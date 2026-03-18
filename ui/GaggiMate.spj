@@ -41514,31 +41514,31 @@
               {
                 "nid": 939638989,
                 "strtype": "IMGBUTTON/Image_pressed",
-                "strval": "-",
+                "strval": "",
                 "InheritedType": 5
               },
               {
                 "nid": -1072451500,
                 "strtype": "IMGBUTTON/Image_disabled",
-                "strval": "-",
+                "strval": "",
                 "InheritedType": 5
               },
               {
                 "nid": -1217254746,
                 "strtype": "IMGBUTTON/Image_checked_released",
-                "strval": "-",
+                "strval": "",
                 "InheritedType": 5
               },
               {
                 "nid": 1794841552,
                 "strtype": "IMGBUTTON/Image_checked_pressed",
-                "strval": "-",
+                "strval": "",
                 "InheritedType": 5
               },
               {
                 "nid": -533421980,
                 "strtype": "IMGBUTTON/Image_checked_disabled",
-                "strval": "-",
+                "strval": "",
                 "InheritedType": 5
               },
               {
@@ -52423,7 +52423,7 @@
     "theme_color1": 5,
     "theme_color2": 0,
     "custom_variable_prefix": "uic",
-    "backup_cnt": 533,
+    "backup_cnt": 538,
     "autosave_cnt": 0,
     "group_color_cnt": 0,
     "lvgl_version": "8.3.11",

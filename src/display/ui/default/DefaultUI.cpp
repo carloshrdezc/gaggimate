@@ -745,7 +745,13 @@ void DefaultUI::updateStatusScreen() const {
     }
 
     lv_label_set_text(ui_StatusScreen_stepLabel, phase.phase == PhaseType::PHASE_TYPE_BREW ? "BREW" : "INFUSION");
-    lv_label_set_text(ui_StatusScreen_phaseLabel, brewProcess && brewProcess->isActive() ? phase.name.c_str() : "Finished");
+    String phaseText = "Finished";
+    if (process->isActive()) {
+        phaseText = phase.name;
+    } else if (controller->getSettings().isDelayAdjust() && !process->isComplete()) {
+        phaseText = "Calibrating...";
+    }
+    lv_label_set_text(ui_StatusScreen_phaseLabel, phaseText.c_str());
 
     // Add bounds check for processStarted timestamp
     if (brewProcess && brewProcess->processStarted > 0 && now >= brewProcess->processStarted) {
@@ -769,7 +775,7 @@ void DefaultUI::updateStatusScreen() const {
             const unsigned long progress = now - brewProcess->currentPhaseStarted;
             lv_bar_set_value(ui_StatusScreen_brewBar, progress, LV_ANIM_OFF);
             lv_bar_set_range(ui_StatusScreen_brewBar, 0, std::max(static_cast<int>(brewProcess->getPhaseDuration()), 1));
-            lv_label_set_text_fmt(ui_StatusScreen_brewLabel, "%ds", brewProcess->getPhaseDuration() / 1000);
+            lv_label_set_text_fmt(ui_StatusScreen_brewLabel, "%d / %ds", progress / 1000, brewProcess->getPhaseDuration() / 1000);
         } else {
             lv_bar_set_value(ui_StatusScreen_brewBar, 0, LV_ANIM_OFF);
             lv_bar_set_range(ui_StatusScreen_brewBar, 0, 1);
