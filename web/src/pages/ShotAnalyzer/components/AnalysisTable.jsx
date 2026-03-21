@@ -477,7 +477,7 @@ export function AnalysisTable({
         <div
           ref={tableContainerRef}
           // removed 'overscroll-*' classes to prevent latching
-          className='no-scrollbar block h-auto min-h-0 w-full overflow-x-auto overflow-y-hidden'
+          className='no-scrollbar border-base-content/10 block h-auto min-h-0 w-full overflow-x-auto overflow-y-hidden rounded-2xl border bg-base-100/30 shadow-sm'
           style={{ scrollBehavior: 'smooth', ...scrollbarHideStyle, ...touchInteractionStyle }}
         >
           {/* Dynamic Font Size applied to Table */}
@@ -485,8 +485,8 @@ export function AnalysisTable({
             className='text-base-content w-full border-collapse transition-all duration-200'
             style={{ fontSize: `${tableFontSize}px`, lineHeight: '1.4' }}
           >
-            <thead>
-              <tr className='bg-base-200 border-base-content/10 border-b-2'>
+            <thead className='bg-base-200/94 sticky top-0 z-10 backdrop-blur-sm'>
+              <tr className='border-base-content/10 border-b-2'>
                 <th className='bg-base-content/5 border-base-content/5 w-8 border-r py-2 text-center opacity-40'>
                   #
                 </th>

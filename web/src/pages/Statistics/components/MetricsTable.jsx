@@ -267,9 +267,9 @@ export function MetricsTable({ metrics }) {
           <p id={DETAILED_TABLE_AVERAGE_HELPER_ID} className='px-1 pb-2 text-[11px] opacity-65'>
             {DETAILED_TABLE_AVERAGE_HELPER_TEXT}
           </p>
-          <div className='overflow-x-auto'>
-            <table className='table-xs table w-full'>
-              <thead>
+          <div className='border-base-content/10 overflow-x-auto rounded-xl border bg-base-100/35'>
+            <table className='table-xs table w-full min-w-[36rem]'>
+              <thead className='bg-base-200/92 sticky top-0 z-10 backdrop-blur-sm'>
                 <tr className='text-xs opacity-60'>
                   <th>Metric</th>
                   <th className='text-right' aria-describedby={DETAILED_TABLE_AVERAGE_HELPER_ID}>

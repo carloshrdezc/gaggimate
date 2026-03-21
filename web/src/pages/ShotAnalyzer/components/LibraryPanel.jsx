@@ -462,13 +462,16 @@ export function LibraryPanel({
   const handleLoadShot = async item => {
     try {
       const wasLibraryOpen = !collapsed;
+      const shouldCollapseAfterLoad = isMobileViewport;
       onShotLoadStart();
-      setCollapsed(true);
+      if (shouldCollapseAfterLoad) {
+        setCollapsed(true);
+      }
       const loadKey =
         item.source === 'gaggimate' ? item.id : item.storageKey || item.name || item.id;
       const full = item.loaded ? item : await libraryService.loadShot(loadKey, item.source);
       await onShotLoad(full, item.name || item.storageKey || item.id);
-      if (wasLibraryOpen) {
+      if (wasLibraryOpen && shouldCollapseAfterLoad) {
         onShotLoadedFromLibrary?.();
       }
     } catch (e) {
@@ -557,6 +560,24 @@ export function LibraryPanel({
           />
           <div style={dropdownStyle}>
             <div className='bg-base-100/80 border-base-content/10 animate-fade-in-down origin-top overflow-hidden rounded-b-xl border border-t-0 shadow-2xl backdrop-blur-md'>
+              <div className='border-base-content/8 bg-base-100/65 flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 text-[11px] font-semibold tracking-wide uppercase'>
+                <div className='flex flex-wrap items-center gap-2'>
+                  <span className='rounded-full border border-base-content/10 bg-base-content/6 px-2.5 py-1 text-base-content/65'>
+                    Analyzer library
+                  </span>
+                  {loading && (
+                    <span className='rounded-full border border-info/20 bg-info/10 px-2.5 py-1 text-info'>
+                      Refreshing results
+                    </span>
+                  )}
+                  {isSearchingProfile && (
+                    <span className='rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-primary'>
+                      Matching profile
+                    </span>
+                  )}
+                </div>
+                <span className='text-base-content/50'>Load stays inline on desktop</span>
+              </div>
               <div className='px-4 pt-4 lg:hidden'>
                 <div className='bg-base-200/60 flex items-center gap-1 rounded-lg p-1'>
                   <button
@@ -583,7 +604,7 @@ export function LibraryPanel({
                   </button>
                 </div>
               </div>
-              <div className='grid max-h-[75vh] grid-cols-1 gap-4 overflow-y-auto overscroll-contain p-4 lg:grid-cols-2'>
+              <div className='grid min-h-[26rem] max-h-[75vh] grid-cols-1 gap-4 overflow-y-auto overscroll-contain p-4 lg:grid-cols-2'>
                 {/* SHOTS SECTION */}
                 <div
                   className={mobileActiveSection === 'shots' ? 'block lg:block' : 'hidden lg:block'}
@@ -675,7 +696,9 @@ export function LibraryPanel({
                     onSourceFilterChange={setProfilesSourceFilter}
                     onLoad={item => {
                       onProfileLoad(item.data || item, item.label || item.name, item.source);
-                      setCollapsed(true);
+                      if (isMobileViewport) {
+                        setCollapsed(true);
+                      }
                     }}
                     onExport={item => handleExport(item, false)} // Pass false for profiles
                     onDelete={handleDelete}

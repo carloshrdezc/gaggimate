@@ -384,7 +384,7 @@ export function StatisticsToolbar({
           </>
         )}
 
-        <div className='ml-auto flex items-center gap-2'>
+        <div className='flex w-full items-center justify-end gap-2 sm:ml-auto sm:w-auto'>
           <button
             type='button'
             onClick={onClearFilters}
@@ -507,10 +507,10 @@ export function StatisticsToolbar({
         </details>
 
         <div
-          className={`flex min-w-0 items-center justify-end gap-2 ${
+          className={`flex w-full min-w-0 items-center justify-end gap-2 ${
             showAdvancedSearch
               ? 'basis-full flex-wrap md:ml-auto md:flex-1 md:basis-auto md:flex-nowrap'
-              : 'ml-auto'
+              : 'sm:ml-auto sm:w-auto'
           }`}
         >
           {showAdvancedSearch && (

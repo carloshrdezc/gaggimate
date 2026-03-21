@@ -6,9 +6,9 @@ export function ProfileGroupTable({ profileGroups }) {
   return (
     <div>
       <h3 className='mb-2 text-sm font-bold uppercase opacity-70'>Per-Profile Statistics</h3>
-      <div className='overflow-x-auto'>
-        <table className='table-xs table w-full'>
-          <thead>
+      <div className='border-base-content/10 overflow-x-auto rounded-2xl border bg-base-100/35 shadow-sm'>
+        <table className='table-xs table w-full min-w-[42rem]'>
+          <thead className='bg-base-200/92 sticky top-0 z-10 backdrop-blur-sm'>
             <tr className='text-xs opacity-60'>
               <th>Profile</th>
               <th className='text-right'>Shots</th>

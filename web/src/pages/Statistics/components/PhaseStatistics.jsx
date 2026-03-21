@@ -95,9 +95,9 @@ function PhaseSection({ phase }) {
             </div>
           </div>
 
-          <div className='overflow-x-auto'>
-            <table className='table-xs table w-full'>
-              <thead>
+          <div className='border-base-content/10 overflow-x-auto rounded-xl border bg-base-100/30'>
+            <table className='table-xs table w-full min-w-[34rem]'>
+              <thead className='bg-base-200/92 sticky top-0 z-10 backdrop-blur-sm'>
                 <tr className='text-xs opacity-60'>
                   <th>Metric</th>
                   <th className='text-right' title='Time-Weighted Average'>

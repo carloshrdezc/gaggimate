@@ -1,6 +1,29 @@
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
 @import 'tailwindcss';
 @plugin 'daisyui';
+
+@font-face {
+  font-family: 'Nothing UI';
+  src: url('/fonts/NType82-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nothing UI';
+  src: url('/fonts/NType82-Headline.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nothing Dot';
+  src: url('/fonts/Ndot57Caps-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 /* https://daisyui.com/theme-generator/#theme=eJx9kutuozAQhV8FIa20K5WRPca3vg2BoUElENmgbbvad18HR8WJs_mHmfP5nBnPn3JqTlS-luPwdlzKl7KqXNMNq688jdQusws17uiUlvqBxi78ZyDvKof5I9X74YvSixigvKntN-2Fw-w62mzPH9uPjs7L8SLaTtM8eLqe2nmcXeXbI931EAuHxlPFGQul-X1sjz_D94-CFezXvQgTkdVQKxV0wDgvUFowiBkhUkIAKhMJVaBC0JJnRDtPC03LN1VzMCb6SBF8ZPCpU2qidXHNuKe3oHgE1AXQoG5trkDmZARYFDEfPgKHqZ93tQGOelMbWSCvQXKZqv3atuT9DjCobb0BWhc8zM-gSIHfjZuG6W2fF17EIYqVoGuVSsm5bVOiUAtgV3F4icv96j521iwP3aGMzeon8XNQBbPrK8onbTxyNCL2z2yhOdQ6aymH6vCY0Q3xQW9nN5wa9_mtlwrisoRF2Z5Q3ph4CgZdCtQIUvJtdioMzyAIYVOkCWNIAoU9t8JuessLISRwzR8kyjqxHITGuMf8WbR8Lw3EhEzg_xPmo-NgTRydMGnSjvpmHYNwcSu9lGdHPTkfrN_L174ZPf39B95wXy4 */
 @plugin "daisyui/theme" {
@@ -139,6 +162,41 @@
   --radius-selector: 1rem;
   --radius-field: 0.25rem;
   --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: 'amoled';
+  default: false;
+  prefersdark: false;
+  color-scheme: 'dark';
+  --color-base-100: oklch(0% 0 0);
+  --color-base-200: oklch(8% 0 0);
+  --color-base-300: oklch(13% 0 0);
+  --color-base-content: oklch(92% 0.01 255);
+  --color-primary: oklch(73% 0.17 42);
+  --color-primary-content: oklch(13% 0.03 42);
+  --color-secondary: oklch(76% 0.11 234);
+  --color-secondary-content: oklch(12% 0.02 234);
+  --color-accent: oklch(78% 0.15 197);
+  --color-accent-content: oklch(14% 0.03 197);
+  --color-neutral: oklch(14% 0 0);
+  --color-neutral-content: oklch(88% 0.01 255);
+  --color-info: oklch(76% 0.1 230);
+  --color-info-content: oklch(15% 0.03 230);
+  --color-success: oklch(78% 0.13 160);
+  --color-success-content: oklch(15% 0.03 160);
+  --color-warning: oklch(86% 0.14 90);
+  --color-warning-content: oklch(18% 0.03 90);
+  --color-error: oklch(72% 0.16 24);
+  --color-error-content: oklch(14% 0.03 24);
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -409,11 +467,212 @@ html[data-theme='coffee'] {
   --statistics-summary-shadow: rgba(0, 0, 0, 0.24);
 }
 
+html[data-theme='amoled'] {
+  --analyzer-pressure-text: #7ab8ff;
+  --analyzer-pressure-anchor: #7ab8ff;
+  --analyzer-target-pressure-text: #7ab8ff;
+  --analyzer-target-pressure-anchor: #7ab8ff;
+  --analyzer-flow-text: #91dc5c;
+  --analyzer-flow-anchor: #91dc5c;
+  --analyzer-target-flow-text: #91dc5c;
+  --analyzer-target-flow-anchor: #91dc5c;
+  --analyzer-puckflow-text: #34d399;
+  --analyzer-puckflow-anchor: #34d399;
+  --analyzer-temp-text: #ff8f5a;
+  --analyzer-temp-anchor: #ff8f5a;
+  --analyzer-target-temp-text: #ff6930;
+  --analyzer-target-temp-anchor: #ff6930;
+  --analyzer-weight-text: #b18cff;
+  --analyzer-weight-anchor: #b18cff;
+  --analyzer-weight-det-text: #b18cff;
+  --analyzer-weight-det-anchor: #b18cff;
+  --analyzer-weightflow-text: #8b5cf6;
+  --analyzer-weightflow-anchor: #8b5cf6;
+  --analyzer-pred-stop-red: #ff5f56;
+  --analyzer-pred-info-blue: #7ab8ff;
+  --analyzer-warning-orange: #ff9c54;
+  --analyzer-warning-orange-strong: #ff7e30;
+  --analyzer-warning-orange-shadow: rgba(255, 124, 48, 0.24);
+  --analyzer-brew-by-time-label-bg: #1f2937;
+  --analyzer-brew-by-time-label-border: #334155;
+  --analyzer-brew-by-time-label-text: #ffffff;
+  --analyzer-brew-by-weight-label-bg: #8b5cf6;
+  --analyzer-brew-by-weight-label-border: #7c3aed;
+  --analyzer-brew-by-weight-label-text: #ffffff;
+  --analyzer-notes-taste-bitter: #d39a6a;
+  --analyzer-notes-taste-balanced: #8fb58b;
+  --analyzer-notes-taste-sour: #d6b66a;
+  --analyzer-phase-line: rgba(148, 163, 184, 0.34);
+  --analyzer-stop-label: rgba(255, 95, 86, 0.92);
+  --analyzer-hover-tooltip-bg: rgba(0, 0, 0, 0.96);
+  --analyzer-hover-tooltip-border: rgba(255, 255, 255, 0.1);
+  --analyzer-hover-tooltip-text: #ffffff;
+  --analyzer-hover-tooltip-shadow: rgba(0, 0, 0, 0.55);
+  --statistics-trend-duration: #a3a3a3;
+  --statistics-trend-water: #67e8f9;
+  --statistics-trend-shots-brown: #c08a5f;
+  --statistics-trend-axis-tick: #8f8f8f;
+  --statistics-trend-grid: rgba(255, 255, 255, 0.08);
+  --statistics-trend-tooltip-bg: rgba(0, 0, 0, 0.95);
+  --statistics-summary-shots-brown: #c08a5f;
+  --statistics-summary-water: #67e8f9;
+  --statistics-summary-duration: #a3a3a3;
+  --statistics-summary-surface-strong: color-mix(
+    in srgb,
+    var(--color-base-100) 96%,
+    var(--color-base-content) 4%
+  );
+  --statistics-summary-surface-muted: color-mix(
+    in srgb,
+    var(--color-base-100) 98%,
+    var(--color-base-content) 2%
+  );
+  --statistics-summary-border: color-mix(in srgb, var(--color-base-content) 12%, transparent);
+  --statistics-summary-shadow: rgba(0, 0, 0, 0.42);
+}
+
 @theme {
-  --font-logo: 'Montserrat', sans-serif;
+  --font-logo: 'Nothing Dot', sans-serif;
+  --font-sans: 'Nothing UI', sans-serif;
 }
 
 @source inline("{,sm:,md:,lg:,xl:}col-span-{1..12}");
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}
+
+body {
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  background: var(--app-background);
+  color: var(--color-base-content);
+}
+
+#app {
+  position: relative;
+  isolation: isolate;
+}
+
+#app::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: var(--app-overlay);
+  opacity: var(--app-overlay-opacity);
+}
+
+.app-shell-glow {
+  background: var(--app-shell-glow);
+}
+
+.status-indicator-card {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.status-indicator-card:hover {
+  transform: translateY(-1px);
+}
+
+.status-live-dot {
+  animation: statusPulse 1.9s ease-in-out infinite;
+}
+
+.status-live-pill {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.status-live-pill:hover {
+  transform: translateY(-1px);
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.78;
+  }
+}
+
+:root {
+  --app-background:
+    radial-gradient(circle at top left, rgba(234, 122, 47, 0.14), transparent 32%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 30%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-base-200) 82%, transparent), var(--color-base-300));
+  --app-overlay:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0, transparent 28%),
+    radial-gradient(circle at center, transparent 0, rgba(15, 23, 42, 0.02) 100%);
+  --app-overlay-opacity: 0.8;
+  --app-shell-glow:
+    radial-gradient(circle at top left, rgba(234, 122, 47, 0.14), transparent 30%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.11), transparent 28%);
+}
+
+html[data-theme='amoled'] {
+  --app-background:
+    radial-gradient(circle at top left, rgba(255, 132, 64, 0.12), transparent 28%),
+    radial-gradient(circle at top right, rgba(63, 173, 255, 0.08), transparent 24%),
+    linear-gradient(180deg, #000000, #020202 55%, #000000);
+  --app-overlay:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0, transparent 24%),
+    radial-gradient(circle at center, transparent 0, rgba(255, 255, 255, 0.015) 100%);
+  --app-overlay-opacity: 0.65;
+  --app-shell-glow:
+    radial-gradient(circle at top left, rgba(255, 132, 64, 0.08), transparent 26%),
+    radial-gradient(circle at top right, rgba(63, 173, 255, 0.05), transparent 22%);
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  z-index: 60;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  transform: translateY(-140%);
+  transition: transform 150ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skip-link,
+  .card,
+  .status-indicator-card,
+  .status-live-dot,
+  .status-live-pill {
+    transition: none;
+    animation: none;
+  }
+}
 
 /* Portal-based tooltip styles (used by Tooltip.jsx) */
 .tooltip-portal {

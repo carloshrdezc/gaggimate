@@ -51,7 +51,7 @@ export function StatusBar({
 
   // Shared styling for badges
   const badgeBaseClass =
-    'flex items-center justify-between flex-1 px-3 sm:px-4 h-full rounded-lg border-2 cursor-pointer transition-all min-w-0 shadow-sm';
+    'flex min-h-12 items-center justify-between rounded-lg border-2 px-3 shadow-sm transition-all sm:px-4 md:h-full';
 
   const shotBadgeClasses = currentShot
     ? `${badgeBaseClass} bg-primary border-primary text-primary-content`
@@ -76,10 +76,7 @@ export function StatusBar({
     <div className='w-full'>
       <div className='p-2'>
         <div
-          className='grid h-12 w-full items-center gap-1 sm:gap-2'
-          style={{
-            gridTemplateColumns: 'minmax(0, 2.6fr) minmax(0, 2.6fr) minmax(5.75rem, 0.9fr)',
-          }}
+          className='grid w-full grid-cols-1 items-center gap-1.5 sm:gap-2 md:h-12 md:grid-cols-[minmax(0,2.6fr)_minmax(0,2.6fr)_minmax(5.75rem,0.9fr)]'
         >
           {/* --- CENTER: SHOT BADGE --- */}
           <div className={shotBadgeClasses} onClick={onTogglePanel} title='Click to toggle library'>

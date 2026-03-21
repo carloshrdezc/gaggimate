@@ -16,6 +16,9 @@ import {
   resolveShotEffectiveTimestampMs,
 } from '../utils/statisticsSearchDsl';
 import { STATISTICS_SOURCE_FALLBACK } from '../utils/statisticsRoute';
+import { SurfaceState } from '../../../components/SurfaceState.jsx';
+import { faChartLine } from '@fortawesome/free-solid-svg-icons/faChartLine';
+import { faFilterCircleXmark } from '@fortawesome/free-solid-svg-icons/faFilterCircleXmark';
 
 // StatisticsView orchestrates metadata loading, filter state, and batch analysis runs.
 // StatisticsService remains pure; this component handles UI-specific selection semantics.
@@ -1073,28 +1076,27 @@ export function StatisticsView({ initialContext }) {
       </div>
 
       {loading && (
-        <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-6 text-center'>
-          <div className='mb-2 text-sm font-semibold opacity-70'>
-            Analyzing shot {progress.current} of {progress.total}...
+        <SurfaceState
+          loading={true}
+          title='Running statistics'
+          description={`Analyzing shot ${progress.current} of ${progress.total || 1}.`}
+        >
+          <div className='mx-auto max-w-xs'>
+            <progress
+              className='progress progress-primary w-full'
+              value={progress.current}
+              max={progress.total || 1}
+            />
           </div>
-          <progress
-            className='progress progress-primary w-full max-w-xs'
-            value={progress.current}
-            max={progress.total || 1}
-          />
-        </div>
+        </SurfaceState>
       )}
 
       {error && (
-        <div className='bg-error/10 border-error/20 rounded-lg border p-4 text-center'>
-          <p className='text-error text-sm'>{error}</p>
-        </div>
+        <SurfaceState tone='error' title='Statistics failed' description={error} />
       )}
 
       {!error && metadataError && (
-        <div className='bg-warning/10 border-warning/20 rounded-lg border p-4 text-center'>
-          <p className='text-warning text-sm'>{metadataError}</p>
-        </div>
+        <SurfaceState tone='warning' title='Metadata unavailable' description={metadataError} />
       )}
 
       {!loading && result && (
@@ -1127,26 +1129,29 @@ export function StatisticsView({ initialContext }) {
           )}
 
           {result.summary.totalShots === 0 && (
-            <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-8 text-center'>
-              <p className='text-sm opacity-50'>No shots found for the selected filters.</p>
-            </div>
+            <SurfaceState
+              icon={faFilterCircleXmark}
+              title='No shots found'
+              description='The selected filters did not match any shots. Try widening the source, date range, or profile selection.'
+            />
           )}
         </div>
       )}
 
       {!loading && !result && !error && !metadataError && metadataLoading && (
-        <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-12 text-center'>
-          <span className='loading loading-spinner loading-lg text-base-content/30' />
-          <p className='mt-3 text-sm opacity-50'>Loading shots and profiles...</p>
-        </div>
+        <SurfaceState
+          loading={true}
+          title='Loading statistics sources'
+          description='Fetching shots and profiles so the filter toolbar and candidate counts are ready.'
+        />
       )}
 
       {!loading && !result && !error && !metadataError && !metadataLoading && (
-        <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-8 text-center'>
-          <p className='text-sm opacity-50'>
-            Configure your filters and press Go to generate statistics.
-          </p>
-        </div>
+        <SurfaceState
+          icon={faChartLine}
+          title='Ready to generate statistics'
+          description='Configure your filters and press Go to generate a trend and summary view.'
+        />
       )}
     </div>
   );

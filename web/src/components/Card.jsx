@@ -29,15 +29,15 @@ export default function Card({
 
   return (
     <div
-      className={`card bg-base-100 shadow-xl ${gridClasses} ${fullHeight ? 'h-full' : ''} ${className}`}
+      className={`card overflow-hidden rounded-[1.75rem] border border-base-300/70 bg-base-100/85 shadow-xl shadow-base-content/5 backdrop-blur-sm transition-[transform,box-shadow] duration-200 sm:hover:-translate-y-0.5 sm:hover:shadow-2xl ${gridClasses} ${fullHeight ? 'h-full' : ''} ${className}`}
       role={role}
     >
       {title && (
-        <div className='card-header px-4 pt-4'>
-          <h2 className='card-title text-lg sm:text-xl'>{title}</h2>
+        <div className='card-header px-5 pt-5'>
+          <h2 className='card-title text-lg tracking-tight sm:text-xl'>{title}</h2>
         </div>
       )}
-      <div className={`card-body flex flex-col gap-2 p-4 ${fullHeight ? 'flex-1' : ''}`}>
+      <div className={`card-body flex flex-col gap-3 p-5 ${fullHeight ? 'flex-1' : ''}`}>
         {children}
       </div>
     </div>

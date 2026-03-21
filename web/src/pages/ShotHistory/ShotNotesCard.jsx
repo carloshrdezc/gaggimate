@@ -46,7 +46,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         let loadedNotes = {
           id: shot.id,
           rating: 0,
-          beanType: '',
+          beanType: shot.beanName || '',
           doseIn: '',
           doseOut: '',
           ratio: '',
@@ -94,7 +94,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         const defaultNotes = {
           id: shot.id,
           rating: 0,
-          beanType: '',
+          beanType: shot.beanName || '',
           doseIn: '',
           doseOut: shot.volume ? shot.volume.toFixed(1) : '',
           ratio: '',
@@ -169,7 +169,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             editable ? 'cursor-pointer hover:text-yellow-300' : 'cursor-default'
           }`}
         >
-          ★
+          {'\u2605'}
         </button>,
       );
     }
@@ -232,7 +232,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         )}
       </div>
 
-      <div className='grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4'>
         {/* Rating */}
         <div className='form-control'>
           <label className='mb-2 block text-sm font-medium'>Rating</label>
@@ -252,7 +252,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             />
           ) : (
             <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.beanType || '—'}
+              {notes.beanType || '\u2014'}
             </div>
           )}
         </div>
@@ -271,7 +271,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             />
           ) : (
             <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.doseIn || '—'}
+              {notes.doseIn || '\u2014'}
             </div>
           )}
         </div>
@@ -290,16 +290,18 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             />
           ) : (
             <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.doseOut || '—'}
+              {notes.doseOut || '\u2014'}
             </div>
           )}
         </div>
 
         {/* Ratio */}
         <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Ratio (1:{notes.ratio || '—'})</label>
+          <label className='mb-2 block text-sm font-medium'>
+            Ratio (1:{notes.ratio || '\u2014'})
+          </label>
           <div className='input input-bordered bg-base-200 w-full cursor-default'>
-            {notes.ratio ? `1:${notes.ratio}` : '—'}
+            {notes.ratio ? `1:${notes.ratio}` : '\u2014'}
           </div>
         </div>
 
@@ -316,7 +318,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             />
           ) : (
             <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.grindSetting || '—'}
+              {notes.grindSetting || '\u2014'}
             </div>
           )}
         </div>

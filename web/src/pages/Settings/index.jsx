@@ -463,6 +463,7 @@ export function Settings() {
                 <option value='dark'>Dark</option>
                 <option value='coffee'>Coffee</option>
                 <option value='nord'>Nord</option>
+                <option value='amoled'>AMOLED</option>
               </select>
             </div>
             <div className='form-control'>

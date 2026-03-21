@@ -39,6 +39,13 @@ import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
 import { faScaleBalanced } from '@fortawesome/free-solid-svg-icons/faScaleBalanced';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { buildStatisticsProfileHref } from '../Statistics/utils/statisticsRoute.js';
+import { BeanSelectionModal } from './BeanSelectionModal.jsx';
+import {
+  clearCurrentBeanSelection,
+  getLastBeanSelectionForProfile,
+  listBeans,
+  recordBeanSelection,
+} from '../../utils/beanManager.js';
 
 Chart.register(
   LineController,
@@ -566,6 +573,9 @@ function SimpleStep(props) {
 export function ProfileList() {
   const apiService = useContext(ApiServiceContext);
   const [profiles, setProfiles] = useState([]);
+  const [beans, setBeans] = useState(() => listBeans());
+  const [beanSelectionProfile, setBeanSelectionProfile] = useState(null);
+  const [selectedBeanId, setSelectedBeanId] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('extraction');
@@ -579,6 +589,10 @@ export function ProfileList() {
       setActiveTab('extraction');
     }
   }, [hasUtilityProfiles]);
+
+  useEffect(() => {
+    setBeans(listBeans());
+  }, []);
 
   const loadProfiles = async () => {
     const response = await apiService.request({ tp: 'req:profiles:list' });
@@ -677,16 +691,6 @@ export function ProfileList() {
   );
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const onSelect = useCallback(
-    async id => {
-      setLoading(true);
-      await apiService.request({ tp: 'req:profiles:select', id });
-      await loadProfiles();
-    },
-    [apiService, setLoading],
-  );
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const onFavorite = useCallback(
     async id => {
       setLoading(true);
@@ -737,6 +741,54 @@ export function ProfileList() {
 
     downloadJson(exportedProfiles, 'profiles.json');
   }, [profiles]);
+
+  const completeProfileSelect = useCallback(
+    async (profile, beanId = '') => {
+      if (!profile) return;
+
+      setLoading(true);
+      await apiService.request({ tp: 'req:profiles:select', id: profile.id });
+
+      if (beanId) {
+        const selectedBean = listBeans().find(bean => bean.id === beanId);
+        if (selectedBean) {
+          recordBeanSelection({
+            profileId: profile.id,
+            profileLabel: profile.label,
+            bean: selectedBean,
+          });
+        }
+      } else {
+        clearCurrentBeanSelection();
+      }
+
+      await loadProfiles();
+      setBeanSelectionProfile(null);
+      setSelectedBeanId('');
+    },
+    [apiService],
+  );
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onSelect = useCallback(
+    async id => {
+      const profile = profiles.find(entry => entry.id === id);
+      if (!profile) return;
+
+      const availableBeans = listBeans();
+      setBeans(availableBeans);
+
+      if (availableBeans.length === 0) {
+        await completeProfileSelect(profile);
+        return;
+      }
+
+      const lastBeanSelection = getLastBeanSelectionForProfile(profile);
+      setSelectedBeanId(lastBeanSelection?.beanId || availableBeans[0]?.id || '');
+      setBeanSelectionProfile(profile);
+    },
+    [profiles, completeProfileSelect],
+  );
 
   const onUpload = function (evt) {
     if (evt.target.files.length) {
@@ -856,8 +908,10 @@ export function ProfileList() {
           />
         </div>
       </div>
-      <div className='mb-4' aria-label='Add profile'>
-        <ProfileAddCard />
+      <div className='mb-4 grid grid-cols-1 gap-4 lg:grid-cols-12'>
+        <div className='lg:col-span-12' aria-label='Add profile'>
+          <ProfileAddCard />
+        </div>
       </div>
       {hasUtilityProfiles && (
         <div role='tablist' className='tabs tabs-border mb-4'>
@@ -900,6 +954,19 @@ export function ProfileList() {
             />
           ))}
       </div>
+      <BeanSelectionModal
+        open={!!beanSelectionProfile}
+        profile={beanSelectionProfile}
+        beans={beans}
+        selectedBeanId={selectedBeanId}
+        onBeanChange={setSelectedBeanId}
+        onClose={() => {
+          setBeanSelectionProfile(null);
+          setSelectedBeanId('');
+        }}
+        onSkip={() => completeProfileSelect(beanSelectionProfile)}
+        onConfirm={() => completeProfileSelect(beanSelectionProfile, selectedBeanId)}
+      />
     </>
   );
 }

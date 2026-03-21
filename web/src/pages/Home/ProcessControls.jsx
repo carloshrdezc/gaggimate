@@ -10,6 +10,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faThermometerHalf } from '@fortawesome/free-solid-svg-icons/faThermometerHalf';
 import { faGauge } from '@fortawesome/free-solid-svg-icons/faGauge';
 import { faRectangleList } from '@fortawesome/free-solid-svg-icons/faRectangleList';
+import { faLeaf } from '@fortawesome/free-solid-svg-icons/faLeaf';
 import { faTint } from '@fortawesome/free-solid-svg-icons/faTint';
 import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
 import { faWeightScale } from '@fortawesome/free-solid-svg-icons/faWeightScale';
@@ -17,6 +18,7 @@ import { ProcessProfileChart } from '../../components/ProcessProfileChart.jsx';
 import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
 import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus';
 import { Tooltip } from '../../components/Tooltip.jsx';
+import { getCurrentBeanSelection } from '../../utils/beanManager.js';
 
 const status = computed(() => machine.value.status);
 
@@ -139,6 +141,7 @@ const ProcessControls = props => {
   const [isFlushing, setIsFlushing] = useState(false);
   const [profileData, setProfileData] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [activeBean, setActiveBean] = useState(() => getCurrentBeanSelection());
 
   // Fetch profile data when the selected profileID changes
   // selectedProfile (name string) is intentionally excluded — the ID is the
@@ -174,6 +177,24 @@ const ProcessControls = props => {
 
     fetchProfile();
   }, [status.value.selectedProfileId, apiService]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const syncBean = event => {
+      if (event?.detail !== undefined) {
+        setActiveBean(event.detail);
+        return;
+      }
+      setActiveBean(getCurrentBeanSelection());
+    };
+
+    window.addEventListener('bean-selection-changed', syncBean);
+    window.addEventListener('storage', syncBean);
+
+    return () => {
+      window.removeEventListener('bean-selection-changed', syncBean);
+      window.removeEventListener('storage', syncBean);
+    };
+  }, []);
 
   // Get settings to check if SmartGrind is enabled
   const { data: settings } = useQuery(
@@ -359,13 +380,26 @@ const ProcessControls = props => {
       </div>
       {brew && (
         <div className='mb-2 text-center'>
-          <div className='text-base-content/60 text-sm'>Current Profile</div>
-          <a href='/profiles' className='mb-2 flex items-center justify-center gap-2'>
-            <span className='text-base-content text-xl font-semibold sm:text-2xl'>
-              {status.value.selectedProfile || 'Default'}
-            </span>
-            <FontAwesomeIcon icon={faRectangleList} className='text-base-content/60 text-xl' />
-          </a>
+          <div className='mb-2 grid gap-3 sm:grid-cols-2'>
+            <div>
+              <div className='text-base-content/60 text-sm'>Current Profile</div>
+              <a href='/profiles' className='flex items-center justify-center gap-2'>
+                <span className='text-base-content text-xl font-semibold sm:text-2xl'>
+                  {status.value.selectedProfile || 'Default'}
+                </span>
+                <FontAwesomeIcon icon={faRectangleList} className='text-base-content/60 text-xl' />
+              </a>
+            </div>
+            <div>
+              <div className='text-base-content/60 text-sm'>Current Bean</div>
+              <a href='/beans' className='flex items-center justify-center gap-2'>
+                <span className='text-base-content text-xl font-semibold sm:text-2xl'>
+                  {activeBean?.beanName || 'Not selected'}
+                </span>
+                <FontAwesomeIcon icon={faLeaf} className='text-base-content/60 text-xl' />
+              </a>
+            </div>
+          </div>
           {status.value.selectedProfileId && (
             <div className='mb-2'>
               {profileLoading && (

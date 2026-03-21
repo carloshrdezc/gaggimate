@@ -74,7 +74,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     },
     [onNotesChanged],
   );
-  const profileTitle = shot.profile || 'Unknown Profile';
+  const profileTitle = shot.beanName
+    ? `${shot.profile || 'Unknown Profile'} \u2022 ${shot.beanName}`
+    : shot.profile || 'Unknown Profile';
   const formattedDate =
     date.toLocaleDateString() +
     ' ' +
@@ -130,9 +132,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const canUpload = visualizerService.validateShot(shot);
 
   return (
-    <Card sm={12} className='[&>.card-body]:p-2'>
+    <Card sm={12} lg={12} className='min-w-0 [&>.card-body]:p-3 sm:[&>.card-body]:p-4'>
       <div className='flex flex-col gap-2'>
-        <div className='flex flex-row items-start gap-2'>
+        <div className='flex min-w-0 flex-row items-start gap-2'>
           <button
             className='border-base-content/20 text-base-content/60 hover:text-base-content hover:bg-base-content/10 hover:border-base-content/40 cursor-pointer rounded-md border p-2 transition-all duration-200'
             onClick={() => {
@@ -145,15 +147,15 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
             <FontAwesomeIcon icon={expanded ? faMinus : faPlus} className='h-3 w-3' />
           </button>
 
-          <div className='min-w-0 flex-grow'>
+          <div className='min-w-0 flex-grow overflow-hidden'>
             {/* Header Row */}
-            <div className='mb-1 flex flex-row items-start justify-between gap-3'>
+            <div className='mb-1 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between'>
               <div className='min-w-0 flex-grow'>
                 <h3 className='text-base-content truncate text-base font-semibold'>
                   {profileTitle}
                 </h3>
                 <p className='text-base-content/70 text-sm'>
-                  #{shot.id} • {formattedDate}
+                  #{shot.id} {'\u2022'} {formattedDate}
                 </p>
                 {expanded &&
                   shot.loaded &&
@@ -167,14 +169,14 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   )}
               </div>
 
-              <div className='flex shrink-0 flex-row items-center gap-2'>
+              <div className='flex shrink-0 flex-wrap items-center gap-2 xl:justify-end'>
                 {shot.incomplete && (
                   <span className='inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800'>
                     INCOMPLETE
                   </span>
                 )}
 
-                <div className='flex flex-row gap-1'>
+                <div className='flex flex-wrap gap-1'>
                   <Tooltip content={shot.loaded ? 'Export' : 'Load first'}>
                     <button
                       disabled={!shot.loaded}
@@ -234,7 +236,7 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
             </div>
 
             {/* Stats Row */}
-            <div className='text-base-content/80 mb-1 flex flex-row items-center gap-4 text-sm'>
+            <div className='text-base-content/80 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm'>
               <div className='flex items-center gap-1'>
                 <FontAwesomeIcon icon={faClock} className='h-4 w-4' />
                 <span>{(shot.duration / 1000).toFixed(1)}s</span>

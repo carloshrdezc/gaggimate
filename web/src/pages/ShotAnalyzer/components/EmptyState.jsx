@@ -4,26 +4,29 @@
  * Explains the dual-source system to users.
  */
 import { maskStyle } from '../utils/analyzerUtils.js';
-import { Spinner } from '../../../components/Spinner.jsx';
+import { faWaveSquare } from '@fortawesome/free-solid-svg-icons/faWaveSquare';
+import { SurfaceState } from '../../../components/SurfaceState.jsx';
 
 export function EmptyState({ loading }) {
   if (loading) {
     return (
-      <div className='flex min-h-[20vh] items-center justify-center p-8'>
-        <Spinner />
+      <div className='py-8'>
+        <SurfaceState
+          loading={true}
+          title='Loading shot data'
+          description='Preparing the analyzer and matching the profile so the deep-dive view opens in a stable state.'
+        />
       </div>
     );
   }
   return (
     <div className='flex min-h-[60vh] items-center justify-center p-8'>
       <div className='max-w-2xl space-y-8 text-center'>
-        {/* Headline */}
-        <div className='space-y-2'>
-          <h2 className='text-base-content text-2xl font-bold'>No Shot Loaded</h2>
-          <p className='text-base-content opacity-70'>
-            Import a shot file or select one from your library to start analyzing.
-          </p>
-        </div>
+        <SurfaceState
+          icon={faWaveSquare}
+          title='No Shot Loaded'
+          description='Import a shot file or select one from your library to start analyzing.'
+        />
 
         {/* Info Box */}
         <div className='bg-base-200/60 border-base-content/5 space-y-6 rounded-xl border p-8 text-left shadow-sm'>

@@ -30,6 +30,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { faSort } from '@fortawesome/free-solid-svg-icons/faSort';
 import { faFilter } from '@fortawesome/free-solid-svg-icons/faFilter';
+import { inferBeanForShot } from '../../utils/beanManager.js';
 
 const connected = computed(() => machine.value.connected);
 
@@ -44,6 +45,7 @@ export function ShotHistory() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const loadHistoryAbortRef = useRef(null);
+  const enrichShotWithBean = useCallback(shot => ({ ...shot, beanName: inferBeanForShot(shot) }), []);
   const loadHistory = async () => {
     // Abort any in-flight fetch to prevent request pileup on the ESP32.
     loadHistoryAbortRef.current?.abort();
@@ -75,15 +77,15 @@ export function ShotHistory() {
           const existing = existingMap.get(newShot.id);
           if (existing && existing.loaded) {
             // Preserve loaded data but update metadata from index
-            return {
+            return enrichShotWithBean({
               ...existing,
               // Update metadata that might have changed (like rating and volume)
               rating: newShot.rating,
               volume: newShot.volume,
               incomplete: newShot.incomplete,
-            };
+            });
           }
-          return newShot;
+          return enrichShotWithBean(newShot);
         });
       });
       setLoading(false);
@@ -123,8 +125,11 @@ export function ShotHistory() {
     // Apply search filter
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase().trim();
-      filtered = filtered.filter(
-        shot => shot.profile?.toLowerCase().includes(search) || shot.id.toString().includes(search),
+        filtered = filtered.filter(
+        shot =>
+          shot.profile?.toLowerCase().includes(search) ||
+          shot.beanName?.toLowerCase().includes(search) ||
+          shot.id.toString().includes(search),
       );
     }
 
@@ -157,6 +162,9 @@ export function ShotHistory() {
         case 'duration':
           comparison = a.duration - b.duration;
           break;
+        case 'bean':
+          comparison = (a.beanName || '').localeCompare(b.beanName || '');
+          break;
         case 'volume':
           comparison = (a.volume || 0) - (b.volume || 0);
           break;
@@ -187,8 +195,8 @@ export function ShotHistory() {
   }
 
   return (
-    <>
-      <div className='mb-6'>
+    <div className='relative isolate min-w-0'>
+      <div className='mb-6 min-w-0'>
         <div className='mb-4 flex flex-row items-center gap-2'>
           <h2 className='flex-grow text-2xl font-bold sm:text-3xl'>Shot History</h2>
           <span className='text-base-content/70 text-sm'>
@@ -198,7 +206,7 @@ export function ShotHistory() {
         </div>
 
         {/* Controls Row */}
-        <div className='flex flex-col gap-3 sm:flex-row sm:items-center'>
+        <div className='flex flex-col gap-3 xl:flex-row xl:items-center'>
           {/* Search */}
           <div className='relative max-w-md flex-grow'>
             <FontAwesomeIcon
@@ -218,7 +226,7 @@ export function ShotHistory() {
           </div>
 
           {/* Sort */}
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-center gap-2'>
             <FontAwesomeIcon icon={faSort} className='text-base-content/50' />
             <select
               value={`${sortBy}-${sortOrder}`}
@@ -236,6 +244,8 @@ export function ShotHistory() {
               <option value='rating-asc'>Lowest Rated</option>
               <option value='profile-asc'>Profile A-Z</option>
               <option value='profile-desc'>Profile Z-A</option>
+              <option value='bean-asc'>Bean A-Z</option>
+              <option value='bean-desc'>Bean Z-A</option>
               <option value='duration-desc'>Longest Duration</option>
               <option value='duration-asc'>Shortest Duration</option>
               <option value='volume-desc'>Highest Volume</option>
@@ -244,7 +254,7 @@ export function ShotHistory() {
           </div>
 
           {/* Filter */}
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-center gap-2'>
             <FontAwesomeIcon icon={faFilter} className='text-base-content/50' />
             <select
               value={filterBy}
@@ -360,6 +370,6 @@ export function ShotHistory() {
           </button>
         </div>
       )}
-    </>
+    </div>
   );
 }

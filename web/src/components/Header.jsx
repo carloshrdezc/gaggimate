@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'preact/hooks';
+import { useCallback, useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faList } from '@fortawesome/free-solid-svg-icons/faList';
+import { faLeaf } from '@fortawesome/free-solid-svg-icons/faLeaf';
 import { faHome } from '@fortawesome/free-solid-svg-icons/faHome';
 import { faTimeline } from '@fortawesome/free-solid-svg-icons/faTimeline';
 import { faTemperatureHalf } from '@fortawesome/free-solid-svg-icons/faTemperatureHalf';
@@ -12,15 +13,19 @@ import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
 import { faMagnifyingGlassChart } from '@fortawesome/free-solid-svg-icons/faMagnifyingGlassChart';
 import { faChartSimple } from '@fortawesome/free-solid-svg-icons/faChartSimple';
+import { machine } from '../services/ApiService.js';
+import { getCurrentBeanSelection } from '../utils/beanManager.js';
+
+const MODE_LABELS = ['Standby', 'Brew', 'Steam', 'Water', 'Grind'];
 
 function HeaderItem(props) {
   const { path } = useLocation();
   let className =
-    'btn btn-md justify-start gap-3 w-full text-base-content hover:text-base-content hover:bg-base-content/10 bg-transparent border-none px-2';
+    'btn btn-sm justify-start gap-3 w-full rounded-full border border-transparent bg-transparent px-3 text-base-content/80 hover:border-base-content/10 hover:bg-base-content/5 hover:text-base-content focus-visible:border-primary/30 focus-visible:bg-primary/10 focus-visible:text-base-content focus-visible:outline-none';
 
   if (path === props.link) {
     className =
-      'btn btn-md justify-start gap-3 w-full bg-primary text-primary-content hover:bg-primary hover:text-primary-content px-2';
+      'btn btn-sm justify-start gap-3 w-full rounded-full border border-primary/10 bg-primary px-3 text-primary-content hover:bg-primary hover:text-primary-content shadow-sm focus-visible:outline-none';
   }
 
   return (
@@ -33,54 +38,114 @@ function HeaderItem(props) {
 
 export function Header() {
   const [open, setOpen] = useState(false);
+  const [activeBean, setActiveBean] = useState(() => getCurrentBeanSelection());
+  const connected = machine.value.connected;
+  const modeLabel = MODE_LABELS[machine.value.status.mode] || 'Unknown';
+  const profileLabel = machine.value.status.selectedProfile || 'Default';
   const openCb = useCallback(
     newState => {
       setOpen(newState);
     },
     [setOpen],
   );
+
+  useEffect(() => {
+    const syncBean = event => {
+      if (event?.detail !== undefined) {
+        setActiveBean(event.detail);
+        return;
+      }
+      setActiveBean(getCurrentBeanSelection());
+    };
+
+    window.addEventListener('bean-selection-changed', syncBean);
+    window.addEventListener('storage', syncBean);
+
+    return () => {
+      window.removeEventListener('bean-selection-changed', syncBean);
+      window.removeEventListener('storage', syncBean);
+    };
+  }, []);
+
   return (
-    <header id='page-header' className='z-1'>
-      <div className='mx-auto px-4 lg:px-8 xl:container'>
-        <div className='border-base-300 flex justify-between border-b-2 py-2 lg:py-6'>
-          <div className='flex items-center'>
-            <a href='/' className='inline-flex' onClick={() => openCb(false)}>
-              <span className='text-base-content font-logo text-3xl font-light'>
-                <span className='font-semibold'>GAGGI</span>MATE
+    <header id='page-header' className='sticky top-0 z-50'>
+      <div className='mx-auto px-4 pt-3 lg:px-8 xl:container'>
+        <div className='rounded-[1.75rem] border border-base-300/70 bg-base-100/80 px-4 py-3 shadow-lg shadow-base-content/5 backdrop-blur-xl lg:px-6'>
+          <div className='flex items-center justify-between gap-4'>
+            <a href='/' className='inline-flex items-center gap-3' onClick={() => openCb(false)}>
+              <span className='grid size-10 place-items-center rounded-2xl bg-primary text-primary-content shadow-sm'>
+                <span className='font-logo text-xl font-semibold'>G</span>
+              </span>
+              <span className='leading-tight'>
+                <span className='font-logo text-2xl font-semibold tracking-wide'>
+                  GAGGI<span className='font-normal'>MATE</span>
+                </span>
+                <span className='text-base-content/60 hidden text-xs uppercase tracking-[0.2em] sm:block'>
+                  Live espresso control
+                </span>
               </span>
             </a>
-          </div>
 
-          <div className='flex items-center gap-1 lg:gap-5'>
-            <div className='relative inline-block'>
+            <div className='hidden min-w-0 items-center gap-2 lg:flex'>
+              <div className='status-live-pill rounded-full border border-base-300/70 bg-base-100/70 px-3 py-2 shadow-sm'>
+                <div className='flex items-center gap-2'>
+                  <span
+                    className={`status-live-dot inline-flex size-2.5 rounded-full ${connected ? 'bg-success shadow-[0_0_0_5px_rgba(52,211,153,0.12)]' : 'bg-error shadow-[0_0_0_5px_rgba(248,113,113,0.12)]'}`}
+                  />
+                  <span className='text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-base-content/55'>
+                    Live state
+                  </span>
+                </div>
+                <div className='mt-1 flex items-center gap-2 text-sm font-semibold'>
+                  <span>{connected ? 'Connected' : 'Offline'}</span>
+                  <span className='text-base-content/30'>{'\u2022'}</span>
+                  <span>{modeLabel}</span>
+                </div>
+              </div>
+              <div className='status-live-pill max-w-[12rem] rounded-full border border-base-300/70 bg-base-100/70 px-3 py-2 text-right shadow-sm'>
+                <div className='text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-base-content/55'>
+                  Active profile
+                </div>
+                <div className='truncate text-sm font-semibold'>{profileLabel}</div>
+              </div>
+              <div className='status-live-pill max-w-[12rem] rounded-full border border-base-300/70 bg-base-100/70 px-3 py-2 text-right shadow-sm'>
+                <div className='text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-base-content/55'>
+                  Active bean
+                </div>
+                <div className='truncate text-sm font-semibold'>
+                  {activeBean?.beanName || 'Not selected'}
+                </div>
+              </div>
+            </div>
+
+            <div className='flex items-center gap-1 lg:gap-5'>
               <a
                 aria-label='github'
                 rel='noopener noreferrer'
                 href='https://github.com/jniebuhr/gaggimate'
                 target='_blank'
-                className='btn btn-sm btn-circle text-base-content hover:text-base-content hover:bg-base-content/10 border-none bg-transparent'
+                className='btn btn-sm btn-circle border-none bg-transparent text-base-content hover:bg-base-content/10 hover:text-base-content focus-visible:bg-base-content/10 focus-visible:outline-none'
               >
                 <FontAwesomeIcon icon={faGithub} className='text-lg' />
               </a>
-            </div>
 
-            <div className='relative inline-block'>
               <a
                 aria-label='discord'
                 rel='noopener noreferrer'
                 href='https://discord.gaggimate.eu/'
                 target='_blank'
-                className='btn btn-sm btn-circle text-base-content hover:text-base-content hover:bg-base-content/10 border-none bg-transparent'
+                className='btn btn-sm btn-circle border-none bg-transparent text-base-content hover:bg-base-content/10 hover:text-base-content focus-visible:bg-base-content/10 focus-visible:outline-none'
               >
                 <FontAwesomeIcon icon={faDiscord} className='text-lg' />
               </a>
-            </div>
 
-            <div className='lg:hidden'>
               <button
                 type='button'
                 onClick={() => openCb(!open)}
-                className='btn btn-sm btn-circle text-base-content hover:text-base-content hover:bg-base-content/10 border-none bg-transparent'
+                aria-expanded={open}
+                aria-controls='mobile-navigation'
+                aria-label={open ? 'Close navigation menu' : 'Open navigation menu'}
+                className='btn btn-sm btn-circle border-none bg-transparent text-base-content hover:bg-base-content/10 hover:text-base-content focus-visible:bg-base-content/10 focus-visible:outline-none lg:hidden'
               >
                 <svg
                   fill='currentColor'
@@ -97,68 +162,73 @@ export function Header() {
               </button>
             </div>
           </div>
-        </div>
 
-        <nav className={`${open ? 'flex' : 'hidden'} flex-col py-4 lg:hidden`}>
-          <HeaderItem label='Dashboard' link='/' icon={faHome} onClick={() => openCb(false)} />
-          <hr className='h-5 border-0' />
-          <div className='space-y-1.5'>
-            <HeaderItem
-              label='Profiles'
-              link='/profiles'
-              icon={faList}
-              onClick={() => openCb(false)}
-            />
-            <HeaderItem
-              label='Shot History'
-              link='/history'
-              icon={faTimeline}
-              onClick={() => openCb(false)}
-            />
-            <HeaderItem
-              label='Shot Analyzer'
-              link='/analyzer'
-              icon={faMagnifyingGlassChart}
-              onClick={() => openCb(false)}
-            />
-            <HeaderItem
-              label='Statistics'
-              link='/statistics'
-              icon={faChartSimple}
-              onClick={() => openCb(false)}
-            />
-          </div>
-          <hr className='h-5 border-0' />
-          <div className='space-y-1.5'>
-            <HeaderItem
-              label='PID Autotune'
-              link='/pidtune'
-              icon={faTemperatureHalf}
-              onClick={() => openCb(false)}
-            />
-            <HeaderItem
-              label='Bluetooth Devices'
-              link='/scales'
-              icon={faBluetoothB}
-              onClick={() => openCb(false)}
-            />
-            <HeaderItem
-              label='Settings'
-              link='/settings'
-              icon={faCog}
-              onClick={() => openCb(false)}
-            />
-          </div>
-          <hr className='h-5 border-0' />
-          <div className='space-y-1.5'>
-            <HeaderItem
-              label='System & Updates'
-              link='/ota'
-              icon={faRotate}
-              onClick={() => openCb(false)}
-            />
-          </div>
-        </nav>
+          <nav
+            id='mobile-navigation'
+            className={`${open ? 'grid' : 'hidden'} mt-4 max-h-[calc(100vh-8.5rem)] gap-3 overflow-y-auto pb-1 lg:hidden`}
+          >
+            <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
+              <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
+                Control
+              </div>
+              <HeaderItem label='Dashboard' link='/' icon={faHome} onClick={() => openCb(false)} />
+              <HeaderItem
+                label='PID Autotune'
+                link='/pidtune'
+                icon={faTemperatureHalf}
+                onClick={() => openCb(false)}
+              />
+              <HeaderItem
+                label='Bluetooth Devices'
+                link='/scales'
+                icon={faBluetoothB}
+                onClick={() => openCb(false)}
+              />
+              <HeaderItem
+                label='Settings'
+                link='/settings'
+                icon={faCog}
+                onClick={() => openCb(false)}
+              />
+            </div>
+            <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
+              <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
+                Review
+              </div>
+              <HeaderItem
+                label='Profiles'
+                link='/profiles'
+                icon={faList}
+                onClick={() => openCb(false)}
+              />
+              <HeaderItem label='Beans' link='/beans' icon={faLeaf} onClick={() => openCb(false)} />
+              <HeaderItem
+                label='Shot History'
+                link='/history'
+                icon={faTimeline}
+                onClick={() => openCb(false)}
+              />
+              <HeaderItem
+                label='Shot Analyzer'
+                link='/analyzer'
+                icon={faMagnifyingGlassChart}
+                onClick={() => openCb(false)}
+              />
+              <HeaderItem
+                label='Statistics'
+                link='/statistics'
+                icon={faChartSimple}
+                onClick={() => openCb(false)}
+              />
+              <HeaderItem
+                label='System & Updates'
+                link='/ota'
+                icon={faRotate}
+                onClick={() => openCb(false)}
+              />
+            </div>
+          </nav>
+        </div>
       </div>
     </header>
   );
