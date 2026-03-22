@@ -19,6 +19,7 @@ import VisualizerUploadModal from '../../components/VisualizerUploadModal.jsx';
 import { visualizerService } from '../../services/VisualizerService.js';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { Tooltip } from '../../components/Tooltip.jsx';
+import { formatTenPointRating, getRatingFillPercent } from '../../utils/ratings.js';
 
 function round2(v) {
   if (v == null || Number.isNaN(v)) return v;
@@ -34,6 +35,8 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const [isUploading, setIsUploading] = useState(false);
 
   const date = new Date(shot.timestamp * 1000);
+  const effectiveRating = shotNotes?.rating ?? shot.rating ?? 0;
+  const hasSamples = Array.isArray(shot.samples) && shot.samples.length > 0;
 
   const onExport = useCallback(() => {
     if (!shot.loaded) return; // Only export loaded data
@@ -70,9 +73,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     notes => {
       setShotNotes(notes);
       // Notify parent that notes changed (so it can reload the index)
-      if (onNotesChanged) onNotesChanged();
+      if (onNotesChanged) onNotesChanged(shot.id, notes, shot.source);
     },
-    [onNotesChanged],
+    [onNotesChanged, shot.id, shot.source],
   );
   const profileTitle = shot.beanName
     ? `${shot.profile || 'Unknown Profile'} \u2022 ${shot.beanName}`
@@ -170,6 +173,15 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
               </div>
 
               <div className='flex shrink-0 flex-wrap items-center gap-2 xl:justify-end'>
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${
+                    shot.source === 'browser'
+                      ? 'bg-purple-100 text-purple-700'
+                      : 'bg-blue-100 text-blue-700'
+                  }`}
+                >
+                  {shot.source === 'browser' ? 'Imported' : 'Device'}
+                </span>
                 {shot.incomplete && (
                   <span className='inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800'>
                     INCOMPLETE
@@ -249,10 +261,19 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                 </div>
               )}
 
-              {shot.rating && shot.rating > 0 ? (
+              {effectiveRating && effectiveRating > 0 ? (
                 <div className='flex items-center gap-1'>
                   <FontAwesomeIcon icon={faStar} className='h-4 w-4 text-yellow-500' />
-                  <span className='font-medium'>{shot.rating}/5</span>
+                  <div className='relative inline-flex text-sm leading-none'>
+                    <div className='text-gray-300'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
+                    <div
+                      className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
+                      style={{ width: getRatingFillPercent(effectiveRating) }}
+                    >
+                      {'\u2605\u2605\u2605\u2605\u2605'}
+                    </div>
+                  </div>
+                  <span className='font-medium'>{formatTenPointRating(effectiveRating)}</span>
                 </div>
               ) : (
                 <div className='text-base-content/50 flex items-center gap-1'>
@@ -269,13 +290,18 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                     <span className='text-base-content/70 text-sm'>Loading shot data...</span>
                   </div>
                 )}
-                {shot.loaded && <HistoryChart shot={shot} />}
+                {shot.loaded && hasSamples && <HistoryChart shot={shot} />}
                 {shot.loaded && (
                   <ShotNotesCard
                     shot={shot}
                     onNotesLoaded={handleNotesLoaded}
                     onNotesUpdate={handleNotesUpdate}
                   />
+                )}
+                {shot.loaded && !hasSamples && (
+                  <div className='text-base-content/60 mt-4 text-sm'>
+                    This backup contains shot details and notes, but not the full sample trace.
+                  </div>
                 )}
               </div>
             )}

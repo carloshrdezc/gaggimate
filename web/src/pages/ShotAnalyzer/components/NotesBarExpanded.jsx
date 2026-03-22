@@ -10,6 +10,11 @@ import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { faTimes } from '@fortawesome/free-solid-svg-icons/faTimes';
 import { faCircleNotch } from '@fortawesome/free-solid-svg-icons/faCircleNotch';
 import { getNotesTasteStyle } from '../utils/analyzerUtils';
+import {
+  formatTenPointRating,
+  getRatingFillPercent,
+  normalizeTenPointRating,
+} from '../../../utils/ratings';
 
 const tasteOptions = [
   { value: 'bitter', label: 'Bitter' },
@@ -27,7 +32,6 @@ export function NotesBarExpanded({
   onSave,
   onCancel,
   onCollapse,
-  isExpanded = false,
 }) {
   const borderClasses = 'border-base-content/5 border-t';
 
@@ -43,38 +47,39 @@ export function NotesBarExpanded({
     };
   };
 
-  // Render stars (editable in edit mode)
-  const renderStars = () => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <button
-          key={i}
-          type='button'
-          disabled={!isEditing}
-          onClick={() => isEditing && onInputChange('rating', i)}
-          className={`text-xl ${i <= notes.rating ? 'text-yellow-400' : 'text-base-content/20'} ${
-            isEditing ? 'cursor-pointer hover:text-yellow-300' : 'cursor-default'
-          }`}
-        >
-          ★
-        </button>,
-      );
-    }
-    return <div className='flex gap-0.5'>{stars}</div>;
-  };
+  const renderStars = () => (
+    <div className='relative inline-flex text-xl leading-none'>
+      <div className='text-base-content/20'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
+      <div
+        className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
+        style={{ width: getRatingFillPercent(notes.rating) }}
+      >
+        {'\u2605\u2605\u2605\u2605\u2605'}
+      </div>
+    </div>
+  );
 
   return (
     <div className={`transition-all duration-200 ${borderClasses}`}>
       <div className='px-4 py-3'>
         {isEditing ? (
-          /* ── EDIT MODE: Vertical layout ── */
           <div className='space-y-4'>
-            {/* Row 1: Rating + Balance/Taste */}
             <div className='grid grid-cols-2 gap-4'>
               <div>
                 <div className={`${labelCls} mb-1.5`}>Rating</div>
-                {renderStars()}
+                <div className='flex items-center gap-3'>
+                  {renderStars()}
+                  <input
+                    type='number'
+                    min='0'
+                    max='10'
+                    step='0.25'
+                    className='input input-sm border-base-content/20 bg-base-100 w-24 text-sm'
+                    value={notes.rating || ''}
+                    onChange={e => onInputChange('rating', normalizeTenPointRating(e.target.value))}
+                    placeholder='0-10'
+                  />
+                </div>
               </div>
               <div>
                 <div className={`${labelCls} mb-1.5`}>Balance / Taste</div>
@@ -102,7 +107,6 @@ export function NotesBarExpanded({
               </div>
             </div>
 
-            {/* Row 2: Dose In, Dose Out, Ratio */}
             <div className='grid grid-cols-3 gap-3'>
               <div>
                 <div className={`${labelCls} mb-1`}>Dose In (g)</div>
@@ -128,14 +132,13 @@ export function NotesBarExpanded({
               </div>
               <div>
                 <div className={`${labelCls} mb-1`}>Ratio</div>
-                <div className='input input-sm bg-base-200/50 border-base-content/10 w-full text-sm'>
-                  {notes.ratio ? `1:${notes.ratio}` : '—'}
+                <div className='input input-sm border-base-content/10 bg-base-200/50 w-full text-sm'>
+                  {notes.ratio ? `1:${notes.ratio}` : '\u2014'}
                 </div>
               </div>
             </div>
 
-            {/* Row 3: Bean Type, Grind Setting */}
-            <div className='grid grid-cols-2 gap-3'>
+            <div className='grid grid-cols-3 gap-3'>
               <div>
                 <div className={`${labelCls} mb-1`}>Bean Type</div>
                 <input
@@ -144,6 +147,16 @@ export function NotesBarExpanded({
                   value={notes.beanType}
                   onChange={e => onInputChange('beanType', e.target.value)}
                   placeholder='e.g., Single Origin, Blend'
+                />
+              </div>
+              <div>
+                <div className={`${labelCls} mb-1`}>Grinder</div>
+                <input
+                  type='text'
+                  className={inputCls}
+                  value={notes.grinder}
+                  onChange={e => onInputChange('grinder', e.target.value)}
+                  placeholder='e.g., Niche Zero'
                 />
               </div>
               <div>
@@ -158,7 +171,6 @@ export function NotesBarExpanded({
               </div>
             </div>
 
-            {/* Row 4: Notes Textarea */}
             <div>
               <div className='mb-1 flex items-center justify-between'>
                 <div className={labelCls}>Notes</div>
@@ -176,7 +188,6 @@ export function NotesBarExpanded({
               />
             </div>
 
-            {/* Action Buttons */}
             <div className='flex justify-end gap-2 pt-1'>
               <button className='btn btn-sm btn-ghost' onClick={onCancel} disabled={saving}>
                 <FontAwesomeIcon icon={faTimes} className='mr-1' />
@@ -202,14 +213,29 @@ export function NotesBarExpanded({
             </div>
           </div>
         ) : (
-          /* ── VIEW MODE: Notes text + edit button ── */
           <div className='flex items-start gap-3'>
-            <div
-              className='bg-base-200/50 hover:bg-base-200/80 min-h-[2rem] min-w-0 flex-1 cursor-pointer rounded-md px-3 py-2 text-xs'
-              onClick={onCollapse}
-              title='Click to collapse'
-            >
-              {notes.notes || 'No notes added'}
+            <div className='min-w-0 flex-1 space-y-2'>
+              <div className='flex flex-wrap items-center gap-2 text-xs'>
+                <span className='rounded-md bg-base-200/60 px-2 py-1 font-medium'>
+                  {renderStars()}
+                </span>
+                <span className='rounded-md bg-base-200/60 px-2 py-1 font-medium'>
+                  {formatTenPointRating(notes.rating)}
+                </span>
+                <span className='rounded-md bg-base-200/60 px-2 py-1 font-medium'>
+                  Grinder: {notes.grinder || '\u2014'}
+                </span>
+                <span className='rounded-md bg-base-200/60 px-2 py-1 font-medium'>
+                  Grind: {notes.grindSetting || '\u2014'}
+                </span>
+              </div>
+              <div
+                className='bg-base-200/50 hover:bg-base-200/80 min-h-[2rem] min-w-0 cursor-pointer rounded-md px-3 py-2 text-xs'
+                onClick={onCollapse}
+                title='Click to collapse'
+              >
+                {notes.notes || 'No notes added'}
+              </div>
             </div>
             <button
               className='btn btn-sm btn-outline flex-shrink-0'

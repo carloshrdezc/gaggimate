@@ -14,13 +14,17 @@ import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
 import { PluginCard } from './PluginCard.jsx';
 import { faEye } from '@fortawesome/free-solid-svg-icons/faEye';
 import { faEyeSlash } from '@fortawesome/free-solid-svg-icons/faEyeSlash';
+import { useContext } from 'preact/hooks';
+import { ApiServiceContext } from '../../services/ApiService.js';
+import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
 
 export function Settings() {
+  const apiService = useContext(ApiServiceContext);
   const [submitting, setSubmitting] = useState(false);
-  const [gen] = useState(0);
+  const [gen, setGen] = useState(0);
   const [formData, setFormData] = useState({});
   const [currentTheme, setCurrentTheme] = useState('light');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
@@ -485,6 +489,11 @@ export function Settings() {
               </select>
             </div>
           </Card>
+
+          <GoogleDriveBackupCard
+            apiService={apiService}
+            onRestoreComplete={() => setGen(prev => prev + 1)}
+          />
 
           {/* System Preferences */}
           <Card sm={10} lg={5} title='System Preferences'>

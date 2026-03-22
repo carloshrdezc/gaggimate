@@ -749,9 +749,11 @@ export function ProfileList() {
       setLoading(true);
       await apiService.request({ tp: 'req:profiles:select', id: profile.id });
 
+      let selectedBeanName = '';
       if (beanId) {
         const selectedBean = listBeans().find(bean => bean.id === beanId);
         if (selectedBean) {
+          selectedBeanName = selectedBean.name;
           recordBeanSelection({
             profileId: profile.id,
             profileLabel: profile.label,
@@ -761,6 +763,8 @@ export function ProfileList() {
       } else {
         clearCurrentBeanSelection();
       }
+
+      apiService.send({ tp: 'req:beans:select', name: selectedBeanName });
 
       await loadProfiles();
       setBeanSelectionProfile(null);

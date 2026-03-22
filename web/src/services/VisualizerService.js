@@ -48,11 +48,11 @@ export class VisualizerService {
     // Extract shot notes data for enhanced metadata
     const notes = shotData.notes || {};
 
-    // Convert 0-5 rating to 0-100 enjoyment scale
-    // Default to 75 (3.75 stars) if no rating provided
+    // Convert 0-10 rating to 0-100 enjoyment scale.
+    // Default to 75 if no rating was captured.
     let enjoyment = 75;
     if (notes.rating && notes.rating > 0) {
-      enjoyment = Math.round(notes.rating * 20);
+      enjoyment = Math.round(notes.rating * 10);
       // Ensure it's within valid range
       enjoyment = Math.max(0, Math.min(100, enjoyment));
     }
@@ -86,7 +86,7 @@ export class VisualizerService {
     // Based on the GitHub source, these should be added to the root level for the parser to extract
     shotFile.bean_weight = parseNumeric(notes.doseIn); // Input dose (grams)
     shotFile.drink_weight = parseNumeric(notes.doseOut); // Output weight (grams)
-    shotFile.grinder_model = 'GaggiMate'; // Fixed grinder model
+    shotFile.grinder_model = notes.grinder || 'GaggiMate';
     shotFile.grinder_setting = notes.grindSetting || ''; // Grind setting from notes
     shotFile.espresso_enjoyment = enjoyment; // Convert 0-5 stars to 0-100 scale
     shotFile.espresso_notes = notes.notes || ''; // Free-form tasting notes

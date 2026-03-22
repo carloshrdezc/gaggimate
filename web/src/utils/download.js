@@ -4,15 +4,11 @@ export function downloadBlob(blob, filename) {
   a.style.display = 'none';
   a.href = url;
   a.download = filename;
-  a.target = '_blank';
-  a.rel = 'noopener';
 
   document.body.appendChild(a);
-  setTimeout(() => {
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 10);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function downloadJson(json, filename) {

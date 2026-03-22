@@ -1,0 +1,185 @@
+const GOOGLE_CLIENT_ID_KEY = 'gaggimate-google-drive-client-id';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const BACKUP_FILENAME = 'gaggimate-backup.json';
+const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
+
+let gisScriptPromise = null;
+let accessToken = '';
+let accessTokenExpiryMs = 0;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === 'true') {
+        resolve();
+        return;
+      }
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), {
+        once: true,
+      });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener(
+      'load',
+      () => {
+        script.dataset.loaded = 'true';
+        resolve();
+      },
+      { once: true },
+    );
+    script.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), {
+      once: true,
+    });
+    document.head.appendChild(script);
+  });
+}
+
+async function ensureGISLoaded() {
+  if (!gisScriptPromise) {
+    gisScriptPromise = loadScript(GIS_SCRIPT_URL);
+  }
+  await gisScriptPromise;
+  if (!window.google?.accounts?.oauth2) {
+    throw new Error('Google Identity Services is unavailable.');
+  }
+}
+
+function getValidAccessToken() {
+  return accessToken && Date.now() < accessTokenExpiryMs ? accessToken : '';
+}
+
+async function requestAccessToken(clientId) {
+  await ensureGISLoaded();
+
+  return new Promise((resolve, reject) => {
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GOOGLE_DRIVE_SCOPE,
+      callback: tokenResponse => {
+        if (tokenResponse.error) {
+          reject(new Error(tokenResponse.error));
+          return;
+        }
+
+        accessToken = tokenResponse.access_token;
+        const expiresInMs = Number(tokenResponse.expires_in || 0) * 1000;
+        accessTokenExpiryMs = Date.now() + Math.max(expiresInMs - 60_000, 0);
+        resolve(accessToken);
+      },
+      error_callback: error => reject(new Error(error?.message || 'Google sign-in failed.')),
+    });
+
+    tokenClient.requestAccessToken({ prompt: getValidAccessToken() ? '' : 'consent' });
+  });
+}
+
+async function authorizedFetch(clientId, url, options = {}) {
+  const token = getValidAccessToken() || (await requestAccessToken(clientId));
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    let details = '';
+    try {
+      details = await response.text();
+    } catch {
+      details = '';
+    }
+    throw new Error(`Google Drive request failed (${response.status}). ${details}`.trim());
+  }
+
+  return response;
+}
+
+function buildMultipartBody(metadata, content) {
+  const boundary = `gaggimate-${Date.now().toString(16)}`;
+  const body = [
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n`,
+    `--${boundary}--`,
+  ].join('');
+
+  return {
+    boundary,
+    body,
+  };
+}
+
+export function getStoredGoogleDriveClientId() {
+  try {
+    return localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setStoredGoogleDriveClientId(clientId) {
+  try {
+    localStorage.setItem(GOOGLE_CLIENT_ID_KEY, String(clientId || '').trim());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function listGoogleDriveBackups(clientId) {
+  const params = new URLSearchParams({
+    spaces: 'appDataFolder',
+    fields: 'files(id,name,modifiedTime,size)',
+    orderBy: 'modifiedTime desc',
+    q: `name='${BACKUP_FILENAME}' and 'appDataFolder' in parents and trashed=false`,
+  });
+
+  const response = await authorizedFetch(
+    clientId,
+    `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
+  );
+  const data = await response.json();
+  return Array.isArray(data.files) ? data.files : [];
+}
+
+export async function uploadGoogleDriveBackup(clientId, bundle) {
+  const existingFiles = await listGoogleDriveBackups(clientId);
+  const content = JSON.stringify(bundle, null, 2);
+  const metadata = existingFiles[0]
+    ? { name: BACKUP_FILENAME }
+    : { name: BACKUP_FILENAME, parents: ['appDataFolder'] };
+  const { boundary, body } = buildMultipartBody(metadata, content);
+
+  const url = existingFiles[0]
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFiles[0].id}?uploadType=multipart`
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+  const method = existingFiles[0] ? 'PATCH' : 'POST';
+
+  const response = await authorizedFetch(clientId, url, {
+    method,
+    headers: {
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  });
+
+  return response.json();
+}
+
+export async function downloadGoogleDriveBackup(clientId, fileId) {
+  const response = await authorizedFetch(
+    clientId,
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+  );
+  return response.json();
+}
+
+export { BACKUP_FILENAME, GOOGLE_DRIVE_SCOPE };

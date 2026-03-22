@@ -34,6 +34,29 @@ export function listBeans() {
   return Array.isArray(beans) ? beans : [];
 }
 
+export function exportBeanData() {
+  return {
+    beans: listBeans(),
+    selectionEvents: readJson(BEAN_SELECTION_EVENTS_KEY, []),
+    activeSelection: getCurrentBeanSelection(),
+  };
+}
+
+export function restoreBeanData(data) {
+  writeJson(BEANS_STORAGE_KEY, Array.isArray(data?.beans) ? data.beans : []);
+  writeJson(
+    BEAN_SELECTION_EVENTS_KEY,
+    Array.isArray(data?.selectionEvents) ? data.selectionEvents : [],
+  );
+  writeJson(ACTIVE_BEAN_SELECTION_KEY, data?.activeSelection || null);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('bean-selection-changed', { detail: data?.activeSelection || null }),
+    );
+  }
+}
+
 export function saveBean(beanInput) {
   const beans = listBeans();
   const bean = {

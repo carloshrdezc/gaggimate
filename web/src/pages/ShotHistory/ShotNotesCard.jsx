@@ -4,9 +4,17 @@ import { ApiServiceContext } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
+import { notesService } from '../ShotAnalyzer/services/NotesService.js';
+import {
+  formatTenPointRating,
+  getRatingFillPercent,
+  normalizeTenPointRating,
+} from '../../utils/ratings.js';
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const apiService = useContext(ApiServiceContext);
+  const notesKey =
+    shot.source === 'browser' ? String(shot.storageKey || shot.name || shot.id || '') : shot.id;
 
   const [notes, setNotes] = useState({
     id: shot.id,
@@ -15,6 +23,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     doseIn: '',
     doseOut: '',
     ratio: '',
+    grinder: '',
     grindSetting: '',
     balanceTaste: 'balanced',
     notes: '',
@@ -35,41 +44,24 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   // Load notes ONLY on component mount
   useEffect(() => {
     if (initialLoaded) return; // Prevent reloading
+    notesService.setApiService(apiService);
 
     const loadNotes = async () => {
       try {
-        const response = await apiService.request({
-          tp: 'req:history:notes:get',
-          id: shot.id,
-        });
-
         let loadedNotes = {
-          id: shot.id,
+          id: notesKey,
           rating: 0,
           beanType: shot.beanName || '',
           doseIn: '',
           doseOut: '',
           ratio: '',
+          grinder: '',
           grindSetting: '',
           balanceTaste: 'balanced',
           notes: '',
         };
-
-        if (response.notes && Object.keys(response.notes).length > 0) {
-          // Parse response.notes if it's a string
-          let parsedNotes = response.notes;
-          if (typeof response.notes === 'string') {
-            try {
-              parsedNotes = JSON.parse(response.notes);
-            } catch (e) {
-              console.warn('Failed to parse notes JSON:', e);
-              parsedNotes = {};
-            }
-          }
-
-          // Merge loaded notes with defaults
-          loadedNotes = { ...loadedNotes, ...parsedNotes };
-        }
+        const savedNotes = await notesService.loadNotes(notesKey, shot.source || 'gaggimate');
+        loadedNotes = { ...loadedNotes, ...savedNotes, id: notesKey };
 
         // Pre-populate doseOut with shot.volume if it's empty and shot.volume exists
         if (!loadedNotes.doseOut && shot.volume) {
@@ -92,12 +84,13 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
 
         // Even if loading fails, set up defaults
         const defaultNotes = {
-          id: shot.id,
+          id: notesKey,
           rating: 0,
           beanType: shot.beanName || '',
           doseIn: '',
           doseOut: shot.volume ? shot.volume.toFixed(1) : '',
           ratio: '',
+          grinder: '',
           grindSetting: '',
           balanceTaste: 'balanced',
           notes: '',
@@ -116,20 +109,16 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
 
   // Reset if shot changes
   useEffect(() => {
-    if (notes.id !== shot.id) {
+    if (notes.id !== notesKey) {
       setInitialLoaded(false);
       setIsEditing(false);
     }
-  }, [shot.id, notes.id]);
+  }, [notes.id, notesKey]);
 
   const saveNotes = async () => {
     setLoading(true);
     try {
-      await apiService.request({
-        tp: 'req:history:notes:save',
-        id: shot.id,
-        notes: notes,
-      });
+      await notesService.saveNotes(notesKey, shot.source || 'gaggimate', notes);
       setIsEditing(false);
       if (onNotesUpdate) {
         onNotesUpdate(notes);
@@ -143,7 +132,10 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
 
   const handleInputChange = (field, value) => {
     setNotes(prev => {
-      const newNotes = { ...prev, [field]: value };
+      const newNotes = {
+        ...prev,
+        [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
+      };
 
       // Only recalculate ratio if we're changing doseIn or doseOut
       if ((field === 'doseIn' || field === 'doseOut') && initialLoaded) {
@@ -156,25 +148,17 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     });
   };
 
-  const renderStars = (rating, editable = false) => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <button
-          key={i}
-          type='button'
-          disabled={!editable}
-          onClick={() => editable && handleInputChange('rating', i)}
-          className={`text-lg ${i <= rating ? 'text-yellow-400' : 'text-gray-300'} ${
-            editable ? 'cursor-pointer hover:text-yellow-300' : 'cursor-default'
-          }`}
-        >
-          {'\u2605'}
-        </button>,
-      );
-    }
-    return stars;
-  };
+  const renderStars = rating => (
+    <div className='relative inline-flex text-lg leading-none'>
+      <div className='text-gray-300'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
+      <div
+        className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
+        style={{ width: getRatingFillPercent(rating) }}
+      >
+        {'\u2605\u2605\u2605\u2605\u2605'}
+      </div>
+    </div>
+  );
 
   const getTasteColor = taste => {
     switch (taste) {
@@ -236,7 +220,23 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         {/* Rating */}
         <div className='form-control'>
           <label className='mb-2 block text-sm font-medium'>Rating</label>
-          <div className='flex gap-1'>{renderStars(notes.rating, isEditing)}</div>
+          <div className='flex items-center gap-3'>
+            {renderStars(notes.rating)}
+            {isEditing ? (
+              <input
+                type='number'
+                min='0'
+                max='10'
+                step='0.25'
+                className='input input-bordered w-28'
+                value={notes.rating || ''}
+                onChange={e => handleInputChange('rating', e.target.value)}
+                placeholder='0-10'
+              />
+            ) : (
+              <div className='text-sm font-medium'>{formatTenPointRating(notes.rating)}</div>
+            )}
+          </div>
         </div>
 
         {/* Bean Type */}
@@ -303,6 +303,24 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
           <div className='input input-bordered bg-base-200 w-full cursor-default'>
             {notes.ratio ? `1:${notes.ratio}` : '\u2014'}
           </div>
+        </div>
+
+        {/* Grinder */}
+        <div className='form-control'>
+          <label className='mb-2 block text-sm font-medium'>Grinder</label>
+          {isEditing ? (
+            <input
+              type='text'
+              className='input input-bordered w-full'
+              value={notes.grinder}
+              onChange={e => handleInputChange('grinder', e.target.value)}
+              placeholder='e.g., Niche Zero'
+            />
+          ) : (
+            <div className='input input-bordered bg-base-200 w-full cursor-default'>
+              {notes.grinder || '\u2014'}
+            </div>
+          )}
         </div>
 
         {/* Grind Setting */}

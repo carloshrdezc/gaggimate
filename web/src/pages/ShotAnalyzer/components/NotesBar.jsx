@@ -18,6 +18,7 @@ import { faGears } from '@fortawesome/free-solid-svg-icons/faGears';
 import { notesService } from '../services/NotesService';
 import { cleanName, getNotesTasteStyle } from '../utils/analyzerUtils';
 import { NotesBarExpanded } from './NotesBarExpanded';
+import { formatTenPointRating, normalizeTenPointRating } from '../../../utils/ratings';
 
 const getTasteTextStyle = taste => {
   const tasteStyle = getNotesTasteStyle(taste);
@@ -29,14 +30,11 @@ export function NotesBar({
   currentShotName,
   shotList = [],
   onNavigate,
-  isExpanded = false,
   notesExpanded = false,
   onToggleNotesExpanded,
   onEditingChange,
   onExpandedHeightChange,
 }) {
-  // Shared responsive spacing for nav arrows and center info chips.
-  // Keeps a visible minimum separation while adapting on wider layouts.
   const chipGap = 'clamp(0.35rem, 0.9vw, 0.7rem)';
 
   const getShotNotesKey = useCallback(shot => {
@@ -49,7 +47,6 @@ export function NotesBar({
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
-  const showExpanded = notesExpanded;
   const expandedPanelRef = useRef(null);
 
   const calculateRatio = useCallback((doseIn, doseOut) => {
@@ -59,14 +56,12 @@ export function NotesBar({
     return '';
   }, []);
 
-  // Extract dose-in from profile name (e.g. "Direct Lever v2 [20g]" → "20", "Auto 16g" → "16")
   const extractDoseFromProfile = useCallback(profileName => {
     if (!profileName) return '';
     const match = profileName.match(/\[?\b(\d+(?:\.\d+)?)\s*g\b\]?/i);
     return match ? match[1] : '';
   }, []);
 
-  // Load notes when shot changes
   useEffect(() => {
     if (!currentShot) return;
     let cancelled = false;
@@ -78,7 +73,6 @@ export function NotesBar({
     setLoading(true);
     setIsEditing(false);
 
-    // Show imported notes immediately (before async persistence load resolves).
     if (inlineNotes) {
       setNotes(inlineNotes);
     }
@@ -87,11 +81,9 @@ export function NotesBar({
       .loadNotes(notesKey, currentShot.source)
       .then(loaded => {
         if (cancelled) return;
-        // Inline notes (from fresh import) should win over empty/default persistence results.
         loaded = inlineNotes ? { ...loaded, ...inlineNotes, id: notesKey } : loaded;
         let autoSave = false;
 
-        // Auto-populate doseIn from profile name if empty
         if (!loaded.doseIn && currentShot.profile) {
           const extracted = extractDoseFromProfile(currentShot.profile);
           if (extracted) {
@@ -100,7 +92,6 @@ export function NotesBar({
           }
         }
 
-        // Auto-populate doseOut from shot volume if empty
         if (!loaded.doseOut && currentShot.volume) {
           loaded.doseOut = currentShot.volume.toFixed(1);
           autoSave = true;
@@ -112,7 +103,6 @@ export function NotesBar({
 
         setNotes(loaded);
 
-        // Auto-save if we populated new values
         if (autoSave && currentShot.source !== 'temp') {
           notesService.saveNotes(notesKey, currentShot.source, loaded);
         }
@@ -137,7 +127,10 @@ export function NotesBar({
 
   const handleInputChange = (field, value) => {
     setNotes(prev => {
-      const updated = { ...prev, [field]: value };
+      const updated = {
+        ...prev,
+        [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
+      };
       if (field === 'doseIn' || field === 'doseOut') {
         const dIn = field === 'doseIn' ? value : prev.doseIn;
         const dOut = field === 'doseOut' ? value : prev.doseOut;
@@ -169,14 +162,12 @@ export function NotesBar({
     });
   };
 
-  // Navigation
   const currentIndex = shotList.findIndex(
     s => getShotNotesKey(s) === getShotNotesKey(currentShot) && s.source === currentShot?.source,
   );
   const canGoPrev = currentIndex > 0;
   const canGoNext = currentIndex >= 0 && currentIndex < shotList.length - 1;
 
-  // Keyboard navigation: ArrowLeft / ArrowRight
   useEffect(() => {
     if (!currentShot) return;
 
@@ -187,14 +178,14 @@ export function NotesBar({
       if (el.isContentEditable) return true;
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
       return !!el.closest(
-        'input, textarea, select, [contenteditable=\"true\"], [role=\"textbox\"]',
+        'input, textarea, select, [contenteditable="true"], [role="textbox"]',
       );
     };
 
     const handleKeyDown = e => {
-      if (e.defaultPrevented) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) {
+        return;
+      }
 
       if (e.key === 'ArrowLeft' && canGoPrev) {
         e.preventDefault();
@@ -214,7 +205,7 @@ export function NotesBar({
   }, [isEditing, onEditingChange]);
 
   useEffect(() => {
-    if (!showExpanded) {
+    if (!notesExpanded) {
       onExpandedHeightChange?.(0);
       return;
     }
@@ -228,13 +219,12 @@ export function NotesBar({
     const reportHeight = () => onExpandedHeightChange?.(panelEl.offsetHeight || 0);
     reportHeight();
 
-    if (typeof ResizeObserver === 'undefined') return;
+    if (typeof ResizeObserver === 'undefined') return undefined;
     const resizeObserver = new ResizeObserver(reportHeight);
     resizeObserver.observe(panelEl);
     return () => resizeObserver.disconnect();
-  }, [showExpanded, onExpandedHeightChange]);
+  }, [notesExpanded, onExpandedHeightChange]);
 
-  // Source badge (matching LibraryRow styling)
   const sourceLabel = currentShot?.source === 'gaggimate' ? 'GM' : 'WEB';
   const sourceBadgeClass =
     currentShot?.source === 'gaggimate'
@@ -242,7 +232,7 @@ export function NotesBar({
       : 'bg-purple-500/10 text-purple-500';
 
   const formatDateTime = ts => {
-    if (!ts) return '—';
+    if (!ts) return '\u2014';
     const d = new Date(ts * 1000);
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -253,13 +243,12 @@ export function NotesBar({
   };
 
   const getDuration = () => {
-    if (!currentShot?.samples?.length) return '—';
+    if (!currentShot?.samples?.length) return '\u2014';
     const first = currentShot.samples[0].t;
     const last = currentShot.samples[currentShot.samples.length - 1].t;
     return `${Math.round((last - first) / 1000)}s`;
   };
 
-  // Shot display name: use ID for GaggiMate shots, filename for browser shots
   const getShotDisplayName = () => {
     if (currentShot?.source === 'gaggimate') {
       return `#${currentShot.id}`;
@@ -270,7 +259,6 @@ export function NotesBar({
   if (!currentShot) return null;
 
   const borderClasses = 'border-base-content/5 border-t';
-
   const fieldCls =
     'shrink-0 rounded-md bg-base-200/60 px-2 py-1 text-xs font-medium whitespace-nowrap';
 
@@ -278,7 +266,6 @@ export function NotesBar({
     <div>
       <div className={`transition-all duration-200 ${borderClasses}`}>
         <div className='flex w-full items-center px-1 py-0.5' style={{ columnGap: chipGap }}>
-          {/* Prev Arrow */}
           <button
             className='btn btn-xs btn-ghost flex-shrink-0 rounded-lg px-1.5 py-1.5 disabled:opacity-30'
             disabled={!canGoPrev}
@@ -288,7 +275,6 @@ export function NotesBar({
             <FontAwesomeIcon icon={faChevronLeft} />
           </button>
 
-          {/* Clickable center area */}
           <button
             type='button'
             className='scrollbar-none block min-w-0 flex-1 cursor-pointer overflow-x-auto px-1 py-1.5'
@@ -296,72 +282,54 @@ export function NotesBar({
             title='Click to expand notes'
           >
             <div className='mx-auto flex w-max items-center' style={{ columnGap: chipGap }}>
-              {/* Source Badge */}
               <span
                 className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${sourceBadgeClass}`}
               >
                 {sourceLabel}
               </span>
-
-              {/* Shot ID/Name */}
               <span className={fieldCls}>{getShotDisplayName()}</span>
-
-              {/* Profile Name (from shot JSON) */}
-              <span className={fieldCls}>{cleanName(currentShot.profile || '—')}</span>
-
-              {/* DateTime */}
+              <span className={fieldCls}>{cleanName(currentShot.profile || '\u2014')}</span>
               <span className={fieldCls}>{formatDateTime(currentShot.timestamp)}</span>
-
-              {/* Duration (clock icon) */}
               <span className={`${fieldCls} flex items-center gap-1`}>
                 <FontAwesomeIcon icon={faClock} className='text-[10px] opacity-50' />
                 {getDuration()}
               </span>
-
-              {/* Ratio (divide icon) */}
               <span className={`${fieldCls} flex items-center gap-1`}>
                 <FontAwesomeIcon icon={faDivide} className='text-[10px] opacity-50' />
-                {notes.ratio ? `1:${notes.ratio}` : '—'}
+                {notes.ratio ? `1:${notes.ratio}` : '\u2014'}
               </span>
-
-              {/* Dose In/Out (scale icon) */}
               <span className={`${fieldCls} flex items-center gap-1`}>
                 <FontAwesomeIcon icon={faWeightScale} className='text-[10px] opacity-50' />
-                {notes.doseIn || '—'}g ▸ {notes.doseOut || '—'}g
+                {notes.doseIn || '\u2014'}g to {notes.doseOut || '\u2014'}g
               </span>
-
-              {/* Rating (star icon + x/5) */}
               <span className={`${fieldCls} flex items-center gap-1`}>
                 <FontAwesomeIcon
                   icon={faStar}
                   className={`text-[10px] ${notes.rating > 0 ? 'text-yellow-400' : 'opacity-30'}`}
                 />
-                {notes.rating > 0 ? `${notes.rating}/5` : '—'}
+                {formatTenPointRating(notes.rating)}
               </span>
-
-              {/* Balance/Taste (right after rating) */}
               <span
                 className={`${fieldCls} capitalize`}
                 style={getTasteTextStyle(notes.balanceTaste)}
               >
                 {notes.balanceTaste}
               </span>
-
-              {/* Bean Type (tag icon) */}
               <span className={`${fieldCls} flex items-center gap-1`}>
                 <FontAwesomeIcon icon={faTag} className='text-[10px] opacity-50' />
-                {notes.beanType || '—'}
+                {notes.beanType || '\u2014'}
               </span>
-
-              {/* Grind Setting (gears icon) */}
               <span className={`${fieldCls} flex items-center gap-1`}>
                 <FontAwesomeIcon icon={faGears} className='text-[10px] opacity-50' />
-                {notes.grindSetting || '—'}
+                {notes.grinder || '\u2014'}
+              </span>
+              <span className={`${fieldCls} flex items-center gap-1`}>
+                <FontAwesomeIcon icon={faGears} className='text-[10px] opacity-50' />
+                {notes.grindSetting || '\u2014'}
               </span>
             </div>
           </button>
 
-          {/* Next Arrow */}
           <button
             className='btn btn-xs btn-ghost flex-shrink-0 rounded-lg px-1.5 py-1.5 disabled:opacity-30'
             disabled={!canGoNext}
@@ -372,7 +340,6 @@ export function NotesBar({
           </button>
         </div>
 
-        {/* Loading indicator */}
         {loading && (
           <div className='bg-primary/20 h-0.5 w-full'>
             <div className='bg-primary h-full w-1/3 animate-pulse rounded-full' />
@@ -380,8 +347,7 @@ export function NotesBar({
         )}
       </div>
 
-      {/* Expanded Notes Panel */}
-      {showExpanded && (
+      {notesExpanded && (
         <div ref={expandedPanelRef}>
           <NotesBarExpanded
             currentShot={currentShot}
@@ -393,7 +359,6 @@ export function NotesBar({
             onSave={handleSave}
             onCancel={handleCancel}
             onCollapse={onToggleNotesExpanded}
-            isExpanded={isExpanded}
           />
         </div>
       )}

@@ -3,7 +3,7 @@
  *
  * Dual-persistence notes service for Shot Analyzer.
  * Notes JSON format is identical across all backends:
- *   { id, rating, beanType, doseIn, doseOut, ratio, grindSetting, balanceTaste, notes }
+ *   { id, rating, beanType, doseIn, doseOut, ratio, grinder, grindSetting, balanceTaste, notes }
  *
  * - GaggiMate shots: Uses the same API as ShotHistory (req:history:notes:get/save)
  * - Browser shots: Dedicated 'notes' store in IndexedDB (same JSON format as API)
@@ -18,6 +18,7 @@ const DEFAULT_NOTES = {
   doseIn: '',
   doseOut: '',
   ratio: '',
+  grinder: '',
   grindSetting: '',
   balanceTaste: 'balanced',
   notes: '',

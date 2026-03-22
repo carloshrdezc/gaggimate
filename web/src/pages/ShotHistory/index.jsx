@@ -26,114 +26,289 @@ import { Spinner } from '../../components/Spinner.jsx';
 import HistoryCard from './HistoryCard.jsx';
 import { parseBinaryShot } from './parseBinaryShot.js';
 import { parseBinaryIndex, indexToShotList } from './parseBinaryIndex.js';
+import { indexedDBService } from '../ShotAnalyzer/services/IndexedDBService.js';
+import { notesService } from '../ShotAnalyzer/services/NotesService.js';
+import { buildShotHistoryArchive, importShotHistoryArchive } from './historyArchive.js';
+import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { faSort } from '@fortawesome/free-solid-svg-icons/faSort';
 import { faFilter } from '@fortawesome/free-solid-svg-icons/faFilter';
+import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
+import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { inferBeanForShot } from '../../utils/beanManager.js';
 
 const connected = computed(() => machine.value.connected);
 
+function getHistoryKey(shot) {
+  return `${shot.source || 'gaggimate'}:${shot.id}`;
+}
+
+function normalizeBrowserShot(shot) {
+  return {
+    ...shot,
+    source: 'browser',
+    loaded: Array.isArray(shot.samples) && shot.samples.length > 0,
+  };
+}
+
 export function ShotHistory() {
   const apiService = useContext(ApiServiceContext);
+  const importInputRef = useRef(null);
+  const loadHistoryAbortRef = useRef(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('date'); // date, rating, profile, duration, volume
-  const [sortOrder, setSortOrder] = useState('desc'); // asc, desc
-  const [filterBy, setFilterBy] = useState('all'); // all, rated, unrated
+  const [sortBy, setSortBy] = useState('date');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [filterBy, setFilterBy] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const loadHistoryAbortRef = useRef(null);
+
   const enrichShotWithBean = useCallback(shot => ({ ...shot, beanName: inferBeanForShot(shot) }), []);
-  const loadHistory = async () => {
-    // Abort any in-flight fetch to prevent request pileup on the ESP32.
+
+  useEffect(() => {
+    notesService.setApiService(apiService);
+  }, [apiService]);
+
+  const mergeShots = useCallback(
+    (deviceShots, browserShots) => {
+      setHistory(prev => {
+        const existingMap = new Map(prev.map(shot => [getHistoryKey(shot), shot]));
+        const nextShots = [...deviceShots, ...browserShots].map(shot => {
+          const key = getHistoryKey(shot);
+          const existing = existingMap.get(key);
+
+          if (shot.source === 'gaggimate' && existing?.loaded) {
+            return enrichShotWithBean({
+              ...existing,
+              ...shot,
+              rating: existing.rating ?? shot.rating,
+              volume: shot.volume ?? existing.volume,
+              incomplete: shot.incomplete ?? existing.incomplete,
+              loaded: true,
+            });
+          }
+
+          if (shot.source === 'browser' && existing) {
+            return enrichShotWithBean({
+              ...existing,
+              ...shot,
+              loaded: shot.loaded || existing.loaded,
+            });
+          }
+
+          return enrichShotWithBean(shot);
+        });
+
+        return nextShots.sort((a, b) => b.timestamp - a.timestamp);
+      });
+    },
+    [enrichShotWithBean],
+  );
+
+  const loadHistory = useCallback(async () => {
     loadHistoryAbortRef.current?.abort();
     const controller = new AbortController();
     loadHistoryAbortRef.current = controller;
+    setLoading(true);
 
     try {
-      // Fetch binary index instead of websocket request
-      const response = await fetch('/api/history/index.bin', { signal: controller.signal });
-      if (!response.ok) {
-        if (response.status === 404) {
-          // Index doesn't exist, show empty list with option to rebuild
-          console.log('Shot index not found. You may need to rebuild it if shots exist.');
-          setHistory([]);
-          setLoading(false);
-          return;
+      const browserShots = (await indexedDBService.getAllShots()).map(normalizeBrowserShot);
+      let deviceShots = [];
+
+      if (connected.value) {
+        const response = await fetch('/api/history/index.bin', { signal: controller.signal });
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const indexData = parseBinaryIndex(arrayBuffer);
+          deviceShots = indexToShotList(indexData).map(shot => ({ ...shot, source: 'gaggimate' }));
+        } else if (response.status !== 404) {
+          throw new Error(`HTTP ${response.status}`);
         }
-        throw new Error(`HTTP ${response.status}`);
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-      const indexData = parseBinaryIndex(arrayBuffer);
-      const shotList = indexToShotList(indexData);
-
-      // Preserve loaded state and data from existing shots
-      setHistory(prev => {
-        const existingMap = new Map(prev.map(shot => [shot.id, shot]));
-        return shotList.map(newShot => {
-          const existing = existingMap.get(newShot.id);
-          if (existing && existing.loaded) {
-            // Preserve loaded data but update metadata from index
-            return enrichShotWithBean({
-              ...existing,
-              // Update metadata that might have changed (like rating and volume)
-              rating: newShot.rating,
-              volume: newShot.volume,
-              incomplete: newShot.incomplete,
-            });
-          }
-          return enrichShotWithBean(newShot);
-        });
-      });
-      setLoading(false);
+      mergeShots(deviceShots, browserShots);
     } catch (error) {
-      if (error.name === 'AbortError') return; // Intentional abort, not an error.
+      if (error.name === 'AbortError') return;
       console.error('Failed to load shot history:', error);
       setHistory([]);
+    } finally {
       setLoading(false);
     }
-  };
+  }, [mergeShots]);
+
   useEffect(() => {
-    if (connected.value) {
-      loadHistory();
-    }
+    loadHistory();
     return () => loadHistoryAbortRef.current?.abort();
-  }, [connected.value]);
+  }, [loadHistory, connected.value]);
 
-  const onDelete = useCallback(
-    async id => {
-      setLoading(true);
-      await apiService.request({ tp: 'req:history:delete', id });
-      // Reload the index after deletion
-      await loadHistory();
-    },
-    [apiService],
-  );
+  const loadShotDetails = useCallback(async shot => {
+    if (!shot || shot.loaded) return;
 
-  const onNotesChanged = useCallback(async () => {
-    // Reload the index to get updated ratings
-    await loadHistory();
+    try {
+      if (shot.source === 'browser') {
+        const storageKey = shot.storageKey || shot.name || shot.id;
+        const storedShot = await indexedDBService.getShot(storageKey);
+        if (!storedShot) return;
+
+        setHistory(prev =>
+          prev.map(item =>
+            getHistoryKey(item) === getHistoryKey(shot)
+              ? enrichShotWithBean({
+                  ...item,
+                  ...storedShot,
+                  source: 'browser',
+                  loaded: true,
+                })
+              : item,
+          ),
+        );
+        return;
+      }
+
+      const paddedId = String(shot.id).padStart(6, '0');
+      const resp = await fetch(`/api/history/${paddedId}.slog`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const parsed = parseBinaryShot(buf, shot.id);
+      parsed.incomplete = (shot?.incomplete ?? false) || parsed.incomplete;
+      if (shot?.notes) parsed.notes = shot.notes;
+
+      setHistory(prev =>
+        prev.map(item =>
+          getHistoryKey(item) === getHistoryKey(shot)
+            ? enrichShotWithBean({
+                ...item,
+                ...parsed,
+                volume: item.volume ?? parsed.volume,
+                rating: item.rating ?? parsed.rating,
+                incomplete: item.incomplete ?? parsed.incomplete,
+                source: 'gaggimate',
+                loaded: true,
+              })
+            : item,
+        ),
+      );
+    } catch (e) {
+      console.error('Failed loading shot', e);
+    }
+  }, [enrichShotWithBean]);
+
+  const buildExportShot = useCallback(async shot => {
+    if (shot.source === 'browser') {
+      const storageKey = shot.storageKey || shot.name || shot.id;
+      const storedShot = await indexedDBService.getShot(storageKey);
+      const notes = await notesService.loadNotes(storageKey, 'browser');
+      return {
+        ...(storedShot || shot),
+        id: String(shot.id),
+        source: 'browser',
+        loaded: Array.isArray((storedShot || shot)?.samples) && (storedShot || shot).samples.length > 0,
+        notes,
+      };
+    }
+
+    const notes = await notesService.loadNotes(String(shot.id), 'gaggimate');
+    return {
+      ...shot,
+      id: String(shot.id),
+      source: 'gaggimate',
+      loaded: Array.isArray(shot.samples) && shot.samples.length > 0,
+      volume: shot.volume ?? null,
+      rating: notes.rating || shot.rating || 0,
+      incomplete: shot.incomplete ?? false,
+      notes,
+    };
   }, []);
 
-  // Filtered and sorted history with pagination
-  const { paginatedHistory, totalPages, totalFilteredItems } = useMemo(() => {
-    let filtered = history;
+  const onDelete = useCallback(
+    async shot => {
+      setLoading(true);
+      try {
+        if (shot.source === 'browser') {
+          const storageKey = shot.storageKey || shot.name || shot.id;
+          await indexedDBService.deleteShot(storageKey);
+          await indexedDBService.deleteNotes(storageKey);
+        } else {
+          await apiService.request({ tp: 'req:history:delete', id: shot.id });
+        }
+      } finally {
+        await loadHistory();
+      }
+    },
+    [apiService, loadHistory],
+  );
 
-    // Apply search filter
+  const onNotesChanged = useCallback((id, notes, source) => {
+    setHistory(prev =>
+      prev.map(shot =>
+        shot.id === id && shot.source === source
+          ? {
+              ...shot,
+              notes,
+              rating: notes.rating || 0,
+            }
+          : shot,
+      ),
+    );
+  }, []);
+
+  const handleExportAll = useCallback(async () => {
+    setArchiveBusy(true);
+    try {
+      const exportShots = [];
+      for (const shot of history) {
+        exportShots.push(await buildExportShot(shot));
+      }
+      const archive = buildShotHistoryArchive(exportShots);
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      downloadJson(archive, `shot-history-${stamp}.json`);
+    } catch (error) {
+      console.error('Failed to export shot history archive:', error);
+      alert(`Export failed: ${error.message}`);
+    } finally {
+      setArchiveBusy(false);
+    }
+  }, [buildExportShot, history]);
+
+  const handleImportFile = useCallback(
+    async event => {
+      const [file] = Array.from(event.target.files || []);
+      if (!file) return;
+
+      setArchiveBusy(true);
+      try {
+        const payload = JSON.parse(await file.text());
+        const imported = await importShotHistoryArchive(payload);
+        await loadHistory();
+        alert(`Imported ${imported.length} shot${imported.length === 1 ? '' : 's'} into Shot History.`);
+      } catch (error) {
+        console.error('Failed to import shot history archive:', error);
+        alert(`Import failed: ${error.message}`);
+      } finally {
+        event.target.value = '';
+        setArchiveBusy(false);
+      }
+    },
+    [loadHistory],
+  );
+
+  const { paginatedHistory, totalPages, totalFilteredItems } = useMemo(() => {
+    let filtered = [...history];
+
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase().trim();
-        filtered = filtered.filter(
+      filtered = filtered.filter(
         shot =>
           shot.profile?.toLowerCase().includes(search) ||
           shot.beanName?.toLowerCase().includes(search) ||
-          shot.id.toString().includes(search),
+          String(shot.id).includes(search) ||
+          String(shot.source || '').toLowerCase().includes(search),
       );
     }
 
-    // Apply status filter
     switch (filterBy) {
       case 'rated':
         filtered = filtered.filter(shot => shot.rating && shot.rating > 0);
@@ -141,11 +316,16 @@ export function ShotHistory() {
       case 'unrated':
         filtered = filtered.filter(shot => !shot.rating || shot.rating === 0);
         break;
-      default: // 'all'
+      case 'device':
+        filtered = filtered.filter(shot => shot.source === 'gaggimate');
+        break;
+      case 'imported':
+        filtered = filtered.filter(shot => shot.source === 'browser');
+        break;
+      default:
         break;
     }
 
-    // Apply sorting
     filtered.sort((a, b) => {
       let comparison = 0;
 
@@ -175,16 +355,24 @@ export function ShotHistory() {
       return sortOrder === 'desc' ? -comparison : comparison;
     });
 
-    const totalFilteredItems = filtered.length;
-    const totalPages = Math.ceil(totalFilteredItems / itemsPerPage);
-
-    // Apply pagination
-    const startIndex = (currentPage - 1) * itemsPerPage;
+    const totalFiltered = filtered.length;
+    const pages = Math.max(1, Math.ceil(totalFiltered / itemsPerPage));
+    const safeCurrentPage = Math.min(currentPage, pages);
+    const startIndex = (safeCurrentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
-    const paginatedHistory = filtered.slice(startIndex, endIndex);
 
-    return { paginatedHistory, totalPages, totalFilteredItems };
+    return {
+      paginatedHistory: filtered.slice(startIndex, endIndex),
+      totalPages: pages,
+      totalFilteredItems: totalFiltered,
+    };
   }, [history, searchTerm, filterBy, sortBy, sortOrder, currentPage]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   if (loading) {
     return (
@@ -197,17 +385,40 @@ export function ShotHistory() {
   return (
     <div className='relative isolate min-w-0'>
       <div className='mb-6 min-w-0'>
-        <div className='mb-4 flex flex-row items-center gap-2'>
+        <div className='mb-4 flex flex-col gap-3 md:flex-row md:items-center md:gap-2'>
           <h2 className='flex-grow text-2xl font-bold sm:text-3xl'>Shot History</h2>
           <span className='text-base-content/70 text-sm'>
             {totalFilteredItems} of {history.length} shots{' '}
             {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
           </span>
+          <div className='flex flex-wrap gap-2'>
+            <button
+              className='btn btn-sm btn-outline'
+              onClick={handleExportAll}
+              disabled={archiveBusy || history.length === 0}
+            >
+              <FontAwesomeIcon icon={faFileExport} />
+              Export History
+            </button>
+            <button
+              className='btn btn-sm btn-outline'
+              onClick={() => importInputRef.current?.click()}
+              disabled={archiveBusy}
+            >
+              <FontAwesomeIcon icon={faFileImport} />
+              Import History
+            </button>
+            <input
+              ref={importInputRef}
+              type='file'
+              accept='.json,application/json'
+              className='hidden'
+              onChange={handleImportFile}
+            />
+          </div>
         </div>
 
-        {/* Controls Row */}
         <div className='flex flex-col gap-3 xl:flex-row xl:items-center'>
-          {/* Search */}
           <div className='relative max-w-md flex-grow'>
             <FontAwesomeIcon
               icon={faSearch}
@@ -219,13 +430,12 @@ export function ShotHistory() {
               value={searchTerm}
               onChange={e => {
                 setSearchTerm(e.target.value);
-                setCurrentPage(1); // Reset to page 1 when searching
+                setCurrentPage(1);
               }}
               className='input input-bordered w-full pr-4 pl-10 text-sm'
             />
           </div>
 
-          {/* Sort */}
           <div className='flex flex-wrap items-center gap-2'>
             <FontAwesomeIcon icon={faSort} className='text-base-content/50' />
             <select
@@ -234,7 +444,7 @@ export function ShotHistory() {
                 const [newSortBy, newSortOrder] = e.target.value.split('-');
                 setSortBy(newSortBy);
                 setSortOrder(newSortOrder);
-                setCurrentPage(1); // Reset to page 1 when sorting
+                setCurrentPage(1);
               }}
               className='select select-bordered text-sm'
             >
@@ -253,18 +463,19 @@ export function ShotHistory() {
             </select>
           </div>
 
-          {/* Filter */}
           <div className='flex flex-wrap items-center gap-2'>
             <FontAwesomeIcon icon={faFilter} className='text-base-content/50' />
             <select
               value={filterBy}
               onChange={e => {
                 setFilterBy(e.target.value);
-                setCurrentPage(1); // Reset to page 1 when filtering
+                setCurrentPage(1);
               }}
               className='select select-bordered text-sm'
             >
               <option value='all'>All Shots</option>
+              <option value='device'>Device Only</option>
+              <option value='imported'>Imported Only</option>
               <option value='rated'>Rated Only</option>
               <option value='unrated'>Unrated Only</option>
             </select>
@@ -273,44 +484,13 @@ export function ShotHistory() {
       </div>
 
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-12'>
-        {paginatedHistory.map((item, idx) => (
+        {paginatedHistory.map(item => (
           <HistoryCard
-            key={item.id}
+            key={getHistoryKey(item)}
             shot={item}
-            onDelete={id => onDelete(id)}
+            onDelete={() => onDelete(item)}
             onNotesChanged={onNotesChanged}
-            onLoad={async id => {
-              // Fetch binary only if not loaded
-              const target = history.find(h => h.id === id);
-              if (!target || target.loaded) return;
-              try {
-                // Pad ID to 6 digits with zeros to match backend filename format
-                const paddedId = id.padStart(6, '0');
-                const resp = await fetch(`/api/history/${paddedId}.slog`);
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const buf = await resp.arrayBuffer();
-                const parsed = parseBinaryShot(buf, id);
-                parsed.incomplete = (target?.incomplete ?? false) || parsed.incomplete;
-                if (target?.notes) parsed.notes = target.notes;
-                setHistory(prev =>
-                  prev.map(h =>
-                    h.id === id
-                      ? {
-                          ...h,
-                          ...parsed,
-                          // Preserve index metadata over shot file data
-                          volume: h.volume ?? parsed.volume, // Use index volume if available, fallback to shot volume
-                          rating: h.rating ?? parsed.rating, // Use index rating if available
-                          incomplete: h.incomplete ?? parsed.incomplete,
-                          loaded: true,
-                        }
-                      : h,
-                  ),
-                );
-              } catch (e) {
-                console.error('Failed loading shot', e);
-              }
-            }}
+            onLoad={() => loadShotDetails(item)}
           />
         ))}
         {totalFilteredItems === 0 && !loading && (
@@ -324,7 +504,6 @@ export function ShotHistory() {
         )}
       </div>
 
-      {/* Pagination Controls */}
       {totalPages > 1 && (
         <div className='mt-6 flex items-center justify-center gap-2'>
           <button
@@ -336,7 +515,6 @@ export function ShotHistory() {
           </button>
 
           <div className='flex items-center gap-1'>
-            {/* Show page numbers */}
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               let pageNum;
               if (totalPages <= 5) {
