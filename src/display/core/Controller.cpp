@@ -205,7 +205,6 @@ void Controller::setupWifi() {
         WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
         WiFi.begin(settings.getWifiSsid(), settings.getWifiPassword());
         WiFi.setTxPower(WIFI_POWER_19_5dBm);
-        WiFi.setAutoReconnect(true);
         for (int attempts = 0; attempts < WIFI_CONNECT_ATTEMPTS; attempts++) {
             if (WiFi.status() == WL_CONNECTED) {
                 break;
@@ -221,7 +220,7 @@ void Controller::setupWifi() {
                          WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
             WiFi.onEvent(
                 [this](WiFiEvent_t, WiFiEventInfo_t info) {
-                    ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %d", info.wifi_sta_disconnected.reason);
+                    ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s", WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
                     pluginManager->trigger("controller:wifi:disconnect");
                     if (!isApConnection) {
                         ESP_LOGI(LOG_TAG, "Trying reconnect to WiFi...");
