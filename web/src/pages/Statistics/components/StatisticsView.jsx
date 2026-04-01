@@ -10,21 +10,20 @@ import { MetricsTable } from './MetricsTable';
 import { ProfileGroupTable } from './ProfileGroupTable';
 import { PhaseStatistics } from './PhaseStatistics';
 import { TrendChart } from './TrendChart';
+import { STATISTICS_SECTION_TITLE_CLASS } from './statisticsUi';
 import {
   buildShotCandidatePredicate,
   parseStatisticsQuery,
   resolveShotEffectiveTimestampMs,
 } from '../utils/statisticsSearchDsl';
 import { STATISTICS_SOURCE_FALLBACK } from '../utils/statisticsRoute';
-import { SurfaceState } from '../../../components/SurfaceState.jsx';
-import { faChartLine } from '@fortawesome/free-solid-svg-icons/faChartLine';
-import { faFilterCircleXmark } from '@fortawesome/free-solid-svg-icons/faFilterCircleXmark';
 
 // StatisticsView orchestrates metadata loading, filter state, and batch analysis runs.
 // StatisticsService remains pure; this component handles UI-specific selection semantics.
 const BATCH_SIZE = 5;
 const DEFAULT_SETTINGS = { scaleDelayMs: 200, sensorDelayMs: 200, isAutoAdjusted: true };
 const NO_PROFILE_LOADED = 'No Profile Loaded';
+const STATISTICS_PANEL_CLASS = 'bg-base-100 border-base-content/10 rounded-xl border shadow-sm';
 
 function getStatisticsFallbackSource(source) {
   return STATISTICS_SOURCE_FALLBACK[source] || null;
@@ -159,6 +158,88 @@ function buildShotSelectionItem(shot, dateBasisMode) {
   };
 }
 
+function getPreferredStatisticsDetailSection(runMode) {
+  return runMode === 'profile' ? 'phase' : 'profile';
+}
+
+function resolveStatisticsDetailSectionChoice({
+  candidate,
+  hasProfileGroupStatistics,
+  hasPhaseStatistics,
+}) {
+  if (candidate === 'phase' && !hasPhaseStatistics && hasProfileGroupStatistics) return 'profile';
+  if (candidate === 'profile' && !hasProfileGroupStatistics && hasPhaseStatistics) return 'phase';
+  return candidate;
+}
+
+function StatisticsDetailHeader({
+  hasPhaseStatistics,
+  hasProfileGroupStatistics,
+  resolvedStatisticsDetailSection,
+  setStatisticsDetailSection,
+}) {
+  if (hasProfileGroupStatistics && hasPhaseStatistics) {
+    return (
+      <div role='tablist' className='tabs tabs-border'>
+        <button
+          type='button'
+          role='tab'
+          className={`tab ${resolvedStatisticsDetailSection === 'profile' ? 'tab-active' : ''}`}
+          aria-selected={resolvedStatisticsDetailSection === 'profile'}
+          onClick={() => setStatisticsDetailSection('profile')}
+        >
+          Per-profile statistics
+        </button>
+        <button
+          type='button'
+          role='tab'
+          className={`tab ${resolvedStatisticsDetailSection === 'phase' ? 'tab-active' : ''}`}
+          aria-selected={resolvedStatisticsDetailSection === 'phase'}
+          onClick={() => setStatisticsDetailSection('phase')}
+        >
+          Per-phase statistics
+        </button>
+      </div>
+    );
+  }
+
+  const title = hasProfileGroupStatistics ? 'Per-profile statistics' : 'Per-phase statistics';
+  return <h3 className={STATISTICS_SECTION_TITLE_CLASS}>{title}</h3>;
+}
+
+function StatisticsDetailSectionPanel({
+  hasPhaseStatistics,
+  hasProfileGroupStatistics,
+  resolvedStatisticsDetailSection,
+  result,
+  setStatisticsDetailSection,
+}) {
+  if (!hasProfileGroupStatistics && !hasPhaseStatistics) return null;
+
+  return (
+    <div className='space-y-2'>
+      <StatisticsDetailHeader
+        hasPhaseStatistics={hasPhaseStatistics}
+        hasProfileGroupStatistics={hasProfileGroupStatistics}
+        resolvedStatisticsDetailSection={resolvedStatisticsDetailSection}
+        setStatisticsDetailSection={setStatisticsDetailSection}
+      />
+
+      <div className={`${STATISTICS_PANEL_CLASS} p-4`}>
+        {hasProfileGroupStatistics &&
+          (!hasPhaseStatistics || resolvedStatisticsDetailSection === 'profile') && (
+            <ProfileGroupTable profileGroups={result.profileGroups} showTitle={false} />
+          )}
+
+        {hasPhaseStatistics &&
+          (!hasProfileGroupStatistics || resolvedStatisticsDetailSection === 'phase') && (
+            <PhaseStatistics phaseStats={result.phaseStats} showTitle={false} />
+          )}
+      </div>
+    </div>
+  );
+}
+
 export function StatisticsView({ initialContext }) {
   const apiService = useContext(ApiServiceContext);
   const initialProfileName = getInitialProfileName(initialContext);
@@ -195,6 +276,7 @@ export function StatisticsView({ initialContext }) {
   const [runRequest, setRunRequest] = useState(null);
   const [calcMode, setCalcMode] = useState(false);
   const [preparingRun, setPreparingRun] = useState(false);
+  const [statisticsDetailSection, setStatisticsDetailSection] = useState('profile');
 
   const metaLoadIdRef = useRef(0);
   const analyzeLoadIdRef = useRef(0);
@@ -203,6 +285,7 @@ export function StatisticsView({ initialContext }) {
   const initialProfilePresetAppliedRef = useRef(false);
   const profileModeShotSeedSignatureRef = useRef('');
   const gmPrefillRetryCountRef = useRef(0);
+  const initializedDetailSectionRunIdRef = useRef(null);
 
   useEffect(() => {
     libraryService.setApiService(apiService);
@@ -999,6 +1082,7 @@ export function StatisticsView({ initialContext }) {
           profiles: profileSnapshot,
           fallbackProfiles: Array.isArray(fallbackProfiles) ? fallbackProfiles : [],
           calcMode: nextCalcMode,
+          mode,
         });
       } finally {
         if (prepareRunIdRef.current === prepareRunId) {
@@ -1019,10 +1103,40 @@ export function StatisticsView({ initialContext }) {
     setDateBasisMode('auto');
   };
 
+  useEffect(() => {
+    if (!result || !runRequest?.id) return;
+    if (initializedDetailSectionRunIdRef.current === runRequest.id) return;
+
+    const hasProfileGroups = Array.isArray(result.profileGroups) && result.profileGroups.length > 0;
+    const hasPhaseStats = Array.isArray(result.phaseStats) && result.phaseStats.length > 0;
+    const preferredSection = getPreferredStatisticsDetailSection(runRequest.mode);
+    const nextSection = resolveStatisticsDetailSectionChoice({
+      candidate: preferredSection,
+      hasProfileGroupStatistics: hasProfileGroups,
+      hasPhaseStatistics: hasPhaseStats,
+    });
+
+    setStatisticsDetailSection(nextSection);
+    initializedDetailSectionRunIdRef.current = runRequest.id;
+  }, [result, runRequest]);
+
+  const hasProfileGroupStatistics = result?.profileGroups?.length > 0;
+  const hasPhaseStatistics = result?.phaseStats?.length > 0;
+  const preferredStatisticsDetailSection = getPreferredStatisticsDetailSection(runRequest?.mode);
+  const detailSectionCandidate =
+    initializedDetailSectionRunIdRef.current === runRequest?.id
+      ? statisticsDetailSection
+      : preferredStatisticsDetailSection;
+  const resolvedStatisticsDetailSection = resolveStatisticsDetailSectionChoice({
+    candidate: detailSectionCandidate,
+    hasProfileGroupStatistics,
+    hasPhaseStatistics,
+  });
+
   return (
     <div className='space-y-5'>
       <div className='bg-base-100/80 border-base-content/10 z-50 rounded-xl border shadow-lg backdrop-blur-md lg:sticky lg:top-0'>
-        <div className='p-2'>
+        <div className='px-1.5 py-1.5 sm:px-2 sm:py-2'>
           <StatisticsToolbar
             source={source}
             onSourceChange={value => {
@@ -1076,82 +1190,77 @@ export function StatisticsView({ initialContext }) {
       </div>
 
       {loading && (
-        <SurfaceState
-          loading={true}
-          title='Running statistics'
-          description={`Analyzing shot ${progress.current} of ${progress.total || 1}.`}
-        >
-          <div className='mx-auto max-w-xs'>
-            <progress
-              className='progress progress-primary w-full'
-              value={progress.current}
-              max={progress.total || 1}
-            />
+        <div className={`${STATISTICS_PANEL_CLASS} p-6 text-center`}>
+          <div className='mb-2 text-sm font-semibold opacity-70'>
+            Analyzing shot {progress.current} of {progress.total}...
           </div>
-        </SurfaceState>
+          <progress
+            className='progress progress-primary w-full max-w-xs'
+            value={progress.current}
+            max={progress.total || 1}
+          />
+        </div>
       )}
 
       {error && (
-        <SurfaceState tone='error' title='Statistics failed' description={error} />
+        <div className='bg-error/10 border-error/20 rounded-lg border p-4 text-center'>
+          <p className='text-error text-sm'>{error}</p>
+        </div>
       )}
 
       {!error && metadataError && (
-        <SurfaceState tone='warning' title='Metadata unavailable' description={metadataError} />
+        <div className='bg-warning/10 border-warning/20 rounded-lg border p-4 text-center'>
+          <p className='text-warning text-sm'>{metadataError}</p>
+        </div>
       )}
 
       {!loading && result && (
         <div className='space-y-5'>
           <SummaryCards summary={result.summary} />
 
-          <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-4 shadow-sm'>
+          <div className='space-y-2'>
+            <h3 className={STATISTICS_SECTION_TITLE_CLASS}>Global metric averages</h3>
             <MetricsTable metrics={result.metrics} />
           </div>
 
           {result.trends.length > 1 && (
-            <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-4 shadow-sm'>
-              <TrendChart trends={result.trends} />
+            <div className='space-y-2'>
+              <h3 className={STATISTICS_SECTION_TITLE_CLASS}>Trends</h3>
+              <div className={`${STATISTICS_PANEL_CLASS} p-4`}>
+                <TrendChart trends={result.trends} />
+              </div>
             </div>
           )}
 
-          {result.profileGroups.length > 0 && (
-            <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-4 shadow-sm'>
-              <ProfileGroupTable profileGroups={result.profileGroups} />
-            </div>
-          )}
-
-          {result.phaseStats.length > 0 && (
-            <div className='bg-base-200/50 border-base-content/5 rounded-lg border p-4 shadow-sm'>
-              <PhaseStatistics
-                phaseStats={result.phaseStats}
-                defaultExpanded={mode === 'profile'}
-              />
-            </div>
-          )}
+          <StatisticsDetailSectionPanel
+            hasPhaseStatistics={hasPhaseStatistics}
+            hasProfileGroupStatistics={hasProfileGroupStatistics}
+            resolvedStatisticsDetailSection={resolvedStatisticsDetailSection}
+            result={result}
+            setStatisticsDetailSection={setStatisticsDetailSection}
+          />
 
           {result.summary.totalShots === 0 && (
-            <SurfaceState
-              icon={faFilterCircleXmark}
-              title='No shots found'
-              description='The selected filters did not match any shots. Try widening the source, date range, or profile selection.'
-            />
+            <div className={`${STATISTICS_PANEL_CLASS} p-8 text-center`}>
+              <p className='text-sm opacity-50'>No shots found for the selected filters.</p>
+            </div>
           )}
         </div>
       )}
 
       {!loading && !result && !error && !metadataError && metadataLoading && (
-        <SurfaceState
-          loading={true}
-          title='Loading statistics sources'
-          description='Fetching shots and profiles so the filter toolbar and candidate counts are ready.'
-        />
+        <div className={`${STATISTICS_PANEL_CLASS} p-12 text-center`}>
+          <span className='loading loading-spinner loading-lg text-base-content/30' />
+          <p className='mt-3 text-sm opacity-50'>Loading shots and profiles...</p>
+        </div>
       )}
 
       {!loading && !result && !error && !metadataError && !metadataLoading && (
-        <SurfaceState
-          icon={faChartLine}
-          title='Ready to generate statistics'
-          description='Configure your filters and press Go to generate a trend and summary view.'
-        />
+        <div className={`${STATISTICS_PANEL_CLASS} p-8 text-center`}>
+          <p className='text-sm opacity-50'>
+            Configure your filters and press Go to generate statistics.
+          </p>
+        </div>
       )}
     </div>
   );

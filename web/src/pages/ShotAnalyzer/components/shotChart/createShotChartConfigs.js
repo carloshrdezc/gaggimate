@@ -158,11 +158,11 @@ export function createShotChartConfigs({
       label: 'Weight',
       data: model.series.weight,
       borderColor: colors.weight,
-      backgroundColor: 'rgba(139, 92, 246, 0.08)',
-      fill: 'origin',
+      backgroundColor: colors.weight,
+      fill: false,
       yAxisID: 'yWeight',
       pointRadius: 0,
-      borderWidth: THIN_LINE_WIDTH,
+      borderWidth: STANDARD_LINE_WIDTH,
       tension: 0.2,
       hidden: !showWeightSeries || !visibility.weight,
     },
@@ -263,6 +263,12 @@ export function createShotChartConfigs({
             // provides item ordering/filtering so both paths share one data model.
             filter: context => shouldRenderTooltipLabel(context.dataset.label),
             itemSort: sortTooltipItems,
+            callbacks: {
+              title: tooltipItems => {
+                const xValue = tooltipItems?.[0]?.parsed?.x;
+                return Number.isFinite(xValue) ? `${xValue.toFixed(2)} s` : '';
+              },
+            },
             external: updateExternalTooltip,
           },
           annotation: {

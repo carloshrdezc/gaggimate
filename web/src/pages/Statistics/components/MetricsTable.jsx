@@ -165,11 +165,9 @@ function MetricRangeViz({ row, metric }) {
     >
       <div className='flex items-center gap-3'>
         <div
-          className='flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border sm:h-14 sm:w-14'
+          className='flex h-12 w-12 shrink-0 items-center justify-center sm:h-14 sm:w-14'
           style={{
             color: row.accentColor,
-            borderColor: `color-mix(in srgb, ${row.accentColor} 32%, var(--statistics-summary-border))`,
-            background: `color-mix(in srgb, ${row.accentColor} 10%, transparent)`,
           }}
         >
           <FontAwesomeIcon icon={row.icon} className='text-2xl sm:text-[1.65rem]' />
@@ -248,11 +246,15 @@ function MetricRangeViz({ row, metric }) {
 export function MetricsTable({ metrics }) {
   if (!metrics || Object.keys(metrics).length === 0) return null;
 
+  const metricCardRows = [
+    ...METRIC_ROWS.filter(row => row.key === 't'),
+    ...METRIC_ROWS.filter(row => row.key !== 't'),
+  ];
+
   return (
     <div>
-      <h3 className='mb-2 text-sm font-bold uppercase opacity-70'>Global Metric Averages</h3>
       <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'>
-        {METRIC_ROWS.map(row => {
+        {metricCardRows.map(row => {
           const metric = metrics[row.key];
           if (!metric) return null;
           return <MetricRangeViz key={row.key} row={row} metric={metric} />;

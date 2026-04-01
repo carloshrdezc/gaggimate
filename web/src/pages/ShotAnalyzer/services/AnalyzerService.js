@@ -4,6 +4,8 @@
  * Calculates metrics, detects phase transitions, and determines exit reasons
  */
 
+/* global globalThis */
+
 const PREDICTIVE_WINDOW_MS = 4000;
 // Last-phase fallback thresholds (g)
 const LAST_PHASE_UNDERSHOOT_MIN_G = 2;
@@ -151,14 +153,14 @@ function getLastNonExtendedIndex(samples) {
 }
 
 function isAnalyzerDebugEnabled() {
-  if (typeof window === 'undefined') return false;
+  if (typeof globalThis === 'undefined') return false;
   try {
     return (
-      window.__SHOT_ANALYZER_DEBUG__ === true ||
-      window.localStorage?.getItem('shotAnalyzerDebug') === '1'
+      globalThis.__SHOT_ANALYZER_DEBUG__ === true ||
+      globalThis.localStorage?.getItem('shotAnalyzerDebug') === '1'
     );
   } catch {
-    return window.__SHOT_ANALYZER_DEBUG__ === true;
+    return globalThis.__SHOT_ANALYZER_DEBUG__ === true;
   }
 }
 
@@ -946,8 +948,12 @@ export function calculateShotMetrics(shotData, profileData, settings) {
   const primaryDelayReview = hasDelayReviewHint
     ? [...delayReviewPhases].sort((a, b) => (b.delayReviewMs || 0) - (a.delayReviewMs || 0))[0]
     : null;
-  const delayReviewPhaseNumber = primaryDelayReview ? primaryDelayReview.tablePhaseNumber : null;
-  const delayReviewMs = primaryDelayReview ? primaryDelayReview.delayReviewMs : null;
+  const hideLastPhaseDelayReview = primaryDelayReview?.tablePhaseNumber === analyzedPhases.length;
+  const shouldExposeDelayReview = Boolean(primaryDelayReview) && !hideLastPhaseDelayReview;
+  const delayReviewPhaseNumber = shouldExposeDelayReview
+    ? primaryDelayReview.tablePhaseNumber
+    : null;
+  const delayReviewMs = shouldExposeDelayReview ? primaryDelayReview.delayReviewMs : null;
   const delayReviewMessage = delayReviewPhaseNumber
     ? delayReviewMs != null
       ? `Unusually high inferred delay in Phase ${delayReviewPhaseNumber} (${delayReviewMs} ms).`
@@ -959,7 +965,7 @@ export function calculateShotMetrics(shotData, profileData, settings) {
     globalScaleLost,
     highScaleDelay: hasHighScaleDelay,
     highScaleDelayMs,
-    delayReviewHint: hasDelayReviewHint,
+    delayReviewHint: shouldExposeDelayReview,
     delayReviewPhaseNumber,
     delayReviewMs,
     delayReviewMessage,
