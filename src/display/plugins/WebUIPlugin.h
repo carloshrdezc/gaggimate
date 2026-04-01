@@ -19,6 +19,7 @@ const String LOCAL_URL = "http://4.4.4.1/";
 const String RELEASE_URL = "https://github.com/jniebuhr/gaggimate/releases/";
 
 class ProfileManager;
+class BeanManager;
 
 class WebUIPlugin : public Plugin {
   public:
@@ -30,6 +31,8 @@ class WebUIPlugin : public Plugin {
     void setupServer();
     void start();
     void stop();
+    void addCorsHeaders(AsyncWebServerResponse *response) const;
+    void handleOptions(AsyncWebServerRequest *request) const;
 
     // Websocket handlers
     void handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data,
@@ -37,6 +40,7 @@ class WebUIPlugin : public Plugin {
     void handleOTASettings(uint32_t clientId, JsonDocument &request);
     void handleOTAStart(uint32_t clientId, JsonDocument &request);
     void handleAutotuneStart(uint32_t clientId, JsonDocument &request);
+    void handleBeanRequest(uint32_t clientId, JsonDocument &request);
     void handleProfileRequest(uint32_t clientId, JsonDocument &request);
     void handleFlushStart(uint32_t clientId, JsonDocument &request);
 
@@ -59,6 +63,7 @@ class WebUIPlugin : public Plugin {
     Controller *controller = nullptr;
     PluginManager *pluginManager = nullptr;
     DNSServer *dnsServer = nullptr;
+    BeanManager *beanManager = nullptr;
     ProfileManager *profileManager = nullptr;
 
     long lastUpdateCheck = 0;

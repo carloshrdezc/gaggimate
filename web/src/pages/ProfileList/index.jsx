@@ -19,7 +19,7 @@ import { computed } from '@preact/signals';
 import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
 import { parseProfile } from './utils.js';
-import { downloadJson } from '../../utils/download.js';
+import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp';
 import { faArrowDown } from '@fortawesome/free-solid-svg-icons/faArrowDown';
@@ -44,6 +44,7 @@ import {
   clearCurrentBeanSelection,
   getLastBeanSelectionForProfile,
   listBeans,
+  migrateLegacyBeansToDevice,
   recordBeanSelection,
 } from '../../utils/beanManager.js';
 
@@ -573,7 +574,7 @@ function SimpleStep(props) {
 export function ProfileList() {
   const apiService = useContext(ApiServiceContext);
   const [profiles, setProfiles] = useState([]);
-  const [beans, setBeans] = useState(() => listBeans());
+  const [beans, setBeans] = useState([]);
   const [beanSelectionProfile, setBeanSelectionProfile] = useState(null);
   const [selectedBeanId, setSelectedBeanId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -591,8 +592,32 @@ export function ProfileList() {
   }, [hasUtilityProfiles]);
 
   useEffect(() => {
-    setBeans(listBeans());
-  }, []);
+    let cancelled = false;
+
+    const loadBeans = async () => {
+      try {
+        await migrateLegacyBeansToDevice(apiService);
+        const loadedBeans = await listBeans(apiService);
+        if (!cancelled) {
+          setBeans(loadedBeans.filter(bean => !bean.archived));
+        }
+      } catch (error) {
+        console.error('Failed to load beans:', error);
+      }
+    };
+
+    loadBeans();
+
+    const handleBeansChanged = () => {
+      loadBeans();
+    };
+
+    window.addEventListener('beans-library-changed', handleBeansChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('beans-library-changed', handleBeansChanged);
+    };
+  }, [apiService]);
 
   const loadProfiles = async () => {
     const response = await apiService.request({ tp: 'req:profiles:list' });
@@ -739,7 +764,14 @@ export function ProfileList() {
       return ep;
     });
 
-    downloadJson(exportedProfiles, 'profiles.json');
+    const download = prepareDownload('profiles.json');
+    try {
+      downloadJson(exportedProfiles, 'profiles.json', download);
+    } catch (error) {
+      download.fail(error);
+      console.error('Failed to export profiles:', error);
+      alert(`Profile export failed: ${error.message}`);
+    }
   }, [profiles]);
 
   const completeProfileSelect = useCallback(
@@ -751,7 +783,7 @@ export function ProfileList() {
 
       let selectedBeanName = '';
       if (beanId) {
-        const selectedBean = listBeans().find(bean => bean.id === beanId);
+        const selectedBean = (await listBeans(apiService)).find(bean => bean.id === beanId);
         if (selectedBean) {
           selectedBeanName = selectedBean.name;
           recordBeanSelection({
@@ -779,7 +811,7 @@ export function ProfileList() {
       const profile = profiles.find(entry => entry.id === id);
       if (!profile) return;
 
-      const availableBeans = listBeans();
+      const availableBeans = (await listBeans(apiService)).filter(bean => !bean.archived);
       setBeans(availableBeans);
 
       if (availableBeans.length === 0) {
@@ -791,7 +823,7 @@ export function ProfileList() {
       setSelectedBeanId(lastBeanSelection?.beanId || availableBeans[0]?.id || '');
       setBeanSelectionProfile(profile);
     },
-    [profiles, completeProfileSelect],
+    [apiService, profiles, completeProfileSelect],
   );
 
   const onUpload = function (evt) {

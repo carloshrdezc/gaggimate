@@ -43,6 +43,7 @@ export function BeanSelectionModal({
                 <option key={bean.id} value={bean.id}>
                   {bean.name}
                   {bean.roaster ? ` \u2022 ${bean.roaster}` : ''}
+                  {bean.quantity !== null && bean.quantity !== undefined ? ` \u2022 ${bean.quantity}g` : ''}
                 </option>
               ))}
             </select>

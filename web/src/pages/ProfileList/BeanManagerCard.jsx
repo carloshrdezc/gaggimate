@@ -1,5 +1,6 @@
 import Card from '../../components/Card.jsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faArchive } from '@fortawesome/free-solid-svg-icons/faArchive';
 import { faLeaf } from '@fortawesome/free-solid-svg-icons/faLeaf';
 import { faPen } from '@fortawesome/free-solid-svg-icons/faPen';
 import { faTrashCan } from '@fortawesome/free-solid-svg-icons/faTrashCan';
@@ -12,7 +13,9 @@ export function BeanManagerCard({
   onSubmit,
   onEdit,
   onDelete,
+  onArchiveToggle,
   onCancel,
+  busy,
 }) {
   return (
     <Card sm={12} lg={5} title='Beans'>
@@ -89,6 +92,20 @@ export function BeanManagerCard({
               placeholder='Washed, Natural, Honey...'
             />
           </label>
+          <label className='form-control'>
+            <span className='mb-1 text-xs font-semibold uppercase tracking-[0.2em] opacity-55'>
+              Quantity (g)
+            </span>
+            <input
+              type='number'
+              min='0'
+              step='0.1'
+              value={draft.quantity ?? ''}
+              onInput={e => onDraftChange('quantity', e.target.value)}
+              className='input input-bordered w-full'
+              placeholder='250'
+            />
+          </label>
           <label className='form-control sm:col-span-2'>
             <span className='mb-1 text-xs font-semibold uppercase tracking-[0.2em] opacity-55'>
               Notes
@@ -112,7 +129,7 @@ export function BeanManagerCard({
                 Cancel
               </button>
             )}
-            <button type='button' onClick={onSubmit} className='btn btn-primary btn-sm'>
+            <button type='button' onClick={onSubmit} className='btn btn-primary btn-sm' disabled={busy}>
               {editing ? 'Update Bean' : 'Save Bean'}
             </button>
           </div>
@@ -157,18 +174,43 @@ export function BeanManagerCard({
                               {bean.process}
                             </span>
                           )}
+                          {bean.quantity !== null && bean.quantity !== undefined && bean.quantity !== '' && (
+                            <span className='rounded-full border border-base-content/10 px-2 py-1'>
+                              {bean.quantity}g left
+                            </span>
+                          )}
+                          {bean.archived && (
+                            <span className='rounded-full border border-base-content/10 px-2 py-1 text-warning'>
+                              Archived
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
                   </div>
                   <div className='flex items-center gap-1'>
-                    <button type='button' onClick={() => onEdit(bean)} className='btn btn-ghost btn-sm btn-square'>
+                    <button
+                      type='button'
+                      onClick={() => onArchiveToggle(bean)}
+                      className='btn btn-ghost btn-sm btn-square'
+                      title={bean.archived ? 'Restore bean' : 'Archive bean'}
+                      disabled={busy}
+                    >
+                      <FontAwesomeIcon icon={faArchive} />
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => onEdit(bean)}
+                      className='btn btn-ghost btn-sm btn-square'
+                      disabled={busy}
+                    >
                       <FontAwesomeIcon icon={faPen} />
                     </button>
                     <button
                       type='button'
                       onClick={() => onDelete(bean.id)}
                       className='btn btn-ghost btn-sm btn-square text-error'
+                      disabled={busy}
                     >
                       <FontAwesomeIcon icon={faTrashCan} />
                     </button>

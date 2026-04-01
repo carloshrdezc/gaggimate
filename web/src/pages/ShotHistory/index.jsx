@@ -29,7 +29,7 @@ import { parseBinaryIndex, indexToShotList } from './parseBinaryIndex.js';
 import { indexedDBService } from '../ShotAnalyzer/services/IndexedDBService.js';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { buildShotHistoryArchive, importShotHistoryArchive } from './historyArchive.js';
-import { downloadJson } from '../../utils/download.js';
+import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { faSort } from '@fortawesome/free-solid-svg-icons/faSort';
@@ -145,27 +145,30 @@ export function ShotHistory() {
   }, [loadHistory, connected.value]);
 
   const loadShotDetails = useCallback(async shot => {
-    if (!shot || shot.loaded) return;
+    if (!shot) return null;
+    if (shot.loaded) return shot;
 
     try {
       if (shot.source === 'browser') {
         const storageKey = shot.storageKey || shot.name || shot.id;
         const storedShot = await indexedDBService.getShot(storageKey);
-        if (!storedShot) return;
+        if (!storedShot) return null;
+
+        const loadedShot = enrichShotWithBean({
+          ...shot,
+          ...storedShot,
+          source: 'browser',
+          loaded: true,
+        });
 
         setHistory(prev =>
           prev.map(item =>
             getHistoryKey(item) === getHistoryKey(shot)
-              ? enrichShotWithBean({
-                  ...item,
-                  ...storedShot,
-                  source: 'browser',
-                  loaded: true,
-                })
+              ? loadedShot
               : item,
           ),
         );
-        return;
+        return loadedShot;
       }
 
       const paddedId = String(shot.id).padStart(6, '0');
@@ -176,23 +179,27 @@ export function ShotHistory() {
       parsed.incomplete = (shot?.incomplete ?? false) || parsed.incomplete;
       if (shot?.notes) parsed.notes = shot.notes;
 
+      const loadedShot = enrichShotWithBean({
+        ...shot,
+        ...parsed,
+        volume: shot.volume ?? parsed.volume,
+        rating: shot.rating ?? parsed.rating,
+        incomplete: shot.incomplete ?? parsed.incomplete,
+        source: 'gaggimate',
+        loaded: true,
+      });
+
       setHistory(prev =>
         prev.map(item =>
           getHistoryKey(item) === getHistoryKey(shot)
-            ? enrichShotWithBean({
-                ...item,
-                ...parsed,
-                volume: item.volume ?? parsed.volume,
-                rating: item.rating ?? parsed.rating,
-                incomplete: item.incomplete ?? parsed.incomplete,
-                source: 'gaggimate',
-                loaded: true,
-              })
+            ? loadedShot
             : item,
         ),
       );
+      return loadedShot;
     } catch (e) {
       console.error('Failed loading shot', e);
+      throw e;
     }
   }, [enrichShotWithBean]);
 
@@ -256,6 +263,9 @@ export function ShotHistory() {
   }, []);
 
   const handleExportAll = useCallback(async () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const filename = `shot-history-${stamp}.json`;
+    const download = prepareDownload(filename);
     setArchiveBusy(true);
     try {
       const exportShots = [];
@@ -263,10 +273,10 @@ export function ShotHistory() {
         exportShots.push(await buildExportShot(shot));
       }
       const archive = buildShotHistoryArchive(exportShots);
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadJson(archive, `shot-history-${stamp}.json`);
+      downloadJson(archive, filename, download);
     } catch (error) {
       console.error('Failed to export shot history archive:', error);
+      download.fail(error);
       alert(`Export failed: ${error.message}`);
     } finally {
       setArchiveBusy(false);

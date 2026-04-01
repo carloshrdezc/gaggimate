@@ -1,10 +1,11 @@
-import { useState, useEffect, useContext, useCallback } from 'preact/hooks';
+import { useState, useEffect, useContext, useCallback, useRef } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
+import { listBeans, syncBeanUsageFromNotes } from '../../utils/beanManager.js';
 import {
   formatTenPointRating,
   getRatingFillPercent,
@@ -19,6 +20,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const [notes, setNotes] = useState({
     id: shot.id,
     rating: 0,
+    beanId: '',
     beanType: '',
     doseIn: '',
     doseOut: '',
@@ -32,6 +34,9 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const [loading, setLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const [availableBeans, setAvailableBeans] = useState([]);
+  const savedNotesRef = useRef(null);
+  const beanFieldListId = `bean-options-${notesKey}`;
 
   // Calculate ratio function
   const calculateRatio = useCallback((doseIn, doseOut) => {
@@ -51,6 +56,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         let loadedNotes = {
           id: notesKey,
           rating: 0,
+          beanId: '',
           beanType: shot.beanName || '',
           doseIn: '',
           doseOut: '',
@@ -74,6 +80,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         }
 
         setNotes(loadedNotes);
+        savedNotesRef.current = loadedNotes;
         setInitialLoaded(true);
         // Pass loaded notes to parent
         if (onNotesLoaded) {
@@ -86,6 +93,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         const defaultNotes = {
           id: notesKey,
           rating: 0,
+          beanId: '',
           beanType: shot.beanName || '',
           doseIn: '',
           doseOut: shot.volume ? shot.volume.toFixed(1) : '',
@@ -97,6 +105,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         };
 
         setNotes(defaultNotes);
+        savedNotesRef.current = defaultNotes;
         setInitialLoaded(true);
         if (onNotesLoaded) {
           onNotesLoaded(defaultNotes);
@@ -112,13 +121,62 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     if (notes.id !== notesKey) {
       setInitialLoaded(false);
       setIsEditing(false);
+      savedNotesRef.current = null;
     }
   }, [notes.id, notesKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAvailableBeans = async () => {
+      try {
+        const beans = await listBeans(apiService);
+        if (!cancelled) {
+          setAvailableBeans(beans.filter(bean => !bean.archived));
+        }
+      } catch (error) {
+        console.error('Failed to load beans for shot notes:', error);
+        if (!cancelled) {
+          setAvailableBeans([]);
+        }
+      }
+    };
+
+    loadAvailableBeans();
+
+    const handleBeansChanged = () => {
+      loadAvailableBeans();
+    };
+
+    window.addEventListener('beans-library-changed', handleBeansChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('beans-library-changed', handleBeansChanged);
+    };
+  }, [apiService]);
+
+  useEffect(() => {
+    if (!availableBeans.length || notes.beanId || !notes.beanType) return;
+    const matchedBean = availableBeans.find(
+      bean =>
+        String(bean.name || '')
+          .trim()
+          .toLowerCase() ===
+        String(notes.beanType || '')
+          .trim()
+          .toLowerCase(),
+    );
+    if (matchedBean) {
+      setNotes(prev => ({ ...prev, beanId: matchedBean.id }));
+    }
+  }, [availableBeans, notes.beanId, notes.beanType]);
 
   const saveNotes = async () => {
     setLoading(true);
     try {
       await notesService.saveNotes(notesKey, shot.source || 'gaggimate', notes);
+      await syncBeanUsageFromNotes(apiService, savedNotesRef.current, notes);
+      savedNotesRef.current = notes;
       setIsEditing(false);
       if (onNotesUpdate) {
         onNotesUpdate(notes);
@@ -132,10 +190,18 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
 
   const handleInputChange = (field, value) => {
     setNotes(prev => {
+      const matchedBean =
+        field === 'beanType'
+          ? availableBeans.find(bean => normalizeBeanName(bean.name) === normalizeBeanName(value))
+          : availableBeans.find(bean => bean.id === prev.beanId) || null;
       const newNotes = {
         ...prev,
         [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
       };
+
+      if (field === 'beanType') {
+        newNotes.beanId = matchedBean?.id || '';
+      }
 
       // Only recalculate ratio if we're changing doseIn or doseOut
       if ((field === 'doseIn' || field === 'doseOut') && initialLoaded) {
@@ -147,6 +213,11 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
       return newNotes;
     });
   };
+
+  const normalizeBeanName = value =>
+    String(value || '')
+      .trim()
+      .toLowerCase();
 
   const renderStars = rating => (
     <div className='relative inline-flex text-lg leading-none'>
@@ -243,13 +314,21 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         <div className='form-control'>
           <label className='mb-2 block text-sm font-medium'>Bean Type</label>
           {isEditing ? (
-            <input
-              type='text'
-              className='input input-bordered w-full'
-              value={notes.beanType}
-              onChange={e => handleInputChange('beanType', e.target.value)}
-              placeholder='e.g., Single Origin, Blend'
-            />
+            <>
+              <input
+                type='text'
+                list={beanFieldListId}
+                className='input input-bordered w-full'
+                value={notes.beanType}
+                onChange={e => handleInputChange('beanType', e.target.value)}
+                placeholder='Choose a saved bean or enter a custom name'
+              />
+              <datalist id={beanFieldListId}>
+                {availableBeans.map(bean => (
+                  <option key={bean.id} value={bean.name} />
+                ))}
+              </datalist>
+            </>
           ) : (
             <div className='input input-bordered bg-base-200 w-full cursor-default'>
               {notes.beanType || '\u2014'}

@@ -18,11 +18,49 @@ import { ProcessProfileChart } from '../../components/ProcessProfileChart.jsx';
 import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
 import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus';
 import { Tooltip } from '../../components/Tooltip.jsx';
-import { getCurrentBeanSelection } from '../../utils/beanManager.js';
+import {
+  clearCurrentBeanSelection,
+  getCurrentBeanSelection,
+  listBeans,
+  recordBeanSelection,
+} from '../../utils/beanManager.js';
 
 const status = computed(() => machine.value.status);
 
 const zeroPad = (num, places) => String(num).padStart(places, '0');
+
+function SelectorCard({
+  label,
+  icon,
+  value,
+  options,
+  onChange,
+  loading = false,
+  emptyLabel,
+  disabled = false,
+}) {
+  return (
+    <label className='block rounded-[1.5rem] border border-base-300/70 bg-base-100/70 p-4 text-left shadow-sm backdrop-blur'>
+      <div className='mb-3 flex items-center gap-2 text-sm text-base-content/60'>
+        <FontAwesomeIcon icon={icon} className='text-base' />
+        <span>{label}</span>
+      </div>
+      <select
+        className='select select-bordered w-full rounded-2xl border-base-300/80 bg-base-100/80 text-base font-semibold'
+        value={value}
+        onChange={onChange}
+        disabled={disabled || loading}
+      >
+        <option value=''>{loading ? `Loading ${label.toLowerCase()}...` : emptyLabel}</option>
+        {options.map(option => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 function formatDuration(duration) {
   const minutes = Math.floor(duration / 60);
@@ -142,6 +180,80 @@ const ProcessControls = props => {
   const [profileData, setProfileData] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [activeBean, setActiveBean] = useState(() => getCurrentBeanSelection());
+  const [profiles, setProfiles] = useState([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [beans, setBeans] = useState([]);
+  const [beansLoading, setBeansLoading] = useState(false);
+  const [profileSelectBusy, setProfileSelectBusy] = useState(false);
+  const [beanSelectBusy, setBeanSelectBusy] = useState(false);
+
+  useEffect(() => {
+    if (!apiService || !brew) return;
+
+    let cancelled = false;
+
+    const loadProfiles = async () => {
+      try {
+        setProfilesLoading(true);
+        const response = await apiService.request({ tp: 'req:profiles:list' });
+        if (!cancelled) {
+          setProfiles(Array.isArray(response?.profiles) ? response.profiles : []);
+        }
+      } catch (error) {
+        console.error('Failed to load profiles:', error);
+        if (!cancelled) {
+          setProfiles([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setProfilesLoading(false);
+        }
+      }
+    };
+
+    loadProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiService, brew]);
+
+  useEffect(() => {
+    if (!brew) return;
+
+    let cancelled = false;
+
+    const loadBeans = async () => {
+      try {
+        setBeansLoading(true);
+        const availableBeans = (await listBeans(apiService)).filter(bean => !bean.archived);
+        if (!cancelled) {
+          setBeans(availableBeans);
+        }
+      } catch (error) {
+        console.error('Failed to load beans:', error);
+        if (!cancelled) {
+          setBeans([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setBeansLoading(false);
+        }
+      }
+    };
+
+    const syncBeans = () => {
+      loadBeans();
+    };
+
+    loadBeans();
+    window.addEventListener('beans-library-changed', syncBeans);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('beans-library-changed', syncBeans);
+    };
+  }, [apiService, brew]);
 
   // Fetch profile data when the selected profileID changes
   // selectedProfile (name string) is intentionally excluded — the ID is the
@@ -317,6 +429,72 @@ const ProcessControls = props => {
     return faPlay;
   };
 
+  const handleProfileSelect = useCallback(
+    async event => {
+      const nextProfileId = event.target.value;
+      if (!nextProfileId || nextProfileId === status.value.selectedProfileId) {
+        return;
+      }
+
+      try {
+        setProfileSelectBusy(true);
+        await apiService.request({ tp: 'req:profiles:select', id: nextProfileId });
+      } catch (error) {
+        console.error('Failed to select profile:', error);
+      } finally {
+        setProfileSelectBusy(false);
+      }
+    },
+    [apiService, status.value.selectedProfileId],
+  );
+
+  const handleBeanSelect = useCallback(
+    async event => {
+      const nextBeanId = event.target.value;
+      if (!nextBeanId) {
+        clearCurrentBeanSelection();
+        apiService.send({ tp: 'req:beans:select', name: '' });
+        return;
+      }
+
+      const selectedBean = beans.find(bean => bean.id === nextBeanId);
+      if (!selectedBean) return;
+
+      try {
+        setBeanSelectBusy(true);
+        recordBeanSelection({
+          profileId: status.value.selectedProfileId,
+          profileLabel: status.value.selectedProfile || '',
+          bean: selectedBean,
+        });
+        apiService.send({ tp: 'req:beans:select', name: selectedBean.name });
+      } catch (error) {
+        console.error('Failed to select bean:', error);
+      } finally {
+        setBeanSelectBusy(false);
+      }
+    },
+    [apiService, beans, status.value.selectedProfile, status.value.selectedProfileId],
+  );
+
+  const profileOptions = profiles.map(profile => ({
+    value: profile.id,
+    label: profile.label || 'Untitled profile',
+  }));
+
+  const beanOptions = beans.map(bean => ({
+    value: bean.id,
+    label: [bean.name, bean.roaster, bean.quantity !== null && bean.quantity !== undefined ? `${bean.quantity}g` : '']
+      .filter(Boolean)
+      .join(' • '),
+  }));
+  const selectedProfileValue = profileOptions.some(profile => profile.value === status.value.selectedProfileId)
+    ? status.value.selectedProfileId
+    : '';
+  const selectedBeanValue = beanOptions.some(bean => bean.value === activeBean?.beanId)
+    ? activeBean.beanId
+    : '';
+
   return (
     <div className={`flex min-h-[250px] flex-col justify-between lg:min-h-[350px]`}>
       <div className='mb-2 flex justify-center'>
@@ -381,24 +559,26 @@ const ProcessControls = props => {
       {brew && (
         <div className='mb-2 text-center'>
           <div className='mb-2 grid gap-3 sm:grid-cols-2'>
-            <div>
-              <div className='text-base-content/60 text-sm'>Current Profile</div>
-              <a href='/profiles' className='flex items-center justify-center gap-2'>
-                <span className='text-base-content text-xl font-semibold sm:text-2xl'>
-                  {status.value.selectedProfile || 'Default'}
-                </span>
-                <FontAwesomeIcon icon={faRectangleList} className='text-base-content/60 text-xl' />
-              </a>
-            </div>
-            <div>
-              <div className='text-base-content/60 text-sm'>Current Bean</div>
-              <a href='/beans' className='flex items-center justify-center gap-2'>
-                <span className='text-base-content text-xl font-semibold sm:text-2xl'>
-                  {activeBean?.beanName || 'Not selected'}
-                </span>
-                <FontAwesomeIcon icon={faLeaf} className='text-base-content/60 text-xl' />
-              </a>
-            </div>
+            <SelectorCard
+              label='Current Profile'
+              icon={faRectangleList}
+              value={selectedProfileValue}
+              options={profileOptions}
+              onChange={handleProfileSelect}
+              loading={profilesLoading || profileSelectBusy}
+              emptyLabel={status.value.selectedProfile || 'Default'}
+              disabled={!apiService}
+            />
+            <SelectorCard
+              label='Current Bean'
+              icon={faLeaf}
+              value={selectedBeanValue}
+              options={beanOptions}
+              onChange={handleBeanSelect}
+              loading={beansLoading || beanSelectBusy}
+              emptyLabel={activeBean?.beanName || 'Not selected'}
+              disabled={!apiService}
+            />
           </div>
           {status.value.selectedProfileId && (
             <div className='mb-2'>

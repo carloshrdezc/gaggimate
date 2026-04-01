@@ -90,6 +90,7 @@ class Settings {
     String getTimezone() const { return timezone; }
     bool isClock24hFormat() const { return clock24hFormat; }
     String getSelectedProfile() const { return selectedProfile; }
+    String getSelectedBean() const { return selectedBean; }
     std::vector<String> getFavoritedProfiles() const { return favoritedProfiles; }
     std::vector<String> getProfileOrder() const { return profileOrder; }
     int getMainBrightness() const { return mainBrightness; }
@@ -146,6 +147,7 @@ class Settings {
     void setTimezone(String timezone);
     void setClockFormat(bool format_24h);
     void setSelectedProfile(String selected_profile);
+    void setSelectedBean(String selected_bean);
     void setFavoritedProfiles(std::vector<String> favorited_profiles);
     void addFavoritedProfile(String profile);
     void removeFavoritedProfile(String profile);
@@ -212,6 +214,7 @@ class Settings {
     String timezone = DEFAULT_TIMEZONE;
     bool clock24hFormat = true;
     String otaChannel = DEFAULT_OTA_CHANNEL;
+    String selectedBean;
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering
     float steamPumpPercentage = DEFAULT_STEAM_PUMP_PERCENTAGE;

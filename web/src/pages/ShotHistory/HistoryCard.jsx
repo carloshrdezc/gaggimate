@@ -1,7 +1,7 @@
 import Card from '../../components/Card.jsx';
 import { useCallback, useState, useContext } from 'preact/hooks';
 import { HistoryChart } from './HistoryChart.jsx';
-import { downloadJson } from '../../utils/download.js';
+import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
 import { faTrashCan } from '@fortawesome/free-solid-svg-icons/faTrashCan';
@@ -33,37 +33,51 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const { armed: confirmDelete, armOrRun: confirmOrDelete } = useConfirmAction(4000);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const date = new Date(shot.timestamp * 1000);
   const effectiveRating = shotNotes?.rating ?? shot.rating ?? 0;
   const hasSamples = Array.isArray(shot.samples) && shot.samples.length > 0;
 
-  const onExport = useCallback(() => {
-    if (!shot.loaded) return; // Only export loaded data
-    const exportData = { ...shot, notes: shotNotes };
-    if (Array.isArray(exportData.samples)) {
-      exportData.samples = exportData.samples.map(s => ({
-        t: s.t,
-        tt: round2(s.tt),
-        ct: round2(s.ct),
-        tp: round2(s.tp),
-        cp: round2(s.cp),
-        fl: round2(s.fl),
-        tf: round2(s.tf),
-        pf: round2(s.pf),
-        vf: round2(s.vf),
-        v: round2(s.v),
-        ev: round2(s.ev),
-        pr: round2(s.pr),
-        systemInfo: s.systemInfo,
-        phaseNumber: s.phaseNumber,
-        phaseDisplayNumber: s.phaseDisplayNumber,
-      }));
+  const onExport = useCallback(async () => {
+    const download = prepareDownload('shot-' + shot.id + '.json');
+    setIsExporting(true);
+    try {
+      const exportShot = !shot.loaded && onLoad ? await onLoad(shot) : shot;
+      if (!exportShot?.loaded) {
+        throw new Error('Shot data is not available yet.');
+      }
+
+      const exportData = { ...exportShot, notes: shotNotes };
+      if (Array.isArray(exportData.samples)) {
+        exportData.samples = exportData.samples.map(s => ({
+          t: s.t,
+          tt: round2(s.tt),
+          ct: round2(s.ct),
+          tp: round2(s.tp),
+          cp: round2(s.cp),
+          fl: round2(s.fl),
+          tf: round2(s.tf),
+          pf: round2(s.pf),
+          vf: round2(s.vf),
+          v: round2(s.v),
+          ev: round2(s.ev),
+          pr: round2(s.pr),
+          systemInfo: s.systemInfo,
+          phaseNumber: s.phaseNumber,
+          phaseDisplayNumber: s.phaseDisplayNumber,
+        }));
+      }
+      exportData.volume = round2(exportData.volume);
+      downloadJson(exportData, 'shot-' + shot.id + '.json', download);
+    } catch (error) {
+      console.error('Failed to export shot:', error);
+      download.fail(error);
+      alert(`Shot export failed: ${error.message}`);
+    } finally {
+      setIsExporting(false);
     }
-    exportData.volume = round2(exportData.volume);
-    // duration left as integer ms
-    downloadJson(exportData, 'shot-' + shot.id + '.json');
-  }, [shot, shotNotes]);
+  }, [onLoad, shot, shotNotes]);
 
   const handleNotesLoaded = useCallback(notes => {
     setShotNotes(notes);
@@ -189,9 +203,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                 )}
 
                 <div className='flex flex-wrap gap-1'>
-                  <Tooltip content={shot.loaded ? 'Export' : 'Load first'}>
+                  <Tooltip content={isExporting ? 'Exporting...' : 'Export'}>
                     <button
-                      disabled={!shot.loaded}
+                      disabled={isExporting}
                       onClick={onExport}
                       className='text-base-content/50 hover:text-info hover:bg-info/10 cursor-pointer rounded-md p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-40'
                       aria-label='Export shot data'

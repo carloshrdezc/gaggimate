@@ -54,6 +54,8 @@ void Controller::setup() {
     if (sdcard) {
         fs = &SD_MMC;
     }
+    beanManager = new BeanManager(fs, "/b");
+    beanManager->setup();
     profileManager = new ProfileManager(fs, "/p", settings, pluginManager);
     profileManager->setup();
     if (settings.isHomekit())

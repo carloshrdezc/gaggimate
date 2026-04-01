@@ -25,8 +25,22 @@ static WebUIPlugin *g_webUIPlugin = nullptr;
 
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
+void WebUIPlugin::addCorsHeaders(AsyncWebServerResponse *response) const {
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    response->addHeader("Access-Control-Max-Age", "86400");
+}
+
+void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
+    AsyncWebServerResponse *response = request->beginResponse(204);
+    addCorsHeaders(response);
+    request->send(response);
+}
+
 void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) {
     this->controller = _controller;
+    this->beanManager = _controller->getBeanManager();
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
@@ -98,6 +112,7 @@ void WebUIPlugin::loop() {
         doc["m"] = controller->getMode();
         doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
         doc["puid"] = controller->getProfileManager()->getSelectedProfile().id;
+        doc["bn"] = controller->getSettings().getSelectedBean();
         doc["cp"] = controller->getSystemInfo().capabilities.pressure;
         doc["cd"] = controller->getSystemInfo().capabilities.dimming;
         doc["tw"] = profileManager->getSelectedProfile().getTotalVolume(); // total target weight for the process
@@ -176,6 +191,11 @@ void WebUIPlugin::loop() {
 }
 
 void WebUIPlugin::setupServer() {
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    DefaultHeaders::Instance().addHeader("Access-Control-Max-Age", "86400");
+    server.on("^\\/api\\/.*$", HTTP_OPTIONS, [this](AsyncWebServerRequest *request) { handleOptions(request); });
     server.on("/connecttest.txt", [](AsyncWebServerRequest *request) {
         request->redirect("http://logout.net");
     }); // windows 11 captive portal workaround
@@ -194,6 +214,7 @@ void WebUIPlugin::setupServer() {
     server.on("/api/settings", [this](AsyncWebServerRequest *request) { handleSettings(request); });
     server.on("/api/status", [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response = request->beginResponseStream("application/json");
+        addCorsHeaders(response);
         JsonDocument doc;
         doc["mode"] = controller->getMode();
         doc["tt"] = controller->getTargetTemp();
@@ -213,7 +234,9 @@ void WebUIPlugin::setupServer() {
     server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
         // Serve the binary index file directly
         if (fs->exists("/h/index.bin")) {
-            request->send(*fs, "/h/index.bin", "application/octet-stream");
+            AsyncWebServerResponse *response = request->beginResponse(*fs, "/h/index.bin", "application/octet-stream");
+            addCorsHeaders(response);
+            request->send(response);
         } else {
             request->send(404, "text/plain", "Index not found");
         }
@@ -291,6 +314,8 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                 String msgType = doc["tp"].as<String>();
                 if (msgType.startsWith("req:profiles:")) {
                     handleProfileRequest(client->id(), doc);
+                } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
+                    handleBeanRequest(client->id(), doc);
                 } else if (msgType == "req:ota-settings") {
                     handleOTASettings(client->id(), doc);
                 } else if (msgType == "req:ota-start") {
@@ -333,6 +358,13 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                         auto target = doc["target"].as<uint8_t>();
                         controller->getSettings().setVolumetricTarget(target);
                     }
+                } else if (msgType == "req:beans:select") {
+                    String beanName = "";
+                    if (doc["name"].is<String>()) {
+                        beanName = doc["name"].as<String>();
+                    }
+                    controller->getSettings().setSelectedBean(beanName);
+                    pluginManager->trigger("beans:selected", "name", beanName);
                 } else if (msgType == "req:history:rebuild") {
                     // Handle rebuild asynchronously - send immediate ack, progress comes via events
                     JsonDocument resp;
@@ -449,6 +481,51 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
                 }
             }
             controller->getSettings().setProfileOrder(order);
+        }
+    }
+
+    size_t bufferSize = measureJson(response);
+    auto *buffer = ws.makeBuffer(bufferSize);
+    serializeJson(response, buffer->get(), bufferSize);
+    ws.text(clientId, buffer);
+}
+
+void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
+    JsonDocument response;
+    auto type = request["tp"].as<String>();
+    response["tp"] = String("res:") + type.substring(4);
+    response["rid"] = request["rid"].as<String>();
+
+    if (type == "req:beans:list") {
+        auto arr = response["beans"].to<JsonArray>();
+        for (const auto &bean : beanManager->listBeans()) {
+            auto obj = arr.add<JsonObject>();
+            writeBean(obj, bean);
+        }
+    } else if (type == "req:beans:load") {
+        BeanEntry bean{};
+        if (beanManager->loadBean(request["id"].as<String>(), bean)) {
+            auto obj = response["bean"].to<JsonObject>();
+            writeBean(obj, bean);
+        } else {
+            response["error"] = F("Load failed");
+        }
+    } else if (type == "req:beans:save") {
+        BeanEntry bean{};
+        if (!parseBean(request["bean"].as<JsonObject>(), bean) || !beanManager->saveBean(bean)) {
+            response["error"] = F("Save failed");
+        } else {
+            auto obj = response["bean"].to<JsonObject>();
+            writeBean(obj, bean);
+        }
+    } else if (type == "req:beans:delete") {
+        BeanEntry bean{};
+        if (beanManager->loadBean(request["id"].as<String>(), bean) && controller->getSettings().getSelectedBean() == bean.name) {
+            controller->getSettings().setSelectedBean("");
+            pluginManager->trigger("beans:selected", "name", "");
+        }
+        if (!beanManager->deleteBean(request["id"].as<String>())) {
+            response["error"] = F("Delete failed");
         }
     }
 
@@ -593,6 +670,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     }
 
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
     JsonDocument doc;
     Settings const &settings = controller->getSettings();
     doc["startupMode"] = settings.getStartupMode() == MODE_BREW ? "brew" : "standby";
@@ -675,6 +753,7 @@ void WebUIPlugin::handleBLEScaleList(AsyncWebServerRequest *request) {
         scalesArray.add(scale);
     }
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
     serializeJson(doc, *response);
     request->send(response);
 }
@@ -688,6 +767,7 @@ void WebUIPlugin::handleBLEScaleScan(AsyncWebServerRequest *request) {
     JsonDocument doc;
     doc["success"] = true;
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
     serializeJson(doc, *response);
     request->send(response);
 }
@@ -701,6 +781,7 @@ void WebUIPlugin::handleBLEScaleConnect(AsyncWebServerRequest *request) {
     JsonDocument doc;
     doc["success"] = true;
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
     serializeJson(doc, *response);
     request->send(response);
 }
@@ -712,6 +793,7 @@ void WebUIPlugin::handleBLEScaleInfo(AsyncWebServerRequest *request) {
     doc["uuid"] = BLEScales.getUUID();
     doc["rssi"] = BLEScales.getRSSI();
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
     serializeJson(doc, *response);
     request->send(response);
 }
@@ -829,6 +911,7 @@ void WebUIPlugin::handleCoreDumpDownload(AsyncWebServerRequest *request) {
     // Set appropriate headers
     response->addHeader("Content-Disposition", "attachment; filename=\"coredump.bin\"");
     response->addHeader("Cache-Control", "no-cache");
+    addCorsHeaders(response);
 
     request->send(response);
 }

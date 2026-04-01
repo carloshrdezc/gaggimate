@@ -6,6 +6,7 @@
 #include "PluginManager.h"
 #include "Settings.h"
 #include <WiFi.h>
+#include <display/core/BeanManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
 #ifndef GAGGIMATE_HEADLESS
@@ -57,6 +58,7 @@ class Controller {
     Process *getProcess() const { return currentProcess; }
     Process *getLastProcess() const { return lastProcess; }
     Settings &getSettings() { return settings; }
+    BeanManager *getBeanManager() { return beanManager; }
     ProfileManager *getProfileManager() { return profileManager; }
 #ifndef GAGGIMATE_HEADLESS
     DefaultUI *getUI() const { return ui; }
@@ -134,6 +136,7 @@ class Controller {
     hw_timer_t *timer = nullptr;
     Settings settings;
     PluginManager *pluginManager{};
+    BeanManager *beanManager{};
     ProfileManager *profileManager{};
 
     int mode = MODE_BREW;

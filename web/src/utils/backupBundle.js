@@ -90,7 +90,7 @@ export async function createBackupBundle(apiService) {
     },
     settings,
     profiles,
-    beans: exportBeanData(),
+    beans: await exportBeanData(apiService),
     shotHistory,
     selectedBean: getCurrentBeanSelection(),
   };
@@ -163,7 +163,7 @@ export async function restoreBackupBundle(apiService, bundle) {
     await restoreSelectedProfile(apiService, bundle.profiles);
   }
   if (bundle.beans) {
-    restoreBeanData(bundle.beans);
+    await restoreBeanData(apiService, bundle.beans);
   }
   if (bundle.selectedBean?.beanName !== undefined) {
     apiService.send({ tp: 'req:beans:select', name: bundle.selectedBean?.beanName || '' });
