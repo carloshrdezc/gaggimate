@@ -18,6 +18,16 @@
 
 static EffectManager effect_mgr;
 
+namespace {
+constexpr lv_opa_t OPA_45 = static_cast<lv_opa_t>(45);
+constexpr lv_opa_t OPA_55 = static_cast<lv_opa_t>(55);
+constexpr lv_opa_t OPA_185 = static_cast<lv_opa_t>(185);
+constexpr lv_opa_t OPA_190 = static_cast<lv_opa_t>(190);
+constexpr lv_opa_t OPA_200 = static_cast<lv_opa_t>(200);
+constexpr lv_opa_t OPA_210 = static_cast<lv_opa_t>(210);
+constexpr lv_opa_t OPA_220 = static_cast<lv_opa_t>(220);
+} // namespace
+
 int16_t calculate_angle(int set_temp, int range, int offset) {
     const double percentage = static_cast<double>(set_temp) / static_cast<double>(MAX_TEMP);
     return (percentage * ((double)range)) - range / 2 - offset;
@@ -79,6 +89,156 @@ DefaultUI::DefaultUI(Controller *controller, Driver *driver, PluginManager *plug
     : controller(controller), panelDriver(driver), pluginManager(pluginManager) {
     setupPanel();
 }
+
+namespace {
+struct DisplayPalette {
+    lv_color_t surface;
+    lv_color_t surfaceStrong;
+    lv_color_t surfaceElevated;
+    lv_color_t surfaceOutline;
+    lv_color_t accent;
+    lv_color_t success;
+    lv_color_t warning;
+    lv_color_t danger;
+    lv_color_t textPrimary;
+    lv_color_t textMuted;
+};
+
+DisplayPalette makeDisplayPalette(const int themeMode, const bool amoledPanel) {
+    if (amoledPanel || themeMode != 0) {
+        return {
+            lv_color_hex(0x050505),
+            lv_color_hex(0x111111),
+            lv_color_hex(0x1D1512),
+            lv_color_hex(0x8F6B54),
+            lv_color_hex(0xFF8C4C),
+            lv_color_hex(0x44D17A),
+            lv_color_hex(0xF3C045),
+            lv_color_hex(0xFF5F56),
+            lv_color_hex(0xF5F5F5),
+            lv_color_hex(0x9A9A9A),
+        };
+    }
+
+    return {
+        lv_color_hex(0xFFFFFF),
+        lv_color_hex(0xF3F4F6),
+        lv_color_hex(0xF8EEDF),
+        lv_color_hex(0xD2B79F),
+        lv_color_hex(0xFF8C4C),
+        lv_color_hex(0x16A34A),
+        lv_color_hex(0xD97706),
+        lv_color_hex(0xDC2626),
+        lv_color_hex(0x111827),
+        lv_color_hex(0x6B7280),
+    };
+}
+
+void stylePanel(lv_obj_t *obj, const DisplayPalette &palette, const lv_opa_t opa = LV_OPA_80, const lv_coord_t radius = 28) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_radius(obj, radius, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(obj, palette.surfaceStrong, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(obj, opa, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(obj, palette.surfaceOutline, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(obj, LV_OPA_40, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_color(obj, palette.accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(obj, 18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_spread(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_ofs_x(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(obj, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void styleChip(lv_obj_t *obj, const DisplayPalette &palette, const lv_color_t tone, const bool subtle = false) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_text_color(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(obj, subtle ? palette.surfaceElevated : tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(obj, subtle ? OPA_190 : LV_OPA_40, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(obj, LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(obj, 999, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(obj, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(obj, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(obj, 7, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(obj, 7, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(obj, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_letter_space(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void styleHeadline(lv_obj_t *obj, const DisplayPalette &palette, const bool emphasis = false) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_text_color(obj, palette.textPrimary, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(obj, emphasis ? LV_OPA_COVER : LV_OPA_90, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_letter_space(obj, emphasis ? 1 : 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void styleSecondary(lv_obj_t *obj, const DisplayPalette &palette) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_text_color(obj, palette.textMuted, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(obj, LV_OPA_80, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_letter_space(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(obj, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void styleMetricValue(lv_obj_t *obj, const DisplayPalette &palette, const lv_font_t *font = &lv_font_montserrat_24) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_text_color(obj, palette.textPrimary, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(obj, font, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void styleIconButton(lv_obj_t *obj, const DisplayPalette &palette, const lv_color_t tone) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_radius(obj, 18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(obj, palette.surfaceElevated, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(obj, OPA_220, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(obj, LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(obj, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(obj, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(obj, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(obj, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_img_recolor(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_img_recolor_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_color(obj, palette.accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(obj, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(obj, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void styleMenuTile(lv_obj_t *obj, const DisplayPalette &palette, const lv_color_t tone) {
+    if (obj == nullptr || !lv_obj_is_valid(obj))
+        return;
+    lv_obj_set_style_radius(obj, 26, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(obj, palette.surfaceElevated, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(obj, OPA_220, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(obj, LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_img_recolor(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_img_recolor_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_color(obj, palette.accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(obj, 16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(obj, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+String buildContextLine(const String &profile, const String &bean) {
+    if (bean.isEmpty()) {
+        return profile;
+    }
+    return profile + " • " + bean;
+}
+} // namespace
 
 void DefaultUI::init() {
     profileManager = controller->getProfileManager();
@@ -212,6 +372,10 @@ void DefaultUI::init() {
     pluginManager->on("profiles:profile:favorite", [this](Event const &event) { reloadProfiles(); });
     pluginManager->on("profiles:profile:unfavorite", [this](Event const &event) { reloadProfiles(); });
     pluginManager->on("profiles:profile:save", [this](Event const &event) { reloadProfiles(); });
+    pluginManager->on("beans:selected", [this](Event const &event) {
+        selectedBean = event.getString("name");
+        rerender = true;
+    });
     pluginManager->on("controller:volumetric-measurement:bluetooth:change", [=](Event const &event) {
         double newWeight = event.getFloat("value");
         if (round(newWeight * 10.0) != round(bluetoothWeight * 10.0)) {
@@ -254,12 +418,14 @@ void DefaultUI::loop() {
         smartGrindActive = settings.isSmartGrindActive();
         grindAvailable = smartGrindActive || settings.getAltRelayFunction() == ALT_RELAY_GRIND;
         applyTheme();
+        applyScreenVisualLanguage();
         if (controller->isErrorState()) {
             changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
         }
         updateTempStableFlag();
         handleScreenChange();
         currentScreen = lv_scr_act();
+        applyScreenVisualLanguage();
         if (lv_scr_act() == ui_StandbyScreen)
             updateStandbyScreen();
         if (lv_scr_act() == ui_StatusScreen)
@@ -584,8 +750,12 @@ void DefaultUI::setupReactive() {
                           },
                           &grindActive);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
-                          [=] { lv_label_set_text(ui_BrewScreen_profileName, selectedProfile.label.c_str()); },
-                          &selectedProfileId);
+                          [=] {
+                              lv_label_set_text(ui_BrewScreen_profileName, selectedProfile.label.c_str());
+                              lv_label_set_text(ui_BrewScreen_Label1,
+                                                selectedBean.isEmpty() ? "PROFILE READY" : buildContextLine("Bean", selectedBean).c_str());
+                          },
+                          &selectedProfileId, &selectedBean);
 
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_ProfileScreen; },
@@ -605,6 +775,15 @@ void DefaultUI::setupReactive() {
                 unsigned int stepCount = favoritedProfiles[currentProfileIdx].phases.size();
                 lv_label_set_text_fmt(ui_ProfileScreen_stepsLabel, "%d step%s", stepCount, stepCount > 1 ? "s" : "");
                 lv_label_set_text_fmt(ui_ProfileScreen_phasesLabel, "%d phase%s", phaseCount, phaseCount > 1 ? "s" : "");
+                ensureProfileBeanLabel();
+                if (profileBeanLabel != nullptr) {
+                    if (selectedBean.isEmpty()) {
+                        lv_obj_add_flag(profileBeanLabel, LV_OBJ_FLAG_HIDDEN);
+                    } else {
+                        lv_obj_clear_flag(profileBeanLabel, LV_OBJ_FLAG_HIDDEN);
+                        lv_label_set_text_fmt(profileBeanLabel, "Bean • %s", selectedBean.c_str());
+                    }
+                }
             } else {
                 _ui_flag_modify(ui_ProfileScreen_profileDetails, LV_OBJ_FLAG_HIDDEN, _UI_MODIFY_FLAG_ADD);
                 _ui_flag_modify(ui_ProfileScreen_loadingSpinner, LV_OBJ_FLAG_HIDDEN, _UI_MODIFY_FLAG_REMOVE);
@@ -623,7 +802,7 @@ void DefaultUI::setupReactive() {
                 ui_ProfileScreen_nextProfileBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_IMG_RECOLOR_OPA,
                 currentProfileIdx < favoritedProfiles.size() - 1 ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
         },
-        &currentProfileIdx, &profileLoaded);
+        &selectedProfileId, &profileLoaded, &selectedBean);
 
     // Show/hide grind button based on SmartGrind setting or Alt Relay function
     effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
@@ -648,8 +827,17 @@ void DefaultUI::setupReactive() {
                               } else {
                                   lv_label_set_text(ui_GrindScreen_weightLabel, "-");
                               }
+                              ensureGrindBeanLabel();
+                              if (grindBeanLabel != nullptr) {
+                                  if (selectedBean.isEmpty()) {
+                                      lv_obj_add_flag(grindBeanLabel, LV_OBJ_FLAG_HIDDEN);
+                                  } else {
+                                      lv_obj_clear_flag(grindBeanLabel, LV_OBJ_FLAG_HIDDEN);
+                                      lv_label_set_text_fmt(grindBeanLabel, "Bean • %s", selectedBean.c_str());
+                                  }
+                              }
                           },
-                          &bluetoothWeight, &volumetricAvailable, &bluetoothScales);
+                          &bluetoothWeight, &volumetricAvailable, &bluetoothScales, &selectedBean);
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
@@ -700,12 +888,203 @@ void DefaultUI::handleScreenChange() {
         }
 
         _ui_screen_change(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0, targetScreenInit);
+        resetCustomScreenHandles();
         lv_obj_del(current);
         rerender = true;
     }
 }
 
+void DefaultUI::resetCustomScreenHandles() {
+    standbyContextLabel = nullptr;
+    statusBeanLabel = nullptr;
+    profileBeanLabel = nullptr;
+    grindBeanLabel = nullptr;
+}
+
+void DefaultUI::ensureStandbyContextLabel() {
+    if (lv_scr_act() != ui_StandbyScreen || !lv_obj_is_valid(ui_StandbyScreen) || standbyContextLabel != nullptr) {
+        return;
+    }
+
+    standbyContextLabel = lv_label_create(ui_StandbyScreen);
+    lv_obj_set_width(standbyContextLabel, 360);
+    lv_label_set_long_mode(standbyContextLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(standbyContextLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_align(standbyContextLabel, LV_ALIGN_BOTTOM_MID, 0, -32);
+}
+
+void DefaultUI::ensureStatusBeanLabel() {
+    if (lv_scr_act() != ui_StatusScreen || !lv_obj_is_valid(ui_StatusScreen_contentPanel2) || statusBeanLabel != nullptr) {
+        return;
+    }
+
+    statusBeanLabel = lv_label_create(ui_StatusScreen_contentPanel2);
+    lv_obj_set_width(statusBeanLabel, 240);
+    lv_obj_align_to(statusBeanLabel, ui_StatusScreen_phaseLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
+    lv_label_set_long_mode(statusBeanLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(statusBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void DefaultUI::ensureProfileBeanLabel() {
+    if (lv_scr_act() != ui_ProfileScreen || !lv_obj_is_valid(ui_ProfileScreen_contentPanel) || profileBeanLabel != nullptr) {
+        return;
+    }
+
+    profileBeanLabel = lv_label_create(ui_ProfileScreen_contentPanel);
+    lv_obj_set_width(profileBeanLabel, 240);
+    lv_obj_align_to(profileBeanLabel, ui_ProfileScreen_profileName, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+    lv_label_set_long_mode(profileBeanLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(profileBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void DefaultUI::ensureGrindBeanLabel() {
+    if (lv_scr_act() != ui_GrindScreen || !lv_obj_is_valid(ui_GrindScreen_contentPanel7) || grindBeanLabel != nullptr) {
+        return;
+    }
+
+    grindBeanLabel = lv_label_create(ui_GrindScreen_contentPanel7);
+    lv_obj_set_width(grindBeanLabel, 220);
+    lv_obj_align_to(grindBeanLabel, ui_GrindScreen_mainLabel7, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+    lv_label_set_long_mode(grindBeanLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(grindBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void DefaultUI::applyScreenVisualLanguage() {
+    const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
+    lv_obj_t *activeScreen = lv_scr_act();
+
+    if (activeScreen == ui_BrewScreen) {
+        stylePanel(ui_BrewScreen_contentPanel4, palette, OPA_55, 44);
+        stylePanel(ui_BrewScreen_profileInfo, palette, OPA_200, 28);
+        stylePanel(ui_BrewScreen_modeSwitch, palette, OPA_220, 22);
+        stylePanel(ui_BrewScreen_tempContainer, palette, OPA_210, 22);
+        stylePanel(ui_BrewScreen_targetContainer, palette, OPA_210, 22);
+        styleHeadline(ui_BrewScreen_mainLabel3, palette, true);
+        styleSecondary(ui_BrewScreen_Label1, palette);
+        styleHeadline(ui_BrewScreen_profileName, palette, true);
+        styleMetricValue(ui_BrewScreen_profileName, palette, &lv_font_montserrat_24);
+        styleMetricValue(ui_BrewScreen_weightLabel, palette, &lv_font_montserrat_24);
+        styleMetricValue(ui_BrewScreen_targetTemp, palette, &lv_font_montserrat_24);
+        styleMetricValue(ui_BrewScreen_targetDuration, palette, &lv_font_montserrat_24);
+        styleIconButton(ui_BrewScreen_ImgButton5, palette, palette.textPrimary);
+        styleIconButton(ui_BrewScreen_startButton, palette, palette.accent);
+        styleIconButton(ui_BrewScreen_profileSelectBtn, palette, palette.accent);
+        styleIconButton(ui_BrewScreen_settingsButton, palette, palette.textMuted);
+        styleIconButton(ui_BrewScreen_downTempButton, palette, palette.textMuted);
+        styleIconButton(ui_BrewScreen_upTempButton, palette, palette.accent);
+        styleIconButton(ui_BrewScreen_downDurationButton, palette, palette.textMuted);
+        styleIconButton(ui_BrewScreen_upDurationButton, palette, palette.accent);
+        styleIconButton(ui_BrewScreen_saveButton, palette, palette.textMuted);
+        styleIconButton(ui_BrewScreen_acceptButton, palette, palette.success);
+        styleIconButton(ui_BrewScreen_saveAsNewButton, palette, palette.warning);
+        if (lv_obj_is_valid(ui_BrewScreen_Image5)) {
+            lv_obj_set_style_img_recolor(ui_BrewScreen_Image5, palette.warning, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image5, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        if (lv_obj_is_valid(ui_BrewScreen_Image4)) {
+            lv_obj_set_style_img_recolor(ui_BrewScreen_Image4, palette.accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image4, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        if (lv_obj_is_valid(ui_BrewScreen_mainLabel3)) {
+            lv_label_set_text(ui_BrewScreen_mainLabel3, active ? "Live Brew Control" : "Brew Setup");
+            lv_obj_set_style_text_font(ui_BrewScreen_mainLabel3, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+    } else if (activeScreen == ui_StatusScreen) {
+        stylePanel(ui_StatusScreen_contentPanel2, palette, OPA_55, 44);
+        styleHeadline(ui_StatusScreen_phaseLabel, palette, true);
+        styleChip(ui_StatusScreen_stepLabel, palette, active ? palette.success : palette.warning, true);
+        styleHeadline(ui_StatusScreen_currentDuration, palette, true);
+        styleSecondary(ui_StatusScreen_targetDuration, palette);
+        styleSecondary(ui_StatusScreen_brewLabel, palette);
+        styleSecondary(ui_StatusScreen_targetTemp, palette);
+        styleMetricValue(ui_StatusScreen_currentDuration, palette, &lv_font_montserrat_34);
+        styleMetricValue(ui_StatusScreen_brewVolume, palette, &lv_font_montserrat_24);
+        styleIconButton(ui_StatusScreen_ImgButton8, palette, palette.textPrimary);
+        styleIconButton(ui_StatusScreen_pauseButton, palette, active ? palette.danger : palette.success);
+        if (lv_obj_is_valid(ui_StatusScreen_barContainer)) {
+            stylePanel(ui_StatusScreen_barContainer, palette, OPA_200, 999);
+            lv_obj_set_style_pad_left(ui_StatusScreen_barContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_right(ui_StatusScreen_barContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_top(ui_StatusScreen_barContainer, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_bottom(ui_StatusScreen_barContainer, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        if (lv_obj_is_valid(ui_StatusScreen_brewBar)) {
+            lv_obj_set_style_radius(ui_StatusScreen_brewBar, 999, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_radius(ui_StatusScreen_brewBar, 999, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        }
+        ensureStatusBeanLabel();
+        if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
+            styleChip(statusBeanLabel, palette, palette.accent, true);
+        }
+    } else if (activeScreen == ui_ProfileScreen) {
+        stylePanel(ui_ProfileScreen_contentPanel, palette, OPA_55, 44);
+        styleHeadline(ui_ProfileScreen_mainLabel, palette, false);
+        styleHeadline(ui_ProfileScreen_profileName, palette, true);
+        styleSecondary(ui_ProfileScreen_phasesLabel, palette);
+        styleSecondary(ui_ProfileScreen_stepsLabel, palette);
+        styleIconButton(ui_ProfileScreen_ImgButton1, palette, palette.textPrimary);
+        styleIconButton(ui_ProfileScreen_previousProfileBtn, palette, palette.textMuted);
+        styleIconButton(ui_ProfileScreen_nextProfileBtn, palette, palette.accent);
+        styleIconButton(ui_ProfileScreen_chooseButton, palette, palette.success);
+        styleMetricValue(ui_ProfileScreen_profileName, palette, &lv_font_montserrat_24);
+        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &lv_font_montserrat_24);
+        styleMetricValue(ui_ProfileScreen_targetDuration2, palette, &lv_font_montserrat_24);
+        if (lv_obj_is_valid(ui_ProfileScreen_Chart1)) {
+            stylePanel(ui_ProfileScreen_Chart1, palette, OPA_190, 20);
+        }
+        ensureProfileBeanLabel();
+        if (profileBeanLabel != nullptr && lv_obj_is_valid(profileBeanLabel)) {
+            styleChip(profileBeanLabel, palette, palette.accent, true);
+        }
+        if (lv_obj_is_valid(ui_ProfileScreen_mainLabel)) {
+            lv_label_set_text(ui_ProfileScreen_mainLabel, "Profile Preview");
+            lv_obj_set_style_text_font(ui_ProfileScreen_mainLabel, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+    } else if (activeScreen == ui_GrindScreen) {
+        stylePanel(ui_GrindScreen_contentPanel7, palette, OPA_55, 44);
+        styleHeadline(ui_GrindScreen_mainLabel7, palette, true);
+        styleSecondary(ui_GrindScreen_targetDuration, palette);
+        styleMetricValue(ui_GrindScreen_targetDuration, palette, &lv_font_montserrat_24);
+        styleIconButton(ui_GrindScreen_ImgButton2, palette, palette.textPrimary);
+        styleIconButton(ui_GrindScreen_startButton, palette, palette.accent);
+        styleIconButton(ui_GrindScreen_downDurationButton, palette, palette.textMuted);
+        styleIconButton(ui_GrindScreen_upDurationButton, palette, palette.accent);
+        ensureGrindBeanLabel();
+        if (grindBeanLabel != nullptr && lv_obj_is_valid(grindBeanLabel)) {
+            styleChip(grindBeanLabel, palette, palette.accent, true);
+        }
+        if (lv_obj_is_valid(ui_GrindScreen_mainLabel7)) {
+            lv_label_set_text(ui_GrindScreen_mainLabel7, grindActive ? "Grind In Progress" : "Grind Setup");
+        }
+    } else if (activeScreen == ui_MenuScreen) {
+        stylePanel(ui_MenuScreen_contentPanel1, palette, OPA_45, 44);
+        styleIconButton(ui_MenuScreen_standbyButton, palette, palette.textPrimary);
+        styleMenuTile(ui_MenuScreen_btnBrew, palette, palette.accent);
+        styleMenuTile(ui_MenuScreen_btnSteam, palette, palette.warning);
+        styleMenuTile(ui_MenuScreen_waterBtn, palette, palette.success);
+        styleMenuTile(ui_MenuScreen_grindBtn, palette, palette.textMuted);
+    } else if (activeScreen == ui_StandbyScreen) {
+        ensureStandbyContextLabel();
+        if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+            styleMetricValue(ui_StandbyScreen_time, palette, &lv_font_montserrat_34);
+            lv_obj_set_style_text_letter_space(ui_StandbyScreen_time, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        if (lv_obj_is_valid(ui_StandbyScreen_statusContainer)) {
+            stylePanel(ui_StandbyScreen_statusContainer, palette, OPA_185, 999);
+            lv_obj_set_style_pad_left(ui_StandbyScreen_statusContainer, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_right(ui_StandbyScreen_statusContainer, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_top(ui_StandbyScreen_statusContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_bottom(ui_StandbyScreen_statusContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_column(ui_StandbyScreen_statusContainer, 18, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        if (standbyContextLabel != nullptr && lv_obj_is_valid(standbyContextLabel)) {
+            styleChip(standbyContextLabel, palette, palette.accent, true);
+        }
+    }
+}
+
 void DefaultUI::updateStandbyScreen() {
+    ensureStandbyContextLabel();
     if (standbyEnterTime > 0) {
         const Settings &settings = controller->getSettings();
         const unsigned long now = millis();
@@ -738,9 +1117,20 @@ void DefaultUI::updateStandbyScreen() {
                                                      : lv_obj_add_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
     !apActive &&WiFi.status() == WL_CONNECTED ? lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN)
                                               : lv_obj_add_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
+
+    if (standbyContextLabel != nullptr) {
+        const String standbyContext = buildContextLine(selectedProfile.label.isEmpty() ? "Ready" : selectedProfile.label, selectedBean);
+        lv_label_set_text(standbyContextLabel, standbyContext.c_str());
+        if (selectedProfile.label.isEmpty() && selectedBean.isEmpty()) {
+            lv_obj_add_flag(standbyContextLabel, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(standbyContextLabel, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 
 void DefaultUI::updateStatusScreen() const {
+    const_cast<DefaultUI *>(this)->ensureStatusBeanLabel();
     // Copy process pointers to avoid race conditions with controller thread
     Process *process = controller->getProcess();
     Process *lastProcess = controller->getLastProcess();
@@ -797,6 +1187,14 @@ void DefaultUI::updateStatusScreen() const {
         phaseText = "Calibrating...";
     }
     lv_label_set_text(ui_StatusScreen_phaseLabel, phaseText.c_str());
+    if (statusBeanLabel != nullptr) {
+        if (selectedBean.isEmpty()) {
+            lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(statusBeanLabel, "Bean • %s", selectedBean.c_str());
+        }
+    }
 
     // Add bounds check for processStarted timestamp
     if (brewProcess && brewProcess->processStarted > 0 && now >= brewProcess->processStarted) {
