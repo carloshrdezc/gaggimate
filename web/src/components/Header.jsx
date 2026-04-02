@@ -36,7 +36,7 @@ function HeaderItem(props) {
   );
 }
 
-export function Header() {
+export function Header({ publicMode = false } = {}) {
   const [open, setOpen] = useState(false);
   const [activeBean, setActiveBean] = useState(() => getCurrentBeanSelection());
   const connected = machine.value.connected;
@@ -67,12 +67,18 @@ export function Header() {
     };
   }, []);
 
+  const brandHref = publicMode ? '/' : '/app';
+
   return (
     <header id='page-header' className='sticky top-0 z-50'>
       <div className='mx-auto px-4 pt-3 lg:px-8 xl:container'>
         <div className='rounded-[1.75rem] border border-base-300/70 bg-base-100/80 px-4 py-3 shadow-lg shadow-base-content/5 backdrop-blur-xl lg:px-6'>
           <div className='flex items-center justify-between gap-4'>
-            <a href='/' className='inline-flex items-center gap-3' onClick={() => openCb(false)}>
+            <a
+              href={brandHref}
+              className='inline-flex items-center gap-3'
+              onClick={() => openCb(false)}
+            >
               <span className='grid size-10 place-items-center rounded-2xl bg-primary text-primary-content shadow-sm'>
                 <span className='font-logo text-xl font-semibold'>G</span>
               </span>
@@ -86,7 +92,8 @@ export function Header() {
               </span>
             </a>
 
-            <div className='hidden min-w-0 items-center gap-2 lg:flex'>
+            {!publicMode && (
+              <div className='hidden min-w-0 items-center gap-2 lg:flex'>
               <div className='status-live-pill rounded-full border border-base-300/70 bg-base-100/70 px-3 py-2 shadow-sm'>
                 <div className='flex items-center gap-2'>
                   <span
@@ -116,7 +123,27 @@ export function Header() {
                   {activeBean?.beanName || 'Not selected'}
                 </div>
               </div>
-            </div>
+              </div>
+            )}
+
+            {publicMode && (
+              <div className='hidden items-center gap-3 lg:flex'>
+                <a
+                  href='https://github.com/jniebuhr/gaggimate'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='btn btn-sm rounded-full border border-base-content/10 bg-transparent px-4 text-base-content/80 hover:border-base-content/20 hover:bg-base-content/5 hover:text-base-content focus-visible:outline-none'
+                >
+                  GitHub
+                </a>
+                <a
+                  href='/app'
+                  className='btn btn-sm rounded-full border border-primary/10 bg-primary px-4 text-primary-content hover:bg-primary hover:text-primary-content focus-visible:outline-none'
+                >
+                  Open app
+                </a>
+              </div>
+            )}
 
             <div className='flex items-center gap-1 lg:gap-5'>
               <a
@@ -167,66 +194,92 @@ export function Header() {
             id='mobile-navigation'
             className={`${open ? 'grid' : 'hidden'} mt-4 max-h-[calc(100vh-8.5rem)] gap-3 overflow-y-auto pb-1 lg:hidden`}
           >
-            <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
-              <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
-                Control
+            {publicMode ? (
+              <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
+                <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
+                  Explore
+                </div>
+                <a
+                  href='/app'
+                  onClick={() => openCb(false)}
+                  className='btn btn-sm justify-start gap-3 rounded-full border border-primary/10 bg-primary px-3 text-primary-content hover:bg-primary hover:text-primary-content shadow-sm focus-visible:outline-none'
+                >
+                  Open live app
+                </a>
+                <a
+                  href='https://github.com/jniebuhr/gaggimate'
+                  onClick={() => openCb(false)}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='btn btn-sm justify-start gap-3 rounded-full border border-transparent bg-transparent px-3 text-base-content/80 hover:border-base-content/10 hover:bg-base-content/5 hover:text-base-content focus-visible:outline-none'
+                >
+                  GitHub repository
+                </a>
               </div>
-              <HeaderItem label='Dashboard' link='/' icon={faHome} onClick={() => openCb(false)} />
-              <HeaderItem
-                label='PID Autotune'
-                link='/pidtune'
-                icon={faTemperatureHalf}
-                onClick={() => openCb(false)}
-              />
-              <HeaderItem
-                label='Bluetooth Devices'
-                link='/scales'
-                icon={faBluetoothB}
-                onClick={() => openCb(false)}
-              />
-              <HeaderItem
-                label='Settings'
-                link='/settings'
-                icon={faCog}
-                onClick={() => openCb(false)}
-              />
-            </div>
-            <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
-              <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
-                Review
-              </div>
-              <HeaderItem
-                label='Profiles'
-                link='/profiles'
-                icon={faList}
-                onClick={() => openCb(false)}
-              />
-              <HeaderItem label='Beans' link='/beans' icon={faLeaf} onClick={() => openCb(false)} />
-              <HeaderItem
-                label='Shot History'
-                link='/history'
-                icon={faTimeline}
-                onClick={() => openCb(false)}
-              />
-              <HeaderItem
-                label='Shot Analyzer'
-                link='/analyzer'
-                icon={faMagnifyingGlassChart}
-                onClick={() => openCb(false)}
-              />
-              <HeaderItem
-                label='Statistics'
-                link='/statistics'
-                icon={faChartSimple}
-                onClick={() => openCb(false)}
-              />
-              <HeaderItem
-                label='System & Updates'
-                link='/ota'
-                icon={faRotate}
-                onClick={() => openCb(false)}
-              />
-            </div>
+            ) : (
+              <>
+                <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
+                  <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
+                    Control
+                  </div>
+                  <HeaderItem label='Dashboard' link='/app' icon={faHome} onClick={() => openCb(false)} />
+                  <HeaderItem
+                    label='PID Autotune'
+                    link='/pidtune'
+                    icon={faTemperatureHalf}
+                    onClick={() => openCb(false)}
+                  />
+                  <HeaderItem
+                    label='Bluetooth Devices'
+                    link='/scales'
+                    icon={faBluetoothB}
+                    onClick={() => openCb(false)}
+                  />
+                  <HeaderItem
+                    label='Settings'
+                    link='/settings'
+                    icon={faCog}
+                    onClick={() => openCb(false)}
+                  />
+                </div>
+                <div className='space-y-2 rounded-2xl border border-base-300/70 bg-base-100/90 p-3'>
+                  <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
+                    Review
+                  </div>
+                  <HeaderItem
+                    label='Profiles'
+                    link='/profiles'
+                    icon={faList}
+                    onClick={() => openCb(false)}
+                  />
+                  <HeaderItem label='Beans' link='/beans' icon={faLeaf} onClick={() => openCb(false)} />
+                  <HeaderItem
+                    label='Shot History'
+                    link='/history'
+                    icon={faTimeline}
+                    onClick={() => openCb(false)}
+                  />
+                  <HeaderItem
+                    label='Shot Analyzer'
+                    link='/analyzer'
+                    icon={faMagnifyingGlassChart}
+                    onClick={() => openCb(false)}
+                  />
+                  <HeaderItem
+                    label='Statistics'
+                    link='/statistics'
+                    icon={faChartSimple}
+                    onClick={() => openCb(false)}
+                  />
+                  <HeaderItem
+                    label='System & Updates'
+                    link='/ota'
+                    icon={faRotate}
+                    onClick={() => openCb(false)}
+                  />
+                </div>
+              </>
+            )}
           </nav>
         </div>
       </div>

@@ -4,7 +4,8 @@ import './style.css';
 import { initializeTheme } from './utils/themeManager.js';
 
 import { render } from 'preact';
-import { LocationProvider, Router, Route, ErrorBoundary } from 'preact-iso';
+import { LocationProvider, Router, Route, ErrorBoundary, useLocation } from 'preact-iso';
+import { useState } from 'preact/hooks';
 
 import { Header } from './components/Header.jsx';
 import { Footer } from './components/Footer.jsx';
@@ -22,63 +23,116 @@ import { Autotune } from './pages/Autotune/index.jsx';
 import { ShotHistory } from './pages/ShotHistory/index.jsx';
 import { ShotAnalyzer } from './pages/ShotAnalyzer/index.jsx';
 import { StatisticsPage } from './pages/Statistics/index.jsx';
+import { LandingPage } from './pages/Landing/index.jsx';
+import { installApiFetchInterceptor } from './services/machineEndpoint.js';
 
-const apiService = new ApiService();
+const APP_ROUTES = [
+  '/app',
+  '/profiles',
+  '/beans',
+  '/settings',
+  '/ota',
+  '/scales',
+  '/pidtune',
+  '/history',
+  '/analyzer',
+  '/statistics',
+];
+
+function isAppRoute(pathname) {
+  return APP_ROUTES.some(route => pathname === route || pathname.startsWith(`${route}/`));
+}
+
+function PublicShell() {
+  return (
+    <div className='relative min-h-screen overflow-hidden bg-base-300 text-base-content'>
+      <div className='app-shell-glow pointer-events-none absolute inset-0' />
+      <div className='relative flex min-h-screen flex-col'>
+        <a href='#main-content' className='skip-link'>
+          Skip to main content
+        </a>
+        <Header publicMode={true} />
+        <main id='main-content' className='flex-1'>
+          <ErrorBoundary>
+            <Router>
+              <Route path='/' component={LandingPage} />
+              <Route default component={NotFound} />
+            </Router>
+          </ErrorBoundary>
+        </main>
+        <Footer publicMode={true} />
+      </div>
+    </div>
+  );
+}
+
+function AppShell() {
+  const [apiService] = useState(() => new ApiService());
+
+  return (
+    <ApiServiceContext.Provider value={apiService}>
+      <div className='relative min-h-screen overflow-hidden bg-base-300 text-base-content'>
+        <div className='app-shell-glow pointer-events-none absolute inset-0' />
+        <div className='relative flex min-h-screen flex-col'>
+          <a href='#main-content' className='skip-link'>
+            Skip to main content
+          </a>
+          <Header />
+
+          <main id='main-content' className='flex-1'>
+            <div className='mx-auto w-full px-4 py-4 lg:px-8 lg:py-6 xl:container'>
+              <div className='grid grid-cols-1 gap-6 lg:grid-cols-12'>
+                <Navigation />
+                <div className='lg:col-span-10'>
+                  <div className='rounded-[2rem] border border-base-300/70 bg-base-100/65 p-4 shadow-2xl shadow-base-content/5 backdrop-blur-xl lg:p-6'>
+                    <ErrorBoundary>
+                      <Router>
+                        <Route path='/app' component={Home} />
+                        <Route path='/profiles' component={ProfileList} />
+                        <Route path='/profiles/:id' component={ProfileEdit} />
+                        <Route path='/beans' component={BeansPage} />
+                        <Route path='/settings' component={Settings} />
+                        <Route path='/ota' component={OTA} />
+                        <Route path='/scales' component={Scales} />
+                        <Route path='/pidtune' component={Autotune} />
+                        <Route path='/history' component={ShotHistory} />
+                        <Route path='/analyzer' component={ShotAnalyzer} />
+                        <Route path='/statistics' component={StatisticsPage} />
+                        <Route
+                          path='/statistics/:sourceAlias/:profileName'
+                          component={StatisticsPage}
+                        />
+                        <Route path='/analyzer/:source/:id' component={ShotAnalyzer} />
+                        <Route default component={NotFound} />
+                      </Router>
+                    </ErrorBoundary>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+          <Footer />
+        </div>
+      </div>
+    </ApiServiceContext.Provider>
+  );
+}
+
+function AppRouter() {
+  const { path } = useLocation();
+  return isAppRoute(path) ? <AppShell /> : <PublicShell />;
+}
 
 export function App() {
   return (
     <LocationProvider>
-      <ApiServiceContext.Provider value={apiService}>
-        <div className='relative min-h-screen overflow-hidden bg-base-300 text-base-content'>
-          <div className='app-shell-glow pointer-events-none absolute inset-0' />
-          <div className='relative flex min-h-screen flex-col'>
-            <a href='#main-content' className='skip-link'>
-              Skip to main content
-            </a>
-            <Header />
-
-            <main id='main-content' className='flex-1'>
-              <div className='mx-auto w-full px-4 py-4 lg:px-8 lg:py-6 xl:container'>
-                <div className='grid grid-cols-1 gap-6 lg:grid-cols-12'>
-                  <Navigation />
-                  <div className='lg:col-span-10'>
-                    <div className='rounded-[2rem] border border-base-300/70 bg-base-100/65 p-4 shadow-2xl shadow-base-content/5 backdrop-blur-xl lg:p-6'>
-                      <ErrorBoundary>
-                        <Router>
-                          <Route path='/' component={Home} />
-                          <Route path='/profiles' component={ProfileList} />
-                          <Route path='/profiles/:id' component={ProfileEdit} />
-                          <Route path='/beans' component={BeansPage} />
-                          <Route path='/settings' component={Settings} />
-                          <Route path='/ota' component={OTA} />
-                          <Route path='/scales' component={Scales} />
-                          <Route path='/pidtune' component={Autotune} />
-                          <Route path='/history' component={ShotHistory} />
-                          <Route path='/analyzer' component={ShotAnalyzer} />
-                          <Route path='/statistics' component={StatisticsPage} />
-                          <Route
-                            path='/statistics/:sourceAlias/:profileName'
-                            component={StatisticsPage}
-                          />
-                          <Route path='/analyzer/:source/:id' component={ShotAnalyzer} />{' '}
-                          {/*deep-link route (sorce & ID)*/}
-                          <Route default component={NotFound} />
-                        </Router>
-                      </ErrorBoundary>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </main>
-            <Footer />
-          </div>
-        </div>
-      </ApiServiceContext.Provider>
+      <AppRouter />
     </LocationProvider>
   );
 }
 
 // Must be called before render
 initializeTheme();
+installApiFetchInterceptor();
 
 render(<App />, document.getElementById('app'));

@@ -40,7 +40,7 @@ export function Navigation(props) {
           <div className='px-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-base-content/45'>
             Control
           </div>
-          <MenuItem label='Dashboard' link='/' icon={faHome} />
+          <MenuItem label='Dashboard' link='/app' icon={faHome} />
           <MenuItem label='PID Autotune' link='/pidtune' icon={faTemperatureHalf} />
           <MenuItem label='Bluetooth Devices' link='/scales' icon={faBluetoothB} />
           <MenuItem label='Settings' link='/settings' icon={faCog} />

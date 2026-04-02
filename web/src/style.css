@@ -586,6 +586,286 @@ body {
   background: var(--app-shell-glow);
 }
 
+.landing-page {
+  position: relative;
+}
+
+.landing-hero {
+  position: relative;
+  min-height: calc(100svh - 6rem);
+}
+
+.landing-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 2.5rem;
+  background:
+    radial-gradient(circle at 12% 16%, rgba(255, 156, 84, 0.22), transparent 28%),
+    radial-gradient(circle at 88% 12%, rgba(123, 199, 255, 0.16), transparent 24%),
+    linear-gradient(160deg, #120d0b 0%, #1f1712 42%, #09090b 100%);
+}
+
+.landing-hero-grid {
+  position: relative;
+  z-index: 1;
+}
+
+.landing-badge,
+.landing-section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.landing-badge {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+}
+
+.landing-section-label {
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 10%, transparent);
+  color: color-mix(in srgb, var(--color-base-content) 62%, transparent);
+  background: color-mix(in srgb, var(--color-base-100) 88%, transparent);
+}
+
+.landing-badge-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #ff9c54;
+  box-shadow: 0 0 0 0.35rem rgba(255, 156, 84, 0.12);
+}
+
+.landing-primary-cta,
+.landing-secondary-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+  padding: 0 1.4rem;
+  border-radius: 999px;
+  font-weight: 700;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.landing-primary-cta {
+  background: #f2ede6;
+  color: #17120f;
+}
+
+.landing-secondary-cta {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.landing-secondary-cta-dark {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.landing-primary-cta:hover,
+.landing-secondary-cta:hover {
+  transform: translateY(-1px);
+}
+
+.landing-visual-panel {
+  position: relative;
+  min-height: 36rem;
+}
+
+.landing-visual-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(16, 13, 11, 0.72);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.28);
+}
+
+.landing-visual-card-main {
+  padding: 1.6rem;
+  border-radius: 2rem;
+}
+
+.landing-visual-card-floating {
+  position: absolute;
+  right: -0.5rem;
+  bottom: 1.5rem;
+  width: min(23rem, 76%);
+  padding: 1.2rem 1.25rem;
+  border-radius: 1.5rem;
+}
+
+.landing-visual-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.74rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.landing-dot-cluster {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.landing-dot-cluster span {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.landing-dot-cluster span:first-child {
+  background: #ff9c54;
+}
+
+.landing-chart {
+  position: relative;
+  height: 13rem;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  background-size: 100% 24%, 18% 100%, 100% 100%;
+}
+
+.landing-chart-line {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  opacity: 0.95;
+}
+
+.landing-chart-line-hot {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 320' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 220 C60 200 110 210 160 196 C220 180 245 98 302 92 C380 84 410 172 495 170 C572 168 640 86 704 102 C750 113 780 136 800 132' stroke='%23ff9c54' stroke-width='7' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.landing-chart-line-flow {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 320' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 250 C52 255 118 226 176 222 C228 219 284 248 334 241 C383 234 434 176 484 170 C551 162 629 198 692 192 C735 188 770 169 800 156' stroke='%237bc7ff' stroke-width='6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.landing-chart-line-pressure {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 320' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 270 C84 268 110 180 180 168 C259 154 291 224 358 214 C423 205 480 124 544 116 C616 107 694 137 800 142' stroke='%23ffd28a' stroke-width='5' fill='none' stroke-linecap='round' opacity='0.85'/%3E%3C/svg%3E");
+}
+
+.landing-metric-block,
+.landing-side-tile,
+.landing-feature-panel {
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 10%, transparent);
+  background: color-mix(in srgb, var(--color-base-100) 84%, transparent);
+}
+
+.landing-metric-block {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 1.25rem;
+  padding: 1rem;
+}
+
+.landing-side-tile {
+  display: flex;
+  gap: 0.9rem;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 1.35rem;
+  padding: 1rem;
+}
+
+.landing-feature-panel {
+  border-radius: 1.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.05);
+}
+
+.landing-feature-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at top left, rgba(255, 156, 84, 0.34), transparent 70%),
+    color-mix(in srgb, var(--color-base-content) 4%, var(--color-base-100));
+  color: color-mix(in srgb, var(--color-base-content) 84%, transparent);
+}
+
+.landing-cta-shell {
+  border-radius: 2.5rem;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at 10% 18%, rgba(255, 156, 84, 0.18), transparent 24%),
+    radial-gradient(circle at 85% 8%, rgba(123, 199, 255, 0.16), transparent 22%),
+    linear-gradient(155deg, #17110f 0%, #2a1d16 48%, #0f0c0a 100%);
+  box-shadow: 0 34px 90px rgba(8, 8, 10, 0.16);
+}
+
+.landing-visual-orbit {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(3px);
+  opacity: 0.78;
+}
+
+.landing-visual-orbit-left {
+  left: -3rem;
+  top: 1rem;
+  width: 11rem;
+  height: 11rem;
+  background: radial-gradient(circle, rgba(255, 156, 84, 0.3), transparent 72%);
+}
+
+.landing-visual-orbit-right {
+  right: -2rem;
+  top: 6rem;
+  width: 9rem;
+  height: 9rem;
+  background: radial-gradient(circle, rgba(123, 199, 255, 0.24), transparent 70%);
+}
+
+@keyframes landingFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -8px, 0);
+  }
+}
+
+.landing-visual-card-main {
+  animation: landingFloat 8s ease-in-out infinite;
+}
+
+.landing-visual-card-floating {
+  animation: landingFloat 10s ease-in-out infinite reverse;
+}
+
 .status-indicator-card {
   transition:
     transform 180ms ease,
@@ -679,9 +959,30 @@ html[data-theme='amoled'] {
   .card,
   .status-indicator-card,
   .status-live-dot,
-  .status-live-pill {
+  .status-live-pill,
+  .landing-primary-cta,
+  .landing-secondary-cta,
+  .landing-visual-card-main,
+  .landing-visual-card-floating {
     transition: none;
     animation: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .landing-hero::before,
+  .landing-cta-shell {
+    border-radius: 2rem;
+  }
+
+  .landing-visual-panel {
+    min-height: auto;
+  }
+
+  .landing-visual-card-floating {
+    position: static;
+    width: 100%;
+    margin-top: 1rem;
   }
 }
 
