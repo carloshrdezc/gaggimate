@@ -417,7 +417,6 @@ void DefaultUI::loop() {
         active = controller->isActive();
         smartGrindActive = settings.isSmartGrindActive();
         grindAvailable = smartGrindActive || settings.getAltRelayFunction() == ALT_RELAY_GRIND;
-        selectedBean = settings.getSelectedBean();
         applyTheme();
         applyScreenVisualLanguage();
         if (controller->isErrorState()) {
@@ -530,7 +529,6 @@ void DefaultUI::setupState() {
     pressureAvailable = controller->getSystemInfo().capabilities.pressure ? 1 : 0;
     pressureScaling = std::ceil(settings.getPressureScaling());
     selectedProfileId = settings.getSelectedProfile();
-    selectedBean = settings.getSelectedBean();
     profileManager->loadSelectedProfile(selectedProfile);
     profileVolumetric = selectedProfile.isVolumetric();
 }
