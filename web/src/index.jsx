@@ -22,6 +22,7 @@ import { Autotune } from './pages/Autotune/index.jsx';
 import { ShotHistory } from './pages/ShotHistory/index.jsx';
 import { ShotAnalyzer } from './pages/ShotAnalyzer/index.jsx';
 import { StatisticsPage } from './pages/Statistics/index.jsx';
+import { installApiFetchInterceptor } from './services/machineEndpoint.js';
 
 const apiService = new ApiService();
 
@@ -80,5 +81,6 @@ export function App() {
 
 // Must be called before render
 initializeTheme();
+installApiFetchInterceptor();
 
 render(<App />, document.getElementById('app'));

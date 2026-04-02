@@ -1,6 +1,7 @@
 import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
+import { getWebSocketUrl } from './machineEndpoint.js';
 
 function randomId() {
   return Math.random()
@@ -23,6 +24,15 @@ export default class ApiService {
     this.connect();
   }
 
+  reconnect() {
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this.connect();
+  }
+
   async connect() {
     if (this.isConnecting) return;
     this.isConnecting = true;
@@ -32,9 +42,7 @@ export default class ApiService {
         this.socket.close();
       }
 
-      const apiHost = window.location.host;
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-      this.socket = new WebSocket(`${wsProtocol}${apiHost}/ws`);
+      this.socket = new WebSocket(getWebSocketUrl('/ws'));
 
       this.socket.addEventListener('message', this._onMessage.bind(this));
       this.socket.addEventListener('close', this._onClose.bind(this));

@@ -20,6 +20,11 @@ import { OverviewChart } from '../../components/OverviewChart.jsx';
 import Card from '../../components/Card.jsx';
 import ProcessControls from './ProcessControls.jsx';
 import { getDashboardLayout, DASHBOARD_LAYOUTS } from '../../utils/dashboardManager.js';
+import {
+  getConfiguredMachineOrigin,
+  setConfiguredMachineOrigin,
+  shouldWarnAboutMixedContent,
+} from '../../services/machineEndpoint.js';
 
 Chart.register(LineController, TimeScale, LinearScale, PointElement, LineElement, Filler, Legend);
 
@@ -56,6 +61,7 @@ function StatPill({ label, value, tone = 'neutral', icon }) {
 
 export function Home() {
   const [dashboardLayout, setDashboardLayout] = useState(DASHBOARD_LAYOUTS.ORDER_FIRST);
+  const [machineOrigin, setMachineOriginState] = useState(() => getConfiguredMachineOrigin());
   const apiService = useContext(ApiServiceContext);
 
   useEffect(() => {
@@ -90,6 +96,28 @@ export function Home() {
   const profileLabel = machine.value.status.selectedProfile || 'Default';
   const temp = formatReading(machine.value.status.currentTemperature, '\u00B0C');
   const pressure = formatReading(machine.value.status.currentPressure, ' bar');
+  const showMixedContentWarning = shouldWarnAboutMixedContent();
+
+  const promptForMachineOrigin = useCallback(() => {
+    const nextValue = window.prompt(
+      'Enter the machine URL or host name',
+      machineOrigin || 'http://gaggimate.local',
+    );
+
+    if (nextValue === null) {
+      return;
+    }
+
+    const normalized = setConfiguredMachineOrigin(nextValue);
+    setMachineOriginState(normalized);
+    apiService.reconnect();
+  }, [apiService, machineOrigin]);
+
+  const resetMachineOrigin = useCallback(() => {
+    setConfiguredMachineOrigin('');
+    setMachineOriginState('');
+    apiService.reconnect();
+  }, [apiService]);
 
   return (
     <>
@@ -123,6 +151,38 @@ export function Home() {
           </div>
         </div>
       </div>
+
+      {!connected && (
+        <div className='mb-5 rounded-[2rem] border border-warning/30 bg-warning/10 p-5 shadow-lg shadow-base-content/5 backdrop-blur-xl lg:p-6'>
+          <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+            <div className='max-w-3xl space-y-2'>
+              <h2 className='text-xl font-semibold'>Machine connection needed</h2>
+              <p className='text-sm leading-relaxed text-base-content/70 sm:text-base'>
+                This app can only read live data when it knows where the machine lives. Right now
+                it is trying {machineOrigin || 'the current site host'}, which is not responding as
+                a GaggiMate machine.
+              </p>
+              {showMixedContentWarning && (
+                <p className='text-sm font-medium text-warning-content'>
+                  This page is loaded over HTTPS, so browsers will block connections to an
+                  `http://` machine URL. Use the machine&apos;s own local web UI or expose it with a
+                  secure HTTPS/WSS tunnel first.
+                </p>
+              )}
+            </div>
+            <div className='flex flex-wrap items-center gap-2'>
+              <button type='button' className='btn btn-primary btn-sm' onClick={promptForMachineOrigin}>
+                Set Machine URL
+              </button>
+              {machineOrigin && (
+                <button type='button' className='btn btn-ghost btn-sm' onClick={resetMachineOrigin}>
+                  Use Site Host
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className='grid grid-cols-1 gap-4 lg:grid-cols-10 lg:items-stretch landscape:sm:grid-cols-10'>
         <Card
