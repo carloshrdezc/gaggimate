@@ -61,6 +61,12 @@ class DefaultUI {
 
     void updateStandbyScreen();
     void updateStatusScreen() const;
+    void applyScreenVisualLanguage();
+    void resetCustomScreenHandles();
+    void ensureStandbyContextLabel();
+    void ensureStatusBeanLabel();
+    void ensureProfileBeanLabel();
+    void ensureGrindBeanLabel();
 
     void adjustDials(lv_obj_t *dials);
     void adjustTempTarget(lv_obj_t *dials);
@@ -86,6 +92,7 @@ class DefaultUI {
     // Screen state
     String selectedProfileId = "";
     Profile selectedProfile{};
+    String selectedBean = "";
     int updateAvailable = false;
     int updateActive = false;
     int apActive = false;
@@ -134,6 +141,10 @@ class DefaultUI {
     lv_obj_t **targetScreen = &ui_StandbyScreen;
     lv_obj_t *currentScreen = ui_StandbyScreen;
     void (*targetScreenInit)(void) = &ui_StandbyScreen_screen_init;
+    mutable lv_obj_t *statusBeanLabel = nullptr;
+    lv_obj_t *standbyContextLabel = nullptr;
+    lv_obj_t *profileBeanLabel = nullptr;
+    lv_obj_t *grindBeanLabel = nullptr;
 
     // Standby brightness control
     unsigned long standbyEnterTime = 0;
