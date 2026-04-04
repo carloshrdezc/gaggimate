@@ -58,6 +58,11 @@ class Controller {
     void startProcess(Process *process);
     Process *getProcess() const { return currentProcess; }
     Process *getLastProcess() const { return lastProcess; }
+    
+    // Thread-safe methods to get process info without exposing raw pointer
+    int getProcessType() const;
+    uint8_t getBrewProcessPhaseIndex() const;
+    bool isBrewProcessVolumetric() const;
     Settings &getSettings() { return settings; }
     BeanManager *getBeanManager() { return beanManager; }
     ProfileManager *getProfileManager() { return profileManager; }

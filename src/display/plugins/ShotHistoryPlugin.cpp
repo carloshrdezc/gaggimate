@@ -312,17 +312,13 @@ void ShotHistoryPlugin::record() {
     // Create and write sample
     ShotLogSample sample = createSample();
 
-    // Track phase transitions
-    if (controller->getMode() == MODE_BREW) {
-        Process *process = controller->getProcess();
-        if (process != nullptr && process->getType() == MODE_BREW) {
-            auto *brewProcess = static_cast<BrewProcess *>(process);
-            uint8_t currentPhase = static_cast<uint8_t>(brewProcess->phaseIndex);
-
-            if (currentPhase != lastRecordedPhase) {
-                recordPhaseTransition(currentPhase, sampleCount);
-                lastRecordedPhase = currentPhase;
-            }
+    // Track phase transitions - use thread-safe method to avoid race condition
+    if (controller->getMode() == MODE_BREW && controller->getProcessType() == MODE_BREW) {
+        uint8_t currentPhase = controller->getBrewProcessPhaseIndex();
+        
+        if (currentPhase != lastRecordedPhase) {
+            recordPhaseTransition(currentPhase, sampleCount);
+            lastRecordedPhase = currentPhase;
         }
     }
 
@@ -369,8 +365,8 @@ void ShotHistoryPlugin::record() {
 }
 
 void ShotHistoryPlugin::startRecording() {
-    Process *process = controller->getProcess();
-    if (process != nullptr && process->getType() == MODE_BREW) {
+    // Use thread-safe method to check process type
+    if (controller->getProcessType() == MODE_BREW) {
         BrewProcess *brewProcess = static_cast<BrewProcess *>(process);
         if (brewProcess->isUtility()) {
             return;
@@ -459,17 +455,9 @@ uint16_t ShotHistoryPlugin::getSystemInfo() {
         systemInfo |= SYSTEM_INFO_SHOT_STARTED_VOLUMETRIC;
     }
 
-    // Bit 1: Currently in volumetric mode (check current process if active)
-    if (controller != nullptr) {
-        Process *process = controller->getProcess();
-        if (process != nullptr && process->getType() == MODE_BREW) {
-            auto *brewProcess = static_cast<BrewProcess *>(process);
-            bool currentlyVolumetric = brewProcess->target == ProcessTarget::VOLUMETRIC &&
-                                       brewProcess->currentPhase.hasVolumetricTarget() && controller->isVolumetricAvailable();
-            if (currentlyVolumetric) {
-                systemInfo |= SYSTEM_INFO_CURRENTLY_VOLUMETRIC;
-            }
-        }
+    // Bit 1: Currently in volumetric mode - use thread-safe method
+    if (controller != nullptr && controller->isBrewProcessVolumetric()) {
+        systemInfo |= SYSTEM_INFO_CURRENTLY_VOLUMETRIC;
     }
 
     // Bit 2: Bluetooth scale connected

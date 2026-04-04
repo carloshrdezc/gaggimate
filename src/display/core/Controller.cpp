@@ -784,8 +784,11 @@ void Controller::deactivateStandby() {
 }
 
 bool Controller::isActive() const {
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
-        return false; // Safe default if we can't get mutex
+    // Use portMAX_DELAY to wait indefinitely for mutex to avoid false negatives
+    // that could cause duplicate process starts or incorrect state transitions
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isActive - should never happen");
+        return false;
     }
     
     Process *proc = currentProcess;
@@ -796,8 +799,10 @@ bool Controller::isActive() const {
 }
 
 bool Controller::isGrindActive() const {
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
-        return false; // Safe default if we can't get mutex
+    // Use portMAX_DELAY to wait indefinitely for mutex to avoid false negatives
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isGrindActive - should never happen");
+        return false;
     }
     
     Process *proc = currentProcess;
@@ -805,6 +810,54 @@ bool Controller::isGrindActive() const {
     
     xSemaphoreGive(processMutex);
     return result;
+}
+
+int Controller::getProcessType() const {
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getProcessType");
+        return -1;
+    }
+    
+    int type = -1;
+    if (currentProcess != nullptr) {
+        type = currentProcess->getType();
+    }
+    
+    xSemaphoreGive(processMutex);
+    return type;
+}
+
+uint8_t Controller::getBrewProcessPhaseIndex() const {
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getBrewProcessPhaseIndex");
+        return 0;
+    }
+    
+    uint8_t phaseIndex = 0;
+    if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
+        auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
+        phaseIndex = static_cast<uint8_t>(brewProcess->phaseIndex);
+    }
+    
+    xSemaphoreGive(processMutex);
+    return phaseIndex;
+}
+
+bool Controller::isBrewProcessVolumetric() const {
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessVolumetric");
+        return false;
+    }
+    
+    bool isVolumetric = false;
+    if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
+        auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
+        isVolumetric = brewProcess->target == ProcessTarget::VOLUMETRIC &&
+                      brewProcess->currentPhase.hasVolumetricTarget() && isVolumetricAvailable();
+    }
+    
+    xSemaphoreGive(processMutex);
+    return isVolumetric;
 }
 
 int Controller::getMode() const { return mode; }
