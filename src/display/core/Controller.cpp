@@ -876,6 +876,59 @@ bool Controller::isBrewProcessUtility() const {
     return isUtility;
 }
 
+ProcessSnapshot Controller::getProcessSnapshot() const {
+    ProcessSnapshot snapshot;
+    
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getProcessSnapshot");
+        return snapshot;
+    }
+    
+    Process *proc = currentProcess;
+    if (proc == nullptr) {
+        proc = lastProcess;
+    }
+    
+    if (proc != nullptr) {
+        snapshot.exists = true;
+        snapshot.isActive = proc->isActive();
+        snapshot.isComplete = proc->isComplete();
+        snapshot.type = proc->getType();
+        snapshot.started = proc->started;
+        snapshot.finished = proc->finished;
+        
+        if (proc->getType() == MODE_BREW) {
+            auto *brew = static_cast<BrewProcess *>(proc);
+            snapshot.isBrew = true;
+            snapshot.phaseIndex = static_cast<uint8_t>(brew->phaseIndex);
+            snapshot.phaseName = brew->currentPhase.name;
+            snapshot.phaseType = static_cast<int>(brew->currentPhase.phase);
+            snapshot.currentPhaseStarted = brew->currentPhaseStarted;
+            snapshot.currentVolume = brew->currentVolume;
+            snapshot.target = brew->target;
+            snapshot.hasVolumetricTarget = brew->currentPhase.hasVolumetricTarget();
+            if (snapshot.hasVolumetricTarget) {
+                Target t = brew->currentPhase.getVolumetricTarget();
+                snapshot.volumetricTargetValue = t.value;
+            }
+            snapshot.phaseDuration = brew->getPhaseDuration();
+            snapshot.phaseCount = brew->profile.phases.size();
+            snapshot.totalDuration = brew->getTotalDuration();
+            snapshot.brewVolume = brew->getBrewVolume();
+        } else if (proc->getType() == MODE_GRIND) {
+            snapshot.isGrind = true;
+            auto *grind = static_cast<GrindProcess *>(proc);
+            snapshot.target = grind->target;
+            snapshot.grindVolume = grind->grindVolume;
+            snapshot.grindTime = grind->time;
+            snapshot.currentVolume = grind->currentVolume;
+        }
+    }
+    
+    xSemaphoreGive(processMutex);
+    return snapshot;
+}
+
 int Controller::getMode() const { return mode; }
 
 void Controller::setMode(int newMode) {

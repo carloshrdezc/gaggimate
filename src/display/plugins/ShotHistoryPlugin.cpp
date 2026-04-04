@@ -971,7 +971,8 @@ void ShotHistoryPlugin::rebuildIndex() {
         }
 
         // Check for notes and extract rating and volume override
-        String notesPath = "/h/" + String(shotId, 10) + ".json";
+        // Use padId to match the format used during normal recording
+        String notesPath = "/h/" + padId(String(shotId, 10)) + ".json";
         if (fs->exists(notesPath)) {
             entry.flags |= SHOT_FLAG_HAS_NOTES;
 
