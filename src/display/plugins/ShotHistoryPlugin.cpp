@@ -93,176 +93,245 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     rebuildInProgress = false;
     xTaskCreatePinnedToCore(loopTask, "ShotHistoryPlugin::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 0);
 }
+bool ShotHistoryPlugin::openLogFileIfNeeded() {
+    if (isFileOpen) {
+        return true;
+    }
+
+    if (!fs->exists("/h")) {
+        if (!fs->mkdir("/h")) {
+            ESP_LOGE("ShotHistoryPlugin", "Failed to create history directory");
+            return false;
+        }
+    }
+
+    currentFile = fs->open("/h/" + currentId + ".slog", FILE_WRITE);
+    if (!currentFile) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to open shot log file for writing");
+        return false;
+    }
+
+    isFileOpen = true;
+    initializeHeader();
+    currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
+    return true;
+}
+
+void ShotHistoryPlugin::initializeHeader() {
+    memset(&header, 0, sizeof(header));
+    header.magic = SHOT_LOG_MAGIC;
+    header.version = SHOT_LOG_VERSION;
+    header.reserved0 = (uint8_t)SHOT_LOG_SAMPLE_SIZE;
+    header.headerSize = SHOT_LOG_HEADER_SIZE;
+    header.sampleInterval = SHOT_LOG_SAMPLE_INTERVAL_MS;
+    header.fieldsMask = SHOT_LOG_FIELDS_MASK_ALL;
+    header.startEpoch = getTime();
+    header.phaseTransitionCount = 0;
+
+    Profile profile = controller->getProfileManager()->getSelectedProfile();
+    strncpy(header.profileId, profile.id.c_str(), sizeof(header.profileId) - 1);
+    header.profileId[sizeof(header.profileId) - 1] = '\0';
+    strncpy(header.profileName, profile.label.c_str(), sizeof(header.profileName) - 1);
+    header.profileName[sizeof(header.profileName) - 1] = '\0';
+}
+
+ShotLogSample ShotHistoryPlugin::createSample() {
+    ShotLogSample sample{};
+    uint32_t tick = sampleCount <= 0xFFFF ? sampleCount : 0xFFFF;
+
+    sample.t = static_cast<uint16_t>(tick);
+    sample.tt = encodeUnsigned(controller->getTargetTemp(), TEMP_SCALE, TEMP_MAX_VALUE);
+    sample.ct = encodeUnsigned(currentTemperature, TEMP_SCALE, TEMP_MAX_VALUE);
+    sample.tp = encodeUnsigned(controller->getTargetPressure(), PRESSURE_SCALE, PRESSURE_MAX_VALUE);
+    sample.cp = encodeUnsigned(controller->getCurrentPressure(), PRESSURE_SCALE, PRESSURE_MAX_VALUE);
+    sample.fl = encodeSigned(controller->getCurrentPumpFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
+    sample.tf = encodeSigned(controller->getTargetFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
+    sample.pf = encodeSigned(controller->getCurrentPuckFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
+    sample.vf = encodeSigned(currentBluetoothFlow, FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
+    sample.v = encodeUnsigned(currentBluetoothWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
+    sample.ev = encodeUnsigned(currentEstimatedWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
+    sample.pr = encodeUnsigned(currentPuckResistance, RESISTANCE_SCALE, RESISTANCE_MAX_VALUE);
+    sample.si = getSystemInfo();
+
+    return sample;
+}
+
+void ShotHistoryPlugin::updateBluetoothFlow() {
+    float btDiff = currentBluetoothWeight - lastBluetoothWeight;
+    float btFlow = btDiff / 0.25f;
+    currentBluetoothFlow = currentBluetoothFlow * 0.75f + btFlow * 0.25f;
+    lastBluetoothWeight = currentBluetoothWeight;
+}
+
+bool ShotHistoryPlugin::writeSampleToBuffer(const ShotLogSample &sample) {
+    if (!isFileOpen) {
+        return false;
+    }
+
+    if (ioBufferPos + sizeof(sample) > sizeof(ioBuffer)) {
+        if (!flushBuffer()) {
+            ESP_LOGE("ShotHistoryPlugin", "Failed to flush buffer, stopping recording");
+            isFileOpen = false;
+            currentFile.close();
+            return false;
+        }
+    }
+
+    memcpy(ioBuffer + ioBufferPos, &sample, sizeof(sample));
+    ioBufferPos += sizeof(sample);
+    sampleCount++;
+    return true;
+}
+
+void ShotHistoryPlugin::checkEarlyIndexCreation() {
+    if (!indexEntryCreated && (millis() - shotStart) > MIN_VALID_SHOT_DURATION_MS) {
+        indexEntryCreated = createEarlyIndexEntry();
+    }
+}
+
+void ShotHistoryPlugin::closeLogFile() {
+    if (!isFileOpen) {
+        return;
+    }
+
+    flushBuffer();
+    patchHeaderWithFinalData();
+    currentFile.close();
+    isFileOpen = false;
+
+    if (isShotTooShort()) {
+        handleFailedShot();
+    } else {
+        handleCompletedShot();
+    }
+}
+
+void ShotHistoryPlugin::patchHeaderWithFinalData() {
+    header.sampleCount = sampleCount;
+    header.durationMs = millis() - shotStart;
+    float finalWeight = currentBluetoothWeight;
+    header.finalWeight = finalWeight > 0.0f ? encodeUnsigned(finalWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE) : 0;
+
+    currentFile.seek(0, SeekSet);
+    currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
+}
+
+bool ShotHistoryPlugin::isShotTooShort() const {
+    return header.durationMs <= MIN_VALID_SHOT_DURATION_MS;
+}
+
+void ShotHistoryPlugin::handleFailedShot() {
+    fs->remove("/h/" + currentId + ".slog");
+
+    if (indexEntryCreated) {
+        markIndexDeleted(currentId.toInt());
+    }
+}
+
+void ShotHistoryPlugin::handleCompletedShot() {
+    controller->getSettings().setHistoryIndex(controller->getSettings().getHistoryIndex() + 1);
+    cleanupHistory();
+    appendCompletedShotToIndex();
+}
+
+void ShotHistoryPlugin::appendCompletedShotToIndex() {
+    ShotIndexEntry indexEntry{};
+    indexEntry.id = currentId.toInt();
+    indexEntry.timestamp = header.startEpoch;
+    indexEntry.duration = header.durationMs;
+    indexEntry.volume = header.finalWeight;
+    indexEntry.rating = 0;
+    indexEntry.flags = SHOT_FLAG_COMPLETED;
+    strncpy(indexEntry.profileId, header.profileId, sizeof(indexEntry.profileId) - 1);
+    indexEntry.profileId[sizeof(indexEntry.profileId) - 1] = '\0';
+    strncpy(indexEntry.profileName, header.profileName, sizeof(indexEntry.profileName) - 1);
+    indexEntry.profileName[sizeof(indexEntry.profileName) - 1] = '\0';
+
+    if (!appendToIndex(indexEntry)) {
+        ESP_LOGE("ShotHistoryPlugin", "CRITICAL: Failed to add completed shot %u to index", indexEntry.id);
+    }
+}
+
 
 void ShotHistoryPlugin::record() {
     bool shouldRecord = recording || extendedRecording;
 
-    if (shouldRecord && (controller->getMode() == MODE_BREW || extendedRecording)) {
-        if (!isFileOpen) {
-            if (!fs->exists("/h")) {
-                if (!fs->mkdir("/h")) {
-                    ESP_LOGE("ShotHistoryPlugin", "Failed to create history directory");
-                    return;
-                }
-            }
-            currentFile = fs->open("/h/" + currentId + ".slog", FILE_WRITE);
-            if (!currentFile) {
-                ESP_LOGE("ShotHistoryPlugin", "Failed to open shot log file for writing");
-                return;
-            }
-            isFileOpen = true;
-                // Prepare header
-                memset(&header, 0, sizeof(header));
-                header.magic = SHOT_LOG_MAGIC;
-                header.version = SHOT_LOG_VERSION;
-                header.reserved0 = (uint8_t)SHOT_LOG_SAMPLE_SIZE; // record sample size actually used
-                header.headerSize = SHOT_LOG_HEADER_SIZE;
-                header.sampleInterval = SHOT_LOG_SAMPLE_INTERVAL_MS;
-                header.fieldsMask = SHOT_LOG_FIELDS_MASK_ALL;
-                header.startEpoch = getTime();
-                Profile profile = controller->getProfileManager()->getSelectedProfile();
-                strncpy(header.profileId, profile.id.c_str(), sizeof(header.profileId) - 1);
-                header.profileId[sizeof(header.profileId) - 1] = '\0';
-                strncpy(header.profileName, profile.label.c_str(), sizeof(header.profileName) - 1);
-                header.profileName[sizeof(header.profileName) - 1] = '\0';
-                header.phaseTransitionCount = 0; // Initialize phase transition count
-                // Write header placeholder
-                currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
-            }
-        }
-        float btDiff = currentBluetoothWeight - lastBluetoothWeight;
-        float btFlow = btDiff / 0.25f;
-        currentBluetoothFlow = currentBluetoothFlow * 0.75f + btFlow * 0.25f;
-        lastBluetoothWeight = currentBluetoothWeight;
-
-        ShotLogSample sample{};
-        uint32_t tick = sampleCount <= 0xFFFF ? sampleCount : 0xFFFF;
-        sample.t = static_cast<uint16_t>(tick);
-        sample.tt = encodeUnsigned(controller->getTargetTemp(), TEMP_SCALE, TEMP_MAX_VALUE);
-        sample.ct = encodeUnsigned(currentTemperature, TEMP_SCALE, TEMP_MAX_VALUE);
-        sample.tp = encodeUnsigned(controller->getTargetPressure(), PRESSURE_SCALE, PRESSURE_MAX_VALUE);
-        sample.cp = encodeUnsigned(controller->getCurrentPressure(), PRESSURE_SCALE, PRESSURE_MAX_VALUE);
-        sample.fl = encodeSigned(controller->getCurrentPumpFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
-        sample.tf = encodeSigned(controller->getTargetFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
-        sample.pf = encodeSigned(controller->getCurrentPuckFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
-        sample.vf = encodeSigned(currentBluetoothFlow, FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
-        sample.v = encodeUnsigned(currentBluetoothWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
-        sample.ev = encodeUnsigned(currentEstimatedWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
-        sample.pr = encodeUnsigned(currentPuckResistance, RESISTANCE_SCALE, RESISTANCE_MAX_VALUE);
-        sample.si = getSystemInfo(); // Pack system state information
-
-        // Track phase transitions
-        if (controller->getMode() == MODE_BREW) {
-            Process *process = controller->getProcess();
-            if (process != nullptr && process->getType() == MODE_BREW) {
-                auto *brewProcess = static_cast<BrewProcess *>(process);
-                uint8_t currentPhase = static_cast<uint8_t>(brewProcess->phaseIndex);
-
-                // Check for phase transition
-                if (currentPhase != lastRecordedPhase) {
-                    recordPhaseTransition(currentPhase, sampleCount);
-                    lastRecordedPhase = currentPhase;
-                }
-            }
-        }
-
+    // Handle file closing when recording stops
+    if (!shouldRecord) {
         if (isFileOpen) {
-            if (ioBufferPos + sizeof(sample) > sizeof(ioBuffer)) {
-                if (!flushBuffer()) {
-                    ESP_LOGE("ShotHistoryPlugin", "Failed to flush buffer, stopping recording");
-                    isFileOpen = false;
-                    currentFile.close();
-                    return;
-                }
-            }
-            memcpy(ioBuffer + ioBufferPos, &sample, sizeof(sample));
-            ioBufferPos += sizeof(sample);
-            sampleCount++;
+            closeLogFile();
         }
+        return;
+    }
 
-        // Check for early index insertion (once per shot after minimum duration)
-        if (!indexEntryCreated && (millis() - shotStart) > MIN_VALID_SHOT_DURATION_MS) {
-            indexEntryCreated = createEarlyIndexEntry();
-        }
+    // Only record during brew mode or extended recording
+    if (controller->getMode() != MODE_BREW && !extendedRecording) {
+        return;
+    }
 
-        // Check for weight stabilization during extended recording
-        if (extendedRecording) {
-            const unsigned long now = millis();
+    // Open log file if needed
+    if (!openLogFileIfNeeded()) {
+        return;
+    }
 
-            bool canProcessWeight = (controller != nullptr);
-            if (canProcessWeight) {
-                canProcessWeight = controller->isVolumetricAvailable();
-            }
+    // Update bluetooth flow calculation
+    updateBluetoothFlow();
 
-            if (!canProcessWeight) {
-                // If BLE connection is unstable, end extended recording early
-                extendedRecording = false;
-                return;
-            }
+    // Create and write sample
+    ShotLogSample sample = createSample();
 
-            const float weightDiff = abs(currentBluetoothWeight - lastStableWeight);
+    // Track phase transitions
+    if (controller->getMode() == MODE_BREW) {
+        Process *process = controller->getProcess();
+        if (process != nullptr && process->getType() == MODE_BREW) {
+            auto *brewProcess = static_cast<BrewProcess *>(process);
+            uint8_t currentPhase = static_cast<uint8_t>(brewProcess->phaseIndex);
 
-            if (weightDiff < WEIGHT_STABILIZATION_THRESHOLD) {
-                if (lastWeightChangeTime == 0) {
-                    lastWeightChangeTime = now;
-                }
-                // Weight has been stable for the threshold time, stop extended recording
-                if (now - lastWeightChangeTime >= WEIGHT_STABILIZATION_TIME) {
-                    extendedRecording = false;
-                }
-            } else {
-                // Weight changed, reset stabilization timer
-                lastWeightChangeTime = 0;
-                lastStableWeight = currentBluetoothWeight;
-            }
-
-            // Also stop extended recording after maximum duration
-            if (now - extendedRecordingStart >= EXTENDED_RECORDING_DURATION) {
-                extendedRecording = false;
+            if (currentPhase != lastRecordedPhase) {
+                recordPhaseTransition(currentPhase, sampleCount);
+                lastRecordedPhase = currentPhase;
             }
         }
     }
-    if (!recording && !extendedRecording && isFileOpen) {
-        flushBuffer();
-        // Patch header with sampleCount and duration
-        header.sampleCount = sampleCount;
-        header.durationMs = millis() - shotStart;
-        float finalWeight = currentBluetoothWeight;
-        header.finalWeight = finalWeight > 0.0f ? encodeUnsigned(finalWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE) : 0;
-        currentFile.seek(0, SeekSet);
-        currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
-        currentFile.close();
-        isFileOpen = false;
-        unsigned long duration = header.durationMs;
-        if (duration <= MIN_VALID_SHOT_DURATION_MS) { // Exclude failed shots and flushes
-            fs->remove("/h/" + currentId + ".slog");
 
-            // If we created an early index entry, mark it as deleted
-            if (indexEntryCreated) {
-                markIndexDeleted(currentId.toInt());
+    // Write sample to buffer
+    if (!writeSampleToBuffer(sample)) {
+        return;
+    }
+
+    // Check for early index creation
+    checkEarlyIndexCreation();
+
+    // Check for weight stabilization during extended recording
+    if (extendedRecording) {
+        const unsigned long now = millis();
+
+        bool canProcessWeight = (controller != nullptr);
+        if (canProcessWeight) {
+            canProcessWeight = controller->isVolumetricAvailable();
+        }
+
+        if (!canProcessWeight) {
+            extendedRecording = false;
+            return;
+        }
+
+        const float weightDiff = abs(currentBluetoothWeight - lastStableWeight);
+
+        if (weightDiff < WEIGHT_STABILIZATION_THRESHOLD) {
+            if (lastWeightChangeTime == 0) {
+                lastWeightChangeTime = now;
+            }
+            if (now - lastWeightChangeTime >= WEIGHT_STABILIZATION_TIME) {
+                extendedRecording = false;
             }
         } else {
-            controller->getSettings().setHistoryIndex(controller->getSettings().getHistoryIndex() + 1);
-            cleanupHistory();
+            lastWeightChangeTime = 0;
+            lastStableWeight = currentBluetoothWeight;
+        }
 
-            // Always create a complete index entry via upsert.
-            // If an early entry exists, it gets overwritten with final data.
-            // If no early entry exists, a new one is appended.
-            ShotIndexEntry indexEntry{};
-            indexEntry.id = currentId.toInt();
-            indexEntry.timestamp = header.startEpoch;
-            indexEntry.duration = header.durationMs;
-            indexEntry.volume = header.finalWeight;
-            indexEntry.rating = 0;
-            indexEntry.flags = SHOT_FLAG_COMPLETED;
-            strncpy(indexEntry.profileId, header.profileId, sizeof(indexEntry.profileId) - 1);
-            indexEntry.profileId[sizeof(indexEntry.profileId) - 1] = '\0';
-            strncpy(indexEntry.profileName, header.profileName, sizeof(indexEntry.profileName) - 1);
-            indexEntry.profileName[sizeof(indexEntry.profileName) - 1] = '\0';
-
-            if (!appendToIndex(indexEntry)) {
-                ESP_LOGE("ShotHistoryPlugin", "CRITICAL: Failed to add completed shot %u to index", indexEntry.id);
-            }
+        if (now - extendedRecordingStart >= EXTENDED_RECORDING_DURATION) {
+            extendedRecording = false;
         }
     }
 }

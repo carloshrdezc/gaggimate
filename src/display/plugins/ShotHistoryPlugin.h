@@ -45,6 +45,20 @@ class ShotHistoryPlugin : public Plugin {
 
     uint16_t getSystemInfo(); // Helper to pack system state bits
 
+    // Phase 1 refactoring: extracted helper methods from record()
+    bool openLogFileIfNeeded();
+    void initializeHeader();
+    ShotLogSample createSample();
+    void updateBluetoothFlow();
+    bool writeSampleToBuffer(const ShotLogSample &sample);
+    void checkEarlyIndexCreation();
+    void closeLogFile();
+    void patchHeaderWithFinalData();
+    bool isShotTooShort() const;
+    void handleFailedShot();
+    void handleCompletedShot();
+    void appendCompletedShotToIndex();
+
     unsigned long getTime();
 
     void endRecording();

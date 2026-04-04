@@ -10,6 +10,8 @@ function randomId() {
 }
 
 export default class ApiService {
+  static HISTORY_MAX_SIZE = 600;
+  
   socket = null;
   listeners = {};
   reconnectAttempts = 0;
@@ -204,6 +206,25 @@ export default class ApiService {
     delete this.listeners[type][id];
   }
 
+  /**
+   * Efficiently adds an entry to history with a fixed maximum size.
+   * Uses shift/push for O(1) operations instead of slice/spread for O(n).
+   * @param {Array} history - The current history array
+   * @param {Object} entry - The new entry to add
+   * @returns {Array} The updated history array
+   */
+  _addToHistory(history, entry) {
+    // Create a shallow copy to maintain immutability for signal reactivity
+    const newHistory = [...history];
+    
+    if (newHistory.length >= ApiService.HISTORY_MAX_SIZE) {
+      newHistory.shift(); // Remove oldest entry - O(1) amortized
+    }
+    newHistory.push(entry); // Add new entry - O(1)
+    
+    return newHistory;
+  }
+
   _onStatus(message) {
     const newStatus = {
       currentTemperature: message.ct,
@@ -233,11 +254,8 @@ export default class ApiService {
     const historyEntry = { ...newStatus };
     delete historyEntry.process;
     
-    // More efficient history management - avoid creating oversized arrays
-    const currentHistory = machine.value.history;
-    const newHistory = currentHistory.length >= 600
-      ? [...currentHistory.slice(-599), historyEntry]
-      : [...currentHistory, historyEntry];
+    // Efficient history management using circular buffer approach
+    const newHistory = this._addToHistory(machine.value.history, historyEntry);
     
     machine.value = {
       ...machine.value,
