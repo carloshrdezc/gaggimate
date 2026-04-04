@@ -32,6 +32,12 @@ const String LOG_TAG = F("Controller");
 
 void Controller::setup() {
     mode = settings.getStartupMode();
+    
+    // Initialize process mutex for thread-safe access
+    processMutex = xSemaphoreCreateMutex();
+    if (processMutex == nullptr) {
+        ESP_LOGE(LOG_TAG, "Failed to create process mutex");
+    }
 
     if (!SPIFFS.begin(true)) {
         Serial.println(F("An Error has occurred while mounting SPIFFS"));
@@ -273,7 +279,7 @@ void Controller::loop() {
     // If BLE scanning has been running for a while without finding the controller,
     // notify the UI so it can update the startup label accordingly.
     if (!waitingForController && initialized && !clientController.isConnected() &&
-        (now - connectStartTime) > CONTROLLER_WAITING_TIMEOUT_MS) {
+        (long)(now - connectStartTime) > CONTROLLER_WAITING_TIMEOUT_MS) {
         waitingForController = true;
         pluginManager->trigger("controller:bluetooth:waiting");
     }
@@ -347,9 +353,9 @@ void Controller::loop() {
         lastProgress = now;
     }
 
-    if (grindActiveUntil != 0 && now > grindActiveUntil)
+    if (grindActiveUntil != 0 && (long)(now - grindActiveUntil) > 0)
         deactivateGrind();
-    if (mode != MODE_STANDBY && settings.getStandbyTimeout() > 0 && now > lastAction + settings.getStandbyTimeout())
+    if (mode != MODE_STANDBY && settings.getStandbyTimeout() > 0 && (long)(now - lastAction) > settings.getStandbyTimeout())
         activateStandby();
 }
 
@@ -390,8 +396,18 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
+    
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in startProcess");
+        delete process;
+        return;
+    }
+    
     processCompleted = false;
     this->currentProcess = process;
+    
+    xSemaphoreGive(processMutex);
+    
     pluginManager->trigger("controller:process:start");
     updateLastAction();
 }
@@ -522,9 +538,15 @@ void Controller::lowerGrindTarget() {
 }
 
 void Controller::updateControl() {
-    // Local capture to avoid race condition with deactivate() running on another core
+    // Thread-safe access to currentProcess with mutex protection
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return; // Skip this update if we can't get the mutex quickly
+    }
+    
     Process *proc = currentProcess;
-    bool active = isActive();
+    bool active = proc != nullptr && proc->isActive();
+    
+    xSemaphoreGive(processMutex);
 
     float targetTemp = getTargetTemp();
     if (targetTemp > .0f) {
@@ -602,12 +624,20 @@ void Controller::activate() {
 }
 
 void Controller::deactivate() {
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in deactivate");
+        return;
+    }
+    
     if (currentProcess == nullptr) {
+        xSemaphoreGive(processMutex);
         return;
     }
     delete lastProcess;
     lastProcess = currentProcess;
     currentProcess = nullptr;
+    
+    xSemaphoreGive(processMutex);
     if (lastProcess->getType() == MODE_BREW) {
         pluginManager->trigger("controller:brew:end");
     } else if (lastProcess->getType() == MODE_GRIND) {
@@ -723,7 +753,7 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
 }
 
 bool Controller::isBluetoothScaleHealthy() const {
-    unsigned long timeSinceLastBluetooth = millis() - lastBluetoothMeasurement;
+    long timeSinceLastBluetooth = (long)(millis() - lastBluetoothMeasurement);
     return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride;
 }
 

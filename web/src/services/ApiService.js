@@ -54,15 +54,15 @@ export default class ApiService {
       this.socket.addEventListener('open', this._boundOnOpen);
     } catch (error) {
       console.error('WebSocket connection error:', error);
-      this._scheduleReconnect();
-    } finally {
       this.isConnecting = false;
+      this._scheduleReconnect();
     }
   }
 
   _onOpen() {
     console.log('WebSocket connected successfully');
     this.reconnectAttempts = 0;
+    this.isConnecting = false;
     machine.value = {
       ...machine.value,
       connected: true,
@@ -108,15 +108,27 @@ export default class ApiService {
     let message;
     try {
       message = JSON.parse(event.data);
-    } catch {
+    } catch (error) {
+      console.warn('Failed to parse WebSocket message:', error);
       return; // Discard malformed messages to avoid crashing the WS handler.
     }
+    
+    // Validate message structure
+    if (!message || typeof message !== 'object' || !message.tp) {
+      console.warn('Invalid message structure:', message);
+      return;
+    }
+    
     const listeners = Object.values(this.listeners[message.tp] || {});
     if (message.tp === 'evt:status') {
       this._onStatus(message);
     }
     for (const listener of listeners) {
-      listener(message);
+      try {
+        listener(message);
+      } catch (error) {
+        console.error('Error in message listener:', error);
+      }
     }
   }
 

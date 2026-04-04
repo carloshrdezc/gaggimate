@@ -23,6 +23,10 @@ constexpr uint16_t RESISTANCE_MAX_VALUE = 0xFFFF;
 constexpr int16_t FLOW_MIN_VALUE = -2000; // -20.00 ml/s
 constexpr int16_t FLOW_MAX_VALUE = 2000;  //  20.00 ml/s
 
+// Minimum duration for a valid shot (7.5 seconds)
+// Shots shorter than this are considered failed/flushes and are excluded
+constexpr unsigned long MIN_VALID_SHOT_DURATION_MS = 7500;
+
 uint16_t encodeUnsigned(float value, float scale, uint16_t maxValue) {
     if (!std::isfinite(value)) {
         return 0;
@@ -96,11 +100,17 @@ void ShotHistoryPlugin::record() {
     if (shouldRecord && (controller->getMode() == MODE_BREW || extendedRecording)) {
         if (!isFileOpen) {
             if (!fs->exists("/h")) {
-                fs->mkdir("/h");
+                if (!fs->mkdir("/h")) {
+                    ESP_LOGE("ShotHistoryPlugin", "Failed to create history directory");
+                    return;
+                }
             }
             currentFile = fs->open("/h/" + currentId + ".slog", FILE_WRITE);
-            if (currentFile) {
-                isFileOpen = true;
+            if (!currentFile) {
+                ESP_LOGE("ShotHistoryPlugin", "Failed to open shot log file for writing");
+                return;
+            }
+            isFileOpen = true;
                 // Prepare header
                 memset(&header, 0, sizeof(header));
                 header.magic = SHOT_LOG_MAGIC;
@@ -158,15 +168,20 @@ void ShotHistoryPlugin::record() {
 
         if (isFileOpen) {
             if (ioBufferPos + sizeof(sample) > sizeof(ioBuffer)) {
-                flushBuffer();
+                if (!flushBuffer()) {
+                    ESP_LOGE("ShotHistoryPlugin", "Failed to flush buffer, stopping recording");
+                    isFileOpen = false;
+                    currentFile.close();
+                    return;
+                }
             }
             memcpy(ioBuffer + ioBufferPos, &sample, sizeof(sample));
             ioBufferPos += sizeof(sample);
             sampleCount++;
         }
 
-        // Check for early index insertion (once per shot after 7.5s)
-        if (!indexEntryCreated && (millis() - shotStart) > 7500) {
+        // Check for early index insertion (once per shot after minimum duration)
+        if (!indexEntryCreated && (millis() - shotStart) > MIN_VALID_SHOT_DURATION_MS) {
             indexEntryCreated = createEarlyIndexEntry();
         }
 
@@ -219,7 +234,7 @@ void ShotHistoryPlugin::record() {
         currentFile.close();
         isFileOpen = false;
         unsigned long duration = header.durationMs;
-        if (duration <= 7500) { // Exclude failed shots and flushes
+        if (duration <= MIN_VALID_SHOT_DURATION_MS) { // Exclude failed shots and flushes
             fs->remove("/h/" + currentId + ".slog");
 
             // If we created an early index entry, mark it as deleted
@@ -553,11 +568,16 @@ void ShotHistoryPlugin::loopTask(void *arg) {
     }
 }
 
-void ShotHistoryPlugin::flushBuffer() {
+bool ShotHistoryPlugin::flushBuffer() {
     if (isFileOpen && ioBufferPos > 0) {
-        currentFile.write(ioBuffer, ioBufferPos);
+        size_t written = currentFile.write(ioBuffer, ioBufferPos);
+        if (written != ioBufferPos) {
+            ESP_LOGE("ShotHistoryPlugin", "Failed to write buffer: expected %zu, wrote %zu", ioBufferPos, written);
+            return false;
+        }
         ioBufferPos = 0;
     }
+    return true;
 }
 
 // Index management methods

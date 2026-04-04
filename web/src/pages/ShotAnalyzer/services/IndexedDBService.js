@@ -108,20 +108,6 @@ class IndexedDBService {
   }
 
   /**
-   * Clear all data and close connection
-   */
-  async clearAll() {
-    const db = await this.init();
-    const tx = db.transaction(['shots', 'profiles', 'notes'], 'readwrite');
-    await Promise.all([
-      tx.objectStore('shots').clear(),
-      tx.objectStore('profiles').clear(),
-      tx.objectStore('notes').clear(),
-    ]);
-    await this.close();
-  }
-
-  /**
    * Delete a shot from browser storage
    * @param {string} name - Shot filename/ID
    */
@@ -221,6 +207,7 @@ class IndexedDBService {
       tx.objectStore('notes').clear(),
       tx.done,
     ]);
+    await this.close();
   }
 
   /**

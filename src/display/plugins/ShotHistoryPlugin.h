@@ -88,7 +88,7 @@ class ShotHistoryPlugin : public Plugin {
     bool rebuildInProgress = false;
 
     xTaskHandle taskHandle;
-    void flushBuffer();
+    bool flushBuffer();
     static void loopTask(void *arg);
 };
 

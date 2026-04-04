@@ -6,6 +6,7 @@
 #include "PluginManager.h"
 #include "Settings.h"
 #include <WiFi.h>
+#include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
@@ -152,6 +153,7 @@ class Controller {
 
     Process *currentProcess = nullptr;
     Process *lastProcess = nullptr;
+    SemaphoreHandle_t processMutex = nullptr;
 
     unsigned long grindActiveUntil = 0;
     unsigned long lastPing = 0;
