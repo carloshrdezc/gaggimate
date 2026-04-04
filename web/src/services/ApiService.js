@@ -207,8 +207,9 @@ export default class ApiService {
   }
 
   /**
-   * Efficiently adds an entry to history with a fixed maximum size.
-   * Uses shift/push for O(1) operations instead of slice/spread for O(n).
+   * Adds an entry to history with a fixed maximum size.
+   * Note: Array.shift() is O(n) as it must shift all elements, but this is
+   * acceptable given the relatively small HISTORY_MAX_SIZE (600 entries).
    * @param {Array} history - The current history array
    * @param {Object} entry - The new entry to add
    * @returns {Array} The updated history array
@@ -218,7 +219,7 @@ export default class ApiService {
     const newHistory = [...history];
     
     if (newHistory.length >= ApiService.HISTORY_MAX_SIZE) {
-      newHistory.shift(); // Remove oldest entry - O(1) amortized
+      newHistory.shift(); // Remove oldest entry - O(n) operation
     }
     newHistory.push(entry); // Add new entry - O(1)
     

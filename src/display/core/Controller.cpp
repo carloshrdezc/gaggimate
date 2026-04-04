@@ -399,13 +399,21 @@ void Controller::autotune(int testTime, int samples) {
 }
 
 void Controller::startProcess(Process *process) {
-    if (isActive() || !isReady()) {
+    if (!isReady()) {
         delete process;
         return;
     }
     
+    // Acquire mutex first to prevent TOCTOU race condition
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in startProcess");
+        delete process;
+        return;
+    }
+    
+    // Check if process is already active while holding the mutex
+    if (currentProcess != nullptr && currentProcess->isActive()) {
+        xSemaphoreGive(processMutex);
         delete process;
         return;
     }

@@ -113,7 +113,13 @@ bool ShotHistoryPlugin::openLogFileIfNeeded() {
 
     isFileOpen = true;
     initializeHeader();
-    currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
+    size_t written = currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
+    if (written != sizeof(header)) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to write header: expected %zu, wrote %zu", sizeof(header), written);
+        currentFile.close();
+        isFileOpen = false;
+        return false;
+    }
     return true;
 }
 
@@ -128,6 +134,11 @@ void ShotHistoryPlugin::initializeHeader() {
     header.startEpoch = getTime();
     header.phaseTransitionCount = 0;
 
+    if (!controller) {
+        ESP_LOGE("ShotHistoryPlugin", "Controller is null in initializeHeader");
+        return;
+    }
+
     Profile profile = controller->getProfileManager()->getSelectedProfile();
     strncpy(header.profileId, profile.id.c_str(), sizeof(header.profileId) - 1);
     header.profileId[sizeof(header.profileId) - 1] = '\0';
@@ -137,6 +148,12 @@ void ShotHistoryPlugin::initializeHeader() {
 
 ShotLogSample ShotHistoryPlugin::createSample() {
     ShotLogSample sample{};
+    
+    if (!controller) {
+        ESP_LOGE("ShotHistoryPlugin", "Controller is null in createSample");
+        return sample;
+    }
+
     uint32_t tick = sampleCount <= 0xFFFF ? sampleCount : 0xFFFF;
 
     sample.t = static_cast<uint16_t>(tick);
@@ -157,9 +174,12 @@ ShotLogSample ShotHistoryPlugin::createSample() {
 }
 
 void ShotHistoryPlugin::updateBluetoothFlow() {
+    static constexpr float BLUETOOTH_FLOW_SAMPLE_INTERVAL = 0.25f; // 250ms sample interval
+    static constexpr float BLUETOOTH_FLOW_SMOOTHING_FACTOR = 0.25f; // 25% new, 75% old
+    
     float btDiff = currentBluetoothWeight - lastBluetoothWeight;
-    float btFlow = btDiff / 0.25f;
-    currentBluetoothFlow = currentBluetoothFlow * 0.75f + btFlow * 0.25f;
+    float btFlow = btDiff / BLUETOOTH_FLOW_SAMPLE_INTERVAL;
+    currentBluetoothFlow = currentBluetoothFlow * (1.0f - BLUETOOTH_FLOW_SMOOTHING_FACTOR) + btFlow * BLUETOOTH_FLOW_SMOOTHING_FACTOR;
     lastBluetoothWeight = currentBluetoothWeight;
 }
 
@@ -194,7 +214,14 @@ void ShotHistoryPlugin::closeLogFile() {
         return;
     }
 
-    flushBuffer();
+    if (!flushBuffer()) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to flush final buffer, marking shot as failed");
+        currentFile.close();
+        isFileOpen = false;
+        handleFailedShot();
+        return;
+    }
+
     patchHeaderWithFinalData();
     currentFile.close();
     isFileOpen = false;
@@ -229,6 +256,11 @@ void ShotHistoryPlugin::handleFailedShot() {
 }
 
 void ShotHistoryPlugin::handleCompletedShot() {
+    if (!controller) {
+        ESP_LOGE("ShotHistoryPlugin", "Controller is null in handleCompletedShot");
+        return;
+    }
+    
     controller->getSettings().setHistoryIndex(controller->getSettings().getHistoryIndex() + 1);
     cleanupHistory();
     appendCompletedShotToIndex();
