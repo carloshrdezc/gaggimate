@@ -387,7 +387,7 @@ bool Controller::isVolumetricAvailable() const {
 }
 
 void Controller::autotune(int testTime, int samples) {
-    if (isActive() || !isReady()) {
+    if (isActiveSafe() || !isReady()) {
         return;
     }
     if (mode != MODE_STANDBY) {
