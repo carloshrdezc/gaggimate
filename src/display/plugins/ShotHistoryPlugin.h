@@ -12,6 +12,8 @@ constexpr size_t MIN_FREE_SPACE_BYTES = 500 * 1024;         // 500 KB reserved f
 constexpr unsigned long EXTENDED_RECORDING_DURATION = 3000; // 3 seconds
 constexpr unsigned long WEIGHT_STABILIZATION_TIME = 1000;   // 1 second
 constexpr float WEIGHT_STABILIZATION_THRESHOLD = 0.1f;      // 0.1g threshold
+constexpr uint8_t MAX_PHASE_TRANSITIONS = 12;               // Maximum phase transitions to record
+constexpr int SHOT_ID_LENGTH = 6;                           // Shot ID padding length
 
 class ShotHistoryPlugin : public Plugin {
   public:

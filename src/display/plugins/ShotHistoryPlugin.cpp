@@ -63,11 +63,10 @@ int16_t encodeSigned(float value, float scale, int16_t minValue, int16_t maxValu
     return static_cast<int16_t>(fixed);
 }
 
-String padId(String id, int length = 6) {
-    while (id.length() < length) {
-        id = "0" + id;
-    }
-    return id;
+String padId(String id, int length = SHOT_ID_LENGTH) {
+    char buffer[SHOT_ID_LENGTH + 1];
+    snprintf(buffer, sizeof(buffer), "%0*d", length, id.toInt());
+    return String(buffer);
 }
 } // namespace
 
@@ -297,7 +296,7 @@ void ShotHistoryPlugin::record() {
     }
 
     // Only record during brew mode or extended recording
-    if (controller->getMode() != MODE_BREW && !extendedRecording) {
+    if (!controller || (controller->getMode() != MODE_BREW && !extendedRecording)) {
         return;
     }
 
@@ -417,7 +416,7 @@ void ShotHistoryPlugin::endExtendedRecording() {
 
 void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t sampleIndex) {
     // Only record if we have space and a valid header
-    if (header.phaseTransitionCount >= 12 || !isFileOpen) {
+    if (header.phaseTransitionCount >= MAX_PHASE_TRANSITIONS || !isFileOpen || !controller) {
         return;
     }
 
@@ -430,7 +429,7 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
     transition.reserved = 0;
 
     // Get phase name from profile
-    if (phaseNumber < profile.phases.size()) {
+    if (phaseNumber < profile.phases.size() && phaseNumber < 255) {
         strncpy(transition.phaseName, profile.phases[phaseNumber].name.c_str(), sizeof(transition.phaseName) - 1);
         transition.phaseName[sizeof(transition.phaseName) - 1] = '\0';
     } else {
@@ -447,23 +446,27 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
 uint16_t ShotHistoryPlugin::getSystemInfo() {
     uint16_t systemInfo = 0;
 
+    if (!controller) {
+        return systemInfo;
+    }
+
     // Bit 0: Shot started in volumetric mode
     if (shotStartedVolumetric) {
         systemInfo |= SYSTEM_INFO_SHOT_STARTED_VOLUMETRIC;
     }
 
     // Bit 1: Currently in volumetric mode - use thread-safe method
-    if (controller != nullptr && controller->isBrewProcessVolumetric()) {
+    if (controller->isBrewProcessVolumetric()) {
         systemInfo |= SYSTEM_INFO_CURRENTLY_VOLUMETRIC;
     }
 
     // Bit 2: Bluetooth scale connected
-    if (controller != nullptr && controller->isBluetoothScaleHealthy()) {
+    if (controller->isBluetoothScaleHealthy()) {
         systemInfo |= SYSTEM_INFO_BLUETOOTH_SCALE_CONNECTED;
     }
 
     // Bit 3: Volumetric available
-    if (controller != nullptr && controller->isVolumetricAvailable()) {
+    if (controller->isVolumetricAvailable()) {
         systemInfo |= SYSTEM_INFO_VOLUMETRIC_AVAILABLE;
     }
 
@@ -523,6 +526,9 @@ void ShotHistoryPlugin::cleanupHistory() {
 }
 
 size_t ShotHistoryPlugin::getFreeSpace() {
+    if (!controller) {
+        return 0;
+    }
     if (controller->isSDCard()) {
         uint64_t total = SD_MMC.totalBytes();
         uint64_t used = SD_MMC.usedBytes();
@@ -550,7 +556,8 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
                 if (fname.endsWith(".slog")) {
                     // Read header only
                     ShotLogHeader hdr{};
-                    if (file.read(reinterpret_cast<uint8_t *>(&hdr), sizeof(hdr)) == sizeof(hdr) && hdr.magic == SHOT_LOG_MAGIC) {
+                    size_t bytesRead = file.read(reinterpret_cast<uint8_t *>(&hdr), sizeof(hdr));
+                    if (bytesRead == sizeof(hdr) && hdr.magic == SHOT_LOG_MAGIC) {
                         float finalWeight = hdr.finalWeight > 0 ? static_cast<float>(hdr.finalWeight) / WEIGHT_SCALE : 0.0f;
 
                         bool headerIncomplete = hdr.sampleCount == 0;
@@ -582,10 +589,7 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
         response["error"] = "use HTTP /api/history?id=<id>";
     } else if (type == "req:history:delete") {
         auto id = request["id"].as<String>();
-        String paddedId = id;
-        while (paddedId.length() < 6) {
-            paddedId = "0" + paddedId;
-        }
+        String paddedId = padId(id);
         fs->remove("/h/" + paddedId + ".slog");
         fs->remove("/h/" + paddedId + ".json");
 
