@@ -365,12 +365,9 @@ void ShotHistoryPlugin::record() {
 }
 
 void ShotHistoryPlugin::startRecording() {
-    // Use thread-safe method to check process type
-    if (controller->getProcessType() == MODE_BREW) {
-        BrewProcess *brewProcess = static_cast<BrewProcess *>(process);
-        if (brewProcess->isUtility()) {
-            return;
-        }
+    // Use thread-safe method to check process type and utility status
+    if (controller->getProcessType() == MODE_BREW && controller->isBrewProcessUtility()) {
+        return;
     }
     currentId = padId(String(controller->getSettings().getHistoryIndex()));
     shotStart = millis();

@@ -860,6 +860,22 @@ bool Controller::isBrewProcessVolumetric() const {
     return isVolumetric;
 }
 
+bool Controller::isBrewProcessUtility() const {
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessUtility");
+        return false;
+    }
+    
+    bool isUtility = false;
+    if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
+        auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
+        isUtility = brewProcess->isUtility();
+    }
+    
+    xSemaphoreGive(processMutex);
+    return isUtility;
+}
+
 int Controller::getMode() const { return mode; }
 
 void Controller::setMode(int newMode) {

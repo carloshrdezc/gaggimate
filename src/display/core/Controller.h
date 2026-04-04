@@ -63,6 +63,7 @@ class Controller {
     int getProcessType() const;
     uint8_t getBrewProcessPhaseIndex() const;
     bool isBrewProcessVolumetric() const;
+    bool isBrewProcessUtility() const;
     Settings &getSettings() { return settings; }
     BeanManager *getBeanManager() { return beanManager; }
     ProfileManager *getProfileManager() { return profileManager; }
