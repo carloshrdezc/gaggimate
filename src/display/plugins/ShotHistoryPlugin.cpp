@@ -79,15 +79,43 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         fs = &SD_MMC;
         ESP_LOGI("ShotHistoryPlugin", "Logging shot history to SD card");
     }
+    
+    // Create mutex for thread-safe access to shared state
+    stateMutex = xSemaphoreCreateMutex();
+    if (stateMutex == nullptr) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to create state mutex");
+        return;
+    }
+    
     pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
     pm->on("controller:brew:end", [this](Event const &) { endRecording(); });
     pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
     pm->on("controller:volumetric-measurement:estimation:change",
-           [this](Event const &event) { currentEstimatedWeight = event.getFloat("value"); });
+           [this](Event const &event) {
+               if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+                   currentEstimatedWeight = event.getFloat("value");
+                   xSemaphoreGive(stateMutex);
+               }
+           });
     pm->on("controller:volumetric-measurement:bluetooth:change",
-           [this](Event const &event) { currentBluetoothWeight = event.getFloat("value"); });
-    pm->on("boiler:currentTemperature:change", [this](Event const &event) { currentTemperature = event.getFloat("value"); });
-    pm->on("pump:puck-resistance:change", [this](Event const &event) { currentPuckResistance = event.getFloat("value"); });
+           [this](Event const &event) {
+               if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+                   currentBluetoothWeight = event.getFloat("value");
+                   xSemaphoreGive(stateMutex);
+               }
+           });
+    pm->on("boiler:currentTemperature:change", [this](Event const &event) {
+        if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+            currentTemperature = event.getFloat("value");
+            xSemaphoreGive(stateMutex);
+        }
+    });
+    pm->on("pump:puck-resistance:change", [this](Event const &event) {
+        if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+            currentPuckResistance = event.getFloat("value");
+            xSemaphoreGive(stateMutex);
+        }
+    });
     // Initialize rebuild state
     rebuildInProgress = false;
     xTaskCreatePinnedToCore(loopTask, "ShotHistoryPlugin::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 0);
@@ -285,6 +313,11 @@ void ShotHistoryPlugin::appendCompletedShotToIndex() {
 
 
 void ShotHistoryPlugin::record() {
+    // Acquire mutex to protect shared state
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    
     bool shouldRecord = recording || extendedRecording;
 
     // Handle file closing when recording stops
@@ -292,16 +325,26 @@ void ShotHistoryPlugin::record() {
         if (isFileOpen) {
             closeLogFile();
         }
+        xSemaphoreGive(stateMutex);
         return;
     }
 
     // Only record during brew mode or extended recording
     if (!controller || (controller->getMode() != MODE_BREW && !extendedRecording)) {
+        xSemaphoreGive(stateMutex);
         return;
     }
 
     // Open log file if needed
     if (!openLogFileIfNeeded()) {
+        xSemaphoreGive(stateMutex);
+        // Trigger error event to notify user
+        if (pluginManager) {
+            Event errorEvent;
+            errorEvent.id = "evt:shot-recording-error";
+            errorEvent.setString("error", "Failed to open shot log file");
+            pluginManager->trigger(errorEvent);
+        }
         return;
     }
 
@@ -323,6 +366,7 @@ void ShotHistoryPlugin::record() {
 
     // Write sample to buffer
     if (!writeSampleToBuffer(sample)) {
+        xSemaphoreGive(stateMutex);
         return;
     }
 
@@ -340,6 +384,7 @@ void ShotHistoryPlugin::record() {
 
         if (!canProcessWeight) {
             extendedRecording = false;
+            xSemaphoreGive(stateMutex);
             return;
         }
 
@@ -361,11 +406,24 @@ void ShotHistoryPlugin::record() {
             extendedRecording = false;
         }
     }
+    
+    xSemaphoreGive(stateMutex);
 }
 
 void ShotHistoryPlugin::startRecording() {
+    // Acquire mutex to protect shared state
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    
+    if (!controller) {
+        xSemaphoreGive(stateMutex);
+        return;
+    }
+    
     // Use thread-safe method to check process type and utility status
     if (controller->getProcessType() == MODE_BREW && controller->isBrewProcessUtility()) {
+        xSemaphoreGive(stateMutex);
         return;
     }
     currentId = padId(String(controller->getSettings().getHistoryIndex()));
@@ -388,6 +446,8 @@ void ShotHistoryPlugin::startRecording() {
 
     // Capture initial volumetric mode state (brew by weight vs brew by time)
     shotStartedVolumetric = controller->getSettings().isVolumetricTarget();
+    
+    xSemaphoreGive(stateMutex);
 }
 
 unsigned long ShotHistoryPlugin::getTime() {
@@ -397,6 +457,11 @@ unsigned long ShotHistoryPlugin::getTime() {
 }
 
 void ShotHistoryPlugin::endRecording() {
+    // Acquire mutex to protect shared state
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    
     if (recording && controller && controller->isVolumetricAvailable() && currentBluetoothWeight > 0) {
         // Start extended recording for any shot with active weight data
         extendedRecording = true;
@@ -406,29 +471,51 @@ void ShotHistoryPlugin::endRecording() {
     }
 
     recording = false;
+    
+    xSemaphoreGive(stateMutex);
 }
 
 void ShotHistoryPlugin::endExtendedRecording() {
+    // Acquire mutex to protect shared state
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    
     if (extendedRecording) {
         extendedRecording = false;
     }
+    
+    xSemaphoreGive(stateMutex);
 }
 
 void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t sampleIndex) {
     // Only record if we have space and a valid header
-    if (header.phaseTransitionCount >= MAX_PHASE_TRANSITIONS || !isFileOpen || !controller) {
+    if (!controller || header.phaseTransitionCount >= MAX_PHASE_TRANSITIONS || !isFileOpen) {
         return;
     }
 
     // Get current profile to extract phase name
     Profile profile = controller->getProfileManager()->getSelectedProfile();
-    PhaseTransition &transition = header.phaseTransitions[header.phaseTransitionCount];
+    
+    // Validate phaseNumber bounds before accessing profile data
+    if (phaseNumber >= profile.phases.size() || phaseNumber >= 255) {
+        // Use fallback for out-of-bounds phase numbers
+        PhaseTransition &transition = header.phaseTransitions[header.phaseTransitionCount];
+        transition.sampleIndex = sampleIndex;
+        transition.phaseNumber = phaseNumber;
+        transition.reserved = 0;
+        snprintf(transition.phaseName, sizeof(transition.phaseName), "Phase %d", phaseNumber + 1);
+        header.phaseTransitionCount++;
+        ESP_LOGD("ShotHistoryPlugin", "Recorded phase transition to phase %d (fallback name) at sample %d", phaseNumber, sampleIndex);
+        return;
+    }
 
+    PhaseTransition &transition = header.phaseTransitions[header.phaseTransitionCount];
     transition.sampleIndex = sampleIndex;
     transition.phaseNumber = phaseNumber;
     transition.reserved = 0;
 
-    // Get phase name from profile
+    // Get phase name from profile (phaseNumber is now validated)
     if (phaseNumber < profile.phases.size() && phaseNumber < 255) {
         strncpy(transition.phaseName, profile.phases[phaseNumber].name.c_str(), sizeof(transition.phaseName) - 1);
         transition.phaseName[sizeof(transition.phaseName) - 1] = '\0';
@@ -529,6 +616,7 @@ size_t ShotHistoryPlugin::getFreeSpace() {
     if (!controller) {
         return 0;
     }
+    
     if (controller->isSDCard()) {
         uint64_t total = SD_MMC.totalBytes();
         uint64_t used = SD_MMC.usedBytes();
@@ -557,28 +645,42 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
                     // Read header only
                     ShotLogHeader hdr{};
                     size_t bytesRead = file.read(reinterpret_cast<uint8_t *>(&hdr), sizeof(hdr));
-                    if (bytesRead == sizeof(hdr) && hdr.magic == SHOT_LOG_MAGIC) {
-                        float finalWeight = hdr.finalWeight > 0 ? static_cast<float>(hdr.finalWeight) / WEIGHT_SCALE : 0.0f;
+                    
+                    // Validate read size
+                    if (bytesRead != sizeof(hdr)) {
+                        ESP_LOGW("ShotHistoryPlugin", "Failed to read header from %s: expected %zu bytes, got %zu", fname.c_str(), sizeof(hdr), bytesRead);
+                        file = root.openNextFile();
+                        continue;
+                    }
+                    
+                    // Validate magic number
+                    if (hdr.magic != SHOT_LOG_MAGIC) {
+                        ESP_LOGW("ShotHistoryPlugin", "Invalid magic number in %s: 0x%08X (expected 0x%08X)", fname.c_str(), hdr.magic, SHOT_LOG_MAGIC);
+                        file = root.openNextFile();
+                        continue;
+                    }
+                    
+                    // File is valid, process it
+                    float finalWeight = hdr.finalWeight > 0 ? static_cast<float>(hdr.finalWeight) / WEIGHT_SCALE : 0.0f;
 
-                        bool headerIncomplete = hdr.sampleCount == 0;
+                    bool headerIncomplete = hdr.sampleCount == 0;
 
-                        auto o = arr.add<JsonObject>();
-                        int start = fname.lastIndexOf('/') + 1;
-                        int end = fname.lastIndexOf('.');
-                        String id = fname.substring(start, end);
-                        o["id"] = id;
-                        o["version"] = hdr.version;
-                        o["timestamp"] = hdr.startEpoch;
-                        o["profile"] = hdr.profileName;
-                        o["profileId"] = hdr.profileId;
-                        o["samples"] = hdr.sampleCount;
-                        o["duration"] = hdr.durationMs;
-                        if (finalWeight > 0.0f) {
-                            o["volume"] = finalWeight;
-                        }
-                        if (headerIncomplete) {
-                            o["incomplete"] = true; // flag partial shot
-                        }
+                    auto o = arr.add<JsonObject>();
+                    int start = fname.lastIndexOf('/') + 1;
+                    int end = fname.lastIndexOf('.');
+                    String id = fname.substring(start, end);
+                    o["id"] = id;
+                    o["version"] = hdr.version;
+                    o["timestamp"] = hdr.startEpoch;
+                    o["profile"] = hdr.profileName;
+                    o["profileId"] = hdr.profileId;
+                    o["samples"] = hdr.sampleCount;
+                    o["duration"] = hdr.durationMs;
+                    if (finalWeight > 0.0f) {
+                        o["volume"] = finalWeight;
+                    }
+                    if (headerIncomplete) {
+                        o["incomplete"] = true; // flag partial shot
                     }
                 }
                 file = root.openNextFile();
