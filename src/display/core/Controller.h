@@ -34,6 +34,8 @@ struct ProcessSnapshot {
     size_t phaseCount = 0;
     unsigned long totalDuration = 0;
     float brewVolume = 0.0f;
+    bool isAdvancedPump = false;
+    float pumpPressure = 0.0f;
     
     // Grind-specific fields
     bool isGrind = false;

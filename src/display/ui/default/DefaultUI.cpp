@@ -1207,9 +1207,8 @@ void DefaultUI::updateStatusScreen() const {
     lv_img_set_src(ui_StatusScreen_Image8,
                    proc.target == ProcessTarget::TIME ? &ui_img_360122106 : &ui_img_1424216268);
 
-    if (brewProcess && brewProcess->isAdvancedPump()) {
-        float pressure = brewProcess->getPumpPressure();
-        const double percentage = 1.0 - static_cast<double>(pressure) / static_cast<double>(pressureScaling);
+    if (proc.isAdvancedPump) {
+        const double percentage = 1.0 - static_cast<double>(proc.pumpPressure) / static_cast<double>(pressureScaling);
         adjustTarget(uic_StatusScreen_dials_pressureTarget, percentage, -62.0, 124.0);
     } else {
         const double percentage = 1.0 - 0.5;
@@ -1217,18 +1216,15 @@ void DefaultUI::updateStatusScreen() const {
     }
 
     // Brew finished adjustments
-    if (process->isActive()) {
+    if (proc.isActive) {
         lv_obj_add_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
     } else {
-        // Re-validate brewProcess pointer before accessing members
-        if (brewProcess && brewProcess->target == ProcessTarget::VOLUMETRIC) {
+        if (proc.target == ProcessTarget::VOLUMETRIC) {
             lv_obj_clear_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
         }
         lv_obj_add_flag(ui_StatusScreen_barContainer, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(ui_StatusScreen_labelContainer, LV_OBJ_FLAG_HIDDEN);
-        if (brewProcess) {
-            lv_label_set_text_fmt(ui_StatusScreen_brewVolume, "%.1lfg", brewProcess->currentVolume);
-        }
+        lv_label_set_text_fmt(ui_StatusScreen_brewVolume, "%.1lfg", proc.currentVolume);
         lv_imgbtn_set_src(ui_StatusScreen_pauseButton, LV_IMGBTN_STATE_RELEASED, nullptr, &ui_img_631115820, nullptr);
     }
 }

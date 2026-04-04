@@ -784,10 +784,9 @@ void Controller::deactivateStandby() {
 }
 
 bool Controller::isActive() const {
-    // Use portMAX_DELAY to wait indefinitely for mutex to avoid false negatives
-    // that could cause duplicate process starts or incorrect state transitions
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isActive - should never happen");
+    // Use reasonable timeout to prevent deadlocks in UI/event loops
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isActive - timeout");
         return false;
     }
     
@@ -799,9 +798,9 @@ bool Controller::isActive() const {
 }
 
 bool Controller::isGrindActive() const {
-    // Use portMAX_DELAY to wait indefinitely for mutex to avoid false negatives
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isGrindActive - should never happen");
+    // Use reasonable timeout to prevent deadlocks in UI/event loops
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isGrindActive - timeout");
         return false;
     }
     
@@ -813,8 +812,8 @@ bool Controller::isGrindActive() const {
 }
 
 int Controller::getProcessType() const {
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getProcessType");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getProcessType - timeout");
         return -1;
     }
     
@@ -828,8 +827,8 @@ int Controller::getProcessType() const {
 }
 
 uint8_t Controller::getBrewProcessPhaseIndex() const {
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getBrewProcessPhaseIndex");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getBrewProcessPhaseIndex - timeout");
         return 0;
     }
     
@@ -844,8 +843,8 @@ uint8_t Controller::getBrewProcessPhaseIndex() const {
 }
 
 bool Controller::isBrewProcessVolumetric() const {
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessVolumetric");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessVolumetric - timeout");
         return false;
     }
     
@@ -861,8 +860,8 @@ bool Controller::isBrewProcessVolumetric() const {
 }
 
 bool Controller::isBrewProcessUtility() const {
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessUtility");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessUtility - timeout");
         return false;
     }
     
@@ -915,6 +914,8 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.phaseCount = brew->profile.phases.size();
             snapshot.totalDuration = brew->getTotalDuration();
             snapshot.brewVolume = brew->getBrewVolume();
+            snapshot.isAdvancedPump = brew->isAdvancedPump();
+            snapshot.pumpPressure = brew->getPumpPressure();
         } else if (proc->getType() == MODE_GRIND) {
             snapshot.isGrind = true;
             auto *grind = static_cast<GrindProcess *>(proc);
