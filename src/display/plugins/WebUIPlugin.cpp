@@ -140,9 +140,11 @@ void WebUIPlugin::loop() {
         ProcessSnapshot proc = controller->getProcessSnapshot();
         if (proc.exists) {
             auto pObj = doc["process"].to<JsonObject>();
-            pObj["a"] = controller->isActive() ? 1 : 0;
+            // Use snapshot state only to avoid TOCTOU race condition
+            pObj["a"] = proc.isActive ? 1 : 0;
             if (proc.isBrew) {
-                unsigned long ts = proc.isActive && controller->isActive() ? millis() : proc.finished;
+                // Use snapshot state consistently - no redundant isActive() call
+                unsigned long ts = proc.isActive ? millis() : proc.finished;
                 pObj["s"] = proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "brew" : "infusion";
                 pObj["l"] = proc.isActive ? proc.phaseName.c_str() : "Finished";
                 pObj["e"] = ts - proc.started;
@@ -157,7 +159,8 @@ void WebUIPlugin::loop() {
                     pObj["pp"] = ts - proc.currentPhaseStarted;
                 }
             } else if (proc.isGrind) {
-                unsigned long ts = proc.isActive && controller->isActive() ? millis() : proc.finished;
+                // Use snapshot state consistently - no redundant isActive() call
+                unsigned long ts = proc.isActive ? millis() : proc.finished;
                 pObj["s"] = "grind";
                 pObj["l"] = proc.isActive ? "Grinding" : "Finished";
                 pObj["e"] = ts - proc.started;

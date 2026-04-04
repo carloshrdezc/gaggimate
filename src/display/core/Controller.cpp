@@ -784,9 +784,9 @@ void Controller::deactivateStandby() {
 }
 
 bool Controller::isActive() const {
-    // Use reasonable timeout to prevent deadlocks in UI/event loops
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isActive - timeout");
+    // Use consistent timeout to prevent deadlocks in UI/event loops
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in isActive - returning false (process may be active)");
         return false;
     }
     
@@ -798,9 +798,9 @@ bool Controller::isActive() const {
 }
 
 bool Controller::isGrindActive() const {
-    // Use reasonable timeout to prevent deadlocks in UI/event loops
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isGrindActive - timeout");
+    // Use consistent timeout to prevent deadlocks in UI/event loops
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in isGrindActive - returning false (process may be active)");
         return false;
     }
     
@@ -812,8 +812,8 @@ bool Controller::isGrindActive() const {
 }
 
 int Controller::getProcessType() const {
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getProcessType - timeout");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in getProcessType - returning -1");
         return -1;
     }
     
@@ -827,8 +827,8 @@ int Controller::getProcessType() const {
 }
 
 uint8_t Controller::getBrewProcessPhaseIndex() const {
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getBrewProcessPhaseIndex - timeout");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in getBrewProcessPhaseIndex - returning 0");
         return 0;
     }
     
@@ -843,8 +843,8 @@ uint8_t Controller::getBrewProcessPhaseIndex() const {
 }
 
 bool Controller::isBrewProcessVolumetric() const {
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessVolumetric - timeout");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in isBrewProcessVolumetric - returning false");
         return false;
     }
     
@@ -860,8 +860,8 @@ bool Controller::isBrewProcessVolumetric() const {
 }
 
 bool Controller::isBrewProcessUtility() const {
-    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in isBrewProcessUtility - timeout");
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in isBrewProcessUtility - returning false");
         return false;
     }
     
@@ -878,8 +878,9 @@ bool Controller::isBrewProcessUtility() const {
 ProcessSnapshot Controller::getProcessSnapshot() const {
     ProcessSnapshot snapshot;
     
-    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in getProcessSnapshot");
+    // Use consistent timeout strategy to prevent deadlocks
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in getProcessSnapshot - returning empty snapshot");
         return snapshot;
     }
     
@@ -914,8 +915,13 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.phaseCount = brew->profile.phases.size();
             snapshot.totalDuration = brew->getTotalDuration();
             snapshot.brewVolume = brew->getBrewVolume();
-            snapshot.isAdvancedPump = brew->isAdvancedPump();
-            snapshot.pumpPressure = brew->getPumpPressure();
+            // Defensive checks for advanced pump methods
+            if (brew->processPhase != ProcessPhase::FINISHED) {
+                snapshot.isAdvancedPump = brew->isAdvancedPump();
+                if (snapshot.isAdvancedPump) {
+                    snapshot.pumpPressure = brew->getPumpPressure();
+                }
+            }
         } else if (proc->getType() == MODE_GRIND) {
             snapshot.isGrind = true;
             auto *grind = static_cast<GrindProcess *>(proc);

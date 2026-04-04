@@ -1215,7 +1215,7 @@ void DefaultUI::updateStatusScreen() const {
         adjustTarget(uic_StatusScreen_dials_pressureTarget, percentage, -62.0, 124.0);
     }
 
-    // Brew finished adjustments
+    // Brew finished adjustments - use snapshot state only to avoid TOCTOU race
     if (proc.isActive) {
         lv_obj_add_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
     } else {

@@ -50,6 +50,10 @@ struct ProcessSnapshot {
 const IPAddress WIFI_AP_IP(4, 4, 4, 1); // the IP address the web server, Samsung requires the IP to be in public space
 const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https://avinetworks.com/glossary/subnet-mask/
 
+// Mutex timeout for UI/event loop methods to prevent deadlocks
+// Chosen to prevent UI freezes while allowing reasonable wait for mutex
+constexpr TickType_t UI_MUTEX_TIMEOUT_MS = 100;
+
 enum class VolumetricMeasurementSource { INACTIVE, FLOW_ESTIMATION, BLUETOOTH };
 
 class Controller {
