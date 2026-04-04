@@ -78,6 +78,7 @@ class Controller {
     int getTargetGrindDuration() const;
     virtual float getCurrentTemp() const { return currentTemp; }
     bool isActive() const;
+    bool isActiveSafe() const;
     bool isGrindActive() const;
     bool isUpdating() const;
     bool isAutotuning() const;
