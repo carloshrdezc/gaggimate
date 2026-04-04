@@ -539,6 +539,7 @@ void Controller::lowerGrindTarget() {
 
 void Controller::updateControl() {
     // Thread-safe access to currentProcess with mutex protection
+    // Hold mutex for entire duration to prevent use-after-free
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         return; // Skip this update if we can't get the mutex quickly
     }
@@ -546,6 +547,34 @@ void Controller::updateControl() {
     Process *proc = currentProcess;
     bool active = proc != nullptr && proc->isActive();
     
+    // Copy values we need while holding the mutex to minimize lock time
+    bool isAltRelayActive = false;
+    int procType = -1;
+    float pumpValue = 0.0f;
+    bool relayActive = false;
+    bool isAdvancedPump = false;
+    bool brewPumpTargetIsPressure = false;
+    float brewPumpPressure = 0.0f;
+    float brewPumpFlow = 0.0f;
+    
+    if (active) {
+        procType = proc->getType();
+        pumpValue = proc->getPumpValue();
+        relayActive = proc->isRelayActive();
+        isAltRelayActive = proc->isAltRelayActive();
+        
+        if (procType == MODE_BREW) {
+            auto *brewProcess = static_cast<BrewProcess *>(proc);
+            isAdvancedPump = brewProcess->isAdvancedPump();
+            if (isAdvancedPump) {
+                brewPumpTargetIsPressure = (brewProcess->getPumpTarget() == PumpTarget::PUMP_TARGET_PRESSURE);
+                brewPumpPressure = brewProcess->getPumpPressure();
+                brewPumpFlow = brewProcess->getPumpFlow();
+            }
+        }
+    }
+    
+    // Release mutex now that we've copied all needed values
     xSemaphoreGive(processMutex);
 
     float targetTemp = getTargetTemp();
@@ -554,35 +583,34 @@ void Controller::updateControl() {
     }
 
     bool altRelayActive = false;
-    if (active && proc->isAltRelayActive()) {
-        if (proc->getType() == MODE_GRIND && settings.getAltRelayFunction() == ALT_RELAY_GRIND) {
+    if (active && isAltRelayActive) {
+        if (procType == MODE_GRIND && settings.getAltRelayFunction() == ALT_RELAY_GRIND) {
             altRelayActive = true;
         }
     }
 
     clientController.sendAltControl(altRelayActive);
     if (active && systemInfo.capabilities.pressure) {
-        if (proc->getType() == MODE_STEAM) {
+        if (procType == MODE_STEAM) {
             targetPressure = settings.getSteamPumpCutoff();
-            targetFlow = proc->getPumpValue() * 0.1f;
+            targetFlow = pumpValue * 0.1f;
             clientController.sendAdvancedOutputControl(false, targetTemp, false, targetPressure, targetFlow);
             return;
         }
-        if (proc->getType() == MODE_BREW) {
-            auto *brewProcess = static_cast<BrewProcess *>(proc);
-            if (brewProcess->isAdvancedPump()) {
-                clientController.sendAdvancedOutputControl(brewProcess->isRelayActive(), targetTemp,
-                                                           brewProcess->getPumpTarget() == PumpTarget::PUMP_TARGET_PRESSURE,
-                                                           brewProcess->getPumpPressure(), brewProcess->getPumpFlow());
-                targetPressure = brewProcess->getPumpPressure();
-                targetFlow = brewProcess->getPumpFlow();
+        if (procType == MODE_BREW) {
+            if (isAdvancedPump) {
+                clientController.sendAdvancedOutputControl(relayActive, targetTemp,
+                                                           brewPumpTargetIsPressure,
+                                                           brewPumpPressure, brewPumpFlow);
+                targetPressure = brewPumpPressure;
+                targetFlow = brewPumpFlow;
                 return;
             }
         }
     }
     targetPressure = 0.0f;
     targetFlow = 0.0f;
-    clientController.sendOutputControl(active && proc->isRelayActive(), active ? proc->getPumpValue() : 0, targetTemp);
+    clientController.sendOutputControl(active && relayActive, active ? pumpValue : 0, targetTemp);
 }
 
 void Controller::activate() {

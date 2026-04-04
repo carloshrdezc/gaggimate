@@ -71,6 +71,7 @@ export default class ApiService {
 
   _onClose() {
     console.log('WebSocket connection closed');
+    this.isConnecting = false; // Reset flag to allow reconnection
     machine.value = {
       ...machine.value,
       connected: false,
@@ -80,6 +81,7 @@ export default class ApiService {
 
   _onError(error) {
     console.error('WebSocket error:', error);
+    this.isConnecting = false; // Reset flag to allow reconnection
     if (this.socket) {
       this.socket.close();
     }
