@@ -312,17 +312,24 @@ void Controller::loop() {
             steamReady = true;
         }
 
-        // Handle current process
-        if (currentProcess != nullptr) {
-            updateLastAction();
-            if (currentProcess->getType() == MODE_BREW) {
-                auto brewProcess = static_cast<BrewProcess *>(currentProcess);
-                brewProcess->updatePressure(pressure);
-                brewProcess->updateFlow(currentPumpFlow);
-            }
-            currentProcess->progress();
-            if (!isActive()) {
-                deactivate();
+        // Handle current process with mutex protection
+        if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            if (currentProcess != nullptr) {
+                updateLastAction();
+                if (currentProcess->getType() == MODE_BREW) {
+                    auto brewProcess = static_cast<BrewProcess *>(currentProcess);
+                    brewProcess->updatePressure(pressure);
+                    brewProcess->updateFlow(currentPumpFlow);
+                }
+                currentProcess->progress();
+                bool stillActive = currentProcess->isActive();
+                xSemaphoreGive(processMutex);
+                
+                if (!stillActive) {
+                    deactivate();
+                }
+            } else {
+                xSemaphoreGive(processMutex);
             }
         }
 
@@ -413,22 +420,47 @@ void Controller::startProcess(Process *process) {
 }
 
 float Controller::getTargetTemp() const {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        // If we can't get mutex, return safe default based on mode
+        switch (mode) {
+        case MODE_BREW:
+        case MODE_GRIND:
+            return profileManager->getSelectedProfile().temperature;
+        case MODE_STEAM:
+            return settings.getTargetSteamTemp();
+        case MODE_WATER:
+            return settings.getTargetWaterTemp();
+        default:
+            return 0;
+        }
+    }
+    
     Process *proc = currentProcess;
+    float result = 0;
+    
     switch (mode) {
     case MODE_BREW:
     case MODE_GRIND:
         if (proc != nullptr && proc->isActive() && proc->getType() == MODE_BREW) {
             auto brewProcess = static_cast<BrewProcess *>(proc);
-            return brewProcess->getTemperature();
+            result = brewProcess->getTemperature();
+        } else {
+            result = profileManager->getSelectedProfile().temperature;
         }
-        return profileManager->getSelectedProfile().temperature;
+        break;
     case MODE_STEAM:
-        return settings.getTargetSteamTemp();
+        result = settings.getTargetSteamTemp();
+        break;
     case MODE_WATER:
-        return settings.getTargetWaterTemp();
+        result = settings.getTargetWaterTemp();
+        break;
     default:
-        return 0;
+        result = 0;
+        break;
     }
+    
+    xSemaphoreGive(processMutex);
+    return result;
 }
 
 void Controller::setTargetTemp(float temperature) {
@@ -556,6 +588,7 @@ void Controller::updateControl() {
     bool brewPumpTargetIsPressure = false;
     float brewPumpPressure = 0.0f;
     float brewPumpFlow = 0.0f;
+    float targetTemp = 0.0f;
     
     if (active) {
         procType = proc->getType();
@@ -571,13 +604,33 @@ void Controller::updateControl() {
                 brewPumpPressure = brewProcess->getPumpPressure();
                 brewPumpFlow = brewProcess->getPumpFlow();
             }
+            targetTemp = brewProcess->getTemperature();
+        }
+    }
+    
+    // Get target temp while still holding mutex to avoid race condition
+    // Inline the logic from getTargetTemp() to avoid deadlock
+    if (targetTemp == 0.0f) {
+        switch (mode) {
+        case MODE_BREW:
+        case MODE_GRIND:
+            targetTemp = profileManager->getSelectedProfile().temperature;
+            break;
+        case MODE_STEAM:
+            targetTemp = settings.getTargetSteamTemp();
+            break;
+        case MODE_WATER:
+            targetTemp = settings.getTargetWaterTemp();
+            break;
+        default:
+            targetTemp = 0;
+            break;
         }
     }
     
     // Release mutex now that we've copied all needed values
     xSemaphoreGive(processMutex);
 
-    float targetTemp = getTargetTemp();
     if (targetTemp > .0f) {
         targetTemp = targetTemp + static_cast<float>(settings.getTemperatureOffset());
     }
@@ -646,7 +699,15 @@ void Controller::activate() {
         break;
     default:;
     }
-    if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
+    
+    // Check if we started a brew process (with mutex protection)
+    bool isBrewProcess = false;
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        isBrewProcess = currentProcess != nullptr && currentProcess->getType() == MODE_BREW;
+        xSemaphoreGive(processMutex);
+    }
+    
+    if (isBrewProcess) {
         pluginManager->trigger("controller:brew:start");
     }
 }
@@ -715,13 +776,27 @@ void Controller::deactivateStandby() {
 }
 
 bool Controller::isActive() const {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return false; // Safe default if we can't get mutex
+    }
+    
     Process *proc = currentProcess;
-    return proc != nullptr && proc->isActive();
+    bool result = proc != nullptr && proc->isActive();
+    
+    xSemaphoreGive(processMutex);
+    return result;
 }
 
 bool Controller::isGrindActive() const {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return false; // Safe default if we can't get mutex
+    }
+    
     Process *proc = currentProcess;
-    return proc != nullptr && proc->isActive() && proc->getType() == MODE_GRIND;
+    bool result = proc != nullptr && proc->isActive() && proc->getType() == MODE_GRIND;
+    
+    xSemaphoreGive(processMutex);
+    return result;
 }
 
 int Controller::getMode() const { return mode; }
@@ -772,9 +847,15 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }
-    if (currentProcess != nullptr) {
-        currentProcess->updateVolume(measurement);
+    
+    // Update volume with mutex protection
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (currentProcess != nullptr) {
+            currentProcess->updateVolume(measurement);
+        }
+        xSemaphoreGive(processMutex);
     }
+    
     if (lastProcess != nullptr && !lastProcess->isComplete()) {
         lastProcess->updateVolume(measurement);
     }
