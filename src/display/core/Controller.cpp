@@ -1054,7 +1054,7 @@ void Controller::handleBrewButton(int brewButtonStatus) {
             deactivateStandby();
             break;
         case MODE_BREW:
-            if (!isActive()) {
+            if (!isActiveSafe()) {
                 deactivateStandby();
                 clear();
                 activate();
@@ -1074,7 +1074,7 @@ void Controller::handleBrewButton(int brewButtonStatus) {
         }
     } else if (!settings.isMomentaryButtons()) {
         if (getMode() == MODE_BREW) {
-            if (isActive()) {
+            if (isActiveSafe()) {
                 deactivate();
                 clear();
             } else {
