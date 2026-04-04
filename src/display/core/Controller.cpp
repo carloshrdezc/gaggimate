@@ -405,6 +405,7 @@ void Controller::startProcess(Process *process) {
     }
     
     // Acquire mutex first to prevent TOCTOU race condition
+    // Use portMAX_DELAY (blocking) with ESP_LOGE: failure here is critical and should never happen
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in startProcess");
         delete process;
@@ -675,7 +676,7 @@ void Controller::updateControl() {
 }
 
 void Controller::activate() {
-    if (isActive())
+    if (isActiveSafe())
         return;
     clear();
     clientController.tare();
@@ -721,6 +722,7 @@ void Controller::activate() {
 }
 
 void Controller::deactivate() {
+    // Use portMAX_DELAY (blocking) with ESP_LOGE: failure here is critical and should never happen
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in deactivate");
         return;
@@ -746,11 +748,21 @@ void Controller::deactivate() {
 
 void Controller::clear() {
     processCompleted = true;
+    
+    // Protect lastProcess access with mutex to prevent race with getProcessSnapshot() and onVolumetricMeasurement()
+    if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(LOG_TAG, "Failed to acquire mutex in clear");
+        return;
+    }
+    
     if (lastProcess != nullptr && lastProcess->getType() == MODE_BREW) {
         pluginManager->trigger("controller:brew:clear");
     }
     delete lastProcess;
     lastProcess = nullptr;
+    
+    xSemaphoreGive(processMutex);
+    
     currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
 }
 
@@ -786,8 +798,25 @@ void Controller::deactivateStandby() {
 bool Controller::isActive() const {
     // Use consistent timeout to prevent deadlocks in UI/event loops
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        ESP_LOGW(LOG_TAG, "Mutex timeout in isActive - returning false (process may be active)");
+        // For UI/display code: return false on timeout to avoid false positives
+        ESP_LOGW(LOG_TAG, "Mutex timeout in isActive - returning false (UI-safe: assume inactive)");
         return false;
+    }
+    
+    Process *proc = currentProcess;
+    bool result = proc != nullptr && proc->isActive();
+    
+    xSemaphoreGive(processMutex);
+    return result;
+}
+
+bool Controller::isActiveSafe() const {
+    // Use consistent timeout to prevent deadlocks in UI/event loops
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        // CRITICAL: Return true on timeout to prevent activate()/onFlush() from calling clear()
+        // while a process may actually be running. False negatives are safer than false positives.
+        ESP_LOGW(LOG_TAG, "Mutex timeout in isActiveSafe - returning true (conservative: assume active)");
+        return true;
     }
     
     Process *proc = currentProcess;
@@ -915,7 +944,6 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.phaseCount = brew->profile.phases.size();
             snapshot.totalDuration = brew->getTotalDuration();
             snapshot.brewVolume = brew->getBrewVolume();
-            // Defensive checks for advanced pump methods
             if (brew->processPhase != ProcessPhase::FINISHED) {
                 snapshot.isAdvancedPump = brew->isAdvancedPump();
                 if (snapshot.isAdvancedPump) {
@@ -985,16 +1013,16 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         return;
     }
     
-    // Update volume with mutex protection
+    // Update volume with mutex protection for both currentProcess and lastProcess
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         if (currentProcess != nullptr) {
             currentProcess->updateVolume(measurement);
         }
+        // Also update lastProcess while holding mutex to prevent race with clear()
+        if (lastProcess != nullptr && !lastProcess->isComplete()) {
+            lastProcess->updateVolume(measurement);
+        }
         xSemaphoreGive(processMutex);
-    }
-    
-    if (lastProcess != nullptr && !lastProcess->isComplete()) {
-        lastProcess->updateVolume(measurement);
     }
 }
 
@@ -1004,7 +1032,7 @@ bool Controller::isBluetoothScaleHealthy() const {
 }
 
 void Controller::onFlush() {
-    if (isActive()) {
+    if (isActiveSafe()) {
         return;
     }
     clear();
