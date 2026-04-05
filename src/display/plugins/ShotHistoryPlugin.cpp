@@ -84,7 +84,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     stateMutex = xSemaphoreCreateMutex();
     if (stateMutex == nullptr) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create state mutex");
-        return;
+        return; // Don't create task if mutex creation failed
     }
     
     pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
@@ -92,33 +92,45 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
     pm->on("controller:volumetric-measurement:estimation:change",
            [this](Event const &event) {
-               if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                    currentEstimatedWeight = event.getFloat("value");
                    xSemaphoreGive(stateMutex);
+               } else {
+                   ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
                }
            });
     pm->on("controller:volumetric-measurement:bluetooth:change",
            [this](Event const &event) {
-               if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                    currentBluetoothWeight = event.getFloat("value");
                    xSemaphoreGive(stateMutex);
+               } else {
+                   ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
                }
            });
     pm->on("boiler:currentTemperature:change", [this](Event const &event) {
-        if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             currentTemperature = event.getFloat("value");
             xSemaphoreGive(stateMutex);
+        } else {
+            ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for temperature update");
         }
     });
     pm->on("pump:puck-resistance:change", [this](Event const &event) {
-        if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE) {
+        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             currentPuckResistance = event.getFloat("value");
             xSemaphoreGive(stateMutex);
+        } else {
+            ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for puck resistance update");
         }
     });
     // Initialize rebuild state
     rebuildInProgress = false;
-    xTaskCreatePinnedToCore(loopTask, "ShotHistoryPlugin::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 0);
+    
+    // Only create task if mutex was successfully created
+    if (stateMutex != nullptr) {
+        xTaskCreatePinnedToCore(loopTask, "ShotHistoryPlugin::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 0);
+    }
 }
 bool ShotHistoryPlugin::openLogFileIfNeeded() {
     if (isFileOpen) {
@@ -314,7 +326,8 @@ void ShotHistoryPlugin::appendCompletedShotToIndex() {
 
 void ShotHistoryPlugin::record() {
     // Acquire mutex to protect shared state
-    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+    // Note: Mutex is held throughout to prevent race conditions with file I/O and shared state
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
         return;
     }
     
@@ -489,6 +502,7 @@ void ShotHistoryPlugin::endExtendedRecording() {
 }
 
 void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t sampleIndex) {
+    // NOTE: This method must be called while holding stateMutex as it accesses shared state (header, controller)
     // Only record if we have space and a valid header
     if (!controller || header.phaseTransitionCount >= MAX_PHASE_TRANSITIONS || !isFileOpen) {
         return;
@@ -510,19 +524,14 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
         return;
     }
 
+    // phaseNumber is now validated, safe to access profile.phases[phaseNumber]
     PhaseTransition &transition = header.phaseTransitions[header.phaseTransitionCount];
     transition.sampleIndex = sampleIndex;
     transition.phaseNumber = phaseNumber;
     transition.reserved = 0;
-
-    // Get phase name from profile (phaseNumber is now validated)
-    if (phaseNumber < profile.phases.size() && phaseNumber < 255) {
-        strncpy(transition.phaseName, profile.phases[phaseNumber].name.c_str(), sizeof(transition.phaseName) - 1);
-        transition.phaseName[sizeof(transition.phaseName) - 1] = '\0';
-    } else {
-        // Fallback to generic name
-        snprintf(transition.phaseName, sizeof(transition.phaseName), "Phase %d", phaseNumber + 1);
-    }
+    
+    strncpy(transition.phaseName, profile.phases[phaseNumber].name.c_str(), sizeof(transition.phaseName) - 1);
+    transition.phaseName[sizeof(transition.phaseName) - 1] = '\0';
 
     header.phaseTransitionCount++;
 
