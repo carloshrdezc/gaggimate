@@ -923,8 +923,15 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
         snapshot.isActive = proc->isActive();
         snapshot.isComplete = proc->isComplete();
         snapshot.type = proc->getType();
-        snapshot.started = proc->started;
-        snapshot.finished = proc->finished;
+        // Note: These fields are only available in BrewProcess, not in base Process class
+        if (proc->getType() == MODE_BREW) {
+            auto *brew = static_cast<BrewProcess *>(proc);
+            snapshot.started = brew->processStarted;
+            snapshot.finished = brew->finished;
+        } else {
+            snapshot.started = 0;
+            snapshot.finished = 0;
+        }
         
         if (proc->getType() == MODE_BREW) {
             auto *brew = static_cast<BrewProcess *>(proc);
