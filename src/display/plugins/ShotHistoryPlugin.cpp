@@ -84,7 +84,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     stateMutex = xSemaphoreCreateMutex();
     if (stateMutex == nullptr) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create state mutex");
-        return; // Don't create task if mutex creation failed
+        return;
     }
     
     pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
@@ -92,7 +92,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
     pm->on("controller:volumetric-measurement:estimation:change",
            [this](Event const &event) {
-               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                    currentEstimatedWeight = event.getFloat("value");
                    xSemaphoreGive(stateMutex);
                } else {
@@ -101,7 +101,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
            });
     pm->on("controller:volumetric-measurement:bluetooth:change",
            [this](Event const &event) {
-               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                    currentBluetoothWeight = event.getFloat("value");
                    xSemaphoreGive(stateMutex);
                } else {
@@ -109,7 +109,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
                }
            });
     pm->on("boiler:currentTemperature:change", [this](Event const &event) {
-        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentTemperature = event.getFloat("value");
             xSemaphoreGive(stateMutex);
         } else {
@@ -117,7 +117,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         }
     });
     pm->on("pump:puck-resistance:change", [this](Event const &event) {
-        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentPuckResistance = event.getFloat("value");
             xSemaphoreGive(stateMutex);
         } else {
@@ -327,7 +327,7 @@ void ShotHistoryPlugin::appendCompletedShotToIndex() {
 void ShotHistoryPlugin::record() {
     // Acquire mutex to protect shared state
     // Note: Mutex is held throughout to prevent race conditions with file I/O and shared state
-    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         return;
     }
     
@@ -425,7 +425,8 @@ void ShotHistoryPlugin::record() {
 
 void ShotHistoryPlugin::startRecording() {
     // Acquire mutex to protect shared state
-    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for startRecording");
         return;
     }
     
@@ -471,7 +472,8 @@ unsigned long ShotHistoryPlugin::getTime() {
 
 void ShotHistoryPlugin::endRecording() {
     // Acquire mutex to protect shared state
-    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endRecording");
         return;
     }
     
@@ -490,7 +492,8 @@ void ShotHistoryPlugin::endRecording() {
 
 void ShotHistoryPlugin::endExtendedRecording() {
     // Acquire mutex to protect shared state
-    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, portMAX_DELAY) != pdTRUE) {
+    if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endExtendedRecording");
         return;
     }
     

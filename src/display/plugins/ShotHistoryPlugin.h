@@ -15,6 +15,7 @@ constexpr unsigned long EXTENDED_RECORDING_DURATION = 3000; // 3 seconds
 constexpr unsigned long WEIGHT_STABILIZATION_TIME = 1000;   // 1 second
 constexpr float WEIGHT_STABILIZATION_THRESHOLD = 0.1f;      // 0.1g threshold
 constexpr int SHOT_ID_LENGTH = 6;                           // Shot ID padding length
+constexpr unsigned long STATE_MUTEX_TIMEOUT_MS = 100;       // Mutex timeout for state access
 
 class ShotHistoryPlugin : public Plugin {
   public:
