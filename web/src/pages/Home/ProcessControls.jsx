@@ -16,6 +16,7 @@ import { TemperatureControls } from '../../components/TemperatureControls.jsx';
 import { GrindTargetBar } from '../../components/GrindTargetBar.jsx';
 import { ProcessDisplay } from '../../components/ProcessDisplay.jsx';
 import { ModeIdleDisplay } from '../../components/ModeIdleDisplay.jsx';
+import ManualControls from './ManualControls.jsx';
 import { useProfileData } from '../../hooks/useProfileData.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
 import { useControlsVisibility } from '../../hooks/useControlsVisibility.js';
@@ -207,36 +208,42 @@ const ProcessControls = ({ brew, mode, changeMode }) => {
         <ModeTabBar mode={mode} changeMode={changeMode} showGrindTab={showGrindTab} pressureAvailable={status.value.pressureAvailable} />
       </div>
 
-      {derivedState.shouldExpand && (
-        <ProcessDisplay
-          brew={brew}
-          grind={grind}
-          showGrindTab={showGrindTab}
-          active={active}
-          finished={finished}
-          processInfo={processInfo}
-          status={{
-            mode,
-            currentTemperature: statusValues.currentTemperature,
-            targetTemperature: statusValues.targetTemperature,
-            isGrindAvailable,
-            volumetricAvailable: statusValues.volumetricAvailable,
-            grindTarget: statusValues.grindTarget,
-            grindTargetVolume: statusValues.grindTargetVolume,
-            grindTargetDuration: statusValues.grindTargetDuration,
-          }}
-        />
-      )}
+      {mode === 5 ? (
+        <ManualControls />
+      ) : (
+        <>
+          {derivedState.shouldExpand && (
+            <ProcessDisplay
+              brew={brew}
+              grind={grind}
+              showGrindTab={showGrindTab}
+              active={active}
+              finished={finished}
+              processInfo={processInfo}
+              status={{
+                mode,
+                currentTemperature: statusValues.currentTemperature,
+                targetTemperature: statusValues.targetTemperature,
+                isGrindAvailable,
+                volumetricAvailable: statusValues.volumetricAvailable,
+                grindTarget: statusValues.grindTarget,
+                grindTargetVolume: statusValues.grindTargetVolume,
+                grindTargetDuration: statusValues.grindTargetDuration,
+              }}
+            />
+          )}
 
-      {!derivedState.shouldExpand && (
-        <div className='flex flex-1 items-center justify-center'>
-          <ModeIdleDisplay
-            mode={mode}
-            showGrindTab={showGrindTab}
-            tempReady={derivedState.tempReady}
-            isGrindAvailable={isGrindAvailable}
-          />
-        </div>
+          {!derivedState.shouldExpand && (
+            <div className='flex flex-1 items-center justify-center'>
+              <ModeIdleDisplay
+                mode={mode}
+                showGrindTab={showGrindTab}
+                tempReady={derivedState.tempReady}
+                isGrindAvailable={isGrindAvailable}
+              />
+            </div>
+          )}
+        </>
       )}
 
       <div className='mt-4 flex flex-col items-center gap-4 space-y-4'>
