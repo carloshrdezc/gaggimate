@@ -6,6 +6,8 @@
 
 class ManualProcess : public Process {
   public:
+    unsigned long processStarted = 0;
+    unsigned long currentPhaseStarted = 0;
     ProcessPhase processPhase = ProcessPhase::RUNNING;
     float livePressure = 9.0f;
     float liveFlow = 2.0f;
@@ -36,15 +38,15 @@ class ManualProcess : public Process {
 
     float getPumpValue() override { return isActive() ? 100.f : 0.f; }
 
-    bool isAdvancedPump() const override { return isActive(); }
+    bool isAdvancedPump() { return isActive(); }
 
-    PumpTarget getPumpTarget() const override { return PumpTarget::PUMP_TARGET_PRESSURE; }
+    PumpTarget getPumpTarget() { return PumpTarget::PUMP_TARGET_PRESSURE; }
 
-    float getPumpPressure() const override { return isActive() ? livePressure : 0.f; }
+    float getPumpPressure() { return isActive() ? livePressure : 0.f; }
 
-    float getPumpFlow() const override { return isActive() ? liveFlow : 0.f; }
+    float getPumpFlow() { return isActive() ? liveFlow : 0.f; }
 
-    float getTemperature() const override { return liveTemperature; }
+    float getTemperature() { return liveTemperature; }
 
     void progress() override {
         // Stateless — driven entirely by live values set via updateLiveValues()

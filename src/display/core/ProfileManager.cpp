@@ -1,5 +1,6 @@
 #include "ProfileManager.h"
 #include <ArduinoJson.h>
+#include <display/core/Event.h>
 
 #include <display/core/SlogToProfileConverter.h>
 #include <display/plugins/ShotHistoryPlugin.h>
@@ -31,7 +32,9 @@ void ProfileManager::setup() {
         }
         saveProfile(profile);
         addFavoritedProfile(profile.id);
-        _plugin_manager->trigger("controller:manual:saved", "profileId", profile.id, "label", profile.label);
+        Event evt = _plugin_manager->trigger("controller:manual:saved");
+        evt.setString("profileId", profile.id);
+        evt.setString("label", profile.label);
     });
 }
 
