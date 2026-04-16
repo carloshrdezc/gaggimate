@@ -6,6 +6,7 @@
 #include <ctime>
 #include <display/config.h>
 #include <display/core/constants.h>
+#include <display/core/process/ManualProcess.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
 #include <display/core/process/PumpProcess.h>
@@ -466,6 +467,14 @@ float Controller::getTargetTemp() const {
     case MODE_WATER:
         result = settings.getTargetWaterTemp();
         break;
+    case MODE_MANUAL:
+        if (proc != nullptr && proc->isActive() && proc->getType() == MODE_MANUAL) {
+            auto manualProcess = static_cast<ManualProcess *>(proc);
+            result = manualProcess->getTemperature();
+        } else {
+            result = profileManager->getSelectedProfile().temperature;
+        }
+        break;
     default:
         result = 0;
         break;
@@ -487,6 +496,9 @@ void Controller::setTargetTemp(float temperature) {
         break;
     case MODE_WATER:
         settings.setTargetWaterTemp(static_cast<int>(temperature));
+        break;
+    case MODE_MANUAL:
+        profileManager->getSelectedProfile().temperature = temperature;
         break;
     default:;
     }
@@ -617,6 +629,10 @@ void Controller::updateControl() {
                 brewPumpFlow = brewProcess->getPumpFlow();
             }
             targetTemp = brewProcess->getTemperature();
+        } else if (procType == MODE_MANUAL) {
+            auto *manualProcess = static_cast<ManualProcess *>(proc);
+            isAdvancedPump = manualProcess->isAdvancedPump();
+            targetTemp = manualProcess->getTemperature();
         }
     }
     
@@ -633,6 +649,9 @@ void Controller::updateControl() {
             break;
         case MODE_WATER:
             targetTemp = settings.getTargetWaterTemp();
+            break;
+        case MODE_MANUAL:
+            targetTemp = profileManager->getSelectedProfile().temperature;
             break;
         default:
             targetTemp = 0;
@@ -672,6 +691,15 @@ void Controller::updateControl() {
                 return;
             }
         }
+        if (procType == MODE_MANUAL) {
+            auto *manualProcess = static_cast<ManualProcess *>(proc);
+            clientController.sendAdvancedOutputControl(relayActive, targetTemp, true,
+                                                       manualProcess->getPumpPressure(),
+                                                       manualProcess->getPumpFlow());
+            targetPressure = manualProcess->getPumpPressure();
+            targetFlow = manualProcess->getPumpFlow();
+            return;
+        }
     }
     targetPressure = 0.0f;
     targetFlow = 0.0f;
@@ -708,6 +736,9 @@ void Controller::activate() {
         break;
     case MODE_WATER:
         startProcess(new PumpProcess());
+        break;
+    case MODE_MANUAL:
+        startProcess(new ManualProcess());
         break;
     default:;
     }
@@ -968,6 +999,10 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.grindVolume = grind->grindVolume;
             snapshot.grindTime = grind->time;
             snapshot.currentVolume = grind->currentVolume;
+        } else if (proc->getType() == MODE_MANUAL) {
+            auto *manual = static_cast<ManualProcess *>(proc);
+            snapshot.pressure = manual->getPumpPressure();
+            snapshot.flow = manual->getPumpFlow();
         }
     }
     
