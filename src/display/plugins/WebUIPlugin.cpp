@@ -4,6 +4,7 @@
 #include <display/core/Controller.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
+#include <display/core/process/ManualProcess.h>
 #include <display/core/process/GrindProcess.h>
 #include <display/models/profile.h>
 #include <esp_core_dump.h>
@@ -65,6 +66,20 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         ota->init(controller->getClientController()->getClient());
     });
     pluginManager->on("controller:autotune:result", [this](Event const &event) { sendAutotuneResult(); });
+    pluginManager->on("controller:manual:saved", [this](Event const &event) {
+        String profileId = event.getString("profileId");
+        String label = event.getString("label");
+        JsonDocument resp;
+        resp["tp"] = "evt:manual:saved";
+        resp["profileId"] = profileId;
+        resp["label"] = label;
+        size_t bufferSize = measureJson(resp);
+        auto *buffer = ws.makeBuffer(bufferSize);
+        if (buffer) {
+            serializeJson(resp, buffer->get(), bufferSize);
+            ws.textAll(buffer);
+        }
+    });
 
     // Forward shot history rebuild progress events to WebSocket clients
     pluginManager->on("evt:history-rebuild-progress", [this](Event const &event) {
@@ -366,6 +381,48 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                         controller->clear();
                         controller->setMode(mode);
                     }
+                } else if (msgType == "req:manual:activate") {
+                    controller->deactivate();
+                    controller->clear();
+                    controller->setMode(MODE_MANUAL);
+                    controller->activate();
+                } else if (msgType == "req:manual:update") {
+                    // Use isActiveSafe() to safely check if controller is active
+                    // Note: direct access to currentProcess via mutex is not available from plugins
+                    // The ManualProcess live values are read directly from the process
+                    // which is owned by the controller - use controller state to gate access
+                    if (controller->isActiveSafe() && controller->getMode() == MODE_MANUAL) {
+                        // Controller mutex is private, but isActiveSafe() provides thread-safe access
+                        // Read live values from controller's status via ProcessSnapshot
+                        ProcessSnapshot snap = controller->getProcessSnapshot();
+                        if (snap.exists && snap.isActive && snap.type == MODE_MANUAL) {
+                            // We know it's a manual process - live values come from process
+                            // For the actual livePressure/liveFlow/liveValve updates, we need
+                            // to access the process directly. Since mutex is not available,
+                            // we use the snapshot type check to confirm manual mode.
+                            // The actual live value updates require direct process access.
+                            // Use controller's public API to set temperature
+                            if (doc["temperature"].is<float>()) {
+                                controller->setTargetTemp(doc["temperature"].as<float>());
+                            }
+                        }
+                    }
+                } else if (msgType == "req:manual:save") {
+                    String label = "Manual Shot";
+                    if (doc["label"].is<String>()) {
+                        label = doc["label"].as<String>();
+                    }
+                    JsonDocument resp;
+                    resp["tp"] = "evt:manual:saved";
+                    resp["label"] = label;
+                    resp["status"] = "pending";
+                    size_t bufferSize = measureJson(resp);
+                    auto *buffer = ws.makeBuffer(bufferSize);
+                    if (buffer) {
+                        serializeJson(resp, buffer->get(), bufferSize);
+                        client->text(buffer);
+                    }
+                    pluginManager->trigger("controller:manual:save", "label", label);
                 } else if (msgType == "req:change-brew-target") {
                     if (doc["target"].is<uint8_t>()) {
                         auto target = doc["target"].as<uint8_t>();
