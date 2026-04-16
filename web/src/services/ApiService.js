@@ -127,6 +127,13 @@ export default class ApiService {
     if (message.tp === 'evt:status') {
       this._onStatus(message);
     }
+    switch (message.tp) {
+      case 'evt:manual:saved':
+        if (this.listeners['manual:saved']) {
+          this.listeners['manual:saved'].forEach(cb => cb(message));
+        }
+        break;
+    }
     for (const listener of listeners) {
       try {
         listener(message);
@@ -143,6 +150,12 @@ export default class ApiService {
       throw new Error('WebSocket is not connected');
     }
   }
+
+  manual = {
+    activate: () => this.send({ tp: 'req:manual:activate' }),
+    update: (params) => this.send({ tp: 'req:manual:update', ...params }),
+    save: (label) => this.send({ tp: 'req:manual:save', label }),
+  };
 
   async request(data = {}) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
