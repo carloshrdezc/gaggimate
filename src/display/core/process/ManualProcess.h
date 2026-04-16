@@ -6,6 +6,7 @@
 
 class ManualProcess : public Process {
   public:
+    ProcessPhase processPhase = ProcessPhase::RUNNING;
     float livePressure = 9.0f;
     float liveFlow = 2.0f;
     float liveTemperature = 93.0f;
