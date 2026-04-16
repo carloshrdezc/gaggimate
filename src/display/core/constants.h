@@ -31,6 +31,7 @@
 #define MODE_STEAM 2
 #define MODE_WATER 3
 #define MODE_GRIND 4
+#define MODE_MANUAL 5
 
 // Alt Relay / SSR2 Function constants
 #define ALT_RELAY_NONE 0
