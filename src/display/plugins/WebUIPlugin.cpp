@@ -387,24 +387,13 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                     controller->setMode(MODE_MANUAL);
                     controller->activate();
                 } else if (msgType == "req:manual:update") {
-                    // Use isActiveSafe() to safely check if controller is active
-                    // Note: direct access to currentProcess via mutex is not available from plugins
-                    // The ManualProcess live values are read directly from the process
-                    // which is owned by the controller - use controller state to gate access
                     if (controller->isActiveSafe() && controller->getMode() == MODE_MANUAL) {
-                        // Controller mutex is private, but isActiveSafe() provides thread-safe access
-                        // Read live values from controller's status via ProcessSnapshot
-                        ProcessSnapshot snap = controller->getProcessSnapshot();
-                        if (snap.exists && snap.isActive && snap.type == MODE_MANUAL) {
-                            // We know it's a manual process - live values come from process
-                            // For the actual livePressure/liveFlow/liveValve updates, we need
-                            // to access the process directly. Since mutex is not available,
-                            // we use the snapshot type check to confirm manual mode.
-                            // The actual live value updates require direct process access.
-                            // Use controller's public API to set temperature
-                            if (doc["temperature"].is<float>()) {
-                                controller->setTargetTemp(doc["temperature"].as<float>());
-                            }
+                        float pressure = doc["pressure"].is<float>() ? doc["pressure"].as<float>() : NAN;
+                        float flow = doc["flow"].is<float>() ? doc["flow"].as<float>() : NAN;
+                        int valve = doc["valve"].is<int>() ? doc["valve"].as<int>() : -1;
+                        controller->setManualLiveValues(pressure, flow, valve);
+                        if (doc["temperature"].is<float>()) {
+                            controller->setTargetTemp(doc["temperature"].as<float>());
                         }
                     }
                 } else if (msgType == "req:manual:save") {

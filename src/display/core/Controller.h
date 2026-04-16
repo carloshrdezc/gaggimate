@@ -71,6 +71,7 @@ class Controller {
     void setPumpModelCoeffs();
     void setTargetGrindDuration(int duration);
     void setTargetGrindVolume(double volume);
+    void setManualLiveValues(float pressure, float flow, int valve);
 
     int getMode() const;
 

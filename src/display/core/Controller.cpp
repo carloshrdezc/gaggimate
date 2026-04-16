@@ -531,6 +531,19 @@ void Controller::setTargetGrindVolume(double volume) {
     updateLastAction();
 }
 
+void Controller::setManualLiveValues(float pressure, float flow, int valve) {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return;
+    }
+    if (currentProcess != nullptr && currentProcess->isActive() && currentProcess->getType() == MODE_MANUAL) {
+        auto *manualProcess = static_cast<ManualProcess *>(currentProcess);
+        if (!isnan(pressure)) manualProcess->livePressure = pressure;
+        if (!isnan(flow)) manualProcess->liveFlow = flow;
+        if (!isnan(valve)) manualProcess->liveValve = valve;
+    }
+    xSemaphoreGive(processMutex);
+}
+
 void Controller::raiseTemp() {
     float temp = getTargetTemp();
     temp = constrain(temp + 1.0f, MIN_TEMP, MAX_TEMP);
