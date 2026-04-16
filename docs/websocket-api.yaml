@@ -37,6 +37,7 @@ channels:
           - $ref: '#/components/messages/ProfilesFavoriteResponse'
           - $ref: '#/components/messages/ProfilesUnfavoriteResponse'
           - $ref: '#/components/messages/ProfilesReorderResponse'
+          - $ref: '#/components/messages/ManualSavedEvent'
     publish:
       description: Messages sent from the client to the server.
       message:
@@ -52,6 +53,9 @@ channels:
           - $ref: '#/components/messages/ProfilesFavoriteRequest'
           - $ref: '#/components/messages/ProfilesUnfavoriteRequest'
           - $ref: '#/components/messages/ProfilesReorderRequest'
+          - $ref: '#/components/messages/ManualActivateRequest'
+          - $ref: '#/components/messages/ManualUpdateRequest'
+          - $ref: '#/components/messages/ManualSaveRequest'
 components:
   schemas:
     StatusPayload:
@@ -381,3 +385,55 @@ components:
             type: string
           # No error field; success implied
         required: [tp]
+    ManualActivateRequest:
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:manual:activate']
+        required: [tp]
+    ManualUpdateRequest:
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:manual:update']
+          pressure:
+            type: number
+            minimum: 0
+            maximum: 15
+          flow:
+            type: number
+            minimum: 0
+          temperature:
+            type: number
+            minimum: 0
+            maximum: 160
+          valve:
+            type: integer
+            enum: [0, 1]
+        required: [tp]
+    ManualSaveRequest:
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:manual:save']
+          label:
+            type: string
+        required: [tp, label]
+    ManualSavedEvent:
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['evt:manual:saved']
+          profileId:
+            type: string
+          label:
+            type: string
+        required: [tp, profileId, label]
