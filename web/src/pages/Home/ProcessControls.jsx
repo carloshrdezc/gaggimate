@@ -204,7 +204,7 @@ const ProcessControls = ({ brew, mode, changeMode }) => {
   return (
     <div className='flex min-h-[250px] flex-col justify-between lg:min-h-[350px]'>
       <div className='mb-3'>
-        <ModeTabBar mode={mode} changeMode={changeMode} showGrindTab={showGrindTab} />
+        <ModeTabBar mode={mode} changeMode={changeMode} showGrindTab={showGrindTab} pressureAvailable={status.value.pressureAvailable} />
       </div>
 
       {derivedState.shouldExpand && (
