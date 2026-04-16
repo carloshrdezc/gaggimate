@@ -15,7 +15,8 @@
       "type": "string",
       "enum": [
         "standard",
-        "pro"
+        "pro",
+        "recorded"
       ]
     },
     "description": {
@@ -165,6 +166,22 @@
                 "value"
               ]
             }
+          },
+          "recordedPressure": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "recordedFlow": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "recordedTemperature": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "recordedValve": {
+            "type": "array",
+            "items": { "type": "integer" }
           }
         },
         "required": [

@@ -23,6 +23,7 @@ class BrewProcess : public Process {
     float currentFlow = 0.0f;
     float currentPressure = 0.0f;
     float waterPumped = 0.0f;
+    float liveTemperature = 0.0f;
     VolumetricRateCalculator volumetricRateCalculator{PREDICTIVE_TIME};
 
     explicit BrewProcess(Profile profile, ProcessTarget target, double brewDelay = 0.0)
@@ -69,6 +70,8 @@ class BrewProcess : public Process {
 
     bool isUtility() const { return profile.utility; }
 
+    bool isRecordedProfile() const { return profile.type == ProfileType::RECORDED; }
+
     double getBrewVolume() const {
         double brewVolume = 0;
         for (const auto &phase : profile.phases) {
@@ -90,6 +93,14 @@ class BrewProcess : public Process {
 
     bool isRelayActive() override {
         if (processPhase == ProcessPhase::FINISHED) {
+            return false;
+        }
+        if (isRecordedProfile()) {
+            unsigned long elapsedMs = millis() - currentPhaseStarted;
+            size_t sampleIndex = elapsedMs / profile.recordedSampleIntervalMs;
+            if (sampleIndex < profile.recordedValve.size()) {
+                return profile.recordedValve[sampleIndex] == 1;
+            }
             return false;
         }
         return currentPhase.valve;
@@ -127,6 +138,9 @@ class BrewProcess : public Process {
     }
 
     float getTemperature() const {
+        if (isRecordedProfile()) {
+            return liveTemperature;
+        }
         if (currentPhase.temperature > 0.0f) {
             return currentPhase.temperature;
         }
@@ -198,6 +212,24 @@ class BrewProcess : public Process {
     }
 
     void computeEffectiveTargetsForCurrentPhase() {
+        if (isRecordedProfile()) {
+            unsigned long elapsedMs = millis() - currentPhaseStarted;
+            size_t sampleIndex = elapsedMs / profile.recordedSampleIntervalMs;
+            size_t maxIndex = std::min({
+                profile.recordedPressure.size(),
+                profile.recordedFlow.size(),
+                profile.recordedTemperature.size()
+            });
+            if (sampleIndex >= maxIndex) {
+                processPhase = ProcessPhase::FINISHED;
+                return;
+            }
+            effectivePressure = profile.recordedPressure[sampleIndex];
+            effectiveFlow = profile.recordedFlow[sampleIndex];
+            liveTemperature = profile.recordedTemperature[sampleIndex];
+            return;
+        }
+
         if (currentPhase.pumpIsSimple) {
             effectivePressure = 0.0f;
             effectiveFlow = 0.0f;
