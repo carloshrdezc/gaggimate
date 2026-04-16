@@ -1,6 +1,9 @@
 #include "ProfileManager.h"
 #include <ArduinoJson.h>
 
+#include <display/core/SlogToProfileConverter.h>
+#include <display/plugins/ShotHistoryPlugin.h>
+
 #include <utility>
 
 ProfileManager::ProfileManager(fs::FS *fs, String dir, Settings &settings, PluginManager *plugin_manager)
@@ -15,6 +18,21 @@ void ProfileManager::setup() {
         loadSelectedProfile(selectedProfile);
     }
     _settings.setFavoritedProfiles(getFavoritedProfiles(true));
+
+    _plugin_manager->on("controller:manual:save", [this](Event const &event) {
+        String label = event.getString("label");
+        String slogPath = ShotHistory.getCurrentShotLogPath();
+        if (slogPath.isEmpty()) {
+            return;
+        }
+        Profile profile = SlogToProfileConverter::convert(slogPath, label, _fs);
+        if (profile.id.isEmpty()) {
+            return;
+        }
+        saveProfile(profile);
+        addFavoritedProfile(profile.id);
+        _plugin_manager->trigger("controller:manual:saved", "profileId", profile.id, "label", profile.label);
+    });
 }
 
 bool ProfileManager::ensureDirectory() const {
@@ -32,7 +50,7 @@ void ProfileManager::migrate() {
     profile.label = "Default";
     profile.description = "Default profile";
     profile.temperature = 93;
-    profile.type = "standard";
+    profile.type = ProfileType::STANDARD;
     Phase brewPhase{};
     brewPhase.name = "Brew";
     brewPhase.phase = PhaseType::PHASE_TYPE_BREW;

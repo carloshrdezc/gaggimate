@@ -4,7 +4,7 @@
 #include <display/models/profile.h>
 
 Profile FLUSH_PROFILE{.label = "Flush",
-                      .type = "standard",
+                      .type = ProfileType::STANDARD,
                       .utility = true,
                       .temperature = 93,
                       .phases = {Phase{.name = "Flush",
