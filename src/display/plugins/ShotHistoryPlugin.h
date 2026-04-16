@@ -28,6 +28,8 @@ class ShotHistoryPlugin : public Plugin {
 
     void handleRequest(JsonDocument &request, JsonDocument &response);
 
+    String getCurrentShotLogPath() const;
+
     // Index management methods
     bool appendToIndex(const ShotIndexEntry &entry);
     void updateIndexMetadata(uint32_t shotId, uint8_t rating, uint16_t volume);

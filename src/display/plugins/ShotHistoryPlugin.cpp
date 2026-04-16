@@ -1221,3 +1221,10 @@ bool ShotHistoryPlugin::createEarlyIndexEntry() {
     }
     return success;
 }
+
+String ShotHistoryPlugin::getCurrentShotLogPath() const {
+    if (currentId.isEmpty())
+        return String();
+    String path = "/h/" + currentId + ".slog";
+    return path;
+}
