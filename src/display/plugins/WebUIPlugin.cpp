@@ -403,16 +403,6 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                     if (doc["label"].is<String>()) {
                         label = doc["label"].as<String>();
                     }
-                    JsonDocument resp;
-                    resp["tp"] = "evt:manual:saved";
-                    resp["label"] = label;
-                    resp["status"] = "pending";
-                    size_t bufferSize = measureJson(resp);
-                    auto *buffer = ws.makeBuffer(bufferSize);
-                    if (buffer) {
-                        serializeJson(resp, buffer->get(), bufferSize);
-                        client->text(buffer);
-                    }
                     pluginManager->trigger("controller:manual:save", "label", label);
                 } else if (msgType == "req:change-brew-target") {
                     if (doc["target"].is<uint8_t>()) {

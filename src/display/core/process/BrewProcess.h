@@ -97,17 +97,17 @@ class BrewProcess : public Process {
         }
         if (isRecordedProfile()) {
             unsigned long elapsedMs = millis() - currentPhaseStarted;
-            size_t sampleIndex = elapsedMs / profile.recordedSampleIntervalMs;
+            size_t sampleIndex = elapsedMs / SHOT_LOG_SAMPLE_INTERVAL_MS;
             size_t maxIndex = std::min({(size_t)1,
-                profile.recordedPressure.size(),
-                profile.recordedFlow.size(),
-                profile.recordedTemperature.size(),
-                profile.recordedValve.size()
+                currentPhase.recordedPressure.size(),
+                currentPhase.recordedFlow.size(),
+                currentPhase.recordedTemperature.size(),
+                currentPhase.recordedValve.size()
             });
             if (sampleIndex >= maxIndex) {
                 return false;
             }
-            return profile.recordedValve[sampleIndex] == 1;
+            return currentPhase.recordedValve[sampleIndex] == 1;
         }
         return currentPhase.valve;
     }
@@ -220,20 +220,20 @@ class BrewProcess : public Process {
     void computeEffectiveTargetsForCurrentPhase() {
         if (isRecordedProfile()) {
             unsigned long elapsedMs = millis() - currentPhaseStarted;
-            size_t sampleIndex = elapsedMs / profile.recordedSampleIntervalMs;
+            size_t sampleIndex = elapsedMs / SHOT_LOG_SAMPLE_INTERVAL_MS;
             size_t maxIndex = std::min({(size_t)1,
-                profile.recordedPressure.size(),
-                profile.recordedFlow.size(),
-                profile.recordedTemperature.size(),
-                profile.recordedValve.size()
+                currentPhase.recordedPressure.size(),
+                currentPhase.recordedFlow.size(),
+                currentPhase.recordedTemperature.size(),
+                currentPhase.recordedValve.size()
             });
             if (sampleIndex >= maxIndex) {
                 processPhase = ProcessPhase::FINISHED;
                 return;
             }
-            effectivePressure = profile.recordedPressure[sampleIndex];
-            effectiveFlow = profile.recordedFlow[sampleIndex];
-            liveTemperature = profile.recordedTemperature[sampleIndex];
+            effectivePressure = currentPhase.recordedPressure[sampleIndex];
+            effectiveFlow = currentPhase.recordedFlow[sampleIndex];
+            liveTemperature = currentPhase.recordedTemperature[sampleIndex];
             return;
         }
 

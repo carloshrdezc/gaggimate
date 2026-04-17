@@ -39,7 +39,9 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
         float tp = sample.tp / 10.0f;
         float fl = sample.fl / 100.0f;
         float ct = sample.ct / 10.0f;
-        int vl = 1; // valve state not stored in slog v5 — default to open
+        int vl = 1; // valve state not stored in slog v5 — valve defaults to open for entire shot
+        // Note: future slog versions should record valve trajectory to enable
+        // precise replay of pre-infusion and other multi-phase valve patterns
 
         pressures.push_back(tp);
         flows.push_back(fl);

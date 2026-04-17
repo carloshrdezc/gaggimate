@@ -142,13 +142,6 @@ struct Profile {
     bool selected = false;
     std::vector<Phase> phases;
 
-    // Recorded profile trajectory arrays
-    std::vector<float> recordedPressure;
-    std::vector<float> recordedFlow;
-    std::vector<float> recordedTemperature;
-    std::vector<int>   recordedValve;
-    unsigned long recordedSampleIntervalMs = SHOT_LOG_SAMPLE_INTERVAL_MS;
-
     bool isVolumetric() const {
         for (const auto &phase : phases) {
             if (phase.hasVolumetricTarget()) {
@@ -245,31 +238,7 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
     profile.selected = obj["selected"] | false;
     profile.utility = obj["utility"] | false;
 
-    // Read recorded trajectory arrays at profile level
-    if (obj["recordedPressure"].is<JsonArray>()) {
-        for (auto v : obj["recordedPressure"].as<JsonArray>()) {
-            profile.recordedPressure.push_back(v.as<float>());
-        }
-    }
-    if (obj["recordedFlow"].is<JsonArray>()) {
-        for (auto v : obj["recordedFlow"].as<JsonArray>()) {
-            profile.recordedFlow.push_back(v.as<float>());
-        }
-    }
-    if (obj["recordedTemperature"].is<JsonArray>()) {
-        for (auto v : obj["recordedTemperature"].as<JsonArray>()) {
-            profile.recordedTemperature.push_back(v.as<float>());
-        }
-    }
-    if (obj["recordedValve"].is<JsonArray>()) {
-        for (auto v : obj["recordedValve"].as<JsonArray>()) {
-            profile.recordedValve.push_back(v.as<int>());
-        }
-    }
-    if (obj["recordedSampleIntervalMs"].is<unsigned long>()) {
-        profile.recordedSampleIntervalMs = obj["recordedSampleIntervalMs"].as<unsigned long>();
-    }
-
+    // Read phases
     auto phasesArray = obj["phases"].as<JsonArray>();
     for (JsonObject p : phasesArray) {
         Phase phase;
@@ -393,27 +362,6 @@ inline void writeProfile(JsonObject &obj, const Profile &profile) {
     obj["favorite"] = profile.favorite;
     obj["selected"] = profile.selected;
     obj["utility"] = profile.utility;
-
-    // Write recorded trajectory arrays at profile level
-    if (!profile.recordedPressure.empty()) {
-        JsonArray arr = obj["recordedPressure"].to<JsonArray>();
-        for (float v : profile.recordedPressure) arr.add(v);
-    }
-    if (!profile.recordedFlow.empty()) {
-        JsonArray arr = obj["recordedFlow"].to<JsonArray>();
-        for (float v : profile.recordedFlow) arr.add(v);
-    }
-    if (!profile.recordedTemperature.empty()) {
-        JsonArray arr = obj["recordedTemperature"].to<JsonArray>();
-        for (float v : profile.recordedTemperature) arr.add(v);
-    }
-    if (!profile.recordedValve.empty()) {
-        JsonArray arr = obj["recordedValve"].to<JsonArray>();
-        for (int v : profile.recordedValve) arr.add(v);
-    }
-    if (profile.recordedSampleIntervalMs != SHOT_LOG_SAMPLE_INTERVAL_MS) {
-        obj["recordedSampleIntervalMs"] = profile.recordedSampleIntervalMs;
-    }
 
     auto phasesArray = obj["phases"].to<JsonArray>();
     for (const Phase &phase : profile.phases) {
