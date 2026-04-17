@@ -182,16 +182,19 @@ const ManualControls = () => {
       <div className='flex flex-col items-center gap-2'>
         {status === STATUS.IDLE && (
           <>
-            <Tooltip content='Flush water'>
-              <button className='btn btn-circle btn-sm border-2 border-base-300 bg-base-100 hover:border-base-content/40 text-base-content/60' onClick={handleFlush}>
-                <FontAwesomeIcon icon={faTint} className='text-lg' />
-              </button>
-            </Tooltip>
             <Tooltip content='Start Manual Brew'>
               <button className='btn btn-circle btn-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 hover:border-primary text-primary' onClick={handleActivate}>
                 <FontAwesomeIcon icon={faPlay} className='text-2xl' />
               </button>
             </Tooltip>
+            <button
+              className='btn text-base-content/60 hover:text-base-content rounded-full text-sm transition-colors duration-200'
+              onClick={handleFlush}
+              aria-label='Flush water'
+            >
+              <FontAwesomeIcon icon={faTint} />
+              Flush
+            </button>
           </>
         )}
         {status === STATUS.RUNNING && (
