@@ -342,8 +342,10 @@ void ShotHistoryPlugin::record() {
         return;
     }
 
-    // Only record during brew mode or extended recording
-    if (!controller || (controller->getMode() != MODE_BREW && !extendedRecording)) {
+    // Record both guided brew shots and manual shots, plus any tail period for
+    // post-shot weight stabilization when extended recording is active.
+    if (!controller ||
+        ((controller->getMode() != MODE_BREW && controller->getMode() != MODE_MANUAL) && !extendedRecording)) {
         xSemaphoreGive(stateMutex);
         return;
     }
