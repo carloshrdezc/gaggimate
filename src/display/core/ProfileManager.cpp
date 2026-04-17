@@ -25,15 +25,21 @@ void ProfileManager::setup() {
         String slogPath = ShotHistory.getCurrentShotLogPath();
         if (slogPath.isEmpty()) {
             ESP_LOGW("ProfileManager", "manual:save failed - no shot log path (currentId is empty)");
+            Event err = _plugin_manager->trigger("controller:manual:error");
+            err.setString("message", "No shot log available — start a manual brew first");
             return;
         }
         Profile profile = SlogToProfileConverter::convert(slogPath, label, _fs);
         if (profile.id.isEmpty()) {
             ESP_LOGW("ProfileManager", "manual:save failed - slog conversion returned empty profile: %s", slogPath.c_str());
+            Event err = _plugin_manager->trigger("controller:manual:error");
+            err.setString("message", "Could not read shot log — file may be corrupted");
             return;
         }
         if (!saveProfile(profile)) {
             ESP_LOGE("ProfileManager", "manual:save failed - could not write profile file");
+            Event err = _plugin_manager->trigger("controller:manual:error");
+            err.setString("message", "Failed to save profile — storage may be full");
             return;
         }
         addFavoritedProfile(profile.id);

@@ -81,6 +81,19 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         }
     });
 
+    pluginManager->on("controller:manual:error", [this](Event const &event) {
+        JsonDocument resp;
+        resp["tp"] = "evt:manual:saved";
+        resp["status"] = "error";
+        resp["message"] = event.getString("message");
+        size_t bufferSize = measureJson(resp);
+        auto *buffer = ws.makeBuffer(bufferSize);
+        if (buffer) {
+            serializeJson(resp, buffer->get(), bufferSize);
+            ws.textAll(buffer);
+        }
+    });
+
     // Forward shot history rebuild progress events to WebSocket clients
     pluginManager->on("evt:history-rebuild-progress", [this](Event const &event) {
         JsonDocument doc;

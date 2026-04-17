@@ -539,7 +539,7 @@ void Controller::setManualLiveValues(float pressure, float flow, int valve) {
         auto *manualProcess = static_cast<ManualProcess *>(currentProcess);
         if (!isnan(pressure)) manualProcess->livePressure = pressure;
         if (!isnan(flow)) manualProcess->liveFlow = flow;
-        if (!isnan(valve)) manualProcess->liveValve = valve;
+        if (valve >= 0 && valve <= 1) manualProcess->liveValve = valve;
     }
     xSemaphoreGive(processMutex);
 }
