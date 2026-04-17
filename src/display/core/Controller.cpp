@@ -767,7 +767,7 @@ void Controller::activate() {
     // Check if we started a brew process (with mutex protection)
     bool isBrewProcess = false;
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        isBrewProcess = currentProcess != nullptr && currentProcess->getType() == MODE_BREW;
+        isBrewProcess = currentProcess != nullptr && (currentProcess->getType() == MODE_BREW || currentProcess->getType() == MODE_MANUAL);
         xSemaphoreGive(processMutex);
     }
     
