@@ -98,7 +98,7 @@ class BrewProcess : public Process {
         if (isRecordedProfile()) {
             unsigned long elapsedMs = millis() - currentPhaseStarted;
             size_t sampleIndex = elapsedMs / SHOT_LOG_SAMPLE_INTERVAL_MS;
-            size_t maxIndex = std::min({(size_t)1,
+            size_t maxIndex = std::min({SIZE_MAX,
                 currentPhase.recordedPressure.size(),
                 currentPhase.recordedFlow.size(),
                 currentPhase.recordedTemperature.size(),
@@ -221,7 +221,7 @@ class BrewProcess : public Process {
         if (isRecordedProfile()) {
             unsigned long elapsedMs = millis() - currentPhaseStarted;
             size_t sampleIndex = elapsedMs / SHOT_LOG_SAMPLE_INTERVAL_MS;
-            size_t maxIndex = std::min({(size_t)1,
+            size_t maxIndex = std::min({SIZE_MAX,
                 currentPhase.recordedPressure.size(),
                 currentPhase.recordedFlow.size(),
                 currentPhase.recordedTemperature.size(),
