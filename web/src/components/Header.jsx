@@ -340,6 +340,13 @@ export function Header() {
     }
   }, [beanOptions.length, apiService]);
 
+  // Invalidate profile cache when a manual shot is saved
+  useEffect(() => {
+    const handler = () => setProfileOptions([]);
+    const id = apiService.on('manual:saved', handler);
+    return () => apiService.off('manual:saved', id);
+  }, [apiService]);
+
   const handleProfileClick = useCallback(() => {
     loadProfileOptions();
     setActivePopover(activePopover === 'profile' ? null : 'profile');

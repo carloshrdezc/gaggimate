@@ -619,6 +619,14 @@ export function ProfileList() {
     };
   }, [apiService]);
 
+  // Load profiles on mount and refresh when a manual shot is saved
+  useEffect(() => {
+    loadProfiles();
+    const handler = () => loadProfiles();
+    const id = apiService.on('manual:saved', handler);
+    return () => apiService.off('manual:saved', id);
+  }, [apiService]);
+
   const loadProfiles = async () => {
     const response = await apiService.request({ tp: 'req:profiles:list' });
     setProfiles(response.profiles);
