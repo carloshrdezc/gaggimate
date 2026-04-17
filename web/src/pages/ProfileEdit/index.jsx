@@ -144,6 +144,15 @@ export function ProfileEdit() {
           pressureAvailable={pressureAvailable.value}
         />
       )}
+      {data?.type === 'recorded' && (
+        <ExtendedProfileForm
+          data={data}
+          onChange={data => setData(data)}
+          onSave={onSave}
+          saving={saving}
+          pressureAvailable={pressureAvailable.value}
+        />
+      )}
     </>
   );
 }
