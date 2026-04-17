@@ -98,10 +98,16 @@ class BrewProcess : public Process {
         if (isRecordedProfile()) {
             unsigned long elapsedMs = millis() - currentPhaseStarted;
             size_t sampleIndex = elapsedMs / profile.recordedSampleIntervalMs;
-            if (sampleIndex < profile.recordedValve.size()) {
-                return profile.recordedValve[sampleIndex] == 1;
+            size_t maxIndex = std::min({(size_t)1,
+                profile.recordedPressure.size(),
+                profile.recordedFlow.size(),
+                profile.recordedTemperature.size(),
+                profile.recordedValve.size()
+            });
+            if (sampleIndex >= maxIndex) {
+                return false;
             }
-            return false;
+            return profile.recordedValve[sampleIndex] == 1;
         }
         return currentPhase.valve;
     }
@@ -215,10 +221,11 @@ class BrewProcess : public Process {
         if (isRecordedProfile()) {
             unsigned long elapsedMs = millis() - currentPhaseStarted;
             size_t sampleIndex = elapsedMs / profile.recordedSampleIntervalMs;
-            size_t maxIndex = std::min({
+            size_t maxIndex = std::min({(size_t)1,
                 profile.recordedPressure.size(),
                 profile.recordedFlow.size(),
-                profile.recordedTemperature.size()
+                profile.recordedTemperature.size(),
+                profile.recordedValve.size()
             });
             if (sampleIndex >= maxIndex) {
                 processPhase = ProcessPhase::FINISHED;

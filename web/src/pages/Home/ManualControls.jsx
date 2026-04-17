@@ -1,4 +1,4 @@
-import { useState, useCallback, useContext, useMemo } from 'preact/hooks';
+import { useState, useCallback, useContext, useMemo, useRef } from 'preact/hooks';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlay, faPause, faSave } from '@fortawesome/free-solid-svg-icons';
@@ -19,15 +19,14 @@ const ManualControls = () => {
   const [valve, setValve] = useState(1); // 1=open, 0=closed
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveLabel, setSaveLabel] = useState('');
-  const [debounceTimer, setDebounceTimer] = useState(null);
+  const debounceTimerRef = useRef(null);
 
   const sendUpdate = useCallback((updates) => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    const timer = setTimeout(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
       api.send({ tp: 'req:manual:update', ...updates });
     }, 100);
-    setDebounceTimer(timer);
-  }, [api, debounceTimer]);
+  }, [api]);
 
   const handleActivate = useCallback(() => {
     api.send({ tp: 'req:manual:activate' });

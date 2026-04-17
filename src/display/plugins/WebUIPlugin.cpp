@@ -395,6 +395,8 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                         if (doc["temperature"].is<float>()) {
                             controller->setTargetTemp(doc["temperature"].as<float>());
                         }
+                    } else {
+                        ESP_LOGW("WebUIPlugin", "req:manual:update ignored - not in manual mode or not active");
                     }
                 } else if (msgType == "req:manual:save") {
                     String label = "Manual Shot";

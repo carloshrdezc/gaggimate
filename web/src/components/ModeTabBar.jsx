@@ -1,3 +1,4 @@
+import { useMemo } from 'preact/hooks';
 import PropTypes from 'prop-types';
 
 const ALL_TABS = [
@@ -9,9 +10,10 @@ const ALL_TABS = [
 
 export function ModeTabBar({ mode, changeMode, showGrindTab = false, pressureAvailable = false }) {
   // Debug: ?debugPressure=true in URL forces Manual tab visible
-  const urlParams = new URLSearchParams(window.location.search);
-  const forcePressure = urlParams.get('debugPressure') === 'true';
-  const effectivePressure = forcePressure || pressureAvailable;
+  const effectivePressure = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('debugPressure') === 'true' || pressureAvailable;
+  }, [pressureAvailable]);
   const tabs = showGrindTab ? [...ALL_TABS, { id: 4, label: 'Grind' }] : ALL_TABS;
   const tabsWithManual = effectivePressure ? [...tabs, { id: 5, label: 'Manual' }] : tabs;
 

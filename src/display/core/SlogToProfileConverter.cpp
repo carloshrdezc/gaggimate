@@ -10,17 +10,20 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
 
     File file = fs->open(slogPath, FILE_READ);
     if (!file) {
+        ESP_LOGW("SlogToProfile", "convert failed - could not open file: %s", slogPath.c_str());
         return profile;
     }
 
     ShotLogHeader header;
     if (file.readBytes(reinterpret_cast<char *>(&header), sizeof(ShotLogHeader)) != sizeof(ShotLogHeader)) {
         file.close();
+        ESP_LOGW("SlogToProfile", "convert failed - could not read header from: %s", slogPath.c_str());
         return profile;
     }
 
     if (header.magic != SHOT_LOG_MAGIC) {
         file.close();
+        ESP_LOGW("SlogToProfile", "convert failed - invalid magic in: %s", slogPath.c_str());
         return profile;
     }
 
@@ -47,6 +50,7 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
     file.close();
 
     if (pressures.empty()) {
+        ESP_LOGW("SlogToProfile", "convert failed - no samples in: %s", slogPath.c_str());
         return profile;
     }
 

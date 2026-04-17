@@ -625,14 +625,16 @@ void Controller::updateControl() {
     bool brewPumpTargetIsPressure = false;
     float brewPumpPressure = 0.0f;
     float brewPumpFlow = 0.0f;
+    float manualPumpPressure = 0.0f;
+    float manualPumpFlow = 0.0f;
     float targetTemp = 0.0f;
-    
+
     if (active) {
         procType = proc->getType();
         pumpValue = proc->getPumpValue();
         relayActive = proc->isRelayActive();
         isAltRelayActive = proc->isAltRelayActive();
-        
+
         if (procType == MODE_BREW) {
             auto *brewProcess = static_cast<BrewProcess *>(proc);
             isAdvancedPump = brewProcess->isAdvancedPump();
@@ -645,6 +647,8 @@ void Controller::updateControl() {
         } else if (procType == MODE_MANUAL) {
             auto *manualProcess = static_cast<ManualProcess *>(proc);
             isAdvancedPump = manualProcess->isAdvancedPump();
+            manualPumpPressure = manualProcess->getPumpPressure();
+            manualPumpFlow = manualProcess->getPumpFlow();
             targetTemp = manualProcess->getTemperature();
         }
     }
@@ -705,12 +709,10 @@ void Controller::updateControl() {
             }
         }
         if (procType == MODE_MANUAL) {
-            auto *manualProcess = static_cast<ManualProcess *>(proc);
             clientController.sendAdvancedOutputControl(relayActive, targetTemp, true,
-                                                       manualProcess->getPumpPressure(),
-                                                       manualProcess->getPumpFlow());
-            targetPressure = manualProcess->getPumpPressure();
-            targetFlow = manualProcess->getPumpFlow();
+                                                       manualPumpPressure, manualPumpFlow);
+            targetPressure = manualPumpPressure;
+            targetFlow = manualPumpFlow;
             return;
         }
     }
