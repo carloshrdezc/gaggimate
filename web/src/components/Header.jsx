@@ -23,8 +23,8 @@ import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
 import { ApiServiceContext, machine } from '../services/ApiService.js';
 import { getCurrentBeanSelection, listBeans } from '../utils/beanManager.js';
 
-const MODE_LABELS = ['Standby', 'Brew', 'Steam', 'Water', 'Grind'];
-const MODE_DOT_COLORS = ['bg-base-content/30', 'bg-primary', 'bg-warning', 'bg-error', 'bg-secondary'];
+const MODE_LABELS = ['Standby', 'Brew', 'Steam', 'Water', 'Grind', 'Manual'];
+const MODE_DOT_COLORS = ['bg-base-content/30', 'bg-primary', 'bg-warning', 'bg-error', 'bg-secondary', 'bg-accent'];
 
 function formatReading(value, suffix) {
   return `${Number.isFinite(value) ? value.toFixed(1) : '0.0'}${suffix}`;
