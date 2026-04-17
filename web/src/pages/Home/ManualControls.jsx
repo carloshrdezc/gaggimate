@@ -1,4 +1,4 @@
-import { useState, useCallback, useContext, useMemo, useRef } from 'preact/hooks';
+import { useState, useCallback, useContext, useMemo, useRef, useEffect } from 'preact/hooks';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlay, faPause, faSave } from '@fortawesome/free-solid-svg-icons';
@@ -19,7 +19,20 @@ const ManualControls = () => {
   const [valve, setValve] = useState(1); // 1=open, 0=closed
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveLabel, setSaveLabel] = useState('');
+  const [saveError, setSaveError] = useState(null);
   const debounceTimerRef = useRef(null);
+
+  // Listen for manual save completion or error
+  useEffect(() => {
+    const handler = (msg) => {
+      if (msg.status === 'error') {
+        setSaveError(msg.message || 'Save failed');
+        setShowSaveModal(true);
+      }
+    };
+    api.on('manual:saved', handler);
+    return () => api.off('manual:saved', handler);
+  }, [api]);
 
   const sendUpdate = useCallback((updates) => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -184,6 +197,11 @@ const ManualControls = () => {
         <div className='modal modal-open'>
           <div className='modal-box'>
             <h3 className='font-bold text-lg'>Save Manual Shot</h3>
+            {saveError && (
+              <div className='alert alert-error mt-3'>
+                <span>{saveError}</span>
+              </div>
+            )}
             <div className='form-control mt-4'>
               <label className='label'>
                 <span className='label-text'>Profile Name</span>
@@ -193,11 +211,11 @@ const ManualControls = () => {
                 className='input input-bordered'
                 placeholder='My Manual Shot'
                 value={saveLabel}
-                onInput={e => setSaveLabel(e.target.value)}
+                onInput={e => { setSaveLabel(e.target.value); setSaveError(null); }}
               />
             </div>
             <div className='modal-action'>
-              <button className='btn btn-ghost' onClick={() => setShowSaveModal(false)}>Cancel</button>
+              <button className='btn btn-ghost' onClick={() => { setShowSaveModal(false); setSaveError(null); }}>Cancel</button>
               <button className='btn btn-primary' onClick={handleSave} disabled={!saveLabel.trim()}>
                 Save
               </button>
