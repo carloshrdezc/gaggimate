@@ -9,9 +9,9 @@ class ManualProcess : public Process {
     unsigned long processStarted = 0;
     unsigned long currentPhaseStarted = 0;
     ProcessPhase processPhase = ProcessPhase::RUNNING;
-    float livePressure = 9.0f;
-    float liveFlow = 2.0f;
-    float liveTemperature = 93.0f;
+    float livePressure = 0.0f;
+    float liveFlow = 0.0f;
+    float liveTemperature = 90.0f;
     int liveValve = 1; // 0=closed, 1=open
 
     explicit ManualProcess() {

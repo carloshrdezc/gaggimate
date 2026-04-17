@@ -13,9 +13,9 @@ const STATUS = {
 const ManualControls = () => {
   const api = useContext(ApiServiceContext);
   const [status, setStatus] = useState(STATUS.IDLE);
-  const [pressure, setPressure] = useState(9.0);
-  const [flow, setFlow] = useState(2.0);
-  const [temperature, setTemperature] = useState(93.0);
+  const [pressure, setPressure] = useState(0.0);
+  const [flow, setFlow] = useState(0.0);
+  const [temperature, setTemperature] = useState(90.0);
   const [valve, setValve] = useState(1); // 1=open, 0=closed
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveLabel, setSaveLabel] = useState('');
