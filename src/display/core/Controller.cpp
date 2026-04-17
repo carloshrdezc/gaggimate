@@ -499,6 +499,12 @@ void Controller::setTargetTemp(float temperature) {
         break;
     case MODE_MANUAL:
         profileManager->getSelectedProfile().temperature = temperature;
+        if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            if (currentProcess != nullptr && currentProcess->getType() == MODE_MANUAL) {
+                static_cast<ManualProcess *>(currentProcess)->setTemperature(temperature);
+            }
+            xSemaphoreGive(processMutex);
+        }
         break;
     default:;
     }

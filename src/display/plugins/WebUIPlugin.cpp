@@ -83,7 +83,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
 
     pluginManager->on("controller:manual:error", [this](Event const &event) {
         JsonDocument resp;
-        resp["tp"] = "evt:manual:saved";
+        resp["tp"] = "evt:manual:error";
         resp["status"] = "error";
         resp["message"] = event.getString("message");
         size_t bufferSize = measureJson(resp);

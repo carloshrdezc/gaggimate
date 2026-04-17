@@ -30,8 +30,8 @@ const ManualControls = () => {
         setShowSaveModal(true);
       }
     };
-    const id = api.on('manual:saved', handler);
-    return () => api.off('manual:saved', id);
+    const id = api.on('manual:error', handler);
+    return () => api.off('manual:error', id);
   }, [api]);
 
   // Sync status when mode changes away from MANUAL (e.g., process ended externally)

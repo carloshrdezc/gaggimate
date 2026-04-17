@@ -47,6 +47,7 @@ class ManualProcess : public Process {
     float getPumpFlow() { return isActive() ? liveFlow : 0.f; }
 
     float getTemperature() { return liveTemperature; }
+    void setTemperature(float t) { liveTemperature = t; }
 
     void progress() override {
         // Stateless — driven entirely by live values set via updateLiveValues()
