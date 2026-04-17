@@ -1,4 +1,3 @@
-import { useMemo } from 'preact/hooks';
 import PropTypes from 'prop-types';
 
 const ALL_TABS = [
@@ -6,21 +5,16 @@ const ALL_TABS = [
   { id: 1, label: 'Brew' },
   { id: 2, label: 'Steam' },
   { id: 3, label: 'Water' },
+  { id: 5, label: 'Manual' },
 ];
 
 export function ModeTabBar({ mode, changeMode, showGrindTab = false, pressureAvailable = false }) {
-  // Debug: ?debugPressure=true in URL forces Manual tab visible
-  const effectivePressure = useMemo(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get('debugPressure') === 'true' || pressureAvailable;
-  }, [pressureAvailable]);
   const tabs = showGrindTab ? [...ALL_TABS, { id: 4, label: 'Grind' }] : ALL_TABS;
-  const tabsWithManual = effectivePressure ? [...tabs, { id: 5, label: 'Manual' }] : tabs;
 
   return (
     <div className='flex justify-center'>
       <div className='bg-base-300/90 flex w-full max-w-md rounded-xl border border-base-300/65 p-1'>
-        {tabsWithManual.map(tab => (
+        {tabs.map(tab => (
           <button
             key={tab.id}
             className={`flex-1 cursor-pointer rounded-lg px-1 py-1.5 text-sm transition-all duration-200 sm:px-4 lg:px-2 lg:py-2 ${
