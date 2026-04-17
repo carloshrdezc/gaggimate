@@ -1,7 +1,7 @@
 import { useState, useCallback, useContext, useMemo, useRef, useEffect } from 'preact/hooks';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlay, faPause, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faPlay, faPause, faSave, faTint } from '@fortawesome/free-solid-svg-icons';
 import { Tooltip } from '../../components/Tooltip.jsx';
 
 const STATUS = {
@@ -60,6 +60,10 @@ const ManualControls = () => {
   const handleDeactivate = useCallback(() => {
     api.send({ tp: 'req:process:deactivate' });
     setStatus(STATUS.FINISHED);
+  }, [api]);
+
+  const handleFlush = useCallback(() => {
+    api.send({ tp: 'req:flush:start' });
   }, [api]);
 
   const handleSave = useCallback(() => {
@@ -177,11 +181,18 @@ const ManualControls = () => {
       {/* Action button */}
       <div className='flex flex-col items-center gap-2'>
         {status === STATUS.IDLE && (
-          <Tooltip content='Start Manual Brew'>
-            <button className='btn btn-circle btn-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 hover:border-primary text-primary' onClick={handleActivate}>
-              <FontAwesomeIcon icon={faPlay} className='text-2xl' />
-            </button>
-          </Tooltip>
+          <>
+            <Tooltip content='Flush water'>
+              <button className='btn btn-circle btn-sm border-2 border-base-300 bg-base-100 hover:border-base-content/40 text-base-content/60' onClick={handleFlush}>
+                <FontAwesomeIcon icon={faTint} className='text-lg' />
+              </button>
+            </Tooltip>
+            <Tooltip content='Start Manual Brew'>
+              <button className='btn btn-circle btn-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 hover:border-primary text-primary' onClick={handleActivate}>
+                <FontAwesomeIcon icon={faPlay} className='text-2xl' />
+              </button>
+            </Tooltip>
+          </>
         )}
         {status === STATUS.RUNNING && (
           <Tooltip content='Stop'>
