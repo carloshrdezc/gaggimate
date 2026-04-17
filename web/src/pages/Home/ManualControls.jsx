@@ -30,9 +30,20 @@ const ManualControls = () => {
         setShowSaveModal(true);
       }
     };
-    api.on('manual:saved', handler);
-    return () => api.off('manual:saved', handler);
+    const id = api.on('manual:saved', handler);
+    return () => api.off('manual:saved', id);
   }, [api]);
+
+  // Sync status when mode changes away from MANUAL (e.g., process ended externally)
+  useEffect(() => {
+    const handler = (msg) => {
+      if (msg.m !== 5 && status === STATUS.RUNNING) {
+        setStatus(STATUS.FINISHED);
+      }
+    };
+    const id = api.on('status', handler);
+    return () => api.off('status', id);
+  }, [status]);
 
   const sendUpdate = useCallback((updates) => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);

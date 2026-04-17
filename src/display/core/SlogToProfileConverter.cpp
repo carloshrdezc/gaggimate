@@ -3,7 +3,6 @@
 
 Profile SlogToProfileConverter::convert(const String &slogPath, const String &label, FS *fs) {
     Profile profile;
-    profile.id = generateShortID();
     profile.label = label;
     profile.type = ProfileType::RECORDED;
     profile.description = "Recorded from manual mode";
@@ -74,5 +73,6 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
     phase.recordedValve = valves;
 
     profile.phases.push_back(phase);
+    profile.id = generateShortID();
     return profile;
 }
