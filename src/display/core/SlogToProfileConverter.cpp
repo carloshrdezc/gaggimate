@@ -35,6 +35,7 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
     unsigned long lastTick = 0;
 
     while (file.readBytes(reinterpret_cast<char *>(&sample), sizeof(ShotLogSample)) == sizeof(ShotLogSample)) {
+        ESP_LOGI("SlogToProfile", "sample raw: tp=%04x ct=%04x fl=%04x", sample.tp, sample.ct, *(uint16_t*)&sample.fl);
         float tp = sample.tp / 10.0f;
         float fl = sample.fl / 100.0f;
         float ct = sample.ct / 10.0f;
@@ -55,6 +56,11 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
         return profile;
     }
 
+    // Compute average recorded temperature for the profile setpoint
+    float tempSum = 0.0f;
+    for (float t : temperatures) { tempSum += t; }
+    profile.temperature = temperatures.empty() ? 90.0f : (tempSum / temperatures.size());
+
     Phase phase;
     phase.name = "Recorded Shot";
     phase.phase = PhaseType::PHASE_TYPE_BREW;
@@ -67,10 +73,18 @@ Profile SlogToProfileConverter::convert(const String &slogPath, const String &la
     phase.transition.type = TransitionType::INSTANT;
     phase.transition.duration = 0;
     phase.transition.adaptive = false;
+
+    ESP_LOGI("SlogToProfile", "convert: %zu samples, lastTick=%lu, duration=%.3fs",
+             pressures.size(), lastTick, phase.duration);
+    if (!pressures.empty()) {
+        ESP_LOGI("SlogToProfile", "  sample[0]: tp=%.2f fl=%.2f ct=%.2f",
+                 pressures[0], flows[0], temperatures[0]);
+    }
     phase.recordedPressure = pressures;
     phase.recordedFlow = flows;
     phase.recordedTemperature = temperatures;
     phase.recordedValve = valves;
+    phase.temperature = profile.temperature;
 
     profile.phases.push_back(phase);
     profile.id = generateShortID();
