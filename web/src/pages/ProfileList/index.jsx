@@ -93,16 +93,18 @@ function ProfileCard({
   }, [data.favorite, unfavoriteDisabled, favoriteDisabled, onUnfavorite, onFavorite, data.id]);
 
   const onDownload = useCallback(() => {
-    const download = {
-      ...data,
-    };
-    delete download.id;
-    delete download.selected;
-    delete download.favorite;
+    const { id, selected, favorite, ...profileData } = data;
+    const filename = `profile-${data.id}.json`;
+    const prepared = prepareDownload(filename);
 
-    const prepared = prepareDownload(`profile-${data.id}.json`);
+    if (!prepared.targetWindow) {
+      console.error('Failed to create download window - popup blocker may be active');
+      alert('Download failed: Please allow popups for this site and try again.');
+      return;
+    }
+
     try {
-      downloadJson(download, `profile-${data.id}.json`, prepared);
+      downloadJson(profileData, filename, prepared);
     } catch (error) {
       prepared.fail(error);
       console.error('Failed to export profile:', error);
@@ -933,20 +935,19 @@ export function ProfileList() {
             <FontAwesomeIcon icon={faFileExport} />
             Export Profiles
           </button>
-          <button
-            onClick={() => document.getElementById('profileImport')?.click()}
-            className='btn btn-sm btn-outline'
+          <label
+            htmlFor='profileImport'
+            className='btn btn-sm btn-outline cursor-pointer'
           >
             <FontAwesomeIcon icon={faFileImport} />
             Import Profiles
-          </button>
+          </label>
           <input
             onChange={onUpload}
             className='hidden'
             id='profileImport'
             type='file'
-            accept='.json,application/json,.tcl'
-            aria-label='Select a JSON file containing profile data to import'
+            accept='.json,application/json'
           />
           <ConfirmButton
             onAction={onClear}
