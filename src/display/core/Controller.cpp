@@ -660,7 +660,8 @@ void Controller::updateControl() {
     
     // Get target temp while still holding mutex to avoid race condition
     // Inline the logic from getTargetTemp() to avoid deadlock
-    if (targetTemp == 0.0f) {
+    // Only needed when no process is active — active process provides its own targetTemp
+    if (!active) {
         switch (mode) {
         case MODE_BREW:
         case MODE_GRIND:
