@@ -410,8 +410,8 @@ components:
             minimum: 0
           temperature:
             type: number
-            minimum: 0
-            maximum: 160
+            minimum: 80
+            maximum: 110
           valve:
             type: integer
             enum: [0, 1]

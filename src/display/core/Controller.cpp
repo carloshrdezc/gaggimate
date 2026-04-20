@@ -1021,6 +1021,7 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.currentVolume = grind->currentVolume;
         } else if (proc->getType() == MODE_MANUAL) {
             auto *manual = static_cast<ManualProcess *>(proc);
+            snapshot.isManual = true;
             snapshot.pumpPressure = manual->getPumpPressure();
             snapshot.pumpFlow = manual->getPumpFlow();
         }

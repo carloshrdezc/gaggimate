@@ -36,8 +36,10 @@ struct ProcessSnapshot {
     float brewVolume = 0.0f;
     bool isAdvancedPump = false;
     float pumpPressure = 0.0f;
+    float pumpFlow = 0.0f;
     
     // Grind-specific fields
+    bool isManual = false;
     bool isGrind = false;
     float grindVolume = 0.0f;
     unsigned long grindTime = 0;
