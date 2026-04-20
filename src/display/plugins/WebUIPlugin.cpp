@@ -404,6 +404,7 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                         float pressure = doc["pressure"].is<float>() ? doc["pressure"].as<float>() : NAN;
                         float flow = doc["flow"].is<float>() ? doc["flow"].as<float>() : NAN;
                         int valve = doc["valve"].is<int>() ? doc["valve"].as<int>() : -1;
+                        flow = std::clamp(flow, 0.0f, 15.0f); // clamp to hardware-safe max
                         controller->setManualLiveValues(pressure, flow, valve);
                         if (doc["temperature"].is<float>()) {
                             controller->setTargetTemp(doc["temperature"].as<float>());

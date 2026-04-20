@@ -8,7 +8,7 @@ const ALL_TABS = [
   { id: 5, label: 'Manual' },
 ];
 
-export function ModeTabBar({ mode, changeMode, showGrindTab = false, pressureAvailable = false }) {
+export function ModeTabBar({ mode, changeMode, showGrindTab = false }) {
   const tabs = showGrindTab ? [...ALL_TABS, { id: 4, label: 'Grind' }] : ALL_TABS;
 
   return (
@@ -36,5 +36,4 @@ ModeTabBar.propTypes = {
   mode: PropTypes.oneOf([0, 1, 2, 3, 4, 5]).isRequired,
   changeMode: PropTypes.func.isRequired,
   showGrindTab: PropTypes.bool,
-  pressureAvailable: PropTypes.bool,
 };

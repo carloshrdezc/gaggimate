@@ -38,6 +38,7 @@ channels:
           - $ref: '#/components/messages/ProfilesUnfavoriteResponse'
           - $ref: '#/components/messages/ProfilesReorderResponse'
           - $ref: '#/components/messages/ManualSavedEvent'
+          - $ref: '#/components/messages/ManualErrorEvent'
     publish:
       description: Messages sent from the client to the server.
       message:
@@ -436,4 +437,22 @@ components:
             type: string
           label:
             type: string
+          status:
+            type: string
+            enum: ['ok']
+            description: Always 'ok' for this event type. Errors are sent via ManualErrorEvent.
         required: [tp, profileId, label]
+    ManualErrorEvent:
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['evt:manual:error']
+          status:
+            type: string
+            enum: ['error']
+          message:
+            type: string
+            description: Human-readable error description.
+        required: [tp, status, message]

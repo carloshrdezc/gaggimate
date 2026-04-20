@@ -96,6 +96,10 @@ class BrewProcess : public Process {
             return false;
         }
         if (isRecordedProfile()) {
+            if (currentPhase.recordedPressure.empty() || currentPhase.recordedFlow.empty() ||
+                currentPhase.recordedTemperature.empty() || currentPhase.recordedValve.empty()) {
+                return false; // Empty trajectory — treat as finished
+            }
             unsigned long elapsedMs = millis() - currentPhaseStarted;
             size_t sampleIndex = elapsedMs / SHOT_LOG_SAMPLE_INTERVAL_MS;
             size_t maxIndex = std::min({SIZE_MAX,

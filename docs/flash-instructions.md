@@ -77,8 +77,6 @@ This usually means `data/w/` was not synced from `web/dist/` before building SPI
 
 After flashing, hard refresh the browser: `Ctrl+Shift+R` (or `Cmd+Shift+R` on Mac).
 
-To force the Manual tab without a real pressure sensor, add `?debugPressure=true` to the URL.
-
 ### Find the correct COM port
 
 ```bash

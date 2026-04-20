@@ -498,7 +498,6 @@ void Controller::setTargetTemp(float temperature) {
         settings.setTargetWaterTemp(static_cast<int>(temperature));
         break;
     case MODE_MANUAL:
-        profileManager->getSelectedProfile().temperature = temperature;
         if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             if (currentProcess != nullptr && currentProcess->getType() == MODE_MANUAL) {
                 static_cast<ManualProcess *>(currentProcess)->setTemperature(temperature);
@@ -1023,6 +1022,7 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
         } else if (proc->getType() == MODE_MANUAL) {
             auto *manual = static_cast<ManualProcess *>(proc);
             snapshot.pumpPressure = manual->getPumpPressure();
+            snapshot.pumpFlow = manual->getPumpFlow();
         }
     }
     

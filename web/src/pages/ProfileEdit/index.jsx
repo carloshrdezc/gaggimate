@@ -145,13 +145,9 @@ export function ProfileEdit() {
         />
       )}
       {data?.type === 'recorded' && (
-        <ExtendedProfileForm
-          data={data}
-          onChange={data => setData(data)}
-          onSave={onSave}
-          saving={saving}
-          pressureAvailable={pressureAvailable.value}
-        />
+        <div className='alert'>
+          <span>Recorded profiles are replay-only and cannot be edited. Select it from the home screen to replay the shot.</span>
+        </div>
       )}
     </>
   );
