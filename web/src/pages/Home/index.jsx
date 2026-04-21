@@ -101,7 +101,7 @@ export function Home() {
           </div>
 
           {/* Quick Actions */}
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             {/* Start/Pause Button */}
             <button
               onClick={active ? handlePause : handleStart}
@@ -152,9 +152,9 @@ export function Home() {
                 class="w-full px-4 py-2.5 bg-[--bg-elevated] border border-[--border] rounded-lg text-[--text-primary] focus:border-[--accent] focus:outline-none transition-all appearance-none cursor-pointer"
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23ffffff30'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px' }}
               >
-                <option value="">Select Profile</option>
+                <option value="" style="background: var(--bg-elevated); color: var(--text-primary);">Select Profile</option>
                 {profiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>
+                  <option key={profile.id} value={profile.id} style="background: var(--bg-elevated); color: var(--text-primary);">
                     {profile.label || profile.id}
                   </option>
                 ))}
