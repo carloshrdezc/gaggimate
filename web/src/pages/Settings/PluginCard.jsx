@@ -1,362 +1,265 @@
 import { faTrashCan } from '@fortawesome/free-solid-svg-icons/faTrashCan';
+import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
+import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
+import { faHome } from '@fortawesome/free-solid-svg-icons/faHome';
+import { faWater } from '@fortawesome/free-solid-svg-icons/faWater';
+import { faGear } from '@fortawesome/free-solid-svg-icons/faGear';
+import { faHome as faHomeAssistant } from '@fortawesome/free-solid-svg-icons/faHome';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import homekitImage from '../../assets/homekit.png';
 
+const PluginSection = ({ icon, title, children }) => (
+  <div class="rounded-xl p-4" style="background: var(--bg-base); border: 1px solid var(--border);">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2">
+        <FontAwesomeIcon icon={icon} class="text-sm text-[--accent]" />
+        <span class="text-sm font-semibold text-[--text-primary]">{title}</span>
+      </div>
+    </div>
+    {children}
+  </div>
+);
+
+const Toggle = ({ id, name, checked, onChange, label }) => (
+  <label class="flex items-center gap-3 cursor-pointer group">
+    <div
+      class="relative size-9 rounded-lg flex items-center justify-center transition-all"
+      style="background: var(--bg-elevated); border: 1px solid var(--border);"
+      onClick={() => onChange({ currentTarget: { name, value: !checked } })}
+    >
+      <div class="size-4 rounded transition-all" style={`background: ${checked ? 'var(--accent)' : 'transparent'};`}>
+        {checked && (
+          <svg viewBox="0 0 12 12" class="w-full h-full">
+            <path d="M2 6l3 3 5-5" stroke="var(--bg-base)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        )}
+      </div>
+    </div>
+    <span class="text-sm text-[--text-secondary] group-hover:text-[--text-primary] transition-colors">{label}</span>
+  </label>
+);
+
+const FieldLabel = ({ children }) => (
+  <label class="block text-xs font-medium text-[--text-secondary] mb-1.5">{children}</label>
+);
+
+const DarkInput = ({ id, name, type = 'text', value, placeholder, onChange, disabled }) => (
+  <input
+    id={id} name={name} type={type} value={value} placeholder={placeholder} disabled={disabled} onChange={onChange}
+    class="w-full px-3 py-2.5 rounded-lg text-sm text-[--text-primary] placeholder:text-[--text-muted] transition-all"
+    style={`background: var(--bg-elevated); border: 1px solid var(--border); outline: none; ${disabled ? 'opacity: 0.5; cursor: not-allowed;' : ''}`}
+    onFocus={e => !disabled && (e.target.style.borderColor = 'var(--accent)')}
+    onBlur={e => !disabled && (e.target.style.borderColor = 'var(--border)')}
+  />
+);
+
+const DarkSelect = ({ id, name, value, onChange, children, disabled }) => (
+  <select
+    id={id} name={name} value={value} disabled={disabled} onChange={onChange}
+    class="w-full px-3 py-2 rounded-lg text-sm text-[--text-primary] cursor-pointer transition-all"
+    style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none;"
+    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+    onBlur={e => e.target.style.borderColor = 'var(--border)'}
+  >
+    {children}
+  </select>
+);
+
 export function PluginCard({
-  formData,
-  onChange,
-  autowakeupSchedules,
-  addAutoWakeupSchedule,
-  removeAutoWakeupSchedule,
-  updateAutoWakeupTime,
-  updateAutoWakeupDay,
+  formData, onChange,
+  autowakeupSchedules, addAutoWakeupSchedule, removeAutoWakeupSchedule,
+  updateAutoWakeupTime, updateAutoWakeupDay,
 }) {
   return (
-    <div className='space-y-4'>
-      <div className='bg-base-200 rounded-lg p-4'>
-        <div className='flex items-center justify-between'>
-          <span className='text-xl font-medium'>Automatic Wakeup Schedule</span>
-          <input
-            id='autowakeupEnabled'
-            name='autowakeupEnabled'
-            value='autowakeupEnabled'
-            type='checkbox'
-            className='toggle toggle-primary'
+    <div class="space-y-4">
+      {/* Auto Wakeup Schedule */}
+      <PluginSection icon={faClock} title="Automatic Wakeup Schedule">
+        <div class="flex items-center justify-between mb-3">
+          <Toggle
+            id="autowakeupEnabled" name="autowakeupEnabled"
             checked={!!formData.autowakeupEnabled}
             onChange={onChange('autowakeupEnabled')}
-            aria-label='Enable Auto Wakeup'
+            label="Enable Auto Wakeup"
           />
         </div>
         {formData.autowakeupEnabled && (
-          <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
-            <p className='text-sm opacity-70'>
-              Automatically switch to brew mode at specified time(s) of day.
-            </p>
-            <div className='form-control'>
-              <label className='mb-2 block text-sm font-medium'>Auto Wakeup Schedule</label>
-              <div className='space-y-2'>
-                {autowakeupSchedules?.map((schedule, scheduleIndex) => (
-                  <div key={scheduleIndex} className='flex flex-wrap items-center gap-1'>
-                    {/* Time input */}
-                    <input
-                      type='time'
-                      className='input input-bordered input-sm w-auto min-w-0 pr-6'
-                      value={schedule.time}
-                      onChange={e => updateAutoWakeupTime(scheduleIndex, e.target.value)}
-                      disabled={!formData.autowakeupEnabled}
-                    />
-
-                    {/* Days toggle buttons */}
-                    <div className='join' role='group' aria-label='Days of week selection'>
-                      {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((dayLabel, dayIndex) => (
-                        <button
-                          key={dayIndex}
-                          type='button'
-                          className={`join-item btn btn-xs ${schedule.days[dayIndex] ? 'btn-primary' : 'btn-outline'}`}
-                          onClick={() =>
-                            updateAutoWakeupDay(scheduleIndex, dayIndex, !schedule.days[dayIndex])
-                          }
-                          disabled={!formData.autowakeupEnabled}
-                          aria-pressed={schedule.days[dayIndex]}
-                          aria-label={
-                            [
-                              'Monday',
-                              'Tuesday',
-                              'Wednesday',
-                              'Thursday',
-                              'Friday',
-                              'Saturday',
-                              'Sunday',
-                            ][dayIndex]
-                          }
-                          title={
-                            [
-                              'Monday',
-                              'Tuesday',
-                              'Wednesday',
-                              'Thursday',
-                              'Friday',
-                              'Saturday',
-                              'Sunday',
-                            ][dayIndex]
-                          }
-                        >
-                          {dayLabel}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Delete button */}
-                    {autowakeupSchedules.length > 1 ? (
+          <div class="pt-3 mt-3" style="border-top: 1px solid var(--border);">
+            <p class="text-xs text-[--text-muted] mb-4">Automatically switch to brew mode at specified time(s).</p>
+            <div class="space-y-3">
+              {autowakeupSchedules?.map((schedule, scheduleIndex) => (
+                <div key={scheduleIndex} class="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="time"
+                    value={schedule.time}
+                    onChange={e => updateAutoWakeupTime(scheduleIndex, e.target.value)}
+                    disabled={!formData.autowakeupEnabled}
+                    class="px-3 py-2 rounded-lg text-sm text-[--text-primary]"
+                    style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none;"
+                    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                    onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                  />
+                  <div class="flex gap-1" role="group" aria-label="Days of week">
+                    {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((dayLabel, dayIndex) => (
                       <button
-                        type='button'
-                        onClick={() => removeAutoWakeupSchedule(scheduleIndex)}
-                        className='btn btn-ghost btn-xs'
+                        key={dayIndex}
+                        type="button"
+                        onClick={() => updateAutoWakeupDay(scheduleIndex, dayIndex, !schedule.days[dayIndex])}
                         disabled={!formData.autowakeupEnabled}
-                        title='Delete this schedule'
+                        aria-pressed={schedule.days[dayIndex]}
+                        class="size-7 rounded-lg text-xs font-medium transition-all"
+                        style={schedule.days[dayIndex]
+                          ? 'background: var(--accent); color: var(--bg-base);'
+                          : 'background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border);'}
                       >
-                        <FontAwesomeIcon icon={faTrashCan} className='text-xs' />
+                        {dayLabel}
                       </button>
-                    ) : (
-                      <div
-                        className='btn btn-ghost btn-xs cursor-not-allowed opacity-30'
-                        title='Cannot delete the last schedule'
-                      >
-                        <FontAwesomeIcon icon={faTrashCan} className='text-xs' />
-                      </div>
-                    )}
+                    ))}
                   </div>
-                ))}
-                <button
-                  type='button'
-                  onClick={addAutoWakeupSchedule}
-                  className='btn btn-primary btn-sm'
-                  disabled={!formData.autowakeupEnabled}
-                >
-                  Add Schedule
-                </button>
-              </div>
+                  {autowakeupSchedules.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => removeAutoWakeupSchedule(scheduleIndex)}
+                      disabled={!formData.autowakeupEnabled}
+                      class="p-1.5 rounded-lg text-[--error] hover:bg-[--error]/10 transition-all"
+                      title="Delete schedule"
+                    >
+                      <FontAwesomeIcon icon={faTrashCan} class="text-xs" />
+                    </button>
+                  ) : (
+                    <div class="p-1.5 opacity-30" title="Cannot delete last schedule">
+                      <FontAwesomeIcon icon={faTrashCan} class="text-xs text-[--text-muted]" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addAutoWakeupSchedule}
+                disabled={!formData.autowakeupEnabled}
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[--accent] border border-[--accent]/30 hover:bg-[--accent]/10 transition-all"
+              >
+                <FontAwesomeIcon icon={faPlus} />
+                Add Schedule
+              </button>
             </div>
           </div>
         )}
-      </div>
+      </PluginSection>
 
-      <div className='bg-base-200 rounded-lg p-4'>
-        <div className='flex items-center justify-between'>
-          <span className='text-xl font-medium'>HomeKit</span>
-          <input
-            id='homekit'
-            name='homekit'
-            value='homekit'
-            type='checkbox'
-            className='toggle toggle-primary'
+      {/* HomeKit */}
+      <PluginSection icon={faHome} title="HomeKit">
+        <div class="flex items-center justify-between">
+          <Toggle
+            id="homekit" name="homekit"
             checked={!!formData.homekit}
             onChange={onChange('homekit')}
-            aria-label='Enable HomeKit'
+            label="Enable HomeKit"
           />
         </div>
         {formData.homekit && (
-          <div className='border-base-300 mt-4 flex flex-col items-center justify-center gap-4 border-t pt-4'>
-            <img src={homekitImage} alt='HomeKit Setup Code' />
-            <p className='text-center'>
-              Open the Home app on your iOS device, select Add Accessory, and enter the setup code
-              shown above.
+          <div class="mt-4 pt-4 flex flex-col items-center gap-4" style="border-top: 1px solid var(--border);">
+            <img src={homekitImage} alt="HomeKit Setup Code" class="max-w-[160px] rounded-lg" />
+            <p class="text-xs text-[--text-muted] text-center">
+              Open the Home app on your iOS device, select Add Accessory, and enter the setup code shown above.
             </p>
           </div>
         )}
-      </div>
+      </PluginSection>
 
-      <div className='bg-base-200 rounded-lg p-4'>
-        <div className='flex items-center justify-between'>
-          <span className='text-xl font-medium'>Boiler Refill Plugin</span>
-          <input
-            id='boilerFillActive'
-            name='boilerFillActive'
-            value='boilerFillActive'
-            type='checkbox'
-            className='toggle toggle-primary'
+      {/* Boiler Refill */}
+      <PluginSection icon={faWater} title="Boiler Refill Plugin">
+        <div class="flex items-center justify-between mb-4">
+          <Toggle
+            id="boilerFillActive" name="boilerFillActive"
             checked={!!formData.boilerFillActive}
             onChange={onChange('boilerFillActive')}
-            aria-label='Enable Boiler Refill'
+            label="Enable Boiler Refill"
           />
         </div>
         {formData.boilerFillActive && (
-          <div className='border-base-300 mt-4 grid grid-cols-2 gap-4 border-t pt-4'>
-            <div className='form-control'>
-              <label htmlFor='startupFillTime' className='mb-2 block text-sm font-medium'>
-                On startup (s)
-              </label>
-              <input
-                id='startupFillTime'
-                name='startupFillTime'
-                type='number'
-                className='input input-bordered w-full'
-                placeholder='0'
-                value={formData.startupFillTime}
-                onChange={onChange('startupFillTime')}
-              />
+          <div class="pt-4 mt-4 grid grid-cols-2 gap-4" style="border-top: 1px solid var(--border);">
+            <div>
+              <FieldLabel htmlFor="startupFillTime">On startup (s)</FieldLabel>
+              <DarkInput id="startupFillTime" name="startupFillTime" type="number" value={formData.startupFillTime} placeholder="0" onChange={onChange('startupFillTime')} />
             </div>
-            <div className='form-control'>
-              <label htmlFor='steamFillTime' className='mb-2 block text-sm font-medium'>
-                On steam deactivate (s)
-              </label>
-              <input
-                id='steamFillTime'
-                name='steamFillTime'
-                type='number'
-                className='input input-bordered w-full'
-                placeholder='0'
-                value={formData.steamFillTime}
-                onChange={onChange('steamFillTime')}
-              />
+            <div>
+              <FieldLabel htmlFor="steamFillTime">On steam deactivate (s)</FieldLabel>
+              <DarkInput id="steamFillTime" name="steamFillTime" type="number" value={formData.steamFillTime} placeholder="0" onChange={onChange('steamFillTime')} />
             </div>
           </div>
         )}
-      </div>
+      </PluginSection>
 
-      <div className='bg-base-200 rounded-lg p-4'>
-        <div className='flex items-center justify-between'>
-          <span className='text-xl font-medium'>Smart Grind Plugin</span>
-          <input
-            id='smartGrindActive'
-            name='smartGrindActive'
-            value='smartGrindActive'
-            type='checkbox'
-            className='toggle toggle-primary'
+      {/* Smart Grind */}
+      <PluginSection icon={faGear} title="Smart Grind Plugin">
+        <div class="flex items-center justify-between mb-4">
+          <Toggle
+            id="smartGrindActive" name="smartGrindActive"
             checked={!!formData.smartGrindActive}
             onChange={onChange('smartGrindActive')}
-            aria-label='Enable Smart Grind'
+            label="Enable Smart Grind"
           />
         </div>
         {formData.smartGrindActive && (
-          <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
-            <p className='text-sm opacity-70'>
-              This feature controls a Tasmota Plug to turn off your grinder after the target has
-              been reached.
-            </p>
-            <div className='form-control'>
-              <label htmlFor='smartGrindIp' className='mb-2 block text-sm font-medium'>
-                Tasmota IP
-              </label>
-              <input
-                id='smartGrindIp'
-                name='smartGrindIp'
-                type='text'
-                className='input input-bordered w-full'
-                placeholder='0'
-                value={formData.smartGrindIp}
-                onChange={onChange('smartGrindIp')}
-              />
+          <div class="pt-4 mt-4 space-y-4" style="border-top: 1px solid var(--border);">
+            <p class="text-xs text-[--text-muted]">This feature controls a Tasmota Plug to turn off your grinder after the target has been reached.</p>
+            <div>
+              <FieldLabel htmlFor="smartGrindIp">Tasmota IP</FieldLabel>
+              <DarkInput id="smartGrindIp" name="smartGrindIp" type="text" value={formData.smartGrindIp} placeholder="0" onChange={onChange('smartGrindIp')} />
             </div>
-            <div className='form-control'>
-              <label htmlFor='smartGrindMode' className='mb-2 block text-sm font-medium'>
-                Mode
-              </label>
-              <select
-                id='smartGrindMode'
-                name='smartGrindMode'
-                className='select select-bordered w-full'
-                onChange={onChange('smartGrindMode')}
-              >
-                <option value='0' selected={formData.smartGrindMode?.toString() === '0'}>
-                  Turn off at target
-                </option>
-                <option value='1' selected={formData.smartGrindMode?.toString() === '1'}>
-                  Toggle off and on at target
-                </option>
-                <option value='2' selected={formData.smartGrindMode?.toString() === '2'}>
-                  Turn on at start, off at target
-                </option>
-              </select>
+            <div>
+              <FieldLabel htmlFor="smartGrindMode">Mode</FieldLabel>
+              <DarkSelect id="smartGrindMode" name="smartGrindMode" value={formData.smartGrindMode ?? 0} onChange={onChange('smartGrindMode')}>
+                <option value="0" selected={formData.smartGrindMode?.toString() === '0'}>Turn off at target</option>
+                <option value="1" selected={formData.smartGrindMode?.toString() === '1'}>Toggle off and on at target</option>
+                <option value="2" selected={formData.smartGrindMode?.toString() === '2'}>Turn on at start, off at target</option>
+              </DarkSelect>
             </div>
           </div>
         )}
-      </div>
+      </PluginSection>
 
-      <div className='bg-base-200 rounded-lg p-4'>
-        <div className='flex items-center justify-between'>
-          <span className='text-xl font-medium'>Home Assistant over MQTT (Deprecated)</span>
-          <input
-            id='homeAssistant'
-            name='homeAssistant'
-            value='homeAssistant'
-            type='checkbox'
-            className='toggle toggle-primary'
+      {/* Home Assistant (Deprecated) */}
+      <PluginSection icon={faHomeAssistant} title="Home Assistant over MQTT (Deprecated)">
+        <div class="flex items-center justify-between mb-4">
+          <Toggle
+            id="homeAssistant" name="homeAssistant"
             checked={!!formData.homeAssistant}
             onChange={onChange('homeAssistant')}
-            aria-label='Enable Home Assistant'
+            label="Enable Home Assistant"
           />
         </div>
         {formData.homeAssistant && (
-          <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
-            <p className='text-sm opacity-70'>
-              This feature allows connection to a Home Assistant or MQTT installation and push the
-              current state. This feature is deprecated for usage with Home Assistant. Please see
-              the{' '}
-              <a
-                href='https://github.com/gaggimate/ha-integration'
-                target='_blank'
-                rel='noreferrer'
-              >
-                Home Assistant Integration
-              </a>{' '}
-              for a more up-to-date solution.
+          <div class="pt-4 mt-4 space-y-4" style="border-top: 1px solid var(--border);">
+            <p class="text-xs text-[--text-muted]">
+              This feature allows connection to a Home Assistant or MQTT installation. This feature is deprecated. Please see the{' '}
+              <a href="https://github.com/gaggimate/ha-integration" target="_blank" rel="noreferrer" class="text-[--accent] hover:underline">Home Assistant Integration</a>.
             </p>
-            <div className='form-control'>
-              <label htmlFor='haIP' className='mb-2 block text-sm font-medium'>
-                MQTT IP
-              </label>
-              <input
-                id='haIP'
-                name='haIP'
-                type='text'
-                className='input input-bordered w-full'
-                placeholder='0'
-                value={formData.haIP}
-                onChange={onChange('haIP')}
-              />
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <FieldLabel htmlFor="haIP">MQTT IP</FieldLabel>
+                <DarkInput id="haIP" name="haIP" type="text" value={formData.haIP} placeholder="0" onChange={onChange('haIP')} />
+              </div>
+              <div>
+                <FieldLabel htmlFor="haPort">MQTT Port</FieldLabel>
+                <DarkInput id="haPort" name="haPort" type="number" value={formData.haPort} placeholder="0" onChange={onChange('haPort')} />
+              </div>
+              <div>
+                <FieldLabel htmlFor="haUser">MQTT User</FieldLabel>
+                <DarkInput id="haUser" name="haUser" type="text" value={formData.haUser} placeholder="user" onChange={onChange('haUser')} />
+              </div>
+              <div>
+                <FieldLabel htmlFor="haPassword">MQTT Password</FieldLabel>
+                <DarkInput id="haPassword" name="haPassword" type="password" value={formData.haPassword} placeholder="password" onChange={onChange('haPassword')} />
+              </div>
             </div>
-
-            <div className='form-control'>
-              <label htmlFor='haPort' className='mb-2 block text-sm font-medium'>
-                MQTT Port
-              </label>
-              <input
-                id='haPort'
-                name='haPort'
-                type='number'
-                className='input input-bordered w-full'
-                placeholder='0'
-                value={formData.haPort}
-                onChange={onChange('haPort')}
-              />
-            </div>
-
-            <div className='form-control'>
-              <label htmlFor='haUser' className='mb-2 block text-sm font-medium'>
-                MQTT User
-              </label>
-              <input
-                id='haUser'
-                name='haUser'
-                type='text'
-                className='input input-bordered w-full'
-                placeholder='user'
-                value={formData.haUser}
-                onChange={onChange('haUser')}
-              />
-            </div>
-
-            <div className='form-control'>
-              <label htmlFor='haPassword' className='mb-2 block text-sm font-medium'>
-                MQTT Password
-              </label>
-              <input
-                id='haPassword'
-                name='haPassword'
-                type='password'
-                className='input input-bordered w-full'
-                placeholder='password'
-                value={formData.haPassword}
-                onChange={onChange('haPassword')}
-              />
-            </div>
-            <div className='form-control'>
-              <label htmlFor='haTopic' className='mb-2 block text-sm font-medium'>
-                Home Assistant Discovery Topic
-              </label>
-              <input
-                id='haTopic'
-                name='haTopic'
-                type='text'
-                className='input input-bordered w-full'
-                value={formData.haTopic}
-                onChange={onChange('haTopic')}
-              />
+            <div>
+              <FieldLabel htmlFor="haTopic">Home Assistant Discovery Topic</FieldLabel>
+              <DarkInput id="haTopic" name="haTopic" type="text" value={formData.haTopic} onChange={onChange('haTopic')} />
             </div>
           </div>
         )}
-      </div>
+      </PluginSection>
     </div>
   );
 }
