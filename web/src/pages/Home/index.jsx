@@ -107,8 +107,8 @@ export function Home() {
               onClick={active ? handlePause : handleStart}
               class={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition-all ${
                 active
-                  ? 'bg-[--warning] text-[--bg-base] hover:bg-[--warning]/90'
-                  : 'bg-[--accent] text-[--bg-base] hover:bg-[--accent]/90'
+                  ? 'bg-[--warning] text-[--bg-base] hover:bg-amber-500'
+                  : 'bg-[--accent] text-[--bg-base] hover:bg-orange-500'
               }`}
             >
               <FontAwesomeIcon icon={active ? faPause : faPlay} class="text-lg" />
@@ -178,35 +178,15 @@ export function Home() {
             </div>
           </div>
 
-          {/* Recent Shots (3 items) */}
+          {/* Recent Shots - real data from API when available */}
           <div class="space-y-3">
             <h3 class="text-sm font-semibold text-[--text-secondary] uppercase tracking-wider">
               Recent Shots
             </h3>
 
-            {/* Placeholder shots - replace with real data from API when available */}
-            <div class="space-y-2">
-              <ShotRow
-                type="espresso"
-                weightIn="18.4"
-                weightOut="36.1"
-                time="28s"
-                score={87}
-              />
-              <ShotRow
-                type="espresso"
-                weightIn="18.2"
-                weightOut="35.8"
-                time="30s"
-                score={85}
-              />
-              <ShotRow
-                type="espresso"
-                weightIn="18.5"
-                weightOut="37.0"
-                time="27s"
-                score={89}
-              />
+            {/* TODO: Integrate with shot history API */}
+            <div class="text-sm text-[--text-muted] py-4">
+              No recent shots available.
             </div>
           </div>
 
@@ -216,22 +196,21 @@ export function Home() {
   );
 }
 
-function ShotRow({ type, weightIn, weightOut, time, score }) {
-  return (
-    <div class="flex items-center justify-between px-4 py-3 bg-[--bg-elevated] rounded-lg border border-[--border] hover:border-[--border-active] transition-all cursor-pointer">
-      <div class="flex items-center gap-4">
-        <span class="text-sm font-medium text-[--accent]">{type}</span>
-        <span class="text-[--text-muted]">·</span>
-        <span class="text-sm text-[--text-secondary] font-data">
-          {weightIn}g → {weightOut}g
-        </span>
-        <span class="text-[--text-muted]">·</span>
-        <span class="text-sm text-[--text-secondary] font-data">{time}</span>
-      </div>
-      <div class="flex items-center gap-3">
-        <span class="text-sm text-[--text-muted]">score:</span>
-        <span class="text-sm font-semibold text-[--text-primary]">{score}</span>
-      </div>
-    </div>
-  );
-}
+// ShotRow component kept for future use
+// function ShotRow({ type, weightIn, weightOut, time, score }) {
+//   return (
+//     <div class="flex items-center justify-between px-4 py-3 bg-[--bg-elevated] rounded-lg border border-[--border] hover:border-[--border-active] transition-all cursor-pointer">
+//       <div class="flex items-center gap-4">
+//         <span class="text-sm font-medium text-[--accent]">{type}</span>
+//         <span class="text-[--text-muted]">·</span>
+//         <span class="text-sm text-[--text-secondary] font-data">{weightIn}g → {weightOut}g</span>
+//         <span class="text-[--text-muted]">·</span>
+//         <span class="text-sm text-[--text-secondary] font-data">{time}</span>
+//       </div>
+//       <div class="flex items-center gap-3">
+//         <span class="text-sm text-[--text-muted]">score:</span>
+//         <span class="text-sm font-semibold text-[--text-primary]">{score}</span>
+//       </div>
+//     </div>
+//   );
+// }

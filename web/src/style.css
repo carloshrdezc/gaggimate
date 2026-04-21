@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 @plugin 'daisyui';
 
@@ -1033,6 +1034,10 @@ body {
 
 .transition-standard {
   transition: all var(--duration-standard) var(--ease-spring);
+}
+
+.font-data {
+  font-family: var(--font-data);
 }
 
 /* Focus visible styles */
