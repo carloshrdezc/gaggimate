@@ -60,7 +60,7 @@ export function Home() {
           <StatusStrip />
 
           {/* Process Display + Chart - Hero Area */}
-          <div class="space-y-4">
+          <div class="space-y-6">
             {/* Profile name + phase indicator */}
             {status.selectedProfile && (
               <div class="flex items-center justify-between">
@@ -79,7 +79,7 @@ export function Home() {
             )}
 
             {/* Process Chart - live updating */}
-            <div class="h-[300px] bg-[--bg-elevated] rounded-lg border border-[--border] p-4">
+            <div class="min-h-[300px] bg-[--bg-elevated] rounded-lg border border-[--border] p-4 overflow-hidden">
               <OverviewChart />
             </div>
 
@@ -101,11 +101,11 @@ export function Home() {
           </div>
 
           {/* Quick Actions */}
-          <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3 pt-2">
             {/* Start/Pause Button */}
             <button
               onClick={active ? handlePause : handleStart}
-              class={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition-all ${
+              class={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition-all shrink-0 ${
                 active
                   ? 'bg-[--warning] text-[--bg-base] hover:bg-amber-500'
                   : 'bg-[--accent] text-[--bg-base] hover:bg-orange-500'
@@ -119,7 +119,7 @@ export function Home() {
             {(active || finished) && (
               <button
                 onClick={handleStop}
-                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium bg-[--bg-elevated] border border-[--border] text-[--text-primary] hover:border-[--border-active] transition-all"
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium bg-[--bg-elevated] border border-[--border] text-[--text-primary] hover:border-[--border-active] transition-all shrink-0"
               >
                 <FontAwesomeIcon icon={faStop} class="text-lg" />
                 <span>Stop</span>
@@ -130,7 +130,7 @@ export function Home() {
             {canFlush && (
               <button
                 onClick={handleFlush}
-                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium bg-[--bg-elevated] border border-[--border] text-[--text-secondary] hover:border-[--border-active] hover:text-[--text-primary] transition-all"
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium bg-[--bg-elevated] border border-[--border] text-[--text-secondary] hover:border-[--border-active] hover:text-[--text-primary] transition-all shrink-0"
               >
                 <FontAwesomeIcon icon={faTint} class="text-lg" />
                 <span>Flush</span>
