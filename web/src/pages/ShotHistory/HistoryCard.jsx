@@ -1,4 +1,3 @@
-import Card from '../../components/Card.jsx';
 import { useCallback, useState, useContext } from 'preact/hooks';
 import { HistoryChart } from './HistoryChart.jsx';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
@@ -14,7 +13,6 @@ import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus';
 import { faMagnifyingGlassChart } from '@fortawesome/free-solid-svg-icons/faMagnifyingGlassChart';
 import ShotNotesCard from './ShotNotesCard.jsx';
 import { useConfirmAction } from '../../hooks/useConfirmAction.js';
-
 import VisualizerUploadModal from '../../components/VisualizerUploadModal.jsx';
 import { visualizerService } from '../../services/VisualizerService.js';
 import { ApiServiceContext } from '../../services/ApiService.js';
@@ -44,28 +42,15 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     setIsExporting(true);
     try {
       const exportShot = !shot.loaded && onLoad ? await onLoad(shot) : shot;
-      if (!exportShot?.loaded) {
-        throw new Error('Shot data is not available yet.');
-      }
-
+      if (!exportShot?.loaded) throw new Error('Shot data is not available yet.');
       const exportData = { ...exportShot, notes: shotNotes };
       if (Array.isArray(exportData.samples)) {
         exportData.samples = exportData.samples.map(s => ({
-          t: s.t,
-          tt: round2(s.tt),
-          ct: round2(s.ct),
-          tp: round2(s.tp),
-          cp: round2(s.cp),
-          fl: round2(s.fl),
-          tf: round2(s.tf),
-          pf: round2(s.pf),
-          vf: round2(s.vf),
-          v: round2(s.v),
-          ev: round2(s.ev),
-          pr: round2(s.pr),
-          systemInfo: s.systemInfo,
-          phaseNumber: s.phaseNumber,
-          phaseDisplayNumber: s.phaseDisplayNumber,
+          t: s.t, tt: round2(s.tt), ct: round2(s.ct), tp: round2(s.tp),
+          cp: round2(s.cp), fl: round2(s.fl), tf: round2(s.tf),
+          pf: round2(s.pf), vf: round2(s.vf), v: round2(s.v),
+          ev: round2(s.ev), pr: round2(s.pr), systemInfo: s.systemInfo,
+          phaseNumber: s.phaseNumber, phaseDisplayNumber: s.phaseDisplayNumber,
         }));
       }
       exportData.volume = round2(exportData.volume);
@@ -79,248 +64,188 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     }
   }, [onLoad, shot, shotNotes]);
 
-  const handleNotesLoaded = useCallback(notes => {
+  const handleNotesLoaded = useCallback(notes => setShotNotes(notes), []);
+  const handleNotesUpdate = useCallback(notes => {
     setShotNotes(notes);
-  }, []);
+    if (onNotesChanged) onNotesChanged(shot.id, notes, shot.source);
+  }, [onNotesChanged, shot.id, shot.source]);
 
-  const handleNotesUpdate = useCallback(
-    notes => {
-      setShotNotes(notes);
-      // Notify parent that notes changed (so it can reload the index)
-      if (onNotesChanged) onNotesChanged(shot.id, notes, shot.source);
-    },
-    [onNotesChanged, shot.id, shot.source],
-  );
   const profileTitle = shot.beanName
     ? `${shot.profile || 'Unknown Profile'} \u2022 ${shot.beanName}`
     : shot.profile || 'Unknown Profile';
-  const formattedDate =
-    date.toLocaleDateString() +
-    ' ' +
-    date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const handleUpload = useCallback(
-    async (username, password, rememberCredentials) => {
-      setIsUploading(true);
-      try {
-        // Validate shot data
-        if (!visualizerService.validateShot(shot)) {
-          throw new Error('Shot data is invalid or incomplete');
-        }
+  const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        // Fetch profile data if profileId is available
-        let profileData = null;
-        if (shot.profileId && apiService) {
-          try {
-            const profileResponse = await apiService.request({
-              tp: 'req:profiles:load',
-              id: shot.profileId,
-            });
-            if (profileResponse.profile) {
-              profileData = profileResponse.profile;
-            }
-          } catch (error) {
-            console.warn('Failed to fetch profile data:', error);
-            // Continue without profile data
-          }
-        }
-
-        // Include notes in shot data
-        const shotWithNotes = {
-          ...shot,
-          notes: shotNotes,
-        };
-
-        await visualizerService.uploadShot(shotWithNotes, username, password, profileData);
-
-        // Show success message
-        alert('Shot uploaded successfully to visualizer.coffee!');
-      } catch (error) {
-        console.error('Upload failed:', error);
-        alert(`Upload failed: ${error.message}`);
-        throw error; // Re-throw to prevent modal from closing
-      } finally {
-        setIsUploading(false);
+  const handleUpload = useCallback(async (username, password, rememberCredentials) => {
+    setIsUploading(true);
+    try {
+      if (!visualizerService.validateShot(shot)) throw new Error('Shot data is invalid or incomplete');
+      let profileData = null;
+      if (shot.profileId && apiService) {
+        try {
+          const profileResponse = await apiService.request({ tp: 'req:profiles:load', id: shot.profileId });
+          if (profileResponse.profile) profileData = profileResponse.profile;
+        } catch (error) { console.warn('Failed to fetch profile data:', error); }
       }
-    },
-    [shot, shotNotes, apiService],
-  );
+      const shotWithNotes = { ...shot, notes: shotNotes };
+      await visualizerService.uploadShot(shotWithNotes, username, password, profileData);
+      alert('Shot uploaded successfully to visualizer.coffee!');
+    } catch (error) {
+      console.error('Upload failed:', error);
+      alert(`Upload failed: ${error.message}`);
+      throw error;
+    } finally {
+      setIsUploading(false);
+    }
+  }, [shot, shotNotes, apiService]);
 
   const canUpload = visualizerService.validateShot(shot);
 
   return (
-    <Card sm={12} lg={12} className='min-w-0 [&>.card-body]:p-3 sm:[&>.card-body]:p-4'>
-      <div className='flex flex-col gap-2'>
-        <div className='flex min-w-0 flex-row items-start gap-2'>
+    <div class="rounded-xl p-4 transition-all duration-150 hover:bg-[--bg-elevated]" style="border: 1px solid transparent;">
+      {/* Header row */}
+      <div class="flex flex-col gap-3">
+        <div class="flex items-start gap-3">
+          {/* Expand button */}
           <button
-            className='border-base-content/20 text-base-content/60 hover:text-base-content hover:bg-base-content/10 hover:border-base-content/40 cursor-pointer rounded-md border p-2 transition-all duration-200'
             onClick={() => {
               const next = !expanded;
               setExpanded(next);
               if (next && !shot.loaded && onLoad) onLoad(shot.id);
             }}
+            class="shrink-0 rounded-lg p-2 text-[--text-muted] hover:text-[--text-primary] hover:bg-[--bg-glass] transition-all"
             aria-label={expanded ? 'Collapse shot details' : 'Expand shot details'}
           >
-            <FontAwesomeIcon icon={expanded ? faMinus : faPlus} className='h-3 w-3' />
+            <FontAwesomeIcon icon={expanded ? faMinus : faPlus} class="text-sm" />
           </button>
 
-          <div className='min-w-0 flex-grow overflow-hidden'>
-            {/* Header Row */}
-            <div className='mb-1 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between'>
-              <div className='min-w-0 flex-grow'>
-                <h3 className='text-base-content truncate text-base font-semibold'>
-                  {profileTitle}
-                </h3>
-                <p className='text-base-content/70 text-sm'>
-                  #{shot.id} {'\u2022'} {formattedDate}
+          {/* Shot info */}
+          <div class="min-w-0 flex-grow">
+            <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h3 class="text-sm font-semibold text-[--text-primary] truncate">{profileTitle}</h3>
+                <p class="text-xs text-[--text-muted] mt-0.5">
+                  #{shot.id} · {formattedDate}
                 </p>
-                {expanded &&
-                  shot.loaded &&
-                  shot.samples &&
-                  shot.samples.length > 0 &&
-                  shot.samples[0].systemInfo && (
-                    <p className='text-base-content/60 text-xs italic'>
-                      Brewed by{' '}
-                      {shot.samples[0].systemInfo.shotStartedVolumetric ? 'Weight' : 'Time'}
-                    </p>
-                  )}
+                {expanded && shot.loaded && hasSamples && shot.samples[0].systemInfo && (
+                  <p class="text-xs text-[--text-muted] italic mt-0.5">
+                    Brewed by {shot.samples[0].systemInfo.shotStartedVolumetric ? 'Weight' : 'Time'}
+                  </p>
+                )}
               </div>
 
-              <div className='flex shrink-0 flex-wrap items-center gap-2 xl:justify-end'>
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${
-                    shot.source === 'browser'
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'bg-blue-100 text-blue-700'
-                  }`}
-                >
+              {/* Badges + actions */}
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class={`text-xs px-2 py-0.5 rounded-full font-medium ${shot.source === 'browser' ? 'text-purple-400' : 'text-blue-400'}`} style={shot.source === 'browser' ? 'background: rgba(168,85,247,0.12);' : 'background: rgba(59,130,246,0.12);'}>
                   {shot.source === 'browser' ? 'Imported' : 'Device'}
                 </span>
                 {shot.incomplete && (
-                  <span className='inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800'>
+                  <span class="text-xs px-2 py-0.5 rounded-full text-[--warning] font-medium" style="background: rgba(234,179,8,0.12);">
                     INCOMPLETE
                   </span>
                 )}
 
-                <div className='flex flex-wrap gap-1'>
+                {/* Action buttons */}
+                <div class="flex items-center gap-1">
                   <Tooltip content={isExporting ? 'Exporting...' : 'Export'}>
                     <button
                       disabled={isExporting}
                       onClick={onExport}
-                      className='text-base-content/50 hover:text-info hover:bg-info/10 cursor-pointer rounded-md p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-40'
-                      aria-label='Export shot data'
+                      class="p-2 rounded-lg text-[--text-muted] hover:text-[--accent] hover:bg-[--bg-glass] transition-all disabled:opacity-40"
+                      aria-label="Export shot"
                     >
-                      <FontAwesomeIcon icon={faFileExport} className='h-4 w-4' />
+                      <FontAwesomeIcon icon={faFileExport} />
                     </button>
                   </Tooltip>
-
-                  {/* Analyzer Button */}
-                  <Tooltip content='Open in Analyzer'>
+                  <Tooltip content="Open in Analyzer">
                     <a
                       href={`/analyzer/internal/${shot.id}`}
-                      className='text-base-content/50 hover:text-primary hover:bg-primary/10 flex items-center justify-center rounded-md p-2 transition-colors'
-                      aria-label='Open in Analyzer'
+                      class="p-2 rounded-lg text-[--text-muted] hover:text-[--accent] hover:bg-[--bg-glass] transition-all"
+                      aria-label="Open in Analyzer"
                     >
-                      <FontAwesomeIcon icon={faMagnifyingGlassChart} className='h-4 w-4' />
+                      <FontAwesomeIcon icon={faMagnifyingGlassChart} />
                     </a>
                   </Tooltip>
-
-                  <Tooltip
-                    content={
-                      canUpload
-                        ? 'Upload to Visualizer.coffee'
-                        : 'Load shot data first by expanding the shot'
-                    }
-                  >
+                  <Tooltip content={canUpload ? 'Upload to Visualizer.coffee' : 'Load shot data first'}>
                     <button
                       onClick={() => setShowUploadModal(true)}
                       disabled={!canUpload}
-                      className={`group inline-block cursor-pointer items-center justify-between gap-2 rounded-md border border-transparent px-2.5 py-2 text-sm font-semibold ${
-                        canUpload
-                          ? 'text-success hover:bg-success/10 active:border-success/20'
-                          : 'cursor-not-allowed text-gray-400'
-                      }`}
-                      aria-label='Upload to visualizer.coffee'
+                      class={`p-2 rounded-lg transition-all ${canUpload ? 'text-[--success] hover:bg-[--success]/10' : 'text-[--text-muted] cursor-not-allowed opacity-40'}`}
+                      aria-label="Upload to visualizer"
                     >
                       <FontAwesomeIcon icon={faUpload} />
                     </button>
                   </Tooltip>
-                  <Tooltip content={confirmDelete ? 'Click to confirm delete' : 'Delete'}>
+                  <Tooltip content={confirmDelete ? 'Click to confirm' : 'Delete'}>
                     <button
-                      onClick={() => {
-                        confirmOrDelete(() => onDelete(shot.id));
-                      }}
-                      className={`cursor-pointer rounded-md p-2 transition-colors ${confirmDelete ? 'bg-error text-error-content font-semibold' : 'text-base-content/50 hover:text-error hover:bg-error/10'}`}
-                      aria-label={confirmDelete ? 'Confirm deletion of shot' : 'Delete shot'}
+                      onClick={() => confirmOrDelete(() => onDelete(shot.id))}
+                      class={`p-2 rounded-lg transition-all ${confirmDelete ? 'bg-[--error] text-white' : 'text-[--error] hover:bg-[--error]/10'}`}
+                      aria-label={confirmDelete ? 'Confirm deletion' : 'Delete shot'}
                     >
-                      <FontAwesomeIcon icon={faTrashCan} className='h-4 w-4' />
-                      {confirmDelete && <span className='ml-2 hidden sm:inline'>Confirm</span>}
+                      <FontAwesomeIcon icon={faTrashCan} />
+                      {confirmDelete && <span class="ml-1 text-xs hidden sm:inline">Confirm</span>}
                     </button>
                   </Tooltip>
                 </div>
               </div>
             </div>
 
-            {/* Stats Row */}
-            <div className='text-base-content/80 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm'>
-              <div className='flex items-center gap-1'>
-                <FontAwesomeIcon icon={faClock} className='h-4 w-4' />
-                <span>{(shot.duration / 1000).toFixed(1)}s</span>
+            {/* Stats row */}
+            <div class="flex flex-wrap items-center gap-4 mt-2 text-xs text-[--text-secondary]">
+              <div class="flex items-center gap-1">
+                <FontAwesomeIcon icon={faClock} class="text-[--text-muted]" />
+                <span class="font-data">{(shot.duration / 1000).toFixed(1)}s</span>
               </div>
-
               {shot.volume && shot.volume > 0 && (
-                <div className='flex items-center gap-1'>
-                  <FontAwesomeIcon icon={faWeightScale} className='h-4 w-4' />
-                  <span>{round2(shot.volume)}g</span>
+                <div class="flex items-center gap-1">
+                  <FontAwesomeIcon icon={faWeightScale} class="text-[--text-muted]" />
+                  <span class="font-data">{round2(shot.volume)}g</span>
                 </div>
               )}
-
               {effectiveRating && effectiveRating > 0 ? (
-                <div className='flex items-center gap-1'>
-                  <FontAwesomeIcon icon={faStar} className='h-4 w-4 text-yellow-500' />
-                  <div className='relative inline-flex text-sm leading-none'>
-                    <div className='text-gray-300'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
-                    <div
-                      className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
-                      style={{ width: getRatingFillPercent(effectiveRating) }}
-                    >
-                      {'\u2605\u2605\u2605\u2605\u2605'}
+                <div class="flex items-center gap-1">
+                  <FontAwesomeIcon icon={faStar} class="text-yellow-400" />
+                  <div class="relative inline-flex text-sm leading-none">
+                    <div class="text-[--text-muted]">★★★★★</div>
+                    <div class="absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400" style={{ width: getRatingFillPercent(effectiveRating) }}>
+                      ★★★★★
                     </div>
                   </div>
-                  <span className='font-medium'>{formatTenPointRating(effectiveRating)}</span>
+                  <span class="text-[--text-primary] font-medium">{formatTenPointRating(effectiveRating)}</span>
                 </div>
               ) : (
-                <div className='text-base-content/50 flex items-center gap-1'>
-                  <FontAwesomeIcon icon={faStar} className='h-4 w-4' />
+                <div class="flex items-center gap-1 text-[--text-muted]">
+                  <FontAwesomeIcon icon={faStar} />
                   <span>Not rated</span>
                 </div>
               )}
             </div>
-
-            {expanded && (
-              <div className='border-base-content/20 mt-4 border-t pt-4'>
-                {!shot.loaded && (
-                  <div className='flex items-center justify-center py-8'>
-                    <span className='text-base-content/70 text-sm'>Loading shot data...</span>
-                  </div>
-                )}
-                {shot.loaded && hasSamples && <HistoryChart shot={shot} />}
-                {shot.loaded && (
-                  <ShotNotesCard
-                    shot={shot}
-                    onNotesLoaded={handleNotesLoaded}
-                    onNotesUpdate={handleNotesUpdate}
-                  />
-                )}
-                {shot.loaded && !hasSamples && (
-                  <div className='text-base-content/60 mt-4 text-sm'>
-                    This backup contains shot details and notes, but not the full sample trace.
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
+
+        {/* Expanded content */}
+        {expanded && (
+          <div class="mt-3 pt-3" style="border-top: 1px solid var(--border);">
+            {!shot.loaded && (
+              <div class="flex items-center justify-center py-8">
+                <span class="text-sm text-[--text-muted]">Loading shot data...</span>
+              </div>
+            )}
+            {shot.loaded && hasSamples && <HistoryChart shot={shot} />}
+            {shot.loaded && (
+              <ShotNotesCard
+                shot={shot}
+                onNotesLoaded={handleNotesLoaded}
+                onNotesUpdate={handleNotesUpdate}
+              />
+            )}
+            {shot.loaded && !hasSamples && (
+              <p class="text-sm text-[--text-muted] mt-3">
+                This backup contains shot details and notes, but not the full sample trace.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <VisualizerUploadModal
@@ -328,13 +253,8 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
         onClose={() => setShowUploadModal(false)}
         onUpload={handleUpload}
         isUploading={isUploading}
-        shotInfo={{
-          profile: shot.profile,
-          timestamp: shot.timestamp,
-          duration: shot.duration,
-          volume: shot.volume,
-        }}
+        shotInfo={{ profile: shot.profile, timestamp: shot.timestamp, duration: shot.duration, volume: shot.volume }}
       />
-    </Card>
+    </div>
   );
 }

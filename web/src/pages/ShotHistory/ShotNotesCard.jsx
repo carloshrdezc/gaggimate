@@ -4,6 +4,7 @@ import { ApiServiceContext } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
+import { faClose } from '@fortawesome/free-solid-svg-icons/faClose';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans, syncBeanUsageFromNotes } from '../../utils/beanManager.js';
 import {
@@ -14,23 +15,12 @@ import {
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const apiService = useContext(ApiServiceContext);
-  const notesKey =
-    shot.source === 'browser' ? String(shot.storageKey || shot.name || shot.id || '') : shot.id;
-
+  const notesKey = shot.source === 'browser' ? String(shot.storageKey || shot.name || shot.id || '') : shot.id;
   const [notes, setNotes] = useState({
-    id: shot.id,
-    rating: 0,
-    beanId: '',
-    beanType: '',
-    doseIn: '',
-    doseOut: '',
-    ratio: '',
-    grinder: '',
-    grindSetting: '',
-    balanceTaste: 'balanced',
-    notes: '',
+    id: shot.id, rating: 0, beanId: '', beanType: '',
+    doseIn: '', doseOut: '', ratio: '',
+    grinder: '', grindSetting: '', balanceTaste: 'balanced', notes: '',
   });
-
   const [loading, setLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
@@ -38,7 +28,6 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const savedNotesRef = useRef(null);
   const beanFieldListId = `bean-options-${notesKey}`;
 
-  // Calculate ratio function
   const calculateRatio = useCallback((doseIn, doseOut) => {
     if (doseIn && doseOut && parseFloat(doseIn) > 0 && parseFloat(doseOut) > 0) {
       return (parseFloat(doseOut) / parseFloat(doseIn)).toFixed(2);
@@ -46,77 +35,44 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     return '';
   }, []);
 
-  // Load notes ONLY on component mount
   useEffect(() => {
-    if (initialLoaded) return; // Prevent reloading
+    if (initialLoaded) return;
     notesService.setApiService(apiService);
-
     const loadNotes = async () => {
       try {
         let loadedNotes = {
-          id: notesKey,
-          rating: 0,
-          beanId: '',
-          beanType: shot.beanName || '',
-          doseIn: '',
-          doseOut: '',
-          ratio: '',
-          grinder: '',
-          grindSetting: '',
-          balanceTaste: 'balanced',
-          notes: '',
+          id: notesKey, rating: 0, beanId: '', beanType: shot.beanName || '',
+          doseIn: '', doseOut: '', ratio: '', grinder: '', grindSetting: '',
+          balanceTaste: 'balanced', notes: '',
         };
         const savedNotes = await notesService.loadNotes(notesKey, shot.source || 'gaggimate');
         loadedNotes = { ...loadedNotes, ...savedNotes, id: notesKey };
-
-        // Pre-populate doseOut with shot.volume if it's empty and shot.volume exists
         if (!loadedNotes.doseOut && shot.volume) {
           loadedNotes.doseOut = shot.volume.toFixed(1);
         }
-
-        // Calculate ratio from loaded data
         if (loadedNotes.doseIn && loadedNotes.doseOut) {
           loadedNotes.ratio = calculateRatio(loadedNotes.doseIn, loadedNotes.doseOut);
         }
-
         setNotes(loadedNotes);
         savedNotesRef.current = loadedNotes;
         setInitialLoaded(true);
-        // Pass loaded notes to parent
-        if (onNotesLoaded) {
-          onNotesLoaded(loadedNotes);
-        }
+        if (onNotesLoaded) onNotesLoaded(loadedNotes);
       } catch (error) {
         console.error('Failed to load notes:', error);
-
-        // Even if loading fails, set up defaults
         const defaultNotes = {
-          id: notesKey,
-          rating: 0,
-          beanId: '',
-          beanType: shot.beanName || '',
-          doseIn: '',
-          doseOut: shot.volume ? shot.volume.toFixed(1) : '',
-          ratio: '',
-          grinder: '',
-          grindSetting: '',
-          balanceTaste: 'balanced',
-          notes: '',
+          id: notesKey, rating: 0, beanId: '', beanType: shot.beanName || '',
+          doseIn: shot.volume ? shot.volume.toFixed(1) : '', ratio: '',
+          grinder: '', grindSetting: '', balanceTaste: 'balanced', notes: '',
         };
-
         setNotes(defaultNotes);
         savedNotesRef.current = defaultNotes;
         setInitialLoaded(true);
-        if (onNotesLoaded) {
-          onNotesLoaded(defaultNotes);
-        }
+        if (onNotesLoaded) onNotesLoaded(defaultNotes);
       }
     };
-
     loadNotes();
-  }, []); // No dependencies - only run once
+  }, []);
 
-  // Reset if shot changes
   useEffect(() => {
     if (notes.id !== notesKey) {
       setInitialLoaded(false);
@@ -127,48 +83,27 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
 
   useEffect(() => {
     let cancelled = false;
-
     const loadAvailableBeans = async () => {
       try {
         const beans = await listBeans(apiService);
-        if (!cancelled) {
-          setAvailableBeans(beans.filter(bean => !bean.archived));
-        }
+        if (!cancelled) setAvailableBeans(beans.filter(bean => !bean.archived));
       } catch (error) {
         console.error('Failed to load beans for shot notes:', error);
-        if (!cancelled) {
-          setAvailableBeans([]);
-        }
+        if (!cancelled) setAvailableBeans([]);
       }
     };
-
     loadAvailableBeans();
-
-    const handleBeansChanged = () => {
-      loadAvailableBeans();
-    };
-
+    const handleBeansChanged = () => loadAvailableBeans();
     window.addEventListener('beans-library-changed', handleBeansChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('beans-library-changed', handleBeansChanged);
-    };
+    return () => { cancelled = true; window.removeEventListener('beans-library-changed', handleBeansChanged); };
   }, [apiService]);
 
   useEffect(() => {
     if (!availableBeans.length || notes.beanId || !notes.beanType) return;
     const matchedBean = availableBeans.find(
-      bean =>
-        String(bean.name || '')
-          .trim()
-          .toLowerCase() ===
-        String(notes.beanType || '')
-          .trim()
-          .toLowerCase(),
+      bean => String(bean.name || '').trim().toLowerCase() === String(notes.beanType || '').trim().toLowerCase(),
     );
-    if (matchedBean) {
-      setNotes(prev => ({ ...prev, beanId: matchedBean.id }));
-    }
+    if (matchedBean) setNotes(prev => ({ ...prev, beanId: matchedBean.id }));
   }, [availableBeans, notes.beanId, notes.beanType]);
 
   const saveNotes = async () => {
@@ -178,9 +113,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
       await syncBeanUsageFromNotes(apiService, savedNotesRef.current, notes);
       savedNotesRef.current = notes;
       setIsEditing(false);
-      if (onNotesUpdate) {
-        onNotesUpdate(notes);
-      }
+      if (onNotesUpdate) onNotesUpdate(notes);
     } catch (error) {
       console.error('Failed to save notes:', error);
     } finally {
@@ -190,276 +123,253 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
 
   const handleInputChange = (field, value) => {
     setNotes(prev => {
-      const matchedBean =
-        field === 'beanType'
-          ? availableBeans.find(bean => normalizeBeanName(bean.name) === normalizeBeanName(value))
-          : availableBeans.find(bean => bean.id === prev.beanId) || null;
+      const matchedBean = field === 'beanType'
+        ? availableBeans.find(bean => normalizeBeanName(bean.name) === normalizeBeanName(value))
+        : availableBeans.find(bean => bean.id === prev.beanId) || null;
       const newNotes = {
         ...prev,
         [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
       };
-
-      if (field === 'beanType') {
-        newNotes.beanId = matchedBean?.id || '';
-      }
-
-      // Only recalculate ratio if we're changing doseIn or doseOut
+      if (field === 'beanType') newNotes.beanId = matchedBean?.id || '';
       if ((field === 'doseIn' || field === 'doseOut') && initialLoaded) {
         const doseIn = field === 'doseIn' ? value : prev.doseIn;
         const doseOut = field === 'doseOut' ? value : prev.doseOut;
         newNotes.ratio = calculateRatio(doseIn, doseOut);
       }
-
       return newNotes;
     });
   };
 
-  const normalizeBeanName = value =>
-    String(value || '')
-      .trim()
-      .toLowerCase();
+  const normalizeBeanName = value => String(value || '').trim().toLowerCase();
 
   const renderStars = rating => (
-    <div className='relative inline-flex text-lg leading-none'>
-      <div className='text-gray-300'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
-      <div
-        className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
-        style={{ width: getRatingFillPercent(rating) }}
-      >
-        {'\u2605\u2605\u2605\u2605\u2605'}
+    <div class="relative inline-flex text-lg leading-none">
+      <div class="text-[--text-muted]">★★★★★</div>
+      <div class="absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400" style={{ width: getRatingFillPercent(rating) }}>
+        ★★★★★
       </div>
     </div>
   );
 
   const getTasteColor = taste => {
     switch (taste) {
-      case 'bitter':
-        return 'text-orange-600';
-      case 'sour':
-        return 'text-yellow-600';
-      case 'balanced':
-        return 'text-green-600';
-      default:
-        return '';
+      case 'bitter': return 'text-orange-400';
+      case 'sour': return 'text-amber-400';
+      case 'balanced': return 'text-emerald-400';
+      default: return 'text-[--text-secondary]';
     }
   };
 
-  // Don't render until initial load is complete
+  const FieldLabel = ({ children }) => (
+    <label class="block text-xs font-medium text-[--text-secondary] mb-1.5">{children}</label>
+  );
+
+  const FieldValue = ({ children }) => (
+    <div class="w-full px-3 py-2 rounded-lg text-sm text-[--text-primary]" style="background: var(--bg-elevated); border: 1px solid var(--border);">
+      {children || '\u2014'}
+    </div>
+  );
+
+  const StyledInput = ({ type = 'text', value, placeholder, onChange, step, min, max, list }) => (
+    <input
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      step={step}
+      min={min}
+      max={max}
+      list={list}
+      onChange={e => onChange(e.target.value)}
+      class="w-full px-3 py-2 rounded-lg text-sm text-[--text-primary] placeholder:text-[--text-muted]"
+      style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none;"
+      onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+      onBlur={e => e.target.style.borderColor = 'var(--border)'}
+    />
+  );
+
   if (!initialLoaded) {
     return (
-      <div className='mt-6 border-t pt-6'>
-        <div className='flex items-center justify-center py-8'>
-          <span className='loading loading-spinner loading-md'></span>
-        </div>
+      <div class="flex items-center justify-center py-8 mt-3">
+        <div class="size-5 rounded-full border-2 border-[--accent] border-t-transparent animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className='border-t-base-content/10 accent mt-6 border-t-2 pt-6'>
-      <div className='mb-4 flex items-center justify-between'>
-        <h3 className='text-lg font-semibold'>Shot Notes</h3>
+    <div class="mt-4 pt-4" style="border-top: 1px solid var(--border);">
+      {/* Header */}
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-sm font-semibold text-[--text-primary]">Shot Notes</h3>
         {!isEditing ? (
-          <button onClick={() => setIsEditing(true)} className='btn btn-sm btn-outline'>
+          <button
+            onClick={() => setIsEditing(true)}
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[--text-secondary] border border-[--border] hover:border-[--accent] hover:text-[--accent] transition-all"
+          >
             <FontAwesomeIcon icon={faEdit} />
             Edit
           </button>
         ) : (
-          <div className='flex gap-2'>
+          <div class="flex gap-2">
             <button
-              onClick={() => setIsEditing(false)}
-              className='btn btn-sm btn-ghost'
+              onClick={() => { setIsEditing(false); setNotes(savedNotesRef.current || notes); }}
               disabled={loading}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[--text-secondary] border border-[--border] hover:border-[--border-active] transition-all"
             >
+              <FontAwesomeIcon icon={faClose} />
               Cancel
             </button>
-            <button onClick={saveNotes} className='btn btn-sm btn-primary' disabled={loading}>
-              {loading ? (
-                <Spinner size={4} />
-              ) : (
-                <>
-                  <FontAwesomeIcon icon={faSave} />
-                  Save
-                </>
-              )}
+            <button
+              onClick={saveNotes}
+              disabled={loading}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style="background: var(--accent); color: var(--bg-base);"
+            >
+              {loading ? <div class="size-3.5 rounded-full border-2 border-t-transparent animate-spin" style="border-color: var(--bg-base);" /> : <FontAwesomeIcon icon={faSave} />}
+              Save
             </button>
           </div>
         )}
       </div>
 
-      <div className='grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4'>
+      {/* Fields grid */}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         {/* Rating */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Rating</label>
-          <div className='flex items-center gap-3'>
+        <div>
+          <FieldLabel>Rating</FieldLabel>
+          <div class="flex items-center gap-2">
             {renderStars(notes.rating)}
             {isEditing ? (
               <input
-                type='number'
-                min='0'
-                max='10'
-                step='0.25'
-                className='input input-bordered w-28'
+                type="number"
+                min="0"
+                max="10"
+                step="0.25"
                 value={notes.rating || ''}
                 onChange={e => handleInputChange('rating', e.target.value)}
-                placeholder='0-10'
+                placeholder="0-10"
+                class="px-2 py-1 rounded-lg text-sm w-16 text-center"
+                style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none; color: var(--text-primary);"
+                onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                onBlur={e => e.target.style.borderColor = 'var(--border)'}
               />
             ) : (
-              <div className='text-sm font-medium'>{formatTenPointRating(notes.rating)}</div>
+              <span class="text-sm font-medium text-[--text-primary]">{formatTenPointRating(notes.rating)}</span>
             )}
           </div>
         </div>
 
         {/* Bean Type */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Bean Type</label>
+        <div>
+          <FieldLabel>Bean Type</FieldLabel>
           {isEditing ? (
             <>
               <input
-                type='text'
+                type="text"
                 list={beanFieldListId}
-                className='input input-bordered w-full'
                 value={notes.beanType}
                 onChange={e => handleInputChange('beanType', e.target.value)}
-                placeholder='Choose a saved bean or enter a custom name'
+                placeholder="Choose or type..."
+                class="w-full px-3 py-2 rounded-lg text-sm text-[--text-primary] placeholder:text-[--text-muted]"
+                style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none;"
+                onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                onBlur={e => e.target.style.borderColor = 'var(--border)'}
               />
               <datalist id={beanFieldListId}>
-                {availableBeans.map(bean => (
-                  <option key={bean.id} value={bean.name} />
-                ))}
+                {availableBeans.map(bean => <option key={bean.id} value={bean.name} />)}
               </datalist>
             </>
           ) : (
-            <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.beanType || '\u2014'}
-            </div>
+            <FieldValue>{notes.beanType}</FieldValue>
           )}
         </div>
 
         {/* Dose In */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Dose In (g)</label>
+        <div>
+          <FieldLabel>Dose In (g)</FieldLabel>
           {isEditing ? (
-            <input
-              type='number'
-              step='0.1'
-              className='input input-bordered w-full'
-              value={notes.doseIn}
-              onChange={e => handleInputChange('doseIn', e.target.value)}
-              placeholder='18.0'
-            />
+            <StyledInput type="number" step="0.1" value={notes.doseIn} placeholder="18.0" onChange={v => handleInputChange('doseIn', v)} />
           ) : (
-            <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.doseIn || '\u2014'}
-            </div>
+            <FieldValue>{notes.doseIn}g</FieldValue>
           )}
         </div>
 
         {/* Dose Out */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Dose Out (g)</label>
+        <div>
+          <FieldLabel>Dose Out (g)</FieldLabel>
           {isEditing ? (
-            <input
-              type='number'
-              step='0.1'
-              className='input input-bordered w-full'
-              value={notes.doseOut}
-              onChange={e => handleInputChange('doseOut', e.target.value)}
-              placeholder='36.0'
-            />
+            <StyledInput type="number" step="0.1" value={notes.doseOut} placeholder="36.0" onChange={v => handleInputChange('doseOut', v)} />
           ) : (
-            <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.doseOut || '\u2014'}
-            </div>
+            <FieldValue>{notes.doseOut}g</FieldValue>
           )}
         </div>
 
         {/* Ratio */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>
-            Ratio (1:{notes.ratio || '\u2014'})
-          </label>
-          <div className='input input-bordered bg-base-200 w-full cursor-default'>
-            {notes.ratio ? `1:${notes.ratio}` : '\u2014'}
-          </div>
+        <div>
+          <FieldLabel>Ratio</FieldLabel>
+          <FieldValue>{notes.ratio ? `1:${notes.ratio}` : '\u2014'}</FieldValue>
         </div>
 
         {/* Grinder */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Grinder</label>
+        <div>
+          <FieldLabel>Grinder</FieldLabel>
           {isEditing ? (
-            <input
-              type='text'
-              className='input input-bordered w-full'
-              value={notes.grinder}
-              onChange={e => handleInputChange('grinder', e.target.value)}
-              placeholder='e.g., Niche Zero'
-            />
+            <StyledInput type="text" value={notes.grinder} placeholder="e.g., Niche Zero" onChange={v => handleInputChange('grinder', v)} />
           ) : (
-            <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.grinder || '\u2014'}
-            </div>
+            <FieldValue>{notes.grinder}</FieldValue>
           )}
         </div>
 
         {/* Grind Setting */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Grind Setting</label>
+        <div>
+          <FieldLabel>Grind Setting</FieldLabel>
           {isEditing ? (
-            <input
-              type='text'
-              className='input input-bordered w-full'
-              value={notes.grindSetting}
-              onChange={e => handleInputChange('grindSetting', e.target.value)}
-              placeholder='e.g., 2.5, Medium-Fine'
-            />
+            <StyledInput type="text" value={notes.grindSetting} placeholder="e.g., 2.5" onChange={v => handleInputChange('grindSetting', v)} />
           ) : (
-            <div className='input input-bordered bg-base-200 w-full cursor-default'>
-              {notes.grindSetting || '\u2014'}
-            </div>
+            <FieldValue>{notes.grindSetting}</FieldValue>
           )}
         </div>
 
         {/* Balance/Taste */}
-        <div className='form-control'>
-          <label className='mb-2 block text-sm font-medium'>Balance/Taste</label>
+        <div>
+          <FieldLabel>Balance / Taste</FieldLabel>
           {isEditing ? (
             <select
-              className='select select-bordered w-full'
               value={notes.balanceTaste}
               onChange={e => handleInputChange('balanceTaste', e.target.value)}
+              class="w-full px-3 py-2 rounded-lg text-sm text-[--text-primary] cursor-pointer"
+              style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none;"
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'}
             >
-              <option value='bitter'>Bitter</option>
-              <option value='balanced'>Balanced</option>
-              <option value='sour'>Sour</option>
+              <option value="bitter">Bitter</option>
+              <option value="balanced">Balanced</option>
+              <option value="sour">Sour</option>
             </select>
           ) : (
-            <div
-              className={`input input-bordered bg-base-200 w-full cursor-default capitalize ${getTasteColor(notes.balanceTaste)}`}
-            >
+            <div class={`w-full px-3 py-2 rounded-lg text-sm font-medium ${getTasteColor(notes.balanceTaste)}`} style="background: var(--bg-elevated); border: 1px solid var(--border);">
               {notes.balanceTaste}
             </div>
           )}
         </div>
       </div>
 
-      {/* Notes Text Area - Full Width */}
-      <div className='form-control mt-6'>
-        <label className='mb-2 block text-sm font-medium'>
-          Notes{' '}
-          {isEditing && <span className='text-xs text-gray-500'>({notes.notes.length}/200)</span>}
-        </label>
+      {/* Notes - full width */}
+      <div class="mt-4">
+        <FieldLabel>Notes {isEditing && <span class="text-[--text-muted]">({notes.notes.length}/200)</span>}</FieldLabel>
         {isEditing ? (
           <textarea
-            className='textarea textarea-bordered w-full'
-            rows='4'
             value={notes.notes}
             maxLength={200}
             onChange={e => handleInputChange('notes', e.target.value)}
-            placeholder='Tasting notes, brewing observations, etc...'
+            placeholder="Tasting notes, observations..."
+            rows={3}
+            class="w-full px-3 py-2 rounded-lg text-sm text-[--text-primary] placeholder:text-[--text-muted] resize-none"
+            style="background: var(--bg-elevated); border: 1px solid var(--border); outline: none;"
+            onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+            onBlur={e => e.target.style.borderColor = 'var(--border)'}
           />
         ) : (
-          <div className='textarea textarea-bordered bg-base-200 min-h-[6rem] w-full cursor-default'>
+          <div class="w-full px-3 py-2 min-h-[4rem] rounded-lg text-sm text-[--text-secondary]" style="background: var(--bg-elevated); border: 1px solid var(--border);">
             {notes.notes || 'No notes added'}
           </div>
         )}
