@@ -44,30 +44,20 @@ export function BeansPage() {
 
   useEffect(() => {
     let cancelled = false;
-
     const hydrate = async () => {
       try {
         setBusy(true);
         await migrateLegacyBeansToDevice(apiService);
         const loadedBeans = await listBeans(apiService);
-        if (!cancelled) {
-          setBeans(loadedBeans);
-        }
+        if (!cancelled) setBeans(loadedBeans);
       } catch (error) {
         console.error('Failed to load beans:', error);
       } finally {
-        if (!cancelled) {
-          setBusy(false);
-        }
+        if (!cancelled) setBusy(false);
       }
     };
-
     hydrate();
-
-    const handleBeansChanged = () => {
-      loadBeans().catch(error => console.error('Failed to refresh beans:', error));
-    };
-
+    const handleBeansChanged = () => loadBeans().catch(error => console.error('Failed to refresh beans:', error));
     window.addEventListener('beans-library-changed', handleBeansChanged);
     return () => {
       cancelled = true;
@@ -83,7 +73,7 @@ export function BeansPage() {
   const activeCount = useMemo(() => beans.filter(bean => !bean.archived).length, [beans]);
   const archivedCount = useMemo(() => beans.filter(bean => bean.archived).length, [beans]);
   const totalBeansLabel = useMemo(
-    () => `${activeCount} active${archivedCount ? ` • ${archivedCount} archived` : ''}`,
+    () => `${activeCount} active${archivedCount ? ` · ${archivedCount} archived` : ''}`,
     [activeCount, archivedCount],
   );
 
@@ -128,9 +118,7 @@ export function BeansPage() {
       setBusy(true);
       try {
         setBeans(await removeBean(apiService, beanId));
-        if (editingBeanId === beanId) {
-          resetBeanDraft();
-        }
+        if (editingBeanId === beanId) resetBeanDraft();
       } finally {
         setBusy(false);
       }
@@ -175,7 +163,6 @@ export function BeansPage() {
     async event => {
       const [file] = Array.from(event.target.files || []);
       if (!file) return;
-
       setBusy(true);
       try {
         const payload = JSON.parse(await file.text());
@@ -193,76 +180,93 @@ export function BeansPage() {
     [apiService, loadBeans],
   );
 
+  // Loading skeleton
+  if (busy && beans.length === 0) {
+    return (
+      <div class="space-y-4">
+        <div class="h-8 w-24 rounded-lg skeleton" style="background: linear-gradient(90deg, var(--bg-elevated) 0%, var(--border) 50%, var(--bg-elevated) 100%); background-size: 200% 100%; animation: shimmer 1.5s infinite;" />
+        <div class="h-48 rounded-xl skeleton" style="background: linear-gradient(90deg, var(--bg-elevated) 0%, var(--border) 50%, var(--bg-elevated) 100%); background-size: 200% 100%; animation: shimmer 1.5s infinite;" />
+      </div>
+    );
+  }
+
   return (
-    <>
-      <div className='mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
-        <div>
-          <div className='mb-2 inline-flex items-center gap-2 rounded-full border border-secondary/15 bg-secondary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-secondary'>
+    <div class="space-y-6">
+      {/* Page Header */}
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="flex-1">
+          <div class="mb-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest" style="color: var(--accent); background: var(--accent-glow);">
             <FontAwesomeIcon icon={faLeaf} />
             Bean Library
           </div>
-          <h1 className='text-2xl font-bold sm:text-3xl'>Beans</h1>
-          <p className='mt-2 max-w-2xl text-sm leading-relaxed text-base-content/70'>
-            Beans are now stored on the machine, so the same library is available from any device
-            that opens GaggiMate. Track remaining quantity, archive finished bags, and export a
-            backup when you want a copy offline.
+          <h1 class="text-2xl font-semibold text-[--text-primary]">Beans</h1>
+          <p class="mt-2 max-w-xl text-sm leading-relaxed text-[--text-secondary]">
+            Beans are stored on the machine — the same library is available from any device. Track remaining quantity, archive finished bags, and export a backup.
           </p>
         </div>
-        <div className='flex flex-wrap items-center justify-end gap-2'>
-          <div className='rounded-full border border-base-content/10 bg-base-100/45 px-4 py-2 text-sm font-medium text-base-content/70'>
-            {totalBeansLabel}
+        <div class="flex flex-col items-end gap-3">
+          <div class="text-sm text-[--text-muted]">{totalBeansLabel}</div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              onClick={onExport}
+              disabled={busy || beans.length === 0}
+              class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[--text-secondary] border border-[--border] hover:border-[--border-active] hover:text-[--text-primary] transition-all disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faFileExport} />
+              <span>Export</span>
+            </button>
+            <button
+              onClick={() => importInputRef.current?.click()}
+              disabled={busy}
+              class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[--text-secondary] border border-[--border] hover:border-[--border-active] hover:text-[--text-primary] transition-all"
+            >
+              <FontAwesomeIcon icon={faFileImport} />
+              <span>Import</span>
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json,application/json"
+              class="hidden"
+              onChange={onImport}
+            />
           </div>
-          <button className='btn btn-sm btn-outline' onClick={onExport} disabled={busy || beans.length === 0}>
-            <FontAwesomeIcon icon={faFileExport} />
-            Export Beans
-          </button>
-          <button className='btn btn-sm btn-outline' onClick={() => importInputRef.current?.click()} disabled={busy}>
-            <FontAwesomeIcon icon={faFileImport} />
-            Import Beans
-          </button>
-          <input
-            ref={importInputRef}
-            type='file'
-            accept='.json,application/json'
-            className='hidden'
-            onChange={onImport}
-          />
         </div>
       </div>
 
-      <div className='mb-4 flex flex-wrap items-center gap-2'>
+      {/* Active / All toggle */}
+      <div class="flex gap-1 p-1 rounded-lg w-fit" style="background: var(--bg-elevated);">
         <button
-          type='button'
-          className={`btn btn-sm ${showArchived ? 'btn-outline' : 'btn-primary'}`}
+          type="button"
           onClick={() => setShowArchived(false)}
+          class="px-4 py-1.5 rounded-md text-sm font-medium transition-all"
+          style={!showArchived ? 'background: var(--accent); color: var(--bg-base);' : 'color: var(--text-secondary);'}
         >
           Active Beans
         </button>
         <button
-          type='button'
-          className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-outline'}`}
+          type="button"
           onClick={() => setShowArchived(true)}
+          class="px-4 py-1.5 rounded-md text-sm font-medium transition-all"
+          style={showArchived ? 'background: var(--accent); color: var(--bg-base);' : 'color: var(--text-secondary);'}
         >
           All Beans
         </button>
       </div>
 
-      <div className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
-        <div className='lg:col-span-12'>
-          <BeanManagerCard
-            beans={visibleBeans}
-            draft={beanDraft}
-            editing={!!editingBeanId}
-            onDraftChange={onBeanDraftChange}
-            onSubmit={onBeanSubmit}
-            onEdit={onBeanEdit}
-            onDelete={onBeanDelete}
-            onArchiveToggle={onBeanArchiveToggle}
-            onCancel={resetBeanDraft}
-            busy={busy}
-          />
-        </div>
-      </div>
-    </>
+      {/* Bean form + list */}
+      <BeanManagerCard
+        beans={visibleBeans}
+        draft={beanDraft}
+        editing={!!editingBeanId}
+        onDraftChange={onBeanDraftChange}
+        onSubmit={onBeanSubmit}
+        onEdit={onBeanEdit}
+        onDelete={onBeanDelete}
+        onArchiveToggle={onBeanArchiveToggle}
+        onCancel={resetBeanDraft}
+        busy={busy}
+      />
+    </div>
   );
 }

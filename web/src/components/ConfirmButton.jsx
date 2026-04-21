@@ -4,6 +4,7 @@ import { Tooltip } from './Tooltip.jsx';
 
 export function ConfirmButton({ onAction, icon, tooltip, confirmTooltip, btnSize = 'sm' }) {
   const [confirm, setConfirm] = useState(false);
+
   const confirmOrAction = useCallback(() => {
     if (confirm) {
       onAction();
@@ -11,19 +12,19 @@ export function ConfirmButton({ onAction, icon, tooltip, confirmTooltip, btnSize
     } else {
       setConfirm(true);
     }
-  }, [confirm, setConfirm, onAction]);
+  }, [confirm, onAction]);
+
+  const sizeClass = btnSize === 'sm' ? 'btn-sm' : btnSize === 'lg' ? 'btn-lg' : '';
 
   return (
     <Tooltip content={confirm ? confirmTooltip : tooltip}>
       <button
-        onClick={() => {
-          confirmOrAction();
-        }}
-        className={`btn btn-ghost btn-${btnSize} text-error cursor-pointer transition-colors ${confirm ? 'bg-error text-error-content font-semibold' : 'hover:text-error hover:bg-error/10'}`}
+        onClick={confirmOrAction}
+        class={`btn btn-ghost ${sizeClass} transition-all duration-150 ${confirm ? 'bg-[--error] text-white font-semibold' : 'text-[--error] hover:bg-[--error]/10'}`}
         aria-label={confirm ? confirmTooltip : tooltip}
       >
         <FontAwesomeIcon icon={icon} />
-        {confirm && <span className='ml-2 hidden sm:inline'>Confirm</span>}
+        {confirm && <span class="ml-2 hidden sm:inline">Confirm</span>}
       </button>
     </Tooltip>
   );
