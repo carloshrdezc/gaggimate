@@ -1,7 +1,5 @@
 /**
- * EmptyState.jsx
- * * Empty state component for Shot Analyzer.
- * Explains the dual-source system to users.
+ * EmptyState.jsx - Dark Precision restyle
  */
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEye } from '@fortawesome/free-solid-svg-icons/faEye';
@@ -16,123 +14,78 @@ const deepDiveLogoMarkup = DeepDiveLogoRaw.replace(
 ).replaceAll('fill="#ffffff"', 'fill="currentColor"');
 
 function DeepDiveLogoMark() {
-  // Inline the original SVG markup from the asset file so the logo renders on
-  // first paint without a second request and without manually duplicating its paths.
   return (
     <div
-      className='mx-auto h-24 w-24 opacity-20 [&>svg]:h-full [&>svg]:w-full'
-      style={{ color: 'var(--color-base-content)' }}
+      class="mx-auto opacity-15 [&>svg]:h-24 [&>svg]:w-24"
+      style={{ color: 'var(--text-muted)' }}
       dangerouslySetInnerHTML={{ __html: deepDiveLogoMarkup }}
-      aria-hidden='true'
+      aria-hidden="true"
     />
   );
 }
 
+const SourceRow = ({ icon, title, description }) => (
+  <div class="flex items-start gap-3 py-3">
+    <div class="flex size-8 shrink-0 items-center justify-center">
+      {icon}
+    </div>
+    <div class="flex-1">
+      <h3 class="text-sm font-semibold text-[--text-primary] mb-0.5">{title}</h3>
+      <p class="text-xs text-[--text-muted] leading-relaxed">{description}</p>
+    </div>
+  </div>
+);
+
 export function EmptyState({ loading }) {
   if (loading) {
     return (
-      <div className='flex min-h-[20vh] items-center justify-center p-8'>
-        <Spinner />
+      <div class="flex items-center justify-center py-16">
+        <div class="size-8 rounded-full border-2 border-[--accent] border-t-transparent animate-spin" />
       </div>
     );
   }
+
   return (
-    <div className='flex min-h-[60vh] items-start justify-center pb-8'>
-      <div className='w-full space-y-6 text-center'>
-        {/* Info Box */}
-        <div className='bg-base-200/60 border-base-content/5 w-full space-y-6 rounded-xl border p-8 text-left shadow-sm'>
-          <div className='border-base-content/10 space-y-2 border-b pb-4 text-center'>
-            <h2 className='text-base-content text-2xl font-bold'>No Shot Loaded</h2>
-            <p className='text-base-content text-sm opacity-70'>
-              Import a shot file or select one from your library to start analyzing.
-            </p>
-          </div>
-
-          <p className='text-base-content border-base-content/10 mb-4 border-b pb-2 text-sm font-bold tracking-wide uppercase'>
-            Supported Sources
-          </p>
-
-          {/* GM Section */}
-          <div className='flex items-start gap-4'>
-            <div className='flex h-8 w-10 flex-shrink-0 items-center justify-center'>
-              <SourceMarker source='gaggimate' variant='large' />
-            </div>
-
-            <div className='flex-1'>
-              {/* REMOVED HOVER EFFECT */}
-              <h3 className='text-base-content mb-1 text-sm font-bold'>GaggiMate (GM)</h3>
-              <p className='text-base-content text-xs leading-relaxed'>
-                Your saved shots and profiles directly from the GaggiMate internal storage.
-              </p>
-            </div>
-          </div>
-
-          {/* Divider - Subtle */}
-          <div className='bg-base-content/5 h-px w-full'></div>
-
-          {/* VIEW Section */}
-          <div className='flex items-start gap-4'>
-            <div className='text-base-content/45 flex h-8 w-10 flex-shrink-0 items-center justify-center'>
-              <FontAwesomeIcon icon={faEye} className='text-lg' />
-            </div>
-
-            <div className='flex-1'>
-              <h3 className='text-base-content mb-1 text-sm font-bold'>Temporary View (VIEW)</h3>
-              <p className='text-base-content text-xs leading-relaxed'>
-                Opens imported external shots and profiles temporarily without saving them to the
-                browser library.
-              </p>
-            </div>
-          </div>
-
-          {/* Divider - Subtle */}
-          <div className='bg-base-content/5 h-px w-full'></div>
-
-          {/* WEB Section */}
-          <div className='flex items-start gap-4'>
-            <div className='flex h-8 w-10 flex-shrink-0 items-center justify-center'>
-              <SourceMarker source='browser' variant='large' />
-            </div>
-
-            <div className='flex-1'>
-              {/* REMOVED HOVER EFFECT */}
-              <h3 className='text-base-content mb-1 text-sm font-bold'>
-                Local Browser Storage (WEB)
-              </h3>
-              <div className='text-base-content text-xs leading-relaxed'>
-                Stores imported external shots and profiles locally in this browser on this device.
-                They are not automatically available in other browsers or on other devices.
-              </div>
-            </div>
-          </div>
-
-          {/* Divider - Subtle */}
-          <div className='bg-base-content/5 h-px w-full'></div>
-
-          <p className='text-base-content border-base-content/10 mb-4 border-b pb-2 text-sm font-bold tracking-wide uppercase'>
-            Import Guidance
-          </p>
-
-          <div className='text-base-content text-xs leading-relaxed'>
-            <span className='block'>
-              Drag and drop files onto the status bar or use the import icons in the shot and
-              profile badges.
-            </span>
-            <span className='mt-1 block'>
-              Use the status bar toggle to switch between{' '}
-              <span className='text-base-content font-bold'>View temporarily</span> and{' '}
-              <span className='font-bold' style={{ color: analyzerUiColors.sourceBadgeWebText }}>
-                Save to Browser
-              </span>{' '}
-              before importing.
-            </span>
-            <span className='mt-1 block'>Bulk upload and download are supported.</span>
-          </div>
+    <div class="flex flex-col items-center justify-center py-8">
+      <div class="w-full max-w-lg rounded-xl p-6" style="background: var(--bg-elevated); border: 1px solid var(--border);">
+        {/* Header */}
+        <div class="text-center mb-6 pb-5" style="border-bottom: 1px solid var(--border);">
+          <h2 class="text-xl font-semibold text-[--text-primary]">No Shot Loaded</h2>
+          <p class="text-sm text-[--text-muted] mt-1">Import a shot file or select one from your library to start analyzing.</p>
         </div>
-        <div className='mx-auto max-w-2xl'>
-          <DeepDiveLogoMark />
+
+        {/* Supported Sources */}
+        <p class="text-xs font-semibold text-[--text-muted] uppercase tracking-wider mb-1">Supported Sources</p>
+        <div class="mb-4" style="border-bottom: 1px solid var(--border);">
+          <SourceRow
+            icon={<SourceMarker source="gaggimate" variant="large" />}
+            title="GaggiMate (GM)"
+            description="Your saved shots and profiles directly from the GaggiMate internal storage."
+          />
+          <div class="h-px w-full" style="background: var(--border);" />
+          <SourceRow
+            icon={<FontAwesomeIcon icon={faEye} class="text-lg text-[--text-muted]" />}
+            title="Temporary View (VIEW)"
+            description="Opens imported external shots and profiles temporarily without saving them to the browser library."
+          />
+          <div class="h-px w-full" style="background: var(--border);" />
+          <SourceRow
+            icon={<SourceMarker source="browser" variant="large" />}
+            title="Local Browser Storage (WEB)"
+            description="Stores imported external shots and profiles locally in this browser on this device. Not available in other browsers or devices."
+          />
+        </div>
+
+        {/* Import Guidance */}
+        <p class="text-xs font-semibold text-[--text-muted] uppercase tracking-wider mb-2">Import Guidance</p>
+        <div class="text-xs text-[--text-muted] space-y-1.5 leading-relaxed">
+          <p>Drag and drop files onto the status bar or use the import icons in the shot and profile badges.</p>
+          <p>Use the status bar toggle to switch between <span class="text-[--text-primary] font-medium">View temporarily</span> and <span class="font-medium" style={`color: ${analyzerUiColors.sourceBadgeWebText};`}>Save to Browser</span> before importing.</p>
+          <p>Bulk upload and download are supported.</p>
         </div>
       </div>
+
+      <DeepDiveLogoMark />
     </div>
   );
 }
