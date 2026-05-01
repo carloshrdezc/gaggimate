@@ -19,6 +19,15 @@ const ui_theme_variable_t _ui_theme_alpha_Progress[2] = {255, 255};
 
 const ui_theme_variable_t _ui_theme_color_Heating[2] = {0xE97A33, 0xB95B24};
 const ui_theme_variable_t _ui_theme_alpha_Heating[2] = {255, 255};
+
+// Nothing theme colors — all three slots use identical Nothing values
+const ui_theme_variable_t _ui_theme_color_NothingBase[3]     = {0x000000, 0x000000, 0x000000};
+const ui_theme_variable_t _ui_theme_color_NothingTrack[3]    = {0x1A1A1A, 0x1A1A1A, 0x1A1A1A};
+const ui_theme_variable_t _ui_theme_color_NothingContent[3] = {0xE8E8E8, 0xE8E8E8, 0xE8E8E8};
+const ui_theme_variable_t _ui_theme_color_NothingRed[3]     = {0xD71921, 0xD71921, 0xD71921};
+const ui_theme_variable_t _ui_theme_color_NothingMuted[3]   = {0x888888, 0x888888, 0x888888};
+const ui_theme_variable_t _ui_theme_color_NothingDisabled[3] = {0x5A5A5A, 0x5A5A5A, 0x5A5A5A};
+
 uint8_t ui_theme_idx = UI_THEME_DEFAULT;
 
 void ui_theme_set(uint8_t theme_idx) {

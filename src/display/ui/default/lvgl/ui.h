@@ -24,6 +24,8 @@ extern "C" {
 
 #include "components/ui_comp.h"
 #include "components/ui_comp_hook.h"
+#include "components/ui_comp_nothing_dials.h"
+#include "fonts/ui_nothing_font.h"
 #include "ui_events.h"
 #include "ui_helpers.h"
 #include "ui_theme_manager.h"

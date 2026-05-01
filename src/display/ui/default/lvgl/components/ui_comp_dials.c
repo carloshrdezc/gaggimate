@@ -4,10 +4,15 @@
 // Project name: GaggiMate
 
 #include "../ui.h"
+#include "ui_comp_nothing_dials.h"
 
 // COMPONENT dials
 
 lv_obj_t *ui_dials_create(lv_obj_t *comp_parent) {
+    if (ui_theme_idx == UI_THEME_NOTHING) {
+        lv_obj_del(lv_obj_get_child(comp_parent, 0));
+        return ui_nothing_dials_create(comp_parent);
+    }
 
     lv_obj_t *cui_dials;
     cui_dials = lv_obj_create(comp_parent);

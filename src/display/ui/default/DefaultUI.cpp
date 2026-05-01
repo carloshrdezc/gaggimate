@@ -106,11 +106,10 @@ struct DisplayPalette {
 };
 
 int resolveDisplayThemeMode(const int requestedThemeMode, const bool amoledPanel) {
-    if (amoledPanel) {
-        return UI_THEME_DEFAULT;
+    if (requestedThemeMode == UI_THEME_LIGHT || requestedThemeMode == UI_THEME_NOTHING) {
+        return requestedThemeMode;
     }
-
-    return requestedThemeMode == UI_THEME_LIGHT ? UI_THEME_LIGHT : UI_THEME_DEFAULT;
+    return UI_THEME_DEFAULT;
 }
 
 DisplayPalette makeDisplayPalette(const int themeMode, const bool amoledPanel) {

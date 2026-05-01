@@ -15,10 +15,18 @@ extern "C" {
 #define UI_THEME_COLOR_SEMIDARK 2
 #define UI_THEME_COLOR_PROGRESS 3
 #define UI_THEME_COLOR_HEATING 4
+#define UI_THEME_COLOR_NOTHINGBASE 5
+#define UI_THEME_COLOR_NOTHINGTRACK 6
+#define UI_THEME_COLOR_NOTHINGCONTENT 7
+#define UI_THEME_COLOR_NOTHINGRED 8
+#define UI_THEME_COLOR_NOTHINGMUTED 9
+#define UI_THEME_COLOR_NOTHINGDISABLED 10
 
 #define UI_THEME_DEFAULT 0
 
 #define UI_THEME_LIGHT 1
+
+#define UI_THEME_NOTHING 2
 
 extern const ui_theme_variable_t _ui_theme_color_NiceWhite[2];
 extern const ui_theme_variable_t _ui_theme_alpha_NiceWhite[2];
@@ -35,8 +43,15 @@ extern const ui_theme_variable_t _ui_theme_alpha_Progress[2];
 extern const ui_theme_variable_t _ui_theme_color_Heating[2];
 extern const ui_theme_variable_t _ui_theme_alpha_Heating[2];
 
-extern const uint32_t *ui_theme_colors[2];
-extern const uint8_t *ui_theme_alphas[2];
+extern const ui_theme_variable_t _ui_theme_color_NothingBase[3];
+extern const ui_theme_variable_t _ui_theme_color_NothingTrack[3];
+extern const ui_theme_variable_t _ui_theme_color_NothingContent[3];
+extern const ui_theme_variable_t _ui_theme_color_NothingRed[3];
+extern const ui_theme_variable_t _ui_theme_color_NothingMuted[3];
+extern const ui_theme_variable_t _ui_theme_color_NothingDisabled[3];
+
+extern const uint32_t *ui_theme_colors[3];
+extern const uint8_t *ui_theme_alphas[3];
 extern uint8_t ui_theme_idx;
 
 void ui_theme_set(uint8_t theme_idx);
