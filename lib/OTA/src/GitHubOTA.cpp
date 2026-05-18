@@ -75,7 +75,9 @@ void GitHubOTA::checkForUpdates() {
             return;
         }
 
-        version = version.substring(1);
+        if (version.startsWith("v") || version.startsWith("V")) {
+            version = version.substring(1);
+        }
         _latest_version_string = version;
         _latest_version = from_string(version.c_str());
     }
