@@ -24,6 +24,15 @@ void BeanconquerorPlugin::setup(Controller *ctrl, PluginManager *manager) {
 }
 
 void BeanconquerorPlugin::initBLEServer() {
+    // Stop the active BLE scan before calling createServer(). createServer()
+    // calls ble_gatts_reset() internally; running it while the scanner is
+    // active corrupts shared NimBLE host state and triggers a watchdog reboot.
+    // NimBLEClientController::loop() will restart the scan automatically.
+    NimBLEScan *activeScan = NimBLEDevice::getScan();
+    if (activeScan && activeScan->isScanning()) {
+        activeScan->stop();
+    }
+
     // NimBLE was already initialized by NimBLEClientController; set the GAP
     // name explicitly so Beanconqueror's scanner finds "ESPROFILE".
     NimBLEDevice::setDeviceName("ESPROFILE");
