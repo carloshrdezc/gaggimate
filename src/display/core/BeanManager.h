@@ -23,7 +23,14 @@ struct BeanEntry {
 };
 
 inline bool parseBean(const JsonObject &obj, BeanEntry &bean) {
-    bean.id = obj["id"] | "";
+    const String candidateId = obj["id"] | "";
+    // Reject IDs containing path separators or other unsafe chars before they
+    // reach any filesystem helper. Empty IDs are tolerated here because
+    // saveBean() generates one when the field is missing.
+    if (!candidateId.isEmpty() && !isSafeId(candidateId)) {
+        return false;
+    }
+    bean.id = candidateId;
     bean.name = obj["name"] | "";
     bean.roaster = obj["roaster"] | "";
     bean.roastLevel = obj["roastLevel"] | "";

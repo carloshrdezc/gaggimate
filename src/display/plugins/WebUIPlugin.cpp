@@ -5,6 +5,7 @@
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
+#include <display/core/utils.h>
 #include <display/models/profile.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
@@ -645,6 +646,11 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
         }
     } else if (type == "req:profiles:load") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         Profile profile;
         if (profileManager->loadProfile(id, profile)) {
             auto obj = response["profile"].to<JsonObject>();
@@ -655,7 +661,11 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
     } else if (type == "req:profiles:save") {
         auto obj = request["profile"].as<JsonObject>();
         Profile profile;
-        parseProfile(obj, profile);
+        if (!parseProfile(obj, profile)) {
+            response["error"] = F("Invalid profile");
+            sendResponse(clientId, response);
+            return;
+        }
         if (!profileManager->saveProfile(profile)) {
             response["error"] = F("Save failed");
         }
@@ -663,17 +673,37 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
         writeProfile(respObj, profile);
     } else if (type == "req:profiles:delete") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         if (!profileManager->deleteProfile(id)) {
             response["error"] = F("Delete failed");
         }
     } else if (type == "req:profiles:select") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         profileManager->selectProfile(id);
     } else if (type == "req:profiles:favorite") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         profileManager->addFavoritedProfile(id);
     } else if (type == "req:profiles:unfavorite") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         profileManager->removeFavoritedProfile(id);
     } else if (type == "req:profiles:reorder") {
         // Expect an array of profile IDs in desired order
@@ -682,7 +712,7 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
             for (JsonVariant v : request["order"].as<JsonArray>()) {
                 if (v.is<String>()) {
                     String id = v.as<String>();
-                    if (!id.isEmpty() && std::find(order.begin(), order.end(), id) == order.end()) {
+                    if (isSafeId(id) && std::find(order.begin(), order.end(), id) == order.end()) {
                         order.emplace_back(std::move(id));
                     }
                 }
@@ -707,8 +737,14 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
             writeBean(obj, bean);
         }
     } else if (type == "req:beans:load") {
+        auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid bean id");
+            sendResponse(clientId, response);
+            return;
+        }
         BeanEntry bean{};
-        if (beanManager->loadBean(request["id"].as<String>(), bean)) {
+        if (beanManager->loadBean(id, bean)) {
             auto obj = response["bean"].to<JsonObject>();
             writeBean(obj, bean);
         } else {
@@ -723,12 +759,18 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
             writeBean(obj, bean);
         }
     } else if (type == "req:beans:delete") {
+        auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid bean id");
+            sendResponse(clientId, response);
+            return;
+        }
         BeanEntry bean{};
-        if (beanManager->loadBean(request["id"].as<String>(), bean) && controller->getSettings().getSelectedBean() == bean.name) {
+        if (beanManager->loadBean(id, bean) && controller->getSettings().getSelectedBean() == bean.name) {
             controller->getSettings().setSelectedBean("");
             pluginManager->trigger("beans:selected", "name", "");
         }
-        if (!beanManager->deleteBean(request["id"].as<String>())) {
+        if (!beanManager->deleteBean(id)) {
             response["error"] = F("Delete failed");
         }
     }
