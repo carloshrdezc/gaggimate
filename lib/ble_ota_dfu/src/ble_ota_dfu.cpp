@@ -191,6 +191,10 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
         }
         Serial.println();
 #endif
+        // Every command tag is at least 1 byte (the command itself).
+        if (len < 1) {
+            return;
+        }
         switch (pData[0]) {
             // Send total and used sizes
         case 0xEF: {
@@ -213,16 +217,45 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
             // Write parts to RAM
         case 0xFB: {
-            // pData[1] is the position of the next part
-            for (uint16_t index = 0; index < len - 2; index++) {
-                updater[!selected_updater][(pData[1] * MTU) + index] = pData[index + 2];
+            // pData[1] is the position of the next part. Validate that the
+            // computed write window fits within the per-buffer UPDATER_SIZE
+            // before touching memory. Without this, a peer can send any
+            // (position, MTU) and write past the 20 KB updater[!sel] buffer -
+            // remotely reachable memory corruption.
+            if (len < 2) {
+                ESP_LOGW(TAG, "0xFB: short packet (len=%u)", len);
+                break;
+            }
+            const uint16_t payload_len = len - 2;
+            if (MTU == 0) {
+                ESP_LOGW(TAG, "0xFB: MTU not initialized; reject");
+                break;
+            }
+            const uint32_t base = static_cast<uint32_t>(pData[1]) * static_cast<uint32_t>(MTU);
+            const uint32_t end = base + payload_len;
+            if (end > UPDATER_SIZE) {
+                ESP_LOGW(TAG, "0xFB: write window out of bounds (pos=%u MTU=%u payload=%u UPDATER_SIZE=%u)", pData[1], MTU,
+                         payload_len, UPDATER_SIZE);
+                break;
+            }
+            for (uint16_t index = 0; index < payload_len; index++) {
+                updater[!selected_updater][base + index] = pData[index + 2];
             }
         } break;
 
             // Write updater content to the flash
         case 0xFC: {
+            if (len < 5) {
+                ESP_LOGW(TAG, "0xFC: short packet (len=%u)", len);
+                break;
+            }
             selected_updater = !selected_updater;
-            write_len[selected_updater] = (pData[1] * 256) + pData[2];
+            uint32_t requested_len = (static_cast<uint32_t>(pData[1]) * 256u) + pData[2];
+            if (requested_len > UPDATER_SIZE) {
+                ESP_LOGW(TAG, "0xFC: write_len %u exceeds UPDATER_SIZE %u; clamping", requested_len, UPDATER_SIZE);
+                requested_len = UPDATER_SIZE;
+            }
+            write_len[selected_updater] = static_cast<uint16_t>(requested_len);
             current_progression = (pData[3] * 256) + pData[4];
 
             received_file_size += write_binary(&FLASH, "/update.bin", updater[selected_updater], write_len[selected_updater]);
@@ -281,6 +314,10 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
             // Keep track of the received file and of the expected file sizes
         case 0xFE:
+            if (len < 5) {
+                ESP_LOGW(TAG, "0xFE: short packet (len=%u)", len);
+                break;
+            }
             received_file_size = 0;
             expected_file_size = (pData[1] * 16777216) + (pData[2] * 65536) + (pData[3] * 256) + pData[4];
 
@@ -288,10 +325,28 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
             break;
 
             // Switch to update mode
-        case 0xFF:
-            parts = (pData[1] * 256) + pData[2];
-            MTU = (pData[3] * 256) + pData[4];
-            break;
+        case 0xFF: {
+            // Setup packet from the peer announces (parts, MTU) for the
+            // upcoming transfer. Validate MTU against the per-buffer size
+            // before any 0xFB writes can use it. parts is checked against a
+            // sane upper bound to avoid pathological progress arithmetic.
+            if (len < 5) {
+                ESP_LOGW(TAG, "0xFF: short packet (len=%u)", len);
+                break;
+            }
+            const uint16_t announced_parts = (pData[1] * 256) + pData[2];
+            const uint16_t announced_mtu = (pData[3] * 256) + pData[4];
+            if (announced_mtu == 0 || announced_mtu > UPDATER_SIZE) {
+                ESP_LOGW(TAG, "0xFF: invalid MTU %u (UPDATER_SIZE=%u); reject", announced_mtu, UPDATER_SIZE);
+                break;
+            }
+            if (announced_parts == 0) {
+                ESP_LOGW(TAG, "0xFF: parts=0 is invalid; reject");
+                break;
+            }
+            parts = announced_parts;
+            MTU = announced_mtu;
+        } break;
 
         default:
             ESP_LOGW(TAG, "Unknown command: %02X", pData[0]);
