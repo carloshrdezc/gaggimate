@@ -18,6 +18,7 @@ export function ProfileEdit() {
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
   const { params } = useRoute();
   const [data, setData] = useState(null);
   const initializedId = useRef(null);
@@ -65,10 +66,17 @@ export function ProfileEdit() {
         );
         setLoading(false);
       } else if (connected.value) {
-        const response = await apiService.request({ tp: 'req:profiles:load', id: params.id });
-        initializedId.current = params.id;
-        setData(response.profile);
-        setLoading(false);
+        try {
+          const response = await apiService.request({ tp: 'req:profiles:load', id: params.id });
+          initializedId.current = params.id;
+          setData(response.profile);
+          setError(null);
+        } catch (err) {
+          console.error('Failed to load profile:', err);
+          setError(`Failed to load profile: ${err.message}`);
+        } finally {
+          setLoading(false);
+        }
       }
     }
     fetchData();
@@ -76,10 +84,17 @@ export function ProfileEdit() {
   const onSave = useCallback(
     async data => {
       setSaving(true);
-      const response = await apiService.request({ tp: 'req:profiles:save', profile: data });
-      setData(response.profile);
-      setSaving(false);
-      location.route('/profiles');
+      try {
+        const response = await apiService.request({ tp: 'req:profiles:save', profile: data });
+        setData(response.profile);
+        setError(null);
+        location.route('/profiles');
+      } catch (err) {
+        console.error('Failed to save profile:', err);
+        alert(`Failed to save profile: ${err.message}`);
+      } finally {
+        setSaving(false);
+      }
     },
     [apiService, params.id, location],
   );
@@ -94,6 +109,21 @@ export function ProfileEdit() {
     return (
       <div className='flex w-full flex-row items-center justify-center py-16'>
         <Spinner size={8} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className='flex w-full flex-col items-center justify-center gap-4 py-16'>
+        <p className='text-center text-[var(--text-error,#f87171)]'>{error}</p>
+        <button
+          onClick={() => location.route('/profiles')}
+          className='btn'
+          aria-label='Back to profiles'
+        >
+          Back to profiles
+        </button>
       </div>
     );
   }

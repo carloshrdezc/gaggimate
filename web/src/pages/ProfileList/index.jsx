@@ -526,9 +526,15 @@ export function ProfileList() {
   }, [apiService]);
 
   const loadProfiles = async () => {
-    const response = await apiService.request({ tp: 'req:profiles:list' });
-    setProfiles(response.profiles);
-    setLoading(false);
+    try {
+      const response = await apiService.request({ tp: 'req:profiles:list' });
+      setProfiles(response.profiles);
+    } catch (err) {
+      console.error('Failed to load profiles:', err);
+      alert(`Failed to load profiles: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const orderDebounceRef = useRef(null);
@@ -641,7 +647,12 @@ export function ProfileList() {
   const onDelete = useCallback(
     async id => {
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:delete', id });
+      try {
+        await apiService.request({ tp: 'req:profiles:delete', id });
+      } catch (err) {
+        console.error('Failed to delete profile:', err);
+        alert(`Failed to delete profile: ${err.message}`);
+      }
       await loadProfiles();
     },
     [apiService],
@@ -650,7 +661,12 @@ export function ProfileList() {
   const onFavorite = useCallback(
     async id => {
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:favorite', id });
+      try {
+        await apiService.request({ tp: 'req:profiles:favorite', id });
+      } catch (err) {
+        console.error('Failed to favorite profile:', err);
+        alert(`Failed to favorite profile: ${err.message}`);
+      }
       await loadProfiles();
     },
     [apiService],
@@ -659,7 +675,12 @@ export function ProfileList() {
   const onUnfavorite = useCallback(
     async id => {
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:unfavorite', id });
+      try {
+        await apiService.request({ tp: 'req:profiles:unfavorite', id });
+      } catch (err) {
+        console.error('Failed to unfavorite profile:', err);
+        alert(`Failed to unfavorite profile: ${err.message}`);
+      }
       await loadProfiles();
     },
     [apiService],
@@ -675,7 +696,12 @@ export function ProfileList() {
         delete copy.selected;
         delete copy.favorite;
         copy.label = `${original.label} Copy`;
-        await apiService.request({ tp: 'req:profiles:save', profile: copy });
+        try {
+          await apiService.request({ tp: 'req:profiles:save', profile: copy });
+        } catch (err) {
+          console.error('Failed to duplicate profile:', err);
+          alert(`Failed to duplicate profile: ${err.message}`);
+        }
       }
       await loadProfiles();
     },
@@ -706,24 +732,29 @@ export function ProfileList() {
       if (!profile) return;
 
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:select', id: profile.id });
+      try {
+        await apiService.request({ tp: 'req:profiles:select', id: profile.id });
 
-      let selectedBeanName = '';
-      if (beanId) {
-        const selectedBean = (await listBeans(apiService)).find(bean => bean.id === beanId);
-        if (selectedBean) {
-          selectedBeanName = selectedBean.name;
-          recordBeanSelection({
-            profileId: profile.id,
-            profileLabel: profile.label,
-            bean: selectedBean,
-          });
+        let selectedBeanName = '';
+        if (beanId) {
+          const selectedBean = (await listBeans(apiService)).find(bean => bean.id === beanId);
+          if (selectedBean) {
+            selectedBeanName = selectedBean.name;
+            recordBeanSelection({
+              profileId: profile.id,
+              profileLabel: profile.label,
+              bean: selectedBean,
+            });
+          }
+        } else {
+          clearCurrentBeanSelection();
         }
-      } else {
-        clearCurrentBeanSelection();
-      }
 
-      apiService.send({ tp: 'req:beans:select', name: selectedBeanName });
+        apiService.send({ tp: 'req:beans:select', name: selectedBeanName });
+      } catch (err) {
+        console.error('Failed to select profile:', err);
+        alert(`Failed to select profile: ${err.message}`);
+      }
 
       await loadProfiles();
       setBeanSelectionProfile(null);
@@ -765,7 +796,10 @@ export function ProfileList() {
             for (const p of profiles) {
               await apiService.request({ tp: 'req:profiles:save', profile: p });
             }
-          } catch {}
+          } catch (err) {
+            console.error('Failed to import profiles:', err);
+            alert(`Failed to import profiles: ${err.message}`);
+          }
           await loadProfiles();
         }
       };
@@ -775,10 +809,15 @@ export function ProfileList() {
 
   const onClear = useCallback(async () => {
     setLoading(true);
-    for (const p of profiles) {
-      if (!p.selected) {
-        await apiService.request({ tp: 'req:profiles:delete', id: p.id });
+    try {
+      for (const p of profiles) {
+        if (!p.selected) {
+          await apiService.request({ tp: 'req:profiles:delete', id: p.id });
+        }
       }
+    } catch (err) {
+      console.error('Failed to clear profiles:', err);
+      alert(`Failed to clear profiles: ${err.message}`);
     }
     await loadProfiles();
   }, [profiles, apiService]);
