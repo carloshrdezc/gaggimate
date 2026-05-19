@@ -10,6 +10,41 @@ import { openDB } from 'idb';
 const DB_NAME = 'gaggimate-analyzer';
 const DB_VERSION = 2;
 
+/**
+ * Thrown by storage-write methods when the browser refuses the write because
+ * the IndexedDB quota for this origin is exhausted. Lets callers show a
+ * "browser storage full" affordance instead of a generic failure.
+ */
+export class BrowserStorageFullError extends Error {
+  constructor(message = 'Browser storage is full. Free up space and try again.') {
+    super(message);
+    this.name = 'BrowserStorageFullError';
+  }
+}
+
+/**
+ * Returns true if the error is a recoverable IndexedDB connection state error
+ * (e.g. the underlying connection was closed by the browser, or another tab
+ * triggered a versionchange that closed it). These can be cleared by reopening
+ * the database.
+ */
+function isRecoverableConnectionError(err) {
+  if (!err) return false;
+  // DOMException name-based detection (works across browsers, including Safari).
+  if (err.name === 'InvalidStateError') return true;
+  // idb wraps some failures with a message; match defensively.
+  if (typeof err.message === 'string' && err.message.includes('database connection is closing')) {
+    return true;
+  }
+  return false;
+}
+
+/** Returns true if the error indicates the browser storage quota is exhausted. */
+function isQuotaError(err) {
+  if (!err) return false;
+  return err.name === 'QuotaExceededError' || err.code === 22;
+}
+
 class IndexedDBService {
   constructor() {
     this.db = null;
@@ -37,6 +72,17 @@ class IndexedDBService {
           db.createObjectStore('notes', { keyPath: 'id' });
         }
       },
+      blocked() {
+        // Another tab holds an older-version connection. Caller can still
+        // proceed; the open promise will resolve once that tab closes.
+        console.warn('IndexedDB upgrade blocked by another open connection.');
+      },
+      terminated: () => {
+        // Browser killed the connection (e.g. profile cleared, tab evicted).
+        // Drop our cached references so the next call reopens.
+        this.db = null;
+        this._initPromise = null;
+      },
     })
       .then(db => {
         this.db = db;
@@ -51,11 +97,39 @@ class IndexedDBService {
   }
 
   /**
-   * Save a shot to browser storage
+   * Run a database operation with reopen-on-failure semantics.
+   *
+   * If the operation throws an `InvalidStateError` (typically from a connection
+   * that was closed by the browser or another tab), drop the cached connection
+   * and retry once.
+   *
+   * @template T
+   * @param {(db: IDBDatabase) => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  async _withDb(fn) {
+    let db = await this.init();
+    try {
+      return await fn(db);
+    } catch (err) {
+      if (!isRecoverableConnectionError(err)) {
+        throw err;
+      }
+      // Connection was stale; null and retry once.
+      console.warn('IndexedDB connection lost, reopening:', err.message);
+      this.db = null;
+      this._initPromise = null;
+      db = await this.init();
+      return await fn(db);
+    }
+  }
+
+  /**
+   * Save a shot to browser storage.
    * @param {Object} shot - Shot data with metadata
+   * @throws {BrowserStorageFullError} when the browser quota is exhausted.
    */
   async saveShot(shot) {
-    const db = await this.init();
     const storageKey = String(shot.storageKey || shot.name || shot.id || Date.now());
 
     // Add source tag and storage timestamp
@@ -67,17 +141,23 @@ class IndexedDBService {
       uploadedAt: Date.now(),
     };
 
-    await db.put('shots', shotWithMeta);
+    try {
+      await this._withDb(db => db.put('shots', shotWithMeta));
+    } catch (err) {
+      if (isQuotaError(err)) {
+        throw new BrowserStorageFullError();
+      }
+      throw err;
+    }
     return shotWithMeta;
   }
 
   /**
-   * Get all browser-uploaded shots
+   * Get all browser-uploaded shots.
    * @returns {Array} List of shots
    */
   async getAllShots() {
-    const db = await this.init();
-    const shots = await db.getAll('shots');
+    const shots = await this._withDb(db => db.getAll('shots'));
 
     // Ensure all have source tag
     return shots.map(shot => ({
@@ -88,16 +168,19 @@ class IndexedDBService {
   }
 
   /**
-   * Get a single shot by name
+   * Get a single shot by name.
    * @param {string} name - Shot filename/ID
    */
   async getShot(name) {
-    const db = await this.init();
-    return db.get('shots', name);
+    return this._withDb(db => db.get('shots', name));
   }
 
   /**
-   * Close the database connection
+   * Close the database connection.
+   *
+   * Note: callers normally do NOT need to call this - the singleton keeps the
+   * connection open for the lifetime of the page. Provided for tests and
+   * explicit teardown.
    */
   async close() {
     if (this.db) {
@@ -108,36 +191,39 @@ class IndexedDBService {
   }
 
   /**
-   * Clear all browser storage and close the database connection
+   * Clear all browser storage.
+   *
+   * Keeps the connection open; subsequent reads/writes work without
+   * reinitializing. (Previously this called `close()` which left concurrent
+   * callers holding a closed-DB reference and throwing `InvalidStateError` on
+   * their next operation.)
    */
   async clearAll() {
-    const db = await this.init();
-    const tx = db.transaction(['shots', 'profiles', 'notes'], 'readwrite');
-    await Promise.all([
-      tx.objectStore('shots').clear(),
-      tx.objectStore('profiles').clear(),
-      tx.objectStore('notes').clear(),
-      tx.done,
-    ]);
-    await this.close();
+    await this._withDb(async db => {
+      const tx = db.transaction(['shots', 'profiles', 'notes'], 'readwrite');
+      await Promise.all([
+        tx.objectStore('shots').clear(),
+        tx.objectStore('profiles').clear(),
+        tx.objectStore('notes').clear(),
+        tx.done,
+      ]);
+    });
   }
 
   /**
-   * Delete a shot from browser storage
+   * Delete a shot from browser storage.
    * @param {string} name - Shot filename/ID
    */
   async deleteShot(name) {
-    const db = await this.init();
-    await db.delete('shots', name);
+    await this._withDb(db => db.delete('shots', name));
   }
 
   /**
-   * Save a profile to browser storage
+   * Save a profile to browser storage.
    * @param {Object} profile - Profile data
+   * @throws {BrowserStorageFullError} when the browser quota is exhausted.
    */
   async saveProfile(profile) {
-    const db = await this.init();
-
     // Add source tag and storage timestamp
     const profileWithMeta = {
       ...profile,
@@ -145,17 +231,23 @@ class IndexedDBService {
       uploadedAt: Date.now(),
     };
 
-    await db.put('profiles', profileWithMeta);
+    try {
+      await this._withDb(db => db.put('profiles', profileWithMeta));
+    } catch (err) {
+      if (isQuotaError(err)) {
+        throw new BrowserStorageFullError();
+      }
+      throw err;
+    }
     return profileWithMeta;
   }
 
   /**
-   * Get all browser-uploaded profiles
+   * Get all browser-uploaded profiles.
    * @returns {Array} List of profiles
    */
   async getAllProfiles() {
-    const db = await this.init();
-    const profiles = await db.getAll('profiles');
+    const profiles = await this._withDb(db => db.getAll('profiles'));
 
     // Ensure all have source tag
     return profiles.map(profile => ({
@@ -165,65 +257,68 @@ class IndexedDBService {
   }
 
   /**
-   * Get a single profile by name
+   * Get a single profile by name.
    * @param {string} name - Profile filename/ID
    */
   async getProfile(name) {
-    const db = await this.init();
-    return db.get('profiles', name);
+    return this._withDb(db => db.get('profiles', name));
   }
 
   /**
-   * Delete a profile from browser storage
+   * Delete a profile from browser storage.
    * @param {string} name - Profile filename/ID
    */
   async deleteProfile(name) {
-    const db = await this.init();
-    await db.delete('profiles', name);
+    await this._withDb(db => db.delete('profiles', name));
   }
 
   /**
-   * Save notes for a shot
+   * Save notes for a shot.
    * @param {Object} notes - Notes object with id, rating, beanType, etc.
+   * @throws {BrowserStorageFullError} when the browser quota is exhausted.
    */
   async saveNotes(notes) {
-    const db = await this.init();
-    await db.put('notes', notes);
+    try {
+      await this._withDb(db => db.put('notes', notes));
+    } catch (err) {
+      if (isQuotaError(err)) {
+        throw new BrowserStorageFullError();
+      }
+      throw err;
+    }
   }
 
   /**
-   * Get notes for a shot by ID
+   * Get notes for a shot by ID.
    * @param {string} id - Shot ID
    * @returns {Object|undefined} Notes object or undefined
    */
   async getNotes(id) {
-    const db = await this.init();
-    return db.get('notes', id);
+    return this._withDb(db => db.get('notes', id));
   }
 
   /**
-   * Delete notes for a shot
+   * Delete notes for a shot.
    * @param {string} id - Shot ID
    */
   async deleteNotes(id) {
-    const db = await this.init();
-    await db.delete('notes', id);
+    await this._withDb(db => db.delete('notes', id));
   }
 
   /**
-   * Get storage stats
+   * Get storage stats.
    * @returns {Object} Count of shots and profiles
    */
   async getStats() {
-    const db = await this.init();
-    const shotCount = await db.count('shots');
-    const profileCount = await db.count('profiles');
-
-    return {
-      shots: shotCount,
-      profiles: profileCount,
-      total: shotCount + profileCount,
-    };
+    return this._withDb(async db => {
+      const shotCount = await db.count('shots');
+      const profileCount = await db.count('profiles');
+      return {
+        shots: shotCount,
+        profiles: profileCount,
+        total: shotCount + profileCount,
+      };
+    });
   }
 }
 
