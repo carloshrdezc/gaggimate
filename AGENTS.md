@@ -2,6 +2,63 @@
 
 This file provides guidance to agents when working with code in this repository.
 
+## Linear Workflow (Mandatory)
+
+**Every task — feature, bug, refactor, chore, brainstorm, research, doc update, investigation — gets a Linear issue. No exceptions.** Use the Linear skill for all tooling decisions; this section defines project-specific rules.
+
+### Defaults
+- **Team**: the workspace's only team (key `CAR`) — use it without asking.
+- **Project**: match by name to the GitHub repo. The default project for this repo is `gaggimate`. Resolution rules:
+  1. Look for an exact case-insensitive match on the GitHub repo name (`gaggimate`).
+  2. If no exact match, pick the closest existing project by name (e.g. `Gaggimate`, `gaggimate-firmware`).
+  3. If still no match, **automatically create** a new project named after the GitHub repo (`gaggimate`) — do not ask first, do not block on linking it to an initiative. Link to an initiative later if needed.
+- **Labels**: required per Linear skill — exactly one type (`feature`/`bug`/`refactor`/`chore`/`spike`) plus 1-2 domain labels (`firmware`, `web`, `ble`, `infrastructure`, `docs`, etc.).
+- **Description**: always populate with what, why, and acceptance criteria — even when the user gave only a title.
+
+### Required State Transitions
+
+The agent must drive the issue through these Linear states as work progresses. Never skip states.
+
+| Trigger | Move issue to |
+|---------|---------------|
+| Issue created (work not started) | `Backlog` (unassigned) or `Ready` (assigned to me / queued for work) |
+| Starting work on the task | `In progress` |
+| Implementation finished, self-review begins | `QA` |
+| Bugs/regressions found during QA self-review | back to `In progress` (then re-enter `QA` when fixed) |
+| QA passes, PR opened | `Ready for Testing` |
+| Bugs found during PR review (mine or reviewer's) | back to `In progress` |
+| PR approved and ready to merge | `PR ready` |
+| PR merged to main | `Done` |
+
+**Self-review in QA** means: re-read the diff, run the build (`pio run -e display` and `cd web && npm run build`), check formatting (`scripts/format.sh`), verify the change against the issue's acceptance criteria. If anything fails or feels off, transition back to `In Progress`.
+
+### PR ↔ Issue Linkage
+
+**Default base branch for PRs is `dev-master`, not `master`.** All work-branch PRs target `dev-master` first; `master` is updated downstream from `dev-master` (typically by maintainers). When opening a PR with `gh pr create`, pass `--base dev-master`. If a PR was opened against `master` by mistake, retarget it with `gh pr edit <num> --base dev-master`.
+
+Always include Linear magic words in the PR description so the link is automatic:
+
+```
+Fixes CAR-123
+```
+
+(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref CAR-123` for related-but-not-closed issues.
+
+### Workflow Per Task
+
+1. Before touching code, **create the Linear issue** with description, labels, project assignment.
+2. Move issue to **In Progress** and begin work.
+3. When code is complete, move to **QA** and self-review (build + format + acceptance criteria).
+4. If QA fails → **In Progress** → fix → **QA** again. Loop until clean.
+5. Open the PR with `Fixes <ISSUE-KEY>` in the description, move issue to **Ready for Testing**.
+6. Review the PR diff yourself; if issues found → **In Progress** → fix → push → re-review → **Ready for Testing**.
+7. When PR is approved and merge-ready, move issue to **PR Ready**.
+8. After merge to main, move issue to **Done**.
+
+### Brainstorming / Research / Spikes
+
+These also get issues — use type label `spike`, leave in `Backlog` until investigation starts, then follow the same In Progress → QA → Done flow. The "deliverable" for a spike issue is the captured findings (comment on the issue or linked doc).
+
 ## Build System
 
 **Dual-platform project**: ESP32 firmware (PlatformIO) + Preact web UI (Vite)
