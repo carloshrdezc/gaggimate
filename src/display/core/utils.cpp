@@ -42,3 +42,18 @@ String implode(const std::vector<String> &strings, String delim) {
     return std::accumulate(std::next(strings.begin()), strings.end(), strings[0],
                            [delim](String a, String b) { return a + delim + b; });
 }
+
+bool isSafeId(const String &id) {
+    const size_t len = id.length();
+    if (len == 0 || len > 32) {
+        return false;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        const char c = id[i];
+        const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}

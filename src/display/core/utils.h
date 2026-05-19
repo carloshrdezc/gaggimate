@@ -24,4 +24,15 @@ extern String generateShortID(uint8_t length = 10);
 extern std::vector<String> explode(const String &input, char delim);
 extern String implode(const std::vector<String> &strings, String delim);
 
+/**
+ * Returns true iff `id` is a safe identifier for use as a profile/bean
+ * filename component on SPIFFS. Safe IDs match `^[A-Za-z0-9_-]{1,32}$`.
+ *
+ * Centralized here so every entry point that accepts an ID over the wire
+ * (WebSocket, HTTP) and every parser that reads one from JSON can use the
+ * same rule. Rejecting at the boundary prevents path-traversal IDs like
+ * `../config` reaching ProfileManager / BeanManager filesystem helpers.
+ */
+extern bool isSafeId(const String &id);
+
 #endif // UTILS_H

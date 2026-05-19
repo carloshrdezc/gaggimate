@@ -1,6 +1,7 @@
 #ifndef PROFILE_H
 #define PROFILE_H
 
+#include "../core/utils.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
@@ -211,8 +212,16 @@ struct Profile {
 };
 
 inline bool parseProfile(const JsonObject &obj, Profile &profile) {
-    if (obj["id"].is<String>())
-        profile.id = obj["id"].as<String>();
+    if (obj["id"].is<String>()) {
+        const String candidate = obj["id"].as<String>();
+        // Reject IDs containing path separators or other unsafe chars before
+        // they reach any filesystem helper. Empty IDs are tolerated here
+        // because saveProfile() generates one when the field is missing.
+        if (!candidate.isEmpty() && !isSafeId(candidate)) {
+            return false;
+        }
+        profile.id = candidate;
+    }
     profile.label = obj["label"].as<String>();
     profile.type = obj["type"].as<String>();
     profile.description = obj["description"].as<String>();
