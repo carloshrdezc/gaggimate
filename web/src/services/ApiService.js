@@ -2,18 +2,33 @@ import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
 
-function randomId() {
-  return Math.random()
-    .toString(36)
-    .replace(/[^a-z]+/g, '')
-    .substr(2, 10);
+/**
+ * Thrown by `ApiService.request()` when the underlying WebSocket closes (or
+ * errors) before a matching response arrives. Lets callers distinguish a
+ * transport drop from an in-band timeout or server error.
+ */
+export class WebSocketDisconnectedError extends Error {
+  constructor(message = 'WebSocket disconnected before response was received') {
+    super(message);
+    this.name = 'WebSocketDisconnectedError';
+  }
 }
+
+// Default timeout for `request()` calls. Reduced from 30s so users don't sit
+// behind dozens of stalled promises after a transient drop. The transport now
+// rejects in-flight requests immediately on close/error, so this is only a
+// safety net for a server that opened the socket but never responds.
+const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;
-  
+
   socket = null;
   listeners = {};
+  /** @type {Map<string, { resolve: Function, reject: Function, timeoutId: ReturnType<typeof setTimeout>, returnType: string }>} */
+  _pendingRequests = new Map();
+  /** Monotonic counter for listener ids — guaranteed unique within a session. */
+  _nextListenerId = 0;
   reconnectAttempts = 0;
   maxReconnectDelay = 30000; // Maximum delay of 30 seconds
   baseReconnectDelay = 1000; // Start with 1 second delay
@@ -101,14 +116,34 @@ export default class ApiService {
       ...machine.value,
       connected: false,
     };
+    this._rejectPendingRequests(
+      new WebSocketDisconnectedError('WebSocket closed before response was received'),
+    );
     this._scheduleReconnect();
   }
 
   _onError(error) {
     console.error('WebSocket error:', error);
     this.isConnecting = false; // Reset flag to allow reconnection
+    this._rejectPendingRequests(
+      new WebSocketDisconnectedError('WebSocket errored before response was received'),
+    );
     if (this.socket) {
       this.socket.close();
+    }
+  }
+
+  /**
+   * Reject every in-flight request with the given error and clear their timeouts.
+   * Called when the transport drops so callers don't hang for the full timeout.
+   */
+  _rejectPendingRequests(error) {
+    if (this._pendingRequests.size === 0) return;
+    const pending = Array.from(this._pendingRequests.values());
+    this._pendingRequests.clear();
+    for (const entry of pending) {
+      clearTimeout(entry.timeoutId);
+      entry.reject(error);
     }
   }
 
@@ -139,13 +174,24 @@ export default class ApiService {
       console.warn('Failed to parse WebSocket message:', error);
       return; // Discard malformed messages to avoid crashing the WS handler.
     }
-    
+
     // Validate message structure
     if (!message || typeof message !== 'object' || !message.tp) {
       console.warn('Invalid message structure:', message);
       return;
     }
-    
+
+    // Resolve any in-flight request waiting on this rid. Done before listener
+    // fan-out so request/response traffic doesn't depend on the listener bus.
+    if (message.rid && this._pendingRequests.has(message.rid)) {
+      const entry = this._pendingRequests.get(message.rid);
+      this._pendingRequests.delete(message.rid);
+      clearTimeout(entry.timeoutId);
+      entry.resolve(message);
+      // Note: we deliberately fall through so listeners still observe the
+      // response (some screens listen on res:* in addition to using request()).
+    }
+
     const listeners = Object.values(this.listeners[message.tp] || {});
     if (message.tp === 'evt:status') {
       this._onStatus(message);
@@ -170,57 +216,51 @@ export default class ApiService {
     }
   }
 
-  async request(data = {}) {
+  /**
+   * Send a request frame and resolve with the matching response.
+   *
+   * Rejects with:
+   * - `WebSocketDisconnectedError` if the socket closes/errors before the
+   *   response arrives (no waiting for the timeout).
+   * - `Error('Request <tp> timed out')` if no response arrives within
+   *   `timeoutMs` (default 5s).
+   * - The error thrown by `send()` if the socket isn't open at send time.
+   *
+   * @param {object} data - frame payload (must include `tp`)
+   * @param {number} [timeoutMs] - request timeout in ms
+   */
+  async request(data = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket is not connected');
+      throw new WebSocketDisconnectedError('WebSocket is not connected');
     }
 
     const returnType = `res:${data.tp.substring(4)}`;
     const rid = uuidv4();
     const message = { ...data, rid };
-    
+
     return new Promise((resolve, reject) => {
-      let timeoutId;
-      let listenerId;
-      let cleaned = false;
-
-      // Centralized cleanup to prevent memory leaks
-      const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        clearTimeout(timeoutId);
-        if (listenerId) {
-          this.off(returnType, listenerId);
-        }
-      };
-
-      // Create a listener for the response with matching rid
-      listenerId = this.on(returnType, response => {
-        if (response.rid === rid) {
-          cleanup();
-          resolve(response);
-        }
-      });
-
-      // Send the request
+      // Send first; if send() throws synchronously we don't want to leave a
+      // pending entry behind.
       try {
         this.send(message);
       } catch (error) {
-        cleanup();
         reject(error);
         return;
       }
 
-      // Timeout: reject if no matching response arrives within 30 seconds
-      timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Request ${data.tp} timed out`));
-      }, 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => {
+        if (this._pendingRequests.delete(rid)) {
+          reject(new Error(`Request ${data.tp} timed out`));
+        }
+      }, timeoutMs);
+
+      this._pendingRequests.set(rid, { resolve, reject, timeoutId, returnType });
     });
   }
 
   on(type, listener) {
-    const id = randomId();
+    // Monotonic counter — collision-free, no PRNG, no truncation.
+    const id = `l${++this._nextListenerId}`;
     if (!this.listeners[type]) {
       this.listeners[type] = {};
     }
@@ -229,7 +269,9 @@ export default class ApiService {
   }
 
   off(type, id) {
-    delete this.listeners[type][id];
+    if (this.listeners[type]) {
+      delete this.listeners[type][id];
+    }
   }
 
   /**
@@ -285,10 +327,10 @@ export default class ApiService {
     };
     const historyEntry = { ...newStatus };
     delete historyEntry.process;
-    
+
     // Efficient history management using circular buffer approach
     const newHistory = this._addToHistory(machine.value.history, historyEntry);
-    
+
     machine.value = {
       ...machine.value,
       connected: true,
