@@ -163,7 +163,7 @@ export function ExtendedProfileForm(props) {
                   type='number'
                   className='grow'
                   value={data?.temperature}
-                  onChange={e => onFieldChange('temperature', e.target.value)}
+                  onChange={e => onFieldChange('temperature', parseFloat(e.target.value))}
                   aria-label='Temperature in degrees Celsius'
                   min='0'
                   max='150'

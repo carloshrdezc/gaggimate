@@ -105,7 +105,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                 type='number'
                 min='1'
                 value={phase.duration}
-                onChange={e => onFieldChange('duration', e.target.value)}
+                onChange={e => onFieldChange('duration', parseFloat(e.target.value))}
                 aria-label='Duration in seconds'
               />
               <span aria-label='seconds'>s</span>
