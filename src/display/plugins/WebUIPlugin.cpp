@@ -23,6 +23,13 @@
 static std::unordered_map<uint32_t, std::string> rxBuffers;
 static WebUIPlugin *g_webUIPlugin = nullptr;
 
+// Sentinel value emitted on /api/settings GET in place of any stored secret
+// (Wi-Fi password, Home Assistant password, cloud relay token). The POST
+// handler treats incoming arguments equal to this string as "no change",
+// preserving the stored value. Defined as a constexpr so the same literal is
+// used at every read/write site.
+static constexpr const char *kSecretSentinel = "---unchanged---";
+
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
 // Parse wss://host[:port][/path] or ws://host[:port][/path]
@@ -757,7 +764,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setWifiSsid(request->arg("wifiSsid"));
             if (request->hasArg("mdnsName"))
                 settings->setMdnsName(request->arg("mdnsName"));
-            if (request->hasArg("wifiPassword") && request->arg("wifiPassword") != "---unchanged---")
+            if (request->hasArg("wifiPassword") && request->arg("wifiPassword") != kSecretSentinel)
                 settings->setWifiPassword(request->arg("wifiPassword"));
             settings->setHomekit(request->hasArg("homekit"));
             settings->setBoilerFillActive(request->hasArg("boilerFillActive"));
@@ -773,7 +780,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             settings->setHomeAssistant(request->hasArg("homeAssistant"));
             if (request->hasArg("haUser"))
                 settings->setHomeAssistantUser(request->arg("haUser"));
-            if (request->hasArg("haPassword"))
+            if (request->hasArg("haPassword") && request->arg("haPassword") != kSecretSentinel)
                 settings->setHomeAssistantPassword(request->arg("haPassword"));
             if (request->hasArg("haIP"))
                 settings->setHomeAssistantIP(request->arg("haIP"));
@@ -867,7 +874,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFlushDuration(request->arg("flushDuration").toInt() * 1000);
             if (request->hasArg("cloudRelayUrl"))
                 settings->setCloudRelayUrl(request->arg("cloudRelayUrl"));
-            if (request->hasArg("cloudRelayToken"))
+            if (request->hasArg("cloudRelayToken") && request->arg("cloudRelayToken") != kSecretSentinel)
                 settings->setCloudRelayToken(request->arg("cloudRelayToken"));
             if (request->hasArg("cloudRelayEnabled"))
                 settings->setCloudRelayEnabled(request->arg("cloudRelayEnabled") == "1");
@@ -892,14 +899,17 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["homekit"] = settings.isHomekit();
     doc["homeAssistant"] = settings.isHomeAssistant();
     doc["haUser"] = settings.getHomeAssistantUser();
-    doc["haPassword"] = settings.getHomeAssistantPassword();
+    doc["haPassword"] = kSecretSentinel;
     doc["haIP"] = settings.getHomeAssistantIP();
     doc["haPort"] = settings.getHomeAssistantPort();
     doc["haTopic"] = settings.getHomeAssistantTopic();
     doc["pid"] = settings.getPid();
     doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();
-    doc["wifiPassword"] = apMode ? "---unchanged---" : settings.getWifiPassword();
+    // Always mask: never return the plaintext WiFi password to clients. The
+    // previous AP-mode-only mask leaked it over HTTP whenever the device was
+    // on the user's Wi-Fi.
+    doc["wifiPassword"] = kSecretSentinel;
     doc["mdnsName"] = settings.getMdnsName();
     doc["temperatureOffset"] = String(settings.getTemperatureOffset());
     doc["pressureScaling"] = String(settings.getPressureScaling());
@@ -934,7 +944,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["autowakeupEnabled"] = settings.isAutoWakeupEnabled();
     doc["flushDuration"] = settings.getFlushDuration() / 1000;
     doc["cloudRelayUrl"] = settings.getCloudRelayUrl();
-    doc["cloudRelayToken"] = settings.getCloudRelayToken();
+    doc["cloudRelayToken"] = kSecretSentinel;
     doc["cloudRelayEnabled"] = settings.isCloudRelayEnabled();
 
     // Add schedule format with days

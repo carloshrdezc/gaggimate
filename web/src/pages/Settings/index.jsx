@@ -207,10 +207,16 @@ export function Settings() {
 
         const data = await response.json();
 
-        // Sync relay config to localStorage so browser uses relay on next connection
-        if (data.cloudRelayUrl && data.cloudRelayToken && data.cloudRelayEnabled) {
+        // Sync relay config to localStorage so browser uses relay on next connection.
+        // The server returns the literal sentinel "---unchanged---" in place of the
+        // real token (the token never crosses the wire on a settings GET/POST). Treat
+        // that as "keep whatever we had" to avoid stamping the sentinel into storage.
+        const SECRET_SENTINEL = '---unchanged---';
+        if (data.cloudRelayUrl && data.cloudRelayEnabled) {
           localStorage.setItem('gaggimate_relay_url', data.cloudRelayUrl);
-          localStorage.setItem('gaggimate_relay_token', data.cloudRelayToken);
+          if (data.cloudRelayToken && data.cloudRelayToken !== SECRET_SENTINEL) {
+            localStorage.setItem('gaggimate_relay_token', data.cloudRelayToken);
+          }
         } else {
           localStorage.removeItem('gaggimate_relay_url');
           localStorage.removeItem('gaggimate_relay_token');
