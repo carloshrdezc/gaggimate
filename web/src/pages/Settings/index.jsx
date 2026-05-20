@@ -13,7 +13,7 @@ import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
 import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
-import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN } from './remoteAccessLogic.js';
+import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
@@ -207,10 +207,25 @@ export function Settings() {
 
         const data = await response.json();
 
-        // Sync relay config to localStorage so browser uses relay on next connection
-        if (data.cloudRelayUrl && data.cloudRelayToken && data.cloudRelayEnabled) {
+        // Sync relay config to localStorage so browser uses relay on next connection.
+        // The server returns the literal sentinel `SECRET_SENTINEL` in place of the
+        // real token on every /api/settings response, so we cannot read the token
+        // from `data`. Use the value we just POSTed (which is what the user typed,
+        // the sentinel if they didn't touch the field, or empty if they cleared it).
+        const submittedToken = formDataToSubmit.get('cloudRelayToken');
+        if (data.cloudRelayUrl && data.cloudRelayEnabled) {
           localStorage.setItem('gaggimate_relay_url', data.cloudRelayUrl);
-          localStorage.setItem('gaggimate_relay_token', data.cloudRelayToken);
+          if (submittedToken === SECRET_SENTINEL || submittedToken === null) {
+            // User left the prefilled sentinel in place (or the field was absent
+            // from the form). Keep whatever was already in localStorage.
+          } else if (submittedToken === '') {
+            // User explicitly cleared the token field. Mirror that to storage so
+            // the browser doesn't keep reconnecting with stale credentials.
+            localStorage.removeItem('gaggimate_relay_token');
+          } else {
+            // User entered a new (or rotated) token. Persist it.
+            localStorage.setItem('gaggimate_relay_token', submittedToken);
+          }
         } else {
           localStorage.removeItem('gaggimate_relay_url');
           localStorage.removeItem('gaggimate_relay_token');
@@ -1156,7 +1171,16 @@ function RemoteAccessCard({ formData, onChange }) {
   const [copied, setCopied] = useState(false);
 
   const relayUrl = formData.cloudRelayUrl || '';
-  const relayToken = formData.cloudRelayToken || '';
+  // formData.cloudRelayToken comes from /api/settings, which masks the real
+  // token with the sentinel. If the user has not just edited the field, fall
+  // back to the previously-persisted token in localStorage so the share link
+  // can still be built. The sentinel itself is rejected by
+  // buildRemoteAccessLink as a defense-in-depth check.
+  const formToken = formData.cloudRelayToken || '';
+  const relayToken =
+    formToken && formToken !== SECRET_SENTINEL
+      ? formToken
+      : localStorage.getItem('gaggimate_relay_token') || '';
   const relayEnabled = !!formData.cloudRelayEnabled;
   const remoteLink = buildRemoteAccessLink({
     relayEnabled,
