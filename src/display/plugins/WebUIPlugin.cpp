@@ -368,10 +368,11 @@ void WebUIPlugin::stop() {
         delete dnsServer;
         dnsServer = nullptr;
     }
-    if (ota != nullptr) {
-        delete ota;
-        ota = nullptr;
-    }
+    // ota is owned by the plugin for its full lifetime: allocated once in
+    // setup() and never freed. Freeing it here used to race with reads on
+    // the Arduino loop task and the AsyncTCP/WS task (see CAR-100). It also
+    // permanently nulled `ota` after the first WiFi cycle since start()
+    // never reallocates it.
     serverRunning = false;
 }
 
