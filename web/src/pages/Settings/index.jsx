@@ -17,6 +17,7 @@ import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN } from './remoteAcce
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
+const SECRET_SENTINEL = '---unchanged---';
 
 export function Settings() {
   const apiService = useContext(ApiServiceContext);
@@ -210,7 +211,7 @@ export function Settings() {
         // Sync relay config to localStorage so browser uses relay on next connection
         if (data.cloudRelayUrl && data.cloudRelayToken && data.cloudRelayEnabled) {
           localStorage.setItem('gaggimate_relay_url', data.cloudRelayUrl);
-          if (data.cloudRelayToken !== '---unchanged---') {
+          if (data.cloudRelayToken !== SECRET_SENTINEL) {
             localStorage.setItem('gaggimate_relay_token', data.cloudRelayToken);
           }
         } else {
