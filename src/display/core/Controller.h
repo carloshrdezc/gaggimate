@@ -114,6 +114,10 @@ class Controller {
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
     Process *getProcess() const { return currentProcess; }
     
+    // DEPRECATED: Direct pointer access is unsafe due to race conditions.
+    // Use getProcessSnapshot() or other thread-safe accessor methods instead.
+    // This method will be removed in a future version.
+    [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
     Process *getLastProcess() const { return lastProcess; }
     
     // Thread-safe methods to get process info without exposing raw pointer
