@@ -210,7 +210,9 @@ export function Settings() {
         // Sync relay config to localStorage so browser uses relay on next connection
         if (data.cloudRelayUrl && data.cloudRelayToken && data.cloudRelayEnabled) {
           localStorage.setItem('gaggimate_relay_url', data.cloudRelayUrl);
-          localStorage.setItem('gaggimate_relay_token', data.cloudRelayToken);
+          if (data.cloudRelayToken !== '---unchanged---') {
+            localStorage.setItem('gaggimate_relay_token', data.cloudRelayToken);
+          }
         } else {
           localStorage.removeItem('gaggimate_relay_url');
           localStorage.removeItem('gaggimate_relay_token');
