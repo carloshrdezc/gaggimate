@@ -16,9 +16,7 @@
 #include <scales/weighmybru.h>
 
 void on_ble_measurement(float value) {
-    if (&BLEScales != nullptr) {
-        BLEScales.onMeasurement(value);
-    }
+    BLEScales.onMeasurement(value);
 }
 
 BLEScalePlugin BLEScales;
@@ -262,15 +260,11 @@ void BLEScalePlugin::establishConnection() {
             });
 
             scale->setWeightUpdatedCallback([](float weight) {
-                // Check if we're in an ISR context
+                // Skip measurement from ISR context to avoid FreeRTOS deadlocks
                 if (xPortInIsrContext()) {
-                    // Skip measurement to avoid FreeRTOS deadlocks from interrupt context
                     return;
                 }
-                // Safe to call directly from task context with null check
-                if (&BLEScales != nullptr) {
-                    BLEScales.onMeasurement(weight);
-                }
+                BLEScales.onMeasurement(weight);
             });
 
             bool connectResult = scale->connect();
