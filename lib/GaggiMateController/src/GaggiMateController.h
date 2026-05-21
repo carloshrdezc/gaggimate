@@ -22,6 +22,7 @@ class GaggiMateController {
     GaggiMateController(String version);
     void setup(void);
     void loop(void);
+    void factoryResetBonds(void);
 
     void registerBoardConfig(ControllerConfig config);
 

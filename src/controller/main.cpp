@@ -9,4 +9,13 @@ void setup() {
     controller.setup();
 }
 
-void loop() { controller.loop(); }
+void loop() {
+    if (Serial.available()) {
+        int c = Serial.read();
+        if (c == 'B') {
+            ESP_LOGW("MAIN", "Serial trigger: factory-reset BLE bonds");
+            controller.factoryResetBonds();
+        }
+    }
+    controller.loop();
+}

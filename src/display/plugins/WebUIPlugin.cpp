@@ -190,8 +190,10 @@ void WebUIPlugin::loop() {
         doc["mf"] = controller->getManualFlow();
         doc["mt"] = controller->getManualTemperature();
         doc["rssi"] = -127;
+        doc["baf"] = false;
         if (controller->getClientController()->getClient()->isConnected()) {
             doc["rssi"] = controller->getClientController()->getClient()->getRssi();
+            doc["baf"] = controller->getClientController()->isAuthFailed();
         }
 
         bool bleConnected = BLEScales.isConnected();
