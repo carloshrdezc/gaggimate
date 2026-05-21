@@ -1,6 +1,7 @@
 #include "NimBLEClientController.h"
 
 constexpr size_t MAX_CONNECT_RETRIES = 3;
+constexpr size_t MAX_SECURE_CONNECTION_ATTEMPTS = 2;
 
 NimBLEClientController::NimBLEClientController() : client(nullptr) {}
 
@@ -88,8 +89,20 @@ bool NimBLEClientController::connectToServer() {
     } while (!client->isConnected());
     client->updateConnParams(6, 8, 0, 400);
 
-    if (!client->secureConnection()) {
-        ESP_LOGW(LOG_TAG, "secureConnection() failed; marking auth failed");
+    bool secure = false;
+    for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
+        secure = client->secureConnection();
+        if (secure) {
+            break;
+        }
+        if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
+            ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
+            delay(250);
+        }
+    }
+
+    if (!secure) {
+        ESP_LOGW(LOG_TAG, "secureConnection() failed after retry; marking auth failed");
         bleAuthFailed = true;
         client->disconnect();
         scan();
