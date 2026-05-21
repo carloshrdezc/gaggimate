@@ -44,12 +44,22 @@ export function parseQuantity(value) {
 }
 
 // Legacy beans saved before CAR-102 used Date.now() (Unix milliseconds).
-// New format is Unix seconds. Detect ms-scale values (anything > Sep-2033
-// in seconds, which equals Jan-1970 in ms) and convert.
-const LEGACY_BEAN_TIMESTAMP_THRESHOLD = 2000000000; // 2033-05-18 in seconds, 1970-01-24 in ms
+// New format is Unix seconds. Threshold 1e11 is unambiguous in practice:
+// 1e11 seconds is year 5138 (no real seconds-timestamp ever reaches it),
+// and 1e11 ms is 1973-03-03 (no real ms-timestamp from this project is
+// ever below it). Picking the boundary here — instead of 2e9 (May 2033) —
+// avoids mis-converting valid Unix-seconds values once we cross into 2033
+// or when a client clock is future-skewed.
+const LEGACY_BEAN_TIMESTAMP_THRESHOLD = 100000000000; // 1e11
 function normalizeBeanTimestamp(value, fallback) {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  // Preserve the firmware's pre-NTP sentinel of 0 instead of replacing it
+  // with the browser clock. Firmware's saveBean backfills on the next save
+  // once NTP is valid via its `bean.createdAt == 0` guard; if we substitute
+  // a client-derived timestamp here, that backfill never runs and a wrong
+  // client clock gets locked into the stored record.
+  if (numeric === 0) return 0;
   if (numeric > LEGACY_BEAN_TIMESTAMP_THRESHOLD) {
     return Math.floor(numeric / 1000);
   }
