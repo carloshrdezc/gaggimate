@@ -44,6 +44,21 @@ inline bool parseBean(const JsonObject &obj, BeanEntry &bean) {
     bean.archived = obj["archived"] | false;
     bean.createdAt = obj["createdAt"] | 0UL;
     bean.updatedAt = obj["updatedAt"] | 0UL;
+
+    // Migrate legacy millis()-based timestamps written by pre-CAR-102 firmware.
+    // Any value below 2023-11-14 (1700000000 Unix seconds) is too small to be
+    // a real Unix timestamp for this project's lifetime — treat as corrupt
+    // and reset to 0. The next saveBean() will backfill from NTP via the
+    // existing `bean.createdAt == 0` guard. This is an in-memory correction;
+    // the file on disk is rewritten on next save.
+    constexpr unsigned long LEGACY_TIMESTAMP_THRESHOLD = 1700000000UL;
+    if (bean.createdAt != 0 && bean.createdAt < LEGACY_TIMESTAMP_THRESHOLD) {
+        bean.createdAt = 0;
+    }
+    if (bean.updatedAt != 0 && bean.updatedAt < LEGACY_TIMESTAMP_THRESHOLD) {
+        bean.updatedAt = 0;
+    }
+
     return !bean.name.isEmpty();
 }
 

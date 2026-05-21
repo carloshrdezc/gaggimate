@@ -43,8 +43,22 @@ export function parseQuantity(value) {
   return Math.round((numeric + Number.EPSILON) * 100) / 100;
 }
 
+// Legacy beans saved before CAR-102 used Date.now() (Unix milliseconds).
+// New format is Unix seconds. Detect ms-scale values (anything > Sep-2033
+// in seconds, which equals Jan-1970 in ms) and convert.
+const LEGACY_BEAN_TIMESTAMP_THRESHOLD = 2000000000; // 2033-05-18 in seconds, 1970-01-24 in ms
+function normalizeBeanTimestamp(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  if (numeric > LEGACY_BEAN_TIMESTAMP_THRESHOLD) {
+    return Math.floor(numeric / 1000);
+  }
+  return numeric;
+}
+
 function normalizeBeanPayload(beanInput = {}) {
-  const now = Date.now();
+  // Unix seconds (matches firmware BeanManager + ShotHistoryPlugin convention).
+  const now = Math.floor(Date.now() / 1000);
   return {
     id: String(beanInput.id || '').trim(),
     name: String(beanInput.name || '').trim(),
@@ -56,8 +70,8 @@ function normalizeBeanPayload(beanInput = {}) {
     notes: String(beanInput.notes || '').trim(),
     quantity: parseQuantity(beanInput.quantity),
     archived: !!beanInput.archived,
-    createdAt: Number(beanInput.createdAt) || now,
-    updatedAt: Number(beanInput.updatedAt) || now,
+    createdAt: normalizeBeanTimestamp(beanInput.createdAt, now),
+    updatedAt: normalizeBeanTimestamp(beanInput.updatedAt, now),
   };
 }
 
@@ -201,7 +215,7 @@ export async function saveBean(apiService, beanInput, options = {}) {
   const bean = normalizeBeanPayload({
     ...beanInput,
     id: beanInput.id || createId('bean'),
-    updatedAt: Date.now(),
+    updatedAt: Math.floor(Date.now() / 1000),
   });
 
   if (!bean.name) return null;

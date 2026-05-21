@@ -1,6 +1,7 @@
 #include "BeanManager.h"
 
 #include <algorithm>
+#include <ctime>
 #include <utility>
 
 BeanManager::BeanManager(fs::FS *fs, String dir) : _fs(fs), _dir(std::move(dir)) {}
@@ -75,11 +76,22 @@ bool BeanManager::saveBean(BeanEntry &bean) {
         bean.id = generateShortID();
     }
 
-    const unsigned long now = millis();
-    if (bean.createdAt == 0) {
-        bean.createdAt = now;
+    // Use NTP-derived Unix seconds (matches ShotHistoryPlugin convention).
+    // If NTP has not synced yet, leave timestamps at 0; the next save will
+    // backfill via the existing `bean.createdAt == 0` guard.
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    const bool ntpValid = timeinfo.tm_year > (2020 - 1900);
+    const unsigned long nowSec = ntpValid ? static_cast<unsigned long>(now) : 0UL;
+
+    if (bean.createdAt == 0 && nowSec != 0) {
+        bean.createdAt = nowSec;
     }
-    bean.updatedAt = now;
+    if (nowSec != 0) {
+        bean.updatedAt = nowSec;
+    }
 
     File file = _fs->open(beanPath(bean.id), "w");
     if (!file) {
