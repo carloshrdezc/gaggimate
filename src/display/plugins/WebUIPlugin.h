@@ -89,10 +89,10 @@ class WebUIPlugin : public Plugin {
     TaskHandle_t relayTaskHandle = nullptr;
     static void relayLoopTask(void *arg);
 
-    long lastUpdateCheck = 0;
-    long lastStatus = 0;
-    long lastCleanup = 0;
-    long lastDns = 0;
+    unsigned long lastUpdateCheck = 0;
+    unsigned long lastStatus = 0;
+    unsigned long lastCleanup = 0;
+    unsigned long lastDns = 0;
     bool updating = false;
     bool apMode = false;
     bool serverRunning = false;
