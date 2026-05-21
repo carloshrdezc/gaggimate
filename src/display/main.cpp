@@ -12,6 +12,13 @@ void setup() {
 }
 
 void loop() {
+    if (Serial.available()) {
+        int c = Serial.read();
+        if (c == 'B') {
+            ESP_LOGW("MAIN", "Serial trigger: factory-reset BLE bonds");
+            controller.getClientController()->factoryResetBonds();
+        }
+    }
     controller.loop();
     delay(2);  // Yield to FreeRTOS idle task to prevent watchdog starvation
 }

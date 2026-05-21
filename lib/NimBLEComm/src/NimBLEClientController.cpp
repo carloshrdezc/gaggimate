@@ -1,6 +1,7 @@
 #include "NimBLEClientController.h"
 
 constexpr size_t MAX_CONNECT_RETRIES = 3;
+constexpr size_t MAX_SECURE_CONNECTION_ATTEMPTS = 2;
 
 NimBLEClientController::NimBLEClientController() : client(nullptr) {}
 
@@ -8,6 +9,8 @@ void NimBLEClientController::initClient() {
     NimBLEDevice::init("GPBLC");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
+    NimBLEDevice::setSecurityAuth(/*bonding*/ true, /*MITM*/ false, /*SC*/ true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     client = NimBLEDevice::createClient();
     scanner = NimBLEDevice::getScan();
     if (client == nullptr) {
@@ -35,7 +38,7 @@ void NimBLEClientController::scan() {
 
 void NimBLEClientController::tare() {
     if (volumetricTareChar != nullptr && client->isConnected()) {
-        volumetricTareChar->writeValue("1");
+        writeRemoteValue(volumetricTareChar, String("1"));
     }
 }
 
@@ -85,6 +88,26 @@ bool NimBLEClientController::connectToServer() {
         tries++;
     } while (!client->isConnected());
     client->updateConnParams(6, 8, 0, 400);
+
+    bool secure = false;
+    for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
+        secure = client->secureConnection();
+        if (secure) {
+            break;
+        }
+        if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
+            ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
+            delay(250);
+        }
+    }
+
+    if (!secure) {
+        ESP_LOGW(LOG_TAG, "secureConnection() failed after retry; marking auth failed");
+        bleAuthFailed = true;
+        client->disconnect();
+        scan();
+        return false;
+    }
 
     ESP_LOGI(LOG_TAG, "Successfully connected to BLE server");
 
@@ -173,7 +196,7 @@ void NimBLEClientController::sendAdvancedOutputControl(bool valve, float boilerS
                                   std::to_string(pressureTarget ? 1 : 0) + "," + float_to_string(pressure) + "," +
                                   float_to_string(flow);
         _lastOutputControl = String(value.c_str());
-        outputControlChar->writeValue(_lastOutputControl, false);
+        writeRemoteValue(outputControlChar, _lastOutputControl, false);
     }
 }
 
@@ -182,49 +205,49 @@ void NimBLEClientController::sendOutputControl(bool valve, float pumpSetpoint, f
         const std::string value =
             "0," + std::to_string(valve ? 1 : 0) + "," + std::to_string(pumpSetpoint) + "," + std::to_string(boilerSetpoint);
         _lastOutputControl = String(value.c_str());
-        outputControlChar->writeValue(_lastOutputControl, false);
+        writeRemoteValue(outputControlChar, _lastOutputControl, false);
     }
 }
 
 void NimBLEClientController::sendPidSettings(const String &pid) {
     if (pidControlChar != nullptr && client->isConnected()) {
-        pidControlChar->writeValue(pid);
+        writeRemoteValue(pidControlChar, pid);
     }
 }
 
 void NimBLEClientController::sendPumpModelCoeffs(const String &pumpModelCoeffs) {
     if (pumpModelCoeffsChar != nullptr && client->isConnected()) {
-        pumpModelCoeffsChar->writeValue(pumpModelCoeffs);
+        writeRemoteValue(pumpModelCoeffsChar, pumpModelCoeffs);
     }
 }
 
 void NimBLEClientController::setPressureScale(float scale) {
     if (client->isConnected() && pressureScaleChar != nullptr) {
-        pressureScaleChar->writeValue(float_to_string(scale));
+        writeRemoteValue(pressureScaleChar, float_to_string(scale));
     }
 }
 
 void NimBLEClientController::sendLedControl(uint8_t channel, uint8_t brightness) {
     if (client->isConnected() && ledControlChar != nullptr) {
-        ledControlChar->writeValue(String(channel) + "," + String(brightness));
+        writeRemoteValue(ledControlChar, String(channel) + "," + String(brightness));
     }
 }
 
 void NimBLEClientController::sendAltControl(bool pinState) {
     if (altControlChar != nullptr && client->isConnected()) {
-        altControlChar->writeValue(pinState ? "1" : "0");
+        writeRemoteValue(altControlChar, String(pinState ? "1" : "0"));
     }
 }
 
 void NimBLEClientController::sendPing() {
     if (pingChar != nullptr && client->isConnected()) {
-        pingChar->writeValue("1");
+        writeRemoteValue(pingChar, String("1"));
     }
 }
 
 void NimBLEClientController::sendAutotune(int testTime, int samples) {
     if (autotuneChar != nullptr && client->isConnected()) {
-        autotuneChar->writeValue(std::to_string(testTime) + "," + std::to_string(samples));
+        writeRemoteValue(autotuneChar, std::to_string(testTime) + "," + std::to_string(samples));
     }
 }
 
@@ -273,6 +296,43 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     tofMeasurementChar = nullptr;
     if (disconnectCallback != nullptr) {
         disconnectCallback();
+    }
+    scan();
+}
+
+void NimBLEClientController::onAuthenticationComplete(ble_gap_conn_desc *desc) {
+    if (desc == nullptr) {
+        ESP_LOGW(LOG_TAG, "Auth complete with null desc; marking auth failed");
+        bleAuthFailed = true;
+        return;
+    }
+    if (!desc->sec_state.encrypted) {
+        ESP_LOGW(LOG_TAG, "Auth complete but link not encrypted; marking auth failed");
+        bleAuthFailed = true;
+        return;
+    }
+    ESP_LOGI(LOG_TAG, "BLE link authenticated and encrypted");
+    bleAuthFailed = false;
+}
+
+bool NimBLEClientController::writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const String &value, bool response) {
+    const bool ok = characteristic != nullptr && characteristic->writeValue(value, response);
+    bleAuthFailed = ok ? false : bleAuthFailed || isConnected();
+    return ok;
+}
+
+bool NimBLEClientController::writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const std::string &value, bool response) {
+    const bool ok = characteristic != nullptr && characteristic->writeValue(value, response);
+    bleAuthFailed = ok ? false : bleAuthFailed || isConnected();
+    return ok;
+}
+
+void NimBLEClientController::factoryResetBonds() {
+    ESP_LOGW(LOG_TAG, "Factory-resetting BLE bonds");
+    NimBLEDevice::deleteAllBonds();
+    bleAuthFailed = false;
+    if (client != nullptr && client->isConnected()) {
+        client->disconnect();
     }
     scan();
 }

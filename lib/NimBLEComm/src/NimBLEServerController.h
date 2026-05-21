@@ -29,6 +29,7 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     void registerTareCallback(const void_callback_t &callback);
     void registerLedControlCallback(const led_control_callback_t &callback);
     void setInfo(String infoString);
+    void factoryResetBonds();
 
   private:
     bool deviceConnected = false;
@@ -68,6 +69,7 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     // BLEServerCallbacks overrides
     void onConnect(NimBLEServer *pServer) override;
     void onDisconnect(NimBLEServer *pServer) override;
+    void onAuthenticationComplete(ble_gap_conn_desc *desc) override;
 
     // BLECharacteristicCallbacks overrides
     void onWrite(NimBLECharacteristic *pCharacteristic) override;
