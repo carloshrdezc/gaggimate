@@ -4,6 +4,7 @@
 
 #include <FS.h>
 #include <ArduinoJson.h>
+#include <ctime>
 #include <display/core/utils.h>
 #include <vector>
 
@@ -44,6 +45,35 @@ inline bool parseBean(const JsonObject &obj, BeanEntry &bean) {
     bean.archived = obj["archived"] | false;
     bean.createdAt = obj["createdAt"] | 0UL;
     bean.updatedAt = obj["updatedAt"] | 0UL;
+
+    // Migrate legacy millis()-based timestamps written by pre-CAR-102 firmware.
+    // A real Unix-seconds timestamp for this project must sit between
+    // 2023-11-14 (1700000000, before the project existed) and "now + 1 year"
+    // slack. Anything outside that window is treated as a stale millis()
+    // value — which can range up to 4294967295 (~49 days of uptime) and
+    // therefore overlaps the low end of the Unix-seconds range — and reset
+    // to 0. The next saveBean() will backfill from NTP via the existing
+    // `bean.createdAt == 0` guard. The upper bound is only applied when NTP
+    // has synced; pre-NTP we keep questionable values and let the next
+    // post-sync parse clean them up. This is an in-memory correction; the
+    // file on disk is rewritten on next save.
+    constexpr unsigned long LEGACY_TIMESTAMP_MIN = 1700000000UL;
+    constexpr unsigned long ONE_YEAR_SECONDS = 31536000UL;
+    const time_t nowTime = time(nullptr);
+    const bool ntpValid = static_cast<unsigned long>(nowTime) >= LEGACY_TIMESTAMP_MIN;
+    const unsigned long horizonMax = ntpValid ? static_cast<unsigned long>(nowTime) + ONE_YEAR_SECONDS : 0UL;
+
+    auto isCorrupt = [&](unsigned long ts) {
+        if (ts < LEGACY_TIMESTAMP_MIN) return true;
+        return horizonMax != 0 && ts > horizonMax;
+    };
+    if (bean.createdAt != 0 && isCorrupt(bean.createdAt)) {
+        bean.createdAt = 0;
+    }
+    if (bean.updatedAt != 0 && isCorrupt(bean.updatedAt)) {
+        bean.updatedAt = 0;
+    }
+
     return !bean.name.isEmpty();
 }
 

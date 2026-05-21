@@ -43,8 +43,32 @@ export function parseQuantity(value) {
   return Math.round((numeric + Number.EPSILON) * 100) / 100;
 }
 
+// Legacy beans saved before CAR-102 used Date.now() (Unix milliseconds).
+// New format is Unix seconds. Threshold 1e11 is unambiguous in practice:
+// 1e11 seconds is year 5138 (no real seconds-timestamp ever reaches it),
+// and 1e11 ms is 1973-03-03 (no real ms-timestamp from this project is
+// ever below it). Picking the boundary here — instead of 2e9 (May 2033) —
+// avoids mis-converting valid Unix-seconds values once we cross into 2033
+// or when a client clock is future-skewed.
+const LEGACY_BEAN_TIMESTAMP_THRESHOLD = 100000000000; // 1e11
+function normalizeBeanTimestamp(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  // Preserve the firmware's pre-NTP sentinel of 0 instead of replacing it
+  // with the browser clock. Firmware's saveBean backfills on the next save
+  // once NTP is valid via its `bean.createdAt == 0` guard; if we substitute
+  // a client-derived timestamp here, that backfill never runs and a wrong
+  // client clock gets locked into the stored record.
+  if (numeric === 0) return 0;
+  if (numeric > LEGACY_BEAN_TIMESTAMP_THRESHOLD) {
+    return Math.floor(numeric / 1000);
+  }
+  return numeric;
+}
+
 function normalizeBeanPayload(beanInput = {}) {
-  const now = Date.now();
+  // Unix seconds (matches firmware BeanManager + ShotHistoryPlugin convention).
+  const now = Math.floor(Date.now() / 1000);
   return {
     id: String(beanInput.id || '').trim(),
     name: String(beanInput.name || '').trim(),
@@ -56,8 +80,8 @@ function normalizeBeanPayload(beanInput = {}) {
     notes: String(beanInput.notes || '').trim(),
     quantity: parseQuantity(beanInput.quantity),
     archived: !!beanInput.archived,
-    createdAt: Number(beanInput.createdAt) || now,
-    updatedAt: Number(beanInput.updatedAt) || now,
+    createdAt: normalizeBeanTimestamp(beanInput.createdAt, now),
+    updatedAt: normalizeBeanTimestamp(beanInput.updatedAt, now),
   };
 }
 
@@ -201,7 +225,7 @@ export async function saveBean(apiService, beanInput, options = {}) {
   const bean = normalizeBeanPayload({
     ...beanInput,
     id: beanInput.id || createId('bean'),
-    updatedAt: Date.now(),
+    updatedAt: Math.floor(Date.now() / 1000),
   });
 
   if (!bean.name) return null;
