@@ -152,14 +152,14 @@ void WebUIPlugin::loop() {
     if (!serverRunning) {
         return;
     }
-    const long now = millis();
-    if ((lastUpdateCheck == 0 || now > lastUpdateCheck + UPDATE_CHECK_INTERVAL)) {
+    const unsigned long now = millis();
+    if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
         ota->checkForUpdates();
         pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
     }
-    if (now > lastStatus + STATUS_PERIOD && (!ws.getClients().empty() || relayConnected)) {
+    if (now - lastStatus > STATUS_PERIOD && (!ws.getClients().empty() || relayConnected)) {
         lastStatus = now;
         JsonDocument doc;
         doc["tp"] = "evt:status";
@@ -256,11 +256,11 @@ void WebUIPlugin::loop() {
 
         broadcastAll(doc.as<String>());
     }
-    if (now > lastCleanup + CLEANUP_PERIOD) {
+    if (now - lastCleanup > CLEANUP_PERIOD) {
         lastCleanup = now;
         ws.cleanupClients();
     }
-    if (now > lastDns + DNS_PERIOD && dnsServer != nullptr) {
+    if (now - lastDns > DNS_PERIOD && dnsServer != nullptr) {
         lastDns = now;
         dnsServer->processNextRequest();
     }
