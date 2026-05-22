@@ -430,6 +430,20 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
+
+    if (!process->isActive()) {
+        const int endedProcessType = process->getType();
+        xSemaphoreGive(processMutex);
+        delete process;
+        if (endedProcessType == MODE_BREW) {
+            pluginManager->trigger("controller:brew:end");
+        } else if (endedProcessType == MODE_GRIND) {
+            pluginManager->trigger("controller:grind:end");
+        }
+        pluginManager->trigger("controller:process:end", "processType", endedProcessType);
+        updateLastAction();
+        return;
+    }
     
     processCompleted = false;
     this->currentProcess = process;

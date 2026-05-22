@@ -6,6 +6,7 @@
 #include <display/core/predictive.h>
 #include <display/core/process/Process.h>
 #include <display/models/profile.h>
+#include <esp_log.h>
 
 class BrewProcess : public Process {
   public:
@@ -27,10 +28,16 @@ class BrewProcess : public Process {
 
     explicit BrewProcess(Profile profile, ProcessTarget target, double brewDelay = 0.0)
         : profile(profile), target(target), brewDelay(brewDelay) {
-        currentPhase = profile.phases.at(phaseIndex);
         unsigned long now = millis();
         processStarted = now;
         currentPhaseStarted = now;
+        if (this->profile.phases.empty()) {
+            ESP_LOGE("BrewProcess", "Refusing to start brew profile with no phases");
+            processPhase = ProcessPhase::FINISHED;
+            finished = now;
+            return;
+        }
+        currentPhase = this->profile.phases[phaseIndex];
         phaseStartPressure = currentPhase.transition.adaptive ? currentPressure : 0;
         phaseStartFlow = currentPhase.transition.adaptive ? currentFlow : 0;
         computeEffectiveTargetsForCurrentPhase();
@@ -135,13 +142,23 @@ class BrewProcess : public Process {
 
     void progress() override {
         // Progress should be called around every 100ms, as defined in PROGRESS_INTERVAL, while the Process is active
+        if (processPhase != ProcessPhase::RUNNING) {
+            return;
+        }
+        if (profile.phases.empty() || phaseIndex >= profile.phases.size()) {
+            ESP_LOGE("BrewProcess", "Phase index %u out of bounds for %u phases; finishing brew process", phaseIndex,
+                     static_cast<unsigned int>(profile.phases.size()));
+            processPhase = ProcessPhase::FINISHED;
+            finished = millis();
+            return;
+        }
         waterPumped += currentFlow / 10.0f; // Add current flow divided to 100ms to water pumped counter
         while (isCurrentPhaseFinished() && processPhase == ProcessPhase::RUNNING) {
             previousPhaseFinished = millis();
             if (phaseIndex + 1 < profile.phases.size()) {
                 waterPumped = 0.0f;
                 phaseIndex++;
-                Phase nextPhase = profile.phases.at(phaseIndex);
+                Phase nextPhase = profile.phases[phaseIndex];
                 phaseStartPressure = nextPhase.transition.adaptive ? currentPressure : getPumpPressure();
                 phaseStartFlow = nextPhase.transition.adaptive ? currentFlow : getPumpFlow();
                 currentPhase = nextPhase;

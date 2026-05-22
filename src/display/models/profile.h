@@ -212,6 +212,30 @@ struct Profile {
 };
 
 inline bool parseProfile(const JsonObject &obj, Profile &profile) {
+    if (!obj["label"].is<String>()) {
+        return false;
+    }
+    const String label = obj["label"].as<String>();
+    if (label.isEmpty()) {
+        return false;
+    }
+
+    if (!obj["type"].is<String>()) {
+        return false;
+    }
+    const String profileType = obj["type"].as<String>();
+    if (profileType != "standard" && profileType != "pro") {
+        return false;
+    }
+
+    if (!obj["phases"].is<JsonArray>()) {
+        return false;
+    }
+    auto phasesArray = obj["phases"].as<JsonArray>();
+    if (phasesArray.size() == 0) {
+        return false;
+    }
+
     if (obj["id"].is<String>()) {
         const String candidate = obj["id"].as<String>();
         // Reject IDs containing path separators or other unsafe chars before
@@ -222,15 +246,14 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
         }
         profile.id = candidate;
     }
-    profile.label = obj["label"].as<String>();
-    profile.type = obj["type"].as<String>();
+    profile.label = label;
+    profile.type = profileType;
     profile.description = obj["description"].as<String>();
     profile.temperature = obj["temperature"].as<float>();
     profile.favorite = obj["favorite"] | false;
     profile.selected = obj["selected"] | false;
     profile.utility = obj["utility"] | false;
 
-    auto phasesArray = obj["phases"].as<JsonArray>();
     for (JsonObject p : phasesArray) {
         Phase phase;
         phase.name = p["name"].as<String>();
