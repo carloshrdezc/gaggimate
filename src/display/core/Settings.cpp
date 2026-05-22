@@ -3,6 +3,24 @@
 #include <algorithm>
 #include <utility>
 
+namespace {
+std::vector<String> cleanProfileIds(std::vector<String> ids) {
+    std::vector<String> cleaned;
+    cleaned.reserve(ids.size());
+
+    for (auto &id : ids) {
+        if (!isSafeId(id)) {
+            continue;
+        }
+        if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {
+            cleaned.emplace_back(std::move(id));
+        }
+    }
+
+    return cleaned;
+}
+} // namespace
+
 Settings::Settings() {
     preferences.begin(PREFERENCES_KEY, true);
     startupMode = preferences.getInt("sm", MODE_STANDBY);
@@ -43,8 +61,8 @@ Settings::Settings() {
     clock24hFormat = preferences.getBool("clk_24h", true);
     selectedProfile = preferences.getString("sp", "");
     selectedBean = preferences.getString("sb", "");
-    favoritedProfiles = explode(preferences.getString("fp", ""), ',');
-    profileOrder = explode(preferences.getString("po", ""), ',');
+    favoritedProfiles = cleanProfileIds(explode(preferences.getString("fp", ""), ','));
+    profileOrder = cleanProfileIds(explode(preferences.getString("po", ""), ','));
     steamPumpPercentage = preferences.getFloat("spp", DEFAULT_STEAM_PUMP_PERCENTAGE);
     steamPumpCutoff = preferences.getFloat("spc", DEFAULT_STEAM_PUMP_CUTOFF);
     historyIndex = preferences.getInt("hi", 0);
@@ -328,11 +346,14 @@ void Settings::setSelectedBean(String selected_bean) {
 }
 
 void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
-    favoritedProfiles = std::move(favorited_profiles);
+    favoritedProfiles = cleanProfileIds(std::move(favorited_profiles));
     save();
 }
 
 void Settings::addFavoritedProfile(String profile) {
+    if (!isSafeId(profile)) {
+        return;
+    }
     if (std::find(favoritedProfiles.begin(), favoritedProfiles.end(), profile) != favoritedProfiles.end()) {
         return;
     }
@@ -347,17 +368,7 @@ void Settings::removeFavoritedProfile(String profile) {
 }
 
 void Settings::setProfileOrder(std::vector<String> profile_order) {
-    std::vector<String> cleaned;
-    cleaned.reserve(profile_order.size());
-    for (auto &id : profile_order) {
-        if (id.isEmpty())
-            continue;
-        if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {
-            cleaned.emplace_back(std::move(id));
-        }
-    }
-
-    profileOrder = std::move(cleaned);
+    profileOrder = cleanProfileIds(std::move(profile_order));
     save();
 }
 
