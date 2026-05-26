@@ -10,7 +10,11 @@ std::vector<String> cleanProfileIds(std::vector<String> ids) {
 
     for (auto &id : ids) {
         if (!isSafeId(id)) {
-            continue;
+            // Retain non-conforming ids so that legacy persisted state (e.g.
+            // favoritedProfiles, profileOrder written by older firmware or
+            // imported from external sources) survives the upgrade. Path-
+            // traversal protection remains at the network and save boundaries.
+            ESP_LOGW("Settings", "Retaining persisted profile id with non-conforming format: %s", id.c_str());
         }
         if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {
             cleaned.emplace_back(std::move(id));

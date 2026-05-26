@@ -32,6 +32,19 @@ std::vector<BeanEntry> BeanManager::listBeans() {
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, file);
             if (!err && parseBean(doc.as<JsonObject>(), bean)) {
+                if (bean.id.isEmpty()) {
+                    String fallbackId = name;
+                    int slash = fallbackId.lastIndexOf('/');
+                    if (slash >= 0) {
+                        fallbackId = fallbackId.substring(slash + 1);
+                    }
+                    if (fallbackId.endsWith(".json")) {
+                        fallbackId = fallbackId.substring(0, fallbackId.length() - 5);
+                    }
+                    if (isSafeId(fallbackId)) {
+                        bean.id = fallbackId;
+                    }
+                }
                 beans.push_back(bean);
             }
         }

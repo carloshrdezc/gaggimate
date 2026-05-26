@@ -100,6 +100,9 @@ bool ProfileManager::loadProfile(const String &uuid, Profile &outProfile) {
     if (!parseProfile(doc.as<JsonObject>(), outProfile)) {
         return false;
     }
+    if (outProfile.id.isEmpty()) {
+        outProfile.id = uuid;
+    }
     outProfile.selected = outProfile.id == _settings.getSelectedProfile();
     std::vector<String> favoritedProfiles = _settings.getFavoritedProfiles();
     outProfile.favorite = std::find(favoritedProfiles.begin(), favoritedProfiles.end(), outProfile.id) != favoritedProfiles.end();

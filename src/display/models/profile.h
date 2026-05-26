@@ -236,20 +236,22 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
         return false;
     }
 
-    if (obj["id"].is<String>()) {
-        const String candidate = obj["id"].as<String>();
-        // Reject IDs containing path separators or other unsafe chars before
-        // they reach any filesystem helper. Empty IDs are tolerated here
-        // because saveProfile() generates one when the field is missing.
-        if (!candidate.isEmpty() && !isSafeId(candidate)) {
-            return false;
-        }
-        profile.id = candidate;
+    const String candidateId = obj["id"].is<String>() ? obj["id"].as<String>() : String("");
+    // Reject IDs containing path separators or other unsafe chars before
+    // they reach any filesystem helper. Empty IDs are tolerated here because
+    // saveProfile() generates one when the field is missing.
+    if (!candidateId.isEmpty() && !isSafeId(candidateId)) {
+        ESP_LOGW("Profile", "Rescuing profile with unsafe ID; will regenerate on next save");
+        profile.id = "";
+    } else {
+        profile.id = candidateId;
     }
+
     profile.label = label;
     profile.type = profileType;
     profile.description = obj["description"].as<String>();
     profile.temperature = obj["temperature"].as<float>();
+
     profile.favorite = obj["favorite"] | false;
     profile.selected = obj["selected"] | false;
     profile.utility = obj["utility"] | false;

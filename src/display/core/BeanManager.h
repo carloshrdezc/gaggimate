@@ -29,9 +29,17 @@ inline bool parseBean(const JsonObject &obj, BeanEntry &bean) {
     // reach any filesystem helper. Empty IDs are tolerated here because
     // saveBean() generates one when the field is missing.
     if (!candidateId.isEmpty() && !isSafeId(candidateId)) {
-        return false;
+        // Rescue: clear the unsafe ID so saveBean() will regenerate a safe one
+        // on next write. This prevents silent data loss for beans imported from
+        // external sources or older firmware whose IDs don't match the
+        // [A-Za-z0-9_-]{1,32} alphabet. Path-traversal protection remains
+        // intact at the network boundary (WebUIPlugin.cpp) and the save
+        // boundary (saveBean rejects unsafe IDs at write time).
+        ESP_LOGW("BeanManager", "Rescuing bean with unsafe ID; will regenerate on next save");
+        bean.id = "";
+    } else {
+        bean.id = candidateId;
     }
-    bean.id = candidateId;
     bean.name = obj["name"] | "";
     bean.roaster = obj["roaster"] | "";
     bean.roastLevel = obj["roastLevel"] | "";
