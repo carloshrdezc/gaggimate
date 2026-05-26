@@ -1,13 +1,66 @@
 #include "ProfileManager.h"
 #include <ArduinoJson.h>
 
+#include <algorithm>
+
 #include <utility>
+
+namespace {
+String filenameStem(const String &name) {
+    String stem = name;
+    int slash = stem.lastIndexOf('/');
+    if (slash >= 0) {
+        stem = stem.substring(slash + 1);
+    }
+    if (stem.endsWith(".json")) {
+        stem = stem.substring(0, stem.length() - 5);
+    }
+    return stem;
+}
+
+std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, const String &dir) {
+    std::vector<std::pair<String, String>> migrations;
+    File root = fs->open(dir);
+    if (!root || !root.isDirectory()) {
+        return migrations;
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+        String name = file.name();
+        if (name.endsWith(".json")) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, file);
+            if (!err) {
+                JsonObject obj = doc.as<JsonObject>();
+                const String rawId = obj["id"] | "";
+                Profile profile{};
+                if (parseProfile(obj, profile)) {
+                    if (profile.id.isEmpty()) {
+                        profile.id = filenameStem(name);
+                    }
+                    if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
+                        std::find_if(migrations.begin(), migrations.end(), [&](const auto &migration) {
+                            return migration.first == rawId;
+                        }) == migrations.end()) {
+                        migrations.emplace_back(rawId, profile.id);
+                    }
+                }
+            }
+        }
+        file = root.openNextFile();
+    }
+
+    return migrations;
+}
+} // namespace
 
 ProfileManager::ProfileManager(fs::FS *fs, String dir, Settings &settings, PluginManager *plugin_manager)
     : _plugin_manager(plugin_manager), _settings(settings), _fs(fs), _dir(std::move(dir)) {}
 
 void ProfileManager::setup() {
     ensureDirectory();
+    _settings.migrateProfileIds(collectProfileIdMigrations(_fs, _dir));
     auto profiles = listProfiles();
     if (getFavoritedProfiles().empty() || profiles.empty() || _settings.getSelectedProfile() == "" ||
         !loadSelectedProfile(selectedProfile)) {
