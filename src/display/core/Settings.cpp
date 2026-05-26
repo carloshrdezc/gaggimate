@@ -4,12 +4,29 @@
 #include <utility>
 
 namespace {
-std::vector<String> cleanProfileIds(std::vector<String> ids) {
+String remapProfileId(const String &id, const std::vector<std::pair<String, String>> &migrations) {
+    for (const auto &migration : migrations) {
+        if (id == migration.first) {
+            return migration.second;
+        }
+    }
+    return id;
+}
+
+std::vector<String> remapProfileIds(std::vector<String> ids, const std::vector<std::pair<String, String>> &migrations) {
+    for (auto &id : ids) {
+        id = remapProfileId(id, migrations);
+    }
+    return ids;
+}
+
+std::vector<String> cleanProfileIds(std::vector<String> ids, const char *context) {
     std::vector<String> cleaned;
     cleaned.reserve(ids.size());
 
     for (auto &id : ids) {
         if (!isSafeId(id)) {
+            ESP_LOGW("Settings", "Dropping unsafe persisted %s id: %s", context ? context : "profile", id.c_str());
             continue;
         }
         if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {
@@ -61,8 +78,8 @@ Settings::Settings() {
     clock24hFormat = preferences.getBool("clk_24h", true);
     selectedProfile = preferences.getString("sp", "");
     selectedBean = preferences.getString("sb", "");
-    favoritedProfiles = cleanProfileIds(explode(preferences.getString("fp", ""), ','));
-    profileOrder = cleanProfileIds(explode(preferences.getString("po", ""), ','));
+    favoritedProfiles = cleanProfileIds(explode(preferences.getString("fp", ""), ','), "favoritedProfiles");
+    profileOrder = cleanProfileIds(explode(preferences.getString("po", ""), ','), "profileOrder");
     steamPumpPercentage = preferences.getFloat("spp", DEFAULT_STEAM_PUMP_PERCENTAGE);
     steamPumpCutoff = preferences.getFloat("spc", DEFAULT_STEAM_PUMP_CUTOFF);
     historyIndex = preferences.getInt("hi", 0);
@@ -156,11 +173,10 @@ void Settings::batchUpdate(const SettingsCallback &callback) {
 }
 
 void Settings::save(bool noDelay) {
+    dirty = true;
     if (noDelay) {
         doSave();
-        return;
     }
-    dirty = true;
 }
 
 void Settings::setTargetSteamTemp(const int target_steam_temp) {
@@ -346,7 +362,7 @@ void Settings::setSelectedBean(String selected_bean) {
 }
 
 void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
-    favoritedProfiles = cleanProfileIds(std::move(favorited_profiles));
+    favoritedProfiles = cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles");
     save();
 }
 
@@ -368,8 +384,50 @@ void Settings::removeFavoritedProfile(String profile) {
 }
 
 void Settings::setProfileOrder(std::vector<String> profile_order) {
-    profileOrder = cleanProfileIds(std::move(profile_order));
+    profileOrder = cleanProfileIds(std::move(profile_order), "profileOrder");
     save();
+}
+
+void Settings::migrateProfileIds(const std::vector<std::pair<String, String>> &migrations) {
+    preferences.begin(PREFERENCES_KEY, true);
+
+    bool needsSave = false;
+    const auto selectedProfileRaw = preferences.getString("sp", "");
+    selectedProfile = remapProfileId(selectedProfileRaw, migrations);
+    if (selectedProfile != selectedProfileRaw) {
+        needsSave = true;
+    }
+    if (!selectedProfile.isEmpty() && !isSafeId(selectedProfile)) {
+        ESP_LOGW("Settings", "Dropping stale persisted selectedProfile id: %s", selectedProfile.c_str());
+        selectedProfile = "";
+        needsSave = true;
+    }
+
+    const auto rawFavoritedProfiles = explode(preferences.getString("fp", ""), ',');
+    const auto remappedFavoritedProfiles = remapProfileIds(rawFavoritedProfiles, migrations);
+    favoritedProfiles = cleanProfileIds(remappedFavoritedProfiles, "favoritedProfiles");
+    if (remappedFavoritedProfiles != rawFavoritedProfiles || favoritedProfiles != remappedFavoritedProfiles) {
+        needsSave = true;
+    }
+
+    const auto rawProfileOrder = explode(preferences.getString("po", ""), ',');
+    const auto remappedProfileOrder = remapProfileIds(rawProfileOrder, migrations);
+    profileOrder = cleanProfileIds(remappedProfileOrder, "profileOrder");
+    if (remappedProfileOrder != rawProfileOrder || profileOrder != remappedProfileOrder) {
+        needsSave = true;
+    }
+
+    preferences.end();
+
+    if (needsSave) {
+        // doSave() early-returns when !dirty. Without setting the flag here,
+        // save(true) would no-op and the migrated sp/fp/po values stay only in
+        // memory — a reboot before any other setter dirties the state would
+        // lose the migration for that boot. Mark dirty explicitly so the
+        // synchronous save actually writes to NVS.
+        dirty = true;
+        save(true);
+    }
 }
 
 void Settings::setMainBrightness(int main_brightness) {

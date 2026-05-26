@@ -7,6 +7,7 @@
 #include <display/core/constants.h>
 #include <display/core/utils.h>
 #include <vector>
+#include <utility>
 
 #define PREFERENCES_KEY "controller"
 
@@ -168,6 +169,7 @@ class Settings {
     void addFavoritedProfile(String profile);
     void removeFavoritedProfile(String profile);
     void setProfileOrder(std::vector<String> profile_order);
+    void migrateProfileIds(const std::vector<std::pair<String, String>> &migrations);
     void setMainBrightness(int main_brightness);
     void setStandbyBrightness(int standby_brightness);
     void setStandbyBrightnessTimeout(int standby_brightness_timeout);

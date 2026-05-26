@@ -19,6 +19,7 @@ String BeanManager::beanPath(const String &uuid) const { return _dir + "/" + uui
 
 std::vector<BeanEntry> BeanManager::listBeans() {
     std::vector<BeanEntry> beans;
+    std::vector<String> rescuedIds;
     File root = _fs->open(_dir);
     if (!root || !root.isDirectory()) {
         return beans;
@@ -28,10 +29,44 @@ std::vector<BeanEntry> BeanManager::listBeans() {
     while (file) {
         String name = file.name();
         if (name.endsWith(".json")) {
+            String stem = name;
+            int slash = stem.lastIndexOf('/');
+            if (slash >= 0) {
+                stem = stem.substring(slash + 1);
+            }
+            if (stem.endsWith(".json")) {
+                stem = stem.substring(0, stem.length() - 5);
+            }
+            // Skip files we just rescued (saveBean above wrote a new file under
+            // a generated safe id; the directory iterator may still hand us
+            // that newly-created file in this same pass).
+            if (std::find(rescuedIds.begin(), rescuedIds.end(), stem) != rescuedIds.end()) {
+                file = root.openNextFile();
+                continue;
+            }
             BeanEntry bean{};
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, file);
             if (!err && parseBean(doc.as<JsonObject>(), bean)) {
+                if (!applyFallbackBeanId(bean, stem)) {
+                    // Both JSON id and filename stem are unsafe. Generate a
+                    // fresh safe id, persist the rescued bean under it, and
+                    // remove the original unsafe file so the UI no longer
+                    // sees an unmanageable empty-id row.
+                    bean.id = generateShortID();
+                    file.close();
+                    if (saveBean(bean)) {
+                        rescuedIds.push_back(bean.id);
+                        if (!_fs->remove(name)) {
+                            ESP_LOGW("BeanManager", "Rescued bean %s but could not remove original file", name.c_str());
+                        }
+                        beans.push_back(bean);
+                    } else {
+                        ESP_LOGE("BeanManager", "Failed to rescue bean file with generated id: %s", name.c_str());
+                    }
+                    file = root.openNextFile();
+                    continue;
+                }
                 beans.push_back(bean);
             }
         }
@@ -64,7 +99,16 @@ bool BeanManager::loadBean(const String &uuid, BeanEntry &outBean) {
         return false;
     }
 
-    return parseBean(doc.as<JsonObject>(), outBean);
+    if (!parseBean(doc.as<JsonObject>(), outBean)) {
+        return false;
+    }
+
+    if (!applyFallbackBeanId(outBean, uuid)) {
+        ESP_LOGW("BeanManager", "Skipping unrescuable bean file (no safe id derivable): %s", uuid.c_str());
+        return false;
+    }
+
+    return true;
 }
 
 bool BeanManager::saveBean(BeanEntry &bean) {
