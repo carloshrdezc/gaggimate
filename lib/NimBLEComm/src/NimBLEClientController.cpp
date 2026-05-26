@@ -1,5 +1,7 @@
 #include "NimBLEClientController.h"
 
+#include "BondPolicy.h"
+
 constexpr size_t MAX_CONNECT_RETRIES = 3;
 constexpr size_t MAX_SECURE_CONNECTION_ATTEMPTS = 2;
 
@@ -90,19 +92,38 @@ bool NimBLEClientController::connectToServer() {
     client->updateConnParams(6, 8, 0, 400);
 
     bool secure = false;
-    for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
-        secure = client->secureConnection();
+    bool wipedThisCycle = false;
+    // Try to establish an encrypted/bonded link. If it fails and we hold a stale
+    // local bond (the usual cause after re-flashing one board: the display's LTK
+    // no longer matches the controller), wipe the local bonds once and retry a
+    // fresh pair. Without this the encrypted setpoint write is silently rejected
+    // and the boiler never heats, with no automatic recovery. Bounded to a single
+    // wipe so an unpairable peer can't trigger an infinite loop.
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
+            secure = client->secureConnection();
+            if (secure) {
+                break;
+            }
+            if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
+                ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
+                delay(250);
+            }
+        }
         if (secure) {
             break;
         }
-        if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
-            ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
-            delay(250);
+        if (!shouldWipeLocalBondsAndRetry(secure, wipedThisCycle, static_cast<size_t>(NimBLEDevice::getNumBonds()))) {
+            break;
         }
+        ESP_LOGW(LOG_TAG, "secureConnection() failed with stale local bond; wiping bonds and retrying fresh pair");
+        NimBLEDevice::deleteAllBonds();
+        wipedThisCycle = true;
+        delay(250);
     }
 
     if (!secure) {
-        ESP_LOGW(LOG_TAG, "secureConnection() failed after retry; marking auth failed");
+        ESP_LOGW(LOG_TAG, "secureConnection() failed after recovery; marking auth failed");
         bleAuthFailed = true;
         client->disconnect();
         scan();

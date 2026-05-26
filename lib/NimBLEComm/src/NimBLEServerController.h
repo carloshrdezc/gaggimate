@@ -68,6 +68,7 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
 
     // BLEServerCallbacks overrides
     void onConnect(NimBLEServer *pServer) override;
+    void onConnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) override;
     void onDisconnect(NimBLEServer *pServer) override;
     void onAuthenticationComplete(ble_gap_conn_desc *desc) override;
 
