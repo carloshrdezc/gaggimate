@@ -18,6 +18,7 @@ bean-whisperer/
 playwright/
 output/
 .claude/settings.local.json
+.serial_capture.log
 *.png
 !docs/**/*.png
 !ui/**/*.png
