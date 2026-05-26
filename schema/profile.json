@@ -30,6 +30,9 @@
     "selected": {
       "type": "boolean"
     },
+    "utility": {
+      "type": "boolean"
+    },
     "phases": {
       "type": "array",
       "items": {
@@ -74,10 +77,17 @@
                 "type": "number"
               },
               "adaptive": {
-                "type": "integer",
-                "enum": [
-                  0,
-                  1
+                "oneOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  }
                 ]
               }
             },

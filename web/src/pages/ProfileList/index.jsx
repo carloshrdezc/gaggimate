@@ -18,7 +18,13 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'p
 import { computed } from '@preact/signals';
 import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
-import { parseProfile } from './utils.js';
+import {
+  getProfileImportConflicts,
+  parseProfileImportText,
+  planProfileImports,
+  serializeProfileForExport,
+  serializeProfilesForExport,
+} from './profileTransfer.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp';
@@ -96,7 +102,7 @@ function ProfileCard({
   }, [data.favorite, unfavoriteDisabled, favoriteDisabled, onUnfavorite, onFavorite, data.id]);
 
   const onDownload = useCallback(() => {
-    const { id, selected, favorite, ...profileData } = data;
+    const profileData = serializeProfileForExport(data);
     const filename = `profile-${data.id}.json`;
     const prepared = prepareDownload(filename);
 
@@ -711,13 +717,7 @@ export function ProfileList() {
   );
 
   const onExport = useCallback(() => {
-    const exportedProfiles = profiles.map(p => {
-      const ep = { ...p };
-      delete ep.id;
-      delete ep.selected;
-      delete ep.favorite;
-      return ep;
-    });
+    const exportedProfiles = serializeProfilesForExport(profiles);
 
     const download = prepareDownload('profiles.json');
     try {
@@ -794,9 +794,25 @@ export function ProfileList() {
         if (typeof result === 'string') {
           setLoading(true);
           try {
-            const profiles = parseProfile(result);
-            for (const p of profiles) {
-              await apiService.request({ tp: 'req:profiles:save', profile: p });
+            const { profiles: importedProfiles } = parseProfileImportText(result);
+            const conflicts = getProfileImportConflicts(importedProfiles, profiles);
+            const conflictLabels = conflicts
+              .slice(0, 5)
+              .map(conflict => `• ${conflict.imported.label}`)
+              .join('\n');
+            const conflictLabelSuffix = conflicts.length > 5 ? '\n• …' : '';
+            const overwriteConflicts =
+              conflicts.length > 0
+                ? window.confirm(
+                    `Found ${conflicts.length} duplicate profile name${conflicts.length === 1 ? '' : 's'}:\n\n${conflictLabels}${conflictLabelSuffix}\n\nOK = replace matching profiles\nCancel = keep both and rename the imported copies`,
+                  )
+                : false;
+            const profilesToSave = planProfileImports(importedProfiles, profiles, {
+              mode: overwriteConflicts ? 'overwrite' : 'rename',
+            });
+
+            for (const profile of profilesToSave) {
+              await apiService.request({ tp: 'req:profiles:save', profile });
             }
           } catch (err) {
             console.error('Failed to import profiles:', err);
@@ -860,7 +876,7 @@ export function ProfileList() {
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <label className='nd-action-btn cursor-pointer' title='Import Profiles'>
+          <label className='nd-action-btn cursor-pointer' title='Import Profiles' htmlFor='profileImport'>
             <FontAwesomeIcon icon={faFileImport} />
           </label>
           <input
