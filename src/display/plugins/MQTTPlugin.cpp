@@ -1,4 +1,5 @@
 #include "MQTTPlugin.h"
+#include "MQTTTopicBuilder.h"
 #include "../core/Controller.h"
 #include <ArduinoJson.h>
 #include <ctime>
@@ -94,10 +95,9 @@ void MQTTPlugin::publishDiscovery(Controller *controller) {
     payload["state_topic"] = "gaggimate/" + String(cmac) + "/state";
     payload["qos"] = 2;
 
-    char publishTopic[80];
-    snprintf(publishTopic, sizeof(publishTopic), "%s/device/%s/config", haTopic.c_str(), cmac);
+    const std::string publishTopic = mqtt_topic::buildHomeAssistantDiscoveryTopic(haTopic.c_str(), cmac);
 
-    client.publish(publishTopic, payload.as<String>());
+    client.publish(publishTopic.c_str(), payload.as<String>());
 }
 
 void MQTTPlugin::publish(const std::string &topic, const std::string &message) {
@@ -106,9 +106,8 @@ void MQTTPlugin::publish(const std::string &topic, const std::string &message) {
     String mac = WiFi.macAddress();
     mac.replace(":", "_");
     const char *cmac = mac.c_str();
-    char publishTopic[80];
-    snprintf(publishTopic, sizeof(publishTopic), "gaggimate/%s/%s", cmac, topic.c_str());
-    client.publish(publishTopic, message.c_str());
+    const std::string publishTopic = mqtt_topic::buildGaggimateTopic(cmac, topic);
+    client.publish(publishTopic.c_str(), message.c_str());
 }
 void MQTTPlugin::publishBrewState(const char *state) {
     char json[100];
