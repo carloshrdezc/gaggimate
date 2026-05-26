@@ -173,11 +173,10 @@ void Settings::batchUpdate(const SettingsCallback &callback) {
 }
 
 void Settings::save(bool noDelay) {
+    dirty = true;
     if (noDelay) {
         doSave();
-        return;
     }
-    dirty = true;
 }
 
 void Settings::setTargetSteamTemp(const int target_steam_temp) {

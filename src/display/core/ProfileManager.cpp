@@ -153,7 +153,12 @@ bool ProfileManager::loadProfile(const String &uuid, Profile &outProfile) {
     if (!parseProfile(doc.as<JsonObject>(), outProfile)) {
         return false;
     }
-    if (outProfile.id.isEmpty()) {
+    // Apply filename-based fallback only when the stem is itself a safe id.
+    // An unsafe filename stem (legacy non-conforming file on disk) would make
+    // the profile visible in the list but inoperable via the WebUI (all profile
+    // actions reject non-safe ids). Keep the id empty in that case so the UI
+    // treats it as a broken entry rather than silently creating a duplicate.
+    if (outProfile.id.isEmpty() && isSafeId(uuid)) {
         outProfile.id = uuid;
     }
     outProfile.selected = outProfile.id == _settings.getSelectedProfile();
