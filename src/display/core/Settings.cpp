@@ -421,6 +421,12 @@ void Settings::migrateProfileIds(const std::vector<std::pair<String, String>> &m
     preferences.end();
 
     if (needsSave) {
+        // doSave() early-returns when !dirty. Without setting the flag here,
+        // save(true) would no-op and the migrated sp/fp/po values stay only in
+        // memory — a reboot before any other setter dirties the state would
+        // lose the migration for that boot. Mark dirty explicitly so the
+        // synchronous save actually writes to NVS.
+        dirty = true;
         save(true);
     }
 }

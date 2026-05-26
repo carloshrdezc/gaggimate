@@ -37,6 +37,9 @@ std::vector<BeanEntry> BeanManager::listBeans() {
             if (stem.endsWith(".json")) {
                 stem = stem.substring(0, stem.length() - 5);
             }
+            // Skip files we just rescued (saveBean above wrote a new file under
+            // a generated safe id; the directory iterator may still hand us
+            // that newly-created file in this same pass).
             if (std::find(rescuedIds.begin(), rescuedIds.end(), stem) != rescuedIds.end()) {
                 file = root.openNextFile();
                 continue;
@@ -45,38 +48,26 @@ std::vector<BeanEntry> BeanManager::listBeans() {
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, file);
             if (!err && parseBean(doc.as<JsonObject>(), bean)) {
-                if (bean.id.isEmpty()) {
-                    String fallbackId = name;
-                    int slash = fallbackId.lastIndexOf('/');
-                    if (slash >= 0) {
-                        fallbackId = fallbackId.substring(slash + 1);
-                    }
-                    if (fallbackId.endsWith(".json")) {
-                        fallbackId = fallbackId.substring(0, fallbackId.length() - 5);
-                    }
-                    if (isSafeId(fallbackId)) {
-                        bean.id = fallbackId;
-                    } else {
-                        bean.id = generateShortID();
-                        file.close();
-                        if (saveBean(bean)) {
-                            rescuedIds.push_back(bean.id);
-                            if (!_fs->remove(name)) {
-                                ESP_LOGW("BeanManager", "Rescued bean %s but could not remove original file", name.c_str());
-                            }
-                            beans.push_back(bean);
-                        } else {
-                            ESP_LOGE("BeanManager", "Failed to rescue bean file with generated id: %s", name.c_str());
+                if (!applyFallbackBeanId(bean, stem)) {
+                    // Both JSON id and filename stem are unsafe. Generate a
+                    // fresh safe id, persist the rescued bean under it, and
+                    // remove the original unsafe file so the UI no longer
+                    // sees an unmanageable empty-id row.
+                    bean.id = generateShortID();
+                    file.close();
+                    if (saveBean(bean)) {
+                        rescuedIds.push_back(bean.id);
+                        if (!_fs->remove(name)) {
+                            ESP_LOGW("BeanManager", "Rescued bean %s but could not remove original file", name.c_str());
                         }
-                        file = root.openNextFile();
-                        continue;
+                        beans.push_back(bean);
+                    } else {
+                        ESP_LOGE("BeanManager", "Failed to rescue bean file with generated id: %s", name.c_str());
                     }
+                    file = root.openNextFile();
+                    continue;
                 }
-                if (bean.id.isEmpty()) {
-                    ESP_LOGW("BeanManager", "Skipping unrescuable bean file (no safe id derivable): %s", name.c_str());
-                } else {
-                    beans.push_back(bean);
-                }
+                beans.push_back(bean);
             }
         }
         file = root.openNextFile();
@@ -108,7 +99,16 @@ bool BeanManager::loadBean(const String &uuid, BeanEntry &outBean) {
         return false;
     }
 
-    return parseBean(doc.as<JsonObject>(), outBean);
+    if (!parseBean(doc.as<JsonObject>(), outBean)) {
+        return false;
+    }
+
+    if (!applyFallbackBeanId(outBean, uuid)) {
+        ESP_LOGW("BeanManager", "Skipping unrescuable bean file (no safe id derivable): %s", uuid.c_str());
+        return false;
+    }
+
+    return true;
 }
 
 bool BeanManager::saveBean(BeanEntry &bean) {

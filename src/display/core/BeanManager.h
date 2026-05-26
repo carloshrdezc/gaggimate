@@ -85,6 +85,13 @@ inline bool parseBean(const JsonObject &obj, BeanEntry &bean) {
     return !bean.name.isEmpty();
 }
 
+inline bool applyFallbackBeanId(BeanEntry &bean, const String &fallbackId) {
+    if (bean.id.isEmpty() && isSafeId(fallbackId)) {
+        bean.id = fallbackId;
+    }
+    return !bean.id.isEmpty();
+}
+
 inline void writeBean(JsonObject &obj, const BeanEntry &bean) {
     obj["id"] = bean.id;
     obj["name"] = bean.name;
