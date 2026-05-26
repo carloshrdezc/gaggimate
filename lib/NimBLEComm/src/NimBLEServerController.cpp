@@ -1,18 +1,5 @@
 #include "NimBLEServerController.h"
 
-#include "BondPolicy.h"
-
-namespace {
-// Convert a stored NimBLEAddress (bond identity) into the host-portable
-// gm_ble_addr_t the bond policy compares against.
-gm_ble_addr_t toBondAddr(const NimBLEAddress &address) {
-    gm_ble_addr_t out{};
-    out.type = address.getType();
-    std::memcpy(out.val, address.getNative(), sizeof(out.val));
-    return out;
-}
-} // namespace
-
 NimBLEServerController::NimBLEServerController() {}
 
 void NimBLEServerController::initServer(const String infoString) {
@@ -191,29 +178,6 @@ void NimBLEServerController::onConnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client connected.");
     deviceConnected = true;
     pServer->stopAdvertising();
-}
-
-void NimBLEServerController::onConnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) {
-    // Proactively clear a stale/asymmetric bond before the peer tries to encrypt.
-    // After re-flashing a board, the controller can hold a bond whose key no
-    // longer matches the connecting display. With WRITE_ENC on every control
-    // characteristic, that mismatch silently rejects setpoint writes (the boiler
-    // never heats) while unencrypted sensor NOTIFYs keep flowing. Wiping the stale
-    // bond here lets a fresh pair succeed automatically. A matching bond compares
-    // equal, so a legitimate reconnect is left untouched.
-    if (desc == nullptr) {
-        return;
-    }
-    const int numBonds = NimBLEDevice::getNumBonds();
-    if (numBonds <= 0) {
-        return;
-    }
-    const gm_ble_addr_t stored = toBondAddr(NimBLEDevice::getBondedAddress(0));
-    const gm_ble_addr_t connecting = desc->peer_id_addr;
-    if (shouldWipeBondsBeforePair(static_cast<size_t>(numBonds), &stored, &connecting)) {
-        ESP_LOGW(LOG_TAG, "Stale/asymmetric bond detected on connect; wiping bonds to allow fresh pair");
-        NimBLEDevice::deleteAllBonds();
-    }
 }
 
 void NimBLEServerController::onDisconnect(NimBLEServer *pServer) {

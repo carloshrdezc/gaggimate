@@ -92,7 +92,7 @@ bool NimBLEClientController::connectToServer() {
     client->updateConnParams(6, 8, 0, 400);
 
     bool secure = false;
-    bool wipedThisCycle = false;
+    bool bondsWiped = false;
     // Try to establish an encrypted/bonded link. If it fails and we hold a stale
     // local bond (the usual cause after re-flashing one board: the display's LTK
     // no longer matches the controller), wipe the local bonds once and retry a
@@ -113,12 +113,12 @@ bool NimBLEClientController::connectToServer() {
         if (secure) {
             break;
         }
-        if (!shouldWipeLocalBondsAndRetry(secure, wipedThisCycle, static_cast<size_t>(NimBLEDevice::getNumBonds()))) {
+        if (!shouldWipeLocalBondsAndRetry(secure, bondsWiped, static_cast<size_t>(NimBLEDevice::getNumBonds()))) {
             break;
         }
         ESP_LOGW(LOG_TAG, "secureConnection() failed with stale local bond; wiping bonds and retrying fresh pair");
         NimBLEDevice::deleteAllBonds();
-        wipedThisCycle = true;
+        bondsWiped = true;
         delay(250);
     }
 
