@@ -4,16 +4,26 @@
 #include <utility>
 
 namespace {
+bool containsPathTraversal(const String &id) {
+    return id == "." || id == ".." || id.indexOf('/') >= 0 || id.indexOf('\\') >= 0 || id.indexOf("..") >= 0;
+}
+
 std::vector<String> cleanProfileIds(std::vector<String> ids) {
     std::vector<String> cleaned;
     cleaned.reserve(ids.size());
 
     for (auto &id : ids) {
+        // Retain legacy formatting so older persisted state (for example,
+        // weird casing, hyphens, or longer IDs imported from external
+        // sources) survives the upgrade. But never keep anything that could
+        // escape the profiles directory; startup validation feeds these IDs
+        // into filesystem existence checks, so path separators or traversal
+        // sequences would reintroduce the CAR-96-style path issue.
+        if (containsPathTraversal(id)) {
+            ESP_LOGW("Settings", "Dropping persisted profile id with path-traversal characters: %s", id.c_str());
+            continue;
+        }
         if (!isSafeId(id)) {
-            // Retain non-conforming ids so that legacy persisted state (e.g.
-            // favoritedProfiles, profileOrder written by older firmware or
-            // imported from external sources) survives the upgrade. Path-
-            // traversal protection remains at the network and save boundaries.
             ESP_LOGW("Settings", "Retaining persisted profile id with non-conforming format: %s", id.c_str());
         }
         if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {

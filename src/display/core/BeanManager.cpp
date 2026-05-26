@@ -45,7 +45,18 @@ std::vector<BeanEntry> BeanManager::listBeans() {
                         bean.id = fallbackId;
                     }
                 }
-                beans.push_back(bean);
+                // Do not mutate the filesystem from this read path. If the
+                // JSON id is unsafe and the filename stem is also not a safe
+                // fallback, surfacing the bean with an empty id would make it
+                // unmanageable in the UI (load/delete reject empty or unsafe
+                // ids; the editor treats empty ids as new records). Keep the
+                // file on disk for manual recovery, but skip it here with an
+                // explicit warning so the issue is visible in logs.
+                if (bean.id.isEmpty()) {
+                    ESP_LOGW("BeanManager", "Skipping unrescuable bean file (no safe id derivable): %s", name.c_str());
+                } else {
+                    beans.push_back(bean);
+                }
             }
         }
         file = root.openNextFile();
