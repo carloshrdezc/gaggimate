@@ -30,7 +30,7 @@ class GitHubOTA {
     void checkForUpdates();
     bool isUpdateAvailable(bool controller = false) const;
     String getCurrentVersion() const;
-    bool update(bool controller = true, bool display = true);
+    bool update(bool controller = true, bool display = true, bool force = false);
     void setReleaseUrl(const String &release_url);
     void setControllerVersion(const String &controller_version);
 

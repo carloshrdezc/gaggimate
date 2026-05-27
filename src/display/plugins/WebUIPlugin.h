@@ -24,6 +24,15 @@ constexpr size_t DNS_PERIOD = 10;
 const String LOCAL_URL = "http://4.4.4.1/";
 const String RELEASE_URL = "https://github.com/carloshrdezc/gaggimate/releases/";
 
+// Last 5 stable releases offered in the OTA dropdown — auto-generated at build
+// time by scripts/generate_stable_versions.py from the GitHub Releases API of
+// `carloshrdezc/gaggimate`. The script is wired in as a PlatformIO pre-script
+// in platformio.ini for the `display` and `controller` envs. If the build is
+// offline and the header has never been generated, a single-entry fallback is
+// emitted so the firmware still compiles. Update RELEASE_URL above and the
+// OWNER/REPO constants in the script in lockstep if the fork ever moves.
+#include "../../stable_versions.h"
+
 class ProfileManager;
 class BeanManager;
 

@@ -10,6 +10,7 @@ __pycache__
 data/w
 .codebuddy
 src/version.h
+src/stable_versions.h
 src/display/ui/default/lvgl/project.info
 bean-whisperer/
 .worktrees/
