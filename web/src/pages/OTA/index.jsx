@@ -337,19 +337,41 @@ const ActionButtonsSection = memo(
     const channelAcknowledged = canUpdateOnAcknowledgedChannel({ formData, pendingChannel });
     const isTagPinned = typeof formData.channel === 'string' && formData.channel.startsWith('tag:');
     // Three-way enable logic for Update Display / Update Controller:
-    //   - Pinned tag, fully resolved on the device  -> force-enable (re-flash / downgrade).
-    //   - Channel still pending an unsaved Save     -> hard-disable (prevents firing
-    //                                                   ota-start against a stale
-    //                                                   `_latest_url` while the new
-    //                                                   channel is being saved).
-    //   - Otherwise                                  -> follow the device's
-    //                                                   `*UpdateAvailable` flag.
-    const displayDisabled = tagFlashReady
-      ? false
-      : !channelAcknowledged || !formData.displayUpdateAvailable;
-    const controllerDisabled = tagFlashReady
-      ? false
-      : !channelAcknowledged || !formData.controllerUpdateAvailable;
+    //   - Acknowledged channel is `tag:*`           -> ONLY enable when
+    //                                                   `tagFlashReady` (the
+    //                                                   strict gate). NEVER
+    //                                                   fall back to the
+    //                                                   `*UpdateAvailable`
+    //                                                   flags here — those
+    //                                                   may still hold a
+    //                                                   stale `true` from
+    //                                                   the previous
+    //                                                   channel's check, and
+    //                                                   the firmware loop()
+    //                                                   passes force=true
+    //                                                   for any tag:*
+    //                                                   channel, which would
+    //                                                   download from the
+    //                                                   old `_latest_url`.
+    //   - Channel still pending an unsaved Save     -> hard-disable.
+    //   - Channel is `latest`/`nightly`, no pending -> follow the device's
+    //                                                   `*UpdateAvailable`
+    //                                                   flag.
+    let displayDisabled;
+    let controllerDisabled;
+    if (isTagPinned) {
+      // Tag-pinned path: tagFlashReady or nothing.
+      displayDisabled = !tagFlashReady;
+      controllerDisabled = !tagFlashReady;
+    } else if (!channelAcknowledged) {
+      // Unsaved channel change: hard-disable until Save & Refresh runs.
+      displayDisabled = true;
+      controllerDisabled = true;
+    } else {
+      // Normal latest/nightly path: trust the device's per-target flag.
+      displayDisabled = !formData.displayUpdateAvailable;
+      controllerDisabled = !formData.controllerUpdateAvailable;
+    }
     const displayLabel = isTagPinned ? 'Flash Display' : 'Update Display';
     const controllerLabel = isTagPinned ? 'Flash Controller' : 'Update Controller';
     return (

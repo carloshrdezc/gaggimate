@@ -129,3 +129,110 @@ test('canUpdateOnAcknowledgedChannel: returns false for malformed input', () => 
   assert.equal(canUpdateOnAcknowledgedChannel({ formData: null, pendingChannel: 'latest' }), false);
   assert.equal(canUpdateOnAcknowledgedChannel({ formData: { channel: 42 }, pendingChannel: 'latest' }), false);
 });
+
+// ---------------------------------------------------------------------------
+// Composite-rule regression tests — these mirror the exact disable-decision
+// the OTA page applies in `ActionButtonsSection`. They lock down the contract
+// across the helpers so a future refactor can't accidentally re-introduce
+// the "stale _latest_url + tag:* settings + force=true" footgun that Codex
+// flagged in pullrequestreview-4376209156.
+//
+// Decision (must match index.jsx):
+//   if isTagPinned                     -> disabled := !tagFlashReady
+//   else if !channelAcknowledged       -> disabled := true
+//   else                                -> disabled := !*UpdateAvailable
+
+function decideDisabled(formData, pendingChannel, target /* 'display' | 'controller' */) {
+  const tagFlashReady = canFlashTaggedRelease({ formData, pendingChannel });
+  const channelAcknowledged = canUpdateOnAcknowledgedChannel({ formData, pendingChannel });
+  const isTagPinned = typeof formData?.channel === 'string' && formData.channel.startsWith('tag:');
+  const flagKey = target === 'controller' ? 'controllerUpdateAvailable' : 'displayUpdateAvailable';
+  if (isTagPinned) return !tagFlashReady;
+  if (!channelAcknowledged) return true;
+  return !formData[flagKey];
+}
+
+test('disable rule: tag-pinned + Checking... must NOT re-enable from stale displayUpdateAvailable', () => {
+  // The exact regression: device acknowledged tag:2.0.8, but status is still
+  // "Checking..." for that tag. The previous channel's check left
+  // displayUpdateAvailable=true. WITHOUT the fix we'd fall back to that flag
+  // and the Flash button would enable; firmware would force-flash from a
+  // stale _latest_url.
+  const formData = {
+    channel: 'tag:2.0.8',
+    status: 'Checking...',
+    displayUpdateAvailable: true,
+    controllerUpdateAvailable: true,
+  };
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+});
+
+test('disable rule: tag-pinned + status mismatch must NOT re-enable from stale flags', () => {
+  // status reports the previous channel's resolved version, not the pinned tag.
+  const formData = {
+    channel: 'tag:2.0.8',
+    status: '2.0.10', // stale from when channel was 'latest'
+    displayUpdateAvailable: true,
+    controllerUpdateAvailable: true,
+  };
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+});
+
+test('disable rule: tag-pinned + Update failed must NOT re-enable from stale flags', () => {
+  const formData = {
+    channel: 'tag:2.0.8',
+    status: 'Update failed',
+    displayUpdateAvailable: true,
+    controllerUpdateAvailable: true,
+  };
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+});
+
+test('disable rule: tag-pinned + tagFlashReady all-true -> enabled', () => {
+  const formData = {
+    channel: 'tag:2.0.8',
+    status: '2.0.8',
+    // *UpdateAvailable flags can be anything — they are not consulted on the
+    // tag-pinned path. Set them false to prove that.
+    displayUpdateAvailable: false,
+    controllerUpdateAvailable: false,
+  };
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), false);
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), false);
+});
+
+test('disable rule: latest channel + unsaved tag selection -> disabled (P1 from prior review)', () => {
+  const formData = {
+    channel: 'latest',
+    status: '2.0.8',
+    displayUpdateAvailable: true,
+    controllerUpdateAvailable: true,
+  };
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
+  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+});
+
+test('disable rule: latest channel + saved + flag true -> enabled', () => {
+  const formData = {
+    channel: 'latest',
+    status: '2.0.8',
+    displayUpdateAvailable: true,
+    controllerUpdateAvailable: false,
+  };
+  assert.equal(decideDisabled(formData, 'latest', 'display'), false);
+  assert.equal(decideDisabled(formData, 'latest', 'controller'), true);
+});
+
+test('disable rule: latest channel + saved + flag false -> disabled', () => {
+  const formData = {
+    channel: 'latest',
+    status: '2.0.8',
+    displayUpdateAvailable: false,
+    controllerUpdateAvailable: false,
+  };
+  assert.equal(decideDisabled(formData, 'latest', 'display'), true);
+  assert.equal(decideDisabled(formData, 'latest', 'controller'), true);
+});
