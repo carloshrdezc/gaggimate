@@ -222,6 +222,12 @@ void NimBLEServerController::onAuthenticationComplete(ble_gap_conn_desc *desc) {
 
     ESP_LOGW(LOG_TAG, "Auth callback fired unencrypted on settled link (bonded=%d, pendingInitialPair=%d); ignoring",
              (int)desc->sec_state.bonded, (int)pendingInitialPair);
+    // Close the initial-pair window: only the FIRST auth callback on a
+    // connection can fail it; later unencrypted callbacks (re-key transients,
+    // BLE_GAP_EVENT_REPEAT_PAIRING with bonded=false, etc.) must not be able
+    // to flip back into the disconnect path on a session we've already
+    // tolerated. Codex review on PR #109 caught this stale-flag edge case.
+    pendingInitialPair = false;
 }
 
 void NimBLEServerController::factoryResetBonds() {
