@@ -181,15 +181,19 @@ export function Settings() {
         }
 
         formDataToSubmit.set('autowakeupEnabled', formData.autowakeupEnabled ? '1' : '');
-        formDataToSubmit.set('homekit', formData.homekit ? '1' : '');
         formDataToSubmit.set('cloudRelayEnabled', formData.cloudRelayEnabled ? '1' : '0');
 
         // These render as <button>, not form inputs, so FormData omits them. The backend
-        // reads them via hasArg(), so the field must be absent (not empty) when disabled.
+        // reads them via hasArg(), so the field must be absent (not ""/falsy) when disabled —
+        // hasArg() returns true for any present key, even one with an empty value.
+        if (formData.homekit) formDataToSubmit.set('homekit', '1');
+        else formDataToSubmit.delete('homekit');
         if (formData.delayAdjust) formDataToSubmit.set('delayAdjust', '1');
         else formDataToSubmit.delete('delayAdjust');
         if (formData.momentaryButtons) formDataToSubmit.set('momentaryButtons', '1');
         else formDataToSubmit.delete('momentaryButtons');
+        if (formData.clock24hFormat) formDataToSubmit.set('clock24hFormat', '1');
+        else formDataToSubmit.delete('clock24hFormat');
 
         const schedulesStr = autowakeupSchedules
           .map(schedule => `${schedule.time}|${schedule.days.map(d => (d ? '1' : '0')).join('')}`)

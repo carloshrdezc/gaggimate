@@ -50,8 +50,12 @@ export function BeansPage() {
     const hydrate = async () => {
       try {
         setBusy(true);
-        await migrateLegacyBeansToDevice(apiService);
-        const loadedBeans = await listBeans(apiService);
+        // migrateLegacyBeansToDevice already returns the final bean list —
+        // using it directly avoids a redundant second req:beans:list request.
+        // Two back-to-back requests matter because the firmware rescue path
+        // runs on every listBeans() call while the original unsafe-ID file
+        // persists; a second call would create a duplicate rescued copy.
+        const loadedBeans = await migrateLegacyBeansToDevice(apiService);
         if (!cancelled) {
           setBeans(loadedBeans);
         }
