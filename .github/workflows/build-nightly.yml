@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-      - "master"
+      - "dev-master"
   workflow_dispatch: {}
 
 permissions:
