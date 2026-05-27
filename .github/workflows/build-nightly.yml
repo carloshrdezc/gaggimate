@@ -133,6 +133,26 @@ jobs:
       - name: Read version
         id: version
         run: echo "version=$(cat release/version.txt)" >> $GITHUB_OUTPUT
+      - name: Checkout repo (for tag management)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Force-move nightly tag to current commit
+        # softprops/action-gh-release sets target_commitish only when CREATING
+        # a tag. If the nightly tag already exists from a prior run, the
+        # release source tarball stays pinned to that old commit even though
+        # the assets refresh. Delete-then-recreate the tag so it always
+        # tracks HEAD before the release action runs.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -d nightly 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+          git tag -f nightly "${{ github.sha }}"
+          git push origin "refs/tags/nightly" --force
       - name: Update Nightly Release
         uses: softprops/action-gh-release@v2
         env:
@@ -144,10 +164,6 @@ jobs:
           body: 'Latest nightly release, use the nightly channel in the UI to download this firmware.'
           files: |
             release/*
-          # Force the nightly tag to track the current commit on every run.
-          # Without this, andelf/nightly-release-style desync left the git tag
-          # pointing at an old commit while no Release object existed at all.
-          target_commitish: ${{ github.sha }}
           make_latest: 'false'
       - name: Deploy to GitHub Pages subdirectory
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
