@@ -90,6 +90,31 @@ test('canFlashTaggedRelease: returns false for malformed input', () => {
   );
 });
 
+// v-prefix tolerance — GitHub release tags occasionally carry a leading `v`
+// (`v1.8.2`). The firmware resolver strips it before reporting, but the
+// channel string keeps it. Both directions must compare equal so legacy
+// v-prefixed tags can flash and stripped-v device reports don't lock the
+// gate forever.
+
+test('canFlashTaggedRelease: enabled when pinned tag is v-prefixed and status is stripped', () => {
+  // Channel stored as "tag:v1.8.2", device reports semver as "1.8.2".
+  const formData = { channel: 'tag:v1.8.2', status: '1.8.2' };
+  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:v1.8.2' }), true);
+});
+
+test('canFlashTaggedRelease: enabled when pinned tag has no v but device reports v-prefixed', () => {
+  // Inverse case — defensive: if a future firmware ever reported "v1.8.2"
+  // verbatim, a non-v-prefixed channel ("tag:1.8.2") should still match.
+  const formData = { channel: 'tag:1.8.2', status: 'v1.8.2' };
+  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:1.8.2' }), true);
+});
+
+test('canFlashTaggedRelease: still rejects mismatched semver even with v-prefix', () => {
+  // Channel "tag:v1.8.2" vs status "1.8.3" — different versions, must not match.
+  const formData = { channel: 'tag:v1.8.2', status: '1.8.3' };
+  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:v1.8.2' }), false);
+});
+
 // canUpdateOnAcknowledgedChannel gate — protects the "Update Display"/"Update
 // Controller" buttons when the channel is "latest" or "nightly" but the
 // dropdown holds an unsaved selection.

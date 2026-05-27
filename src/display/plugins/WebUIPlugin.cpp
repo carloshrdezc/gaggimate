@@ -170,9 +170,11 @@ void WebUIPlugin::loop() {
             // GitHub release tags occasionally carry a leading `v` prefix
             // (`v1.8.2`); the resolver strips it, but the channel string we
             // stored does not. Treat them as equal so legacy tags still flash.
+            // Cover both directions in case a future resolver path keeps the
+            // `v` and the channel string drops it.
             const bool match = resolved == pinned ||
                                (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
-                               ("v" + resolved) == pinned;
+                               (resolved.startsWith("v") && resolved.substring(1) == pinned);
             if (!match) {
                 ESP_LOGE("WebUIPlugin",
                          "Refusing forced OTA: pinned tag %s but resolved %s",

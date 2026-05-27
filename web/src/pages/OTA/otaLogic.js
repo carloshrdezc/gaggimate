@@ -52,7 +52,19 @@ export function canFlashTaggedRelease({ formData, pendingChannel } = {}) {
     return false;
   }
   // Tag is "tag:2.0.8" -> compare against "2.0.8".
-  return status === channel.slice(4);
+  // GitHub release tags occasionally carry a leading `v` prefix (e.g.
+  // `v1.8.2`). The firmware's resolver (GitHubOTA::checkForUpdates) strips
+  // it before reporting the version, but the channel string we stored does
+  // not. Mirror the firmware's leading-`v` tolerance here so the Flash
+  // buttons enable for v-prefixed legacy tags too — without this, a tag
+  // like `tag:v1.8.2` would resolve to status `1.8.2` and the strict
+  // equality below would leave `tagFlashReady` false forever.
+  const pinned = channel.slice(4);
+  return (
+    status === pinned ||
+    (pinned.startsWith('v') && status === pinned.slice(1)) ||
+    (status.startsWith('v') && status.slice(1) === pinned)
+  );
 }
 
 // Decide whether the "Update Display" / "Update Controller" buttons should be
