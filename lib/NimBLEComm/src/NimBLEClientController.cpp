@@ -362,7 +362,7 @@ void NimBLEClientController::loopTask(void *arg) {
         controller->loop();
         // Tick every 1 s so an interrupted scan is restarted within 1 s.
         // The previous 5 s interval caused multi-second blind spots after any
-        // scan disruption (e.g. BeanconquerorPlugin advertising startup).
+        // scan disruption.
         xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(1000));
     }
 }
