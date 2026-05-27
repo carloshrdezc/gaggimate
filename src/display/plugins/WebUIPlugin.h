@@ -24,20 +24,14 @@ constexpr size_t DNS_PERIOD = 10;
 const String LOCAL_URL = "http://4.4.4.1/";
 const String RELEASE_URL = "https://github.com/carloshrdezc/gaggimate/releases/";
 
-// Last 5 stable releases offered in the OTA dropdown.
-// Newest first. Update this list when cutting a new stable release.
-// Synthesizing dynamically from the GitHub API was considered and rejected:
-// it adds runtime HTTPS + JSON parse + RAM pressure on the ESP32 while the
-// release set only changes when we ship firmware (which already requires a
-// commit to this repo). Build-time constant keeps the firmware tiny.
-constexpr const char *const STABLE_VERSIONS[] = {
-    "2.0.10",
-    "2.0.9",
-    "2.0.8.1",
-    "2.0.8",
-    "2.0.7",
-};
-constexpr size_t STABLE_VERSIONS_COUNT = sizeof(STABLE_VERSIONS) / sizeof(STABLE_VERSIONS[0]);
+// Last 5 stable releases offered in the OTA dropdown — auto-generated at build
+// time by scripts/generate_stable_versions.py from the GitHub Releases API of
+// `carloshrdezc/gaggimate`. The script is wired in as a PlatformIO pre-script
+// in platformio.ini for the `display` and `controller` envs. If the build is
+// offline and the header has never been generated, a single-entry fallback is
+// emitted so the firmware still compiles. Update RELEASE_URL above and the
+// OWNER/REPO constants in the script in lockstep if the fork ever moves.
+#include "../../stable_versions.h"
 
 class ProfileManager;
 class BeanManager;
