@@ -6,7 +6,7 @@ import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
-import { updateOtaChannel, canFlashTaggedRelease } from './otaLogic.js';
+import { updateOtaChannel, canFlashTaggedRelease, canUpdateOnAcknowledgedChannel } from './otaLogic.js';
 
 // Constants
 const REBUILD_STATUS = {
@@ -334,9 +334,22 @@ const ActionButtonsSection = memo(
     // with force=true against a stale `_latest_url` would download the wrong
     // firmware.
     const tagFlashReady = canFlashTaggedRelease({ formData, pendingChannel });
+    const channelAcknowledged = canUpdateOnAcknowledgedChannel({ formData, pendingChannel });
     const isTagPinned = typeof formData.channel === 'string' && formData.channel.startsWith('tag:');
-    const displayDisabled = tagFlashReady ? false : !formData.displayUpdateAvailable;
-    const controllerDisabled = tagFlashReady ? false : !formData.controllerUpdateAvailable;
+    // Three-way enable logic for Update Display / Update Controller:
+    //   - Pinned tag, fully resolved on the device  -> force-enable (re-flash / downgrade).
+    //   - Channel still pending an unsaved Save     -> hard-disable (prevents firing
+    //                                                   ota-start against a stale
+    //                                                   `_latest_url` while the new
+    //                                                   channel is being saved).
+    //   - Otherwise                                  -> follow the device's
+    //                                                   `*UpdateAvailable` flag.
+    const displayDisabled = tagFlashReady
+      ? false
+      : !channelAcknowledged || !formData.displayUpdateAvailable;
+    const controllerDisabled = tagFlashReady
+      ? false
+      : !channelAcknowledged || !formData.controllerUpdateAvailable;
     const displayLabel = isTagPinned ? 'Flash Display' : 'Update Display';
     const controllerLabel = isTagPinned ? 'Flash Controller' : 'Update Controller';
     return (

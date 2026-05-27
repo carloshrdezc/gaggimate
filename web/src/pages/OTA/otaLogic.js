@@ -54,3 +54,30 @@ export function canFlashTaggedRelease({ formData, pendingChannel } = {}) {
   // Tag is "tag:2.0.8" -> compare against "2.0.8".
   return status === channel.slice(4);
 }
+
+// Decide whether the "Update Display" / "Update Controller" buttons should be
+// enabled in the *non-tag-pinned* path (channel is "latest" or "nightly", and
+// the device says an update is available).
+//
+// The trap this guards against: the dropdown is bound to `pendingChannel`,
+// but Save & Refresh has not been clicked yet. Clicking "Update Display"
+// fires both `req:ota-start` *and* the form's `req:ota-settings` payload —
+// so the device receives the new (e.g. tag:*) channel and immediately runs
+// the OTA, but `GitHubOTA::checkForUpdates()` has not had a chance to
+// resolve `_latest_url` for the new channel yet. Result: it flashes the
+// previous channel's binary against the new channel's metadata, or fails on
+// a relative URL.
+//
+// Rule: if the dropdown shows a value the device has not acknowledged yet
+// (`pendingChannel !== formData.channel`), block the Update buttons. The
+// user must click "Save & Refresh" first; once the device echoes the new
+// channel back, the normal `*UpdateAvailable` flags (or the tag gate) will
+// re-enable the right button.
+export function canUpdateOnAcknowledgedChannel({ formData, pendingChannel } = {}) {
+  if (!formData || typeof formData !== 'object') return false;
+  const { channel } = formData;
+  if (typeof channel !== 'string') return false;
+  // If there's no pending value (initial load), trust formData.channel.
+  if (pendingChannel === undefined) return true;
+  return pendingChannel === channel;
+}

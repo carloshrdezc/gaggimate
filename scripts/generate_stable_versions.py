@@ -65,6 +65,37 @@ def _git_describe() -> str:
         return "unknown"
 
 
+def _current_release_tag() -> str | None:
+    """Return the tag at HEAD if HEAD is exactly on a tag, else None.
+
+    During the GitHub Actions release flow, `.github/workflows/build.yml`
+    builds the firmware *before* the release-publishing job creates the
+    GitHub Release. So at firmware build time, the just-pushed tag is
+    visible to git but not yet to the Releases API. We promote it here
+    so the artifact for tag X ships with X already in STABLE_VERSIONS,
+    letting users on the just-released firmware force-reflash that
+    exact build via the dropdown without waiting for the next release.
+
+    `nightly` is filtered out — it's a moving tag, not a release line.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+        if out.returncode != 0:
+            return None
+        tag = out.stdout.strip()
+        if not tag or tag.lower() == "nightly":
+            return None
+        return tag
+    except Exception:
+        return None
+
+
 def _fetch_releases() -> list[dict] | None:
     """Return list of release dicts, or None on any failure."""
     url = "https://api.github.com/repos/{}/{}/releases?per_page={}".format(
@@ -131,10 +162,20 @@ def _format_header(versions: list[str], source: str) -> str:
 
 def main() -> int:
     releases = _fetch_releases()
+    current_tag = _current_release_tag()
     if releases is not None:
         versions = _filter_stable(releases)
+        # If this build is on a tag, prepend it so the artifact for tag X
+        # ships with X already listed (the Releases API hasn't seen it yet
+        # — release publish runs *after* build in our workflow).
+        if current_tag and current_tag not in versions:
+            versions.insert(0, current_tag)
+            versions = versions[:MAX_VERSIONS]
         if versions:
-            content = _format_header(versions, "github-api ({}/{})".format(OWNER, REPO))
+            source = "github-api ({}/{})".format(OWNER, REPO)
+            if current_tag:
+                source += " + current-tag({})".format(current_tag)
+            content = _format_header(versions, source)
             with open(HEADER_PATH, "w", encoding="utf-8", newline="\n") as f:
                 f.write(content)
             print("[stable_versions] Wrote {} with {} versions: {}".format(
@@ -149,7 +190,8 @@ def main() -> int:
         return 0
 
     # Last-resort fallback: emit a single-entry array so firmware still compiles.
-    fallback_version = _git_describe()
+    # Prefer the exact-match tag (if HEAD is on one) over the descended-from tag.
+    fallback_version = current_tag or _git_describe()
     content = _format_header([fallback_version], "fallback (git-describe, build was offline)")
     with open(HEADER_PATH, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)

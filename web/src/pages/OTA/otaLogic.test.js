@@ -89,3 +89,43 @@ test('canFlashTaggedRelease: returns false for malformed input', () => {
     false,
   );
 });
+
+// canUpdateOnAcknowledgedChannel gate — protects the "Update Display"/"Update
+// Controller" buttons when the channel is "latest" or "nightly" but the
+// dropdown holds an unsaved selection.
+
+import { canUpdateOnAcknowledgedChannel } from './otaLogic.js';
+
+test('canUpdateOnAcknowledgedChannel: enabled when dropdown matches device channel', () => {
+  const formData = { channel: 'latest', displayUpdateAvailable: true };
+  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'latest' }), true);
+});
+
+test('canUpdateOnAcknowledgedChannel: disabled when user has unsaved tag selection on a "latest" device', () => {
+  // The trap from the P1 codex review: device is on `latest` with an update
+  // available, user picks `tag:2.0.8` from the dropdown but does NOT click
+  // Save & Refresh. Without this gate, the "Update Display" button stays
+  // enabled and clicking it would send `req:ota-start` while the device's
+  // `_latest_url` still points at `latest`.
+  const formData = { channel: 'latest', displayUpdateAvailable: true };
+  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'tag:2.0.8' }), false);
+});
+
+test('canUpdateOnAcknowledgedChannel: disabled when user has unsaved nightly selection on a "latest" device', () => {
+  const formData = { channel: 'latest', displayUpdateAvailable: true };
+  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'nightly' }), false);
+});
+
+test('canUpdateOnAcknowledgedChannel: enabled on initial load when pendingChannel is undefined', () => {
+  // Initial mount: parent has not yet seeded `pendingChannel` from formData.
+  // We trust formData.channel; the gate is for unsaved deltas only.
+  const formData = { channel: 'latest', displayUpdateAvailable: true };
+  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: undefined }), true);
+});
+
+test('canUpdateOnAcknowledgedChannel: returns false for malformed input', () => {
+  assert.equal(canUpdateOnAcknowledgedChannel(), false);
+  assert.equal(canUpdateOnAcknowledgedChannel({}), false);
+  assert.equal(canUpdateOnAcknowledgedChannel({ formData: null, pendingChannel: 'latest' }), false);
+  assert.equal(canUpdateOnAcknowledgedChannel({ formData: { channel: 42 }, pendingChannel: 'latest' }), false);
+});
