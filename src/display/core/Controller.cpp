@@ -15,7 +15,6 @@
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
 #include <display/plugins/BLEScalePlugin.h>
-#include <display/plugins/BeanconquerorPlugin.h>
 #include <display/plugins/BoilerFillPlugin.h>
 #include <display/plugins/HomekitPlugin.h>
 #include <display/plugins/LedControlPlugin.h>
@@ -82,7 +81,6 @@ void Controller::setup() {
     pluginManager->registerPlugin(new WebUIPlugin());
     pluginManager->registerPlugin(&ShotHistory);
     pluginManager->registerPlugin(&BLEScales);
-    pluginManager->registerPlugin(new BeanconquerorPlugin());
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
     pluginManager->setup(this);
@@ -763,7 +761,10 @@ void Controller::activate() {
             pluginManager->trigger("controller:brew:prestart");
         }
     }
-    delay(200);
+    // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
+    // tare to settle.  Arduino delay() spins without yielding and can starve
+    // the WiFi TCP/IP stack, causing WebSocket disconnections.
+    vTaskDelay(pdMS_TO_TICKS(200));
     switch (mode) {
     case MODE_BREW:
         startProcess(new BrewProcess(profileManager->getSelectedProfile(),
