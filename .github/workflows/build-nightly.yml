@@ -125,6 +125,10 @@ jobs:
       pages: write
       pull-requests: write
     steps:
+      - name: Checkout repo (for tag management)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download Firmware Files
         uses: actions/download-artifact@v4
         with:
@@ -133,10 +137,6 @@ jobs:
       - name: Read version
         id: version
         run: echo "version=$(cat release/version.txt)" >> $GITHUB_OUTPUT
-      - name: Checkout repo (for tag management)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Force-move nightly tag to current commit
         # softprops/action-gh-release sets target_commitish only when CREATING
         # a tag. If the nightly tag already exists from a prior run, the
