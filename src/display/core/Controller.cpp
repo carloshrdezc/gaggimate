@@ -749,22 +749,30 @@ void Controller::activate() {
     if (isActiveSafe())
         return;
     clear();
-    clientController.tare();
-    if (isVolumetricAvailable()) {
+    // Tare + settle is only meaningful for modes that consume scale/volumetric
+    // data. Steam and water modes have no scale and no volumetric phase, so
+    // running them here would block the controller task on a synchronous BLE
+    // write-with-response and a 200 ms settle for nothing — visibly freezing
+    // LVGL on the shared core (see CAR-253).
+    const bool needsTare = (mode == MODE_BREW || mode == MODE_MANUAL);
+    if (needsTare) {
+        clientController.tare();
+        if (isVolumetricAvailable()) {
 #ifdef NIGHTLY_BUILD
-        currentVolumetricSource =
-            isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
+            currentVolumetricSource =
+                isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
 #else
-        currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+            currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
 #endif
-        if (mode == MODE_BREW) {
-            pluginManager->trigger("controller:brew:prestart");
+            if (mode == MODE_BREW) {
+                pluginManager->trigger("controller:brew:prestart");
+            }
         }
+        // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
+        // tare to settle.  Arduino delay() spins without yielding and can starve
+        // the WiFi TCP/IP stack, causing WebSocket disconnections.
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
-    // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
-    // tare to settle.  Arduino delay() spins without yielding and can starve
-    // the WiFi TCP/IP stack, causing WebSocket disconnections.
-    vTaskDelay(pdMS_TO_TICKS(200));
     switch (mode) {
     case MODE_BREW:
         startProcess(new BrewProcess(profileManager->getSelectedProfile(),
