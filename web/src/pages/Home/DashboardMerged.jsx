@@ -709,6 +709,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
           }}
           style={{
             width: '100%',
+            boxSizing: 'border-box',
             fontFamily: 'var(--dm-font-display)',
             fontSize: 26,
             fontWeight: 700,
