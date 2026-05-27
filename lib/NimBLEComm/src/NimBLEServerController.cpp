@@ -177,24 +177,57 @@ void NimBLEServerController::registerPumpModelCoeffsCallback(const pump_model_co
 void NimBLEServerController::onConnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client connected.");
     deviceConnected = true;
+    pendingInitialPair = true; // cleared by onAuthenticationComplete or onDisconnect (CAR-231)
     pServer->stopAdvertising();
 }
 
 void NimBLEServerController::onDisconnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client disconnected.");
     deviceConnected = false;
+    pendingInitialPair = false;
     pServer->startAdvertising(); // Restart advertising so clients can reconnect
 }
 
 void NimBLEServerController::onAuthenticationComplete(ble_gap_conn_desc *desc) {
-    if (desc == nullptr || !desc->sec_state.encrypted) {
-        ESP_LOGW(LOG_TAG, "Pairing failed or link unencrypted; disconnecting peer");
-        if (server != nullptr && desc != nullptr) {
-            server->disconnect(desc->conn_handle);
-        }
+    if (desc == nullptr) {
+        ESP_LOGW(LOG_TAG, "onAuthenticationComplete with null desc; ignoring");
         return;
     }
-    ESP_LOGI(LOG_TAG, "Peer authenticated and encrypted");
+
+    if (desc->sec_state.encrypted) {
+        ESP_LOGI(LOG_TAG, "Peer authenticated and encrypted");
+        pendingInitialPair = false;
+        return;
+    }
+
+    // Link reports unencrypted. NimBLE invokes this callback on ANY completed
+    // security procedure on the link (initial pair, re-encryption, link re-key,
+    // BLE_GAP_EVENT_REPEAT_PAIRING, peer-driven SMP re-negotiation). The
+    // sec_state.encrypted flag can be transiently false during those even on
+    // an already-bonded healthy session. Only treat this as a real pairing
+    // failure when:
+    //   - we're still in the initial-pair window for this connection, AND
+    //   - the peer is not bonded (a true "pair failed" shape).
+    // Any other shape: log and let NimBLE's own SMP state machine handle it.
+    // See CAR-231 — the previous unconditional disconnect tore down healthy
+    // encrypted links mid-session whenever a re-encryption transient fired.
+    if (pendingInitialPair && !desc->sec_state.bonded) {
+        ESP_LOGW(LOG_TAG, "Initial pairing failed (unencrypted, not bonded); disconnecting peer");
+        if (server != nullptr) {
+            server->disconnect(desc->conn_handle);
+        }
+        pendingInitialPair = false;
+        return;
+    }
+
+    ESP_LOGW(LOG_TAG, "Auth callback fired unencrypted on settled link (bonded=%d, pendingInitialPair=%d); ignoring",
+             (int)desc->sec_state.bonded, (int)pendingInitialPair);
+    // Close the initial-pair window: only the FIRST auth callback on a
+    // connection can fail it; later unencrypted callbacks (re-key transients,
+    // BLE_GAP_EVENT_REPEAT_PAIRING with bonded=false, etc.) must not be able
+    // to flip back into the disconnect path on a session we've already
+    // tolerated. Codex review on PR #109 caught this stale-flag edge case.
+    pendingInitialPair = false;
 }
 
 void NimBLEServerController::factoryResetBonds() {
