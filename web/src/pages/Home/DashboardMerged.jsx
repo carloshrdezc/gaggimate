@@ -708,7 +708,10 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); setEditing(false); }
           }}
           style={{
+            display: 'block',
             width: '100%',
+            maxWidth: '100%',
+            minWidth: 0,
             boxSizing: 'border-box',
             fontFamily: 'var(--dm-font-display)',
             fontSize: 26,
