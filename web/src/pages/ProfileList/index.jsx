@@ -502,8 +502,10 @@ export function ProfileList() {
 
     const loadBeans = async () => {
       try {
-        await migrateLegacyBeansToDevice(apiService);
-        const loadedBeans = await listBeans(apiService);
+        // Use migrateLegacyBeansToDevice's return value directly — it already
+        // returns the final list, so a second listBeans() call is redundant and
+        // would trigger an extra req:beans:list that can cause duplicate rescues.
+        const loadedBeans = await migrateLegacyBeansToDevice(apiService);
         if (!cancelled) {
           setBeans(loadedBeans.filter(bean => !bean.archived));
         }

@@ -57,7 +57,15 @@ std::vector<BeanEntry> BeanManager::listBeans() {
                     file.close();
                     if (saveBean(bean)) {
                         rescuedIds.push_back(bean.id);
-                        if (!_fs->remove(name)) {
+                        // Use beanPath(stem) — not 'name' — to guarantee an
+                        // absolute path. file.name() from openNextFile() returns
+                        // a platform-dependent value that may omit the leading
+                        // '/' (e.g. "b/ID.json" instead of "/b/ID.json"),
+                        // causing LittleFS.remove() to silently fail and leaving
+                        // the original unsafe file on disk. Every subsequent
+                        // listBeans() call would then re-rescue it with a new
+                        // random ID, producing unbounded duplicates.
+                        if (!_fs->remove(beanPath(stem))) {
                             ESP_LOGW("BeanManager", "Rescued bean %s but could not remove original file", name.c_str());
                         }
                         beans.push_back(bean);
