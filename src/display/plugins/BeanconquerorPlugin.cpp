@@ -10,8 +10,24 @@ void BeanconquerorPlugin::setup(Controller *ctrl, PluginManager *manager) {
     controller = ctrl;
     pluginManager = manager;
 
-    manager->on("controller:bluetooth:init", [this](Event const &) {
-        initBLEServer();
+    // Initialise the GATT server only after the BLE client has successfully
+    // connected to the controller board.  Starting it earlier (on
+    // controller:bluetooth:init) forces the NimBLE stack to run both a scanner
+    // and an advertiser simultaneously; the two compete for RF time and the
+    // scanner misses most controller advertising packets, causing persistent
+    // connection failures and slow reconnection.
+    manager->on("controller:bluetooth:connect", [this](Event const &) {
+        if (!bleReady) {
+            initBLEServer();
+        } else {
+            resumeAdvertising();
+        }
+    });
+
+    // While the display is scanning/reconnecting to the controller, pause
+    // advertising so the radio can focus on the scan.
+    manager->on("controller:bluetooth:disconnect", [this](Event const &) {
+        pauseAdvertising();
     });
 
     manager->on("controller:brew:start", [this](Event const &) { brewing = true; });
@@ -62,7 +78,28 @@ void BeanconquerorPlugin::initBLEServer() {
     pAdvertising->start();
 
     bleReady = true;
+    advertisingActive = true;
     ESP_LOGI("BeanconquerorPlugin", "BLE peripheral ready, advertising as ESPROFILE");
+}
+
+void BeanconquerorPlugin::pauseAdvertising() {
+    if (!bleReady || !advertisingActive) return;
+    NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+    if (pAdvertising && pAdvertising->isAdvertising()) {
+        pAdvertising->stop();
+        advertisingActive = false;
+        ESP_LOGI("BeanconquerorPlugin", "Advertising paused for BLE reconnection scan");
+    }
+}
+
+void BeanconquerorPlugin::resumeAdvertising() {
+    if (!bleReady || advertisingActive) return;
+    NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+    if (pAdvertising) {
+        pAdvertising->start();
+        advertisingActive = true;
+        ESP_LOGI("BeanconquerorPlugin", "Advertising resumed after controller reconnect");
+    }
 }
 
 void BeanconquerorPlugin::loop() {

@@ -21,6 +21,8 @@ class BeanconquerorPlugin : public Plugin {
   private:
     void initBLEServer();
     void buildAndNotify();
+    void pauseAdvertising();
+    void resumeAdvertising();
 
     Controller *controller = nullptr;
     PluginManager *pluginManager = nullptr;
@@ -29,6 +31,7 @@ class BeanconquerorPlugin : public Plugin {
     NimBLECharacteristic *shotDataChar = nullptr;
 
     bool bleReady = false;
+    bool advertisingActive = false;
     bool brewing = false;
     unsigned long lastNotify = 0;
 };

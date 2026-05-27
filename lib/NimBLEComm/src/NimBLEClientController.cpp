@@ -25,7 +25,11 @@ void NimBLEClientController::scan() {
     readyForConnection = false;
     scanner->clearDuplicateCache();
     scanner->setAdvertisedDeviceCallbacks(this, true);
-    scanner->setInterval(2000);
+    // Use a 50% duty cycle (200 ms interval / 100 ms window) so the scanner
+    // sees the controller's advertising packets quickly.  The previous 5%
+    // duty cycle (2000 ms / 100 ms) caused extremely slow discovery and
+    // frequent reconnection failures.
+    scanner->setInterval(200);
     scanner->setWindow(100);
     scanner->setMaxResults(0);
     scanner->setDuplicateFilter(false);
@@ -79,7 +83,7 @@ bool NimBLEClientController::connectToServer() {
 
         if (!client->connect(NimBLEAddress(serverDevice->getAddress()))) {
             ESP_LOGE(LOG_TAG, "Failed connecting to BLE server. Retrying...");
-            delay(500); // Add a small delay to avoid busy-waiting
+            vTaskDelay(pdMS_TO_TICKS(500)); // Yield to FreeRTOS instead of spinning
         }
 
         tries++;
@@ -153,7 +157,7 @@ bool NimBLEClientController::connectToServer() {
                                                       std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
     }
 
-    delay(500);
+    vTaskDelay(pdMS_TO_TICKS(500)); // Yield to FreeRTOS instead of spinning
 
     readyForConnection = false;
     return true;
@@ -356,6 +360,9 @@ void NimBLEClientController::loopTask(void *arg) {
     auto *controller = static_cast<NimBLEClientController *>(arg);
     while (true) {
         controller->loop();
-        xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(5000));
+        // Tick every 1 s so an interrupted scan is restarted within 1 s.
+        // The previous 5 s interval caused multi-second blind spots after any
+        // scan disruption (e.g. BeanconquerorPlugin advertising startup).
+        xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(1000));
     }
 }

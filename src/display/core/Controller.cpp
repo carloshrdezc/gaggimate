@@ -749,7 +749,10 @@ void Controller::activate() {
             pluginManager->trigger("controller:brew:prestart");
         }
     }
-    delay(200);
+    // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
+    // tare to settle.  Arduino delay() spins without yielding and can starve
+    // the WiFi TCP/IP stack, causing WebSocket disconnections.
+    vTaskDelay(pdMS_TO_TICKS(200));
     switch (mode) {
     case MODE_BREW:
         startProcess(new BrewProcess(profileManager->getSelectedProfile(),
