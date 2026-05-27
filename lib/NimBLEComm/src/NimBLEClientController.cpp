@@ -1,5 +1,7 @@
 #include "NimBLEClientController.h"
 
+#include "BondPolicy.h"
+
 constexpr size_t MAX_CONNECT_RETRIES = 3;
 constexpr size_t MAX_SECURE_CONNECTION_ATTEMPTS = 2;
 
@@ -90,19 +92,51 @@ bool NimBLEClientController::connectToServer() {
     client->updateConnParams(6, 8, 0, 400);
 
     bool secure = false;
-    for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
-        secure = client->secureConnection();
+    bool bondsWiped = false;
+    // Try to establish an encrypted/bonded link. If it fails and we hold a stale
+    // local bond (the usual cause after re-flashing one board: the display's LTK
+    // no longer matches the controller), wipe the local bonds once and retry a
+    // fresh pair. Without this the encrypted setpoint write is silently rejected
+    // and the boiler never heats, with no automatic recovery. Bounded to a single
+    // wipe so an unpairable peer can't trigger an infinite loop.
+    //
+    // Note: after a failed secureConnection() the server's onAuthenticationComplete
+    // disconnects the peer (NimBLEServerController.cpp). The reconnect triggered by
+    // onDisconnect/scan will pick up the wiped-bond state and complete a fresh pair
+    // via the server's native BLE_GAP_EVENT_REPEAT_PAIRING handler.
+    for (size_t cycle = 0; cycle < 2; ++cycle) {
+        // Guard: if the server already dropped us (its onAuthenticationComplete
+        // disconnects on auth failure), skip calling secureConnection() on a dead
+        // link — the bond wipe already happened and the next connectToServer()
+        // will complete the fresh pair.
+        if (!client->isConnected()) {
+            ESP_LOGW(LOG_TAG, "Link dropped during bond recovery; fresh pair will complete on next connect");
+            break;
+        }
+        for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
+            secure = client->secureConnection();
+            if (secure) {
+                break;
+            }
+            if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
+                ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
+                delay(250);
+            }
+        }
         if (secure) {
             break;
         }
-        if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
-            ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
-            delay(250);
+        if (!shouldWipeLocalBondsAndRetry(secure, bondsWiped, static_cast<size_t>(NimBLEDevice::getNumBonds()))) {
+            break;
         }
+        ESP_LOGW(LOG_TAG, "secureConnection() failed with stale local bond; wiping bonds and retrying fresh pair");
+        NimBLEDevice::deleteAllBonds();
+        bondsWiped = true;
+        delay(250);
     }
 
     if (!secure) {
-        ESP_LOGW(LOG_TAG, "secureConnection() failed after retry; marking auth failed");
+        ESP_LOGW(LOG_TAG, "secureConnection() failed after recovery; marking auth failed");
         bleAuthFailed = true;
         client->disconnect();
         scan();
