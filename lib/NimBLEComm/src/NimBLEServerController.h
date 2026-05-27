@@ -33,6 +33,12 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
 
   private:
     bool deviceConnected = false;
+    // True only between onConnect and the first authenticated callback for a connection.
+    // Used by onAuthenticationComplete to distinguish a real initial-pair failure
+    // (must hard-disconnect) from a transient unencrypted callback fire on an
+    // already-bonded link (must NOT disconnect — would tear down a healthy session).
+    // See CAR-231.
+    bool pendingInitialPair = false;
     String infoString = "";
     NimBLEAdvertising *advertising = nullptr;
     NimBLEServer *server = nullptr;

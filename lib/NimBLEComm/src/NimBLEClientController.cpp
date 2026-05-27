@@ -93,7 +93,12 @@ bool NimBLEClientController::connectToServer() {
 
         tries++;
     } while (!client->isConnected());
-    client->updateConnParams(6, 8, 0, 400);
+    // 12,24 = 15-30 ms connection interval; supervisionTimeout=800 = 8 s.
+    // The previous 6,8,0,400 (7.5-10 ms / 4 s) was too tight for the EMI-rich
+    // environment around an espresso machine (pump SSR, boiler triac, Wi-Fi
+    // crowding) and caused mid-session supervision-timeout disconnects.
+    // See CAR-231.
+    client->updateConnParams(12, 24, 0, 800);
 
     bool secure = false;
     bool bondsWiped = false;
