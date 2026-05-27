@@ -148,12 +148,47 @@ void WebUIPlugin::loop() {
         // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
         // This bypasses the upgrade-only guard so re-flashing the same version
         // and downgrading both work.
-        const bool force = controller->getSettings().getOTAChannel().startsWith("tag:");
-        const bool updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
+        const String channel = controller->getSettings().getOTAChannel();
+        const bool force = channel.startsWith("tag:");
+        bool tagResolved = true;
+        if (force) {
+            // Defense-in-depth: a WS client can send `req:ota-settings tag:X`
+            // followed immediately by `req:ota-start` before the throttled
+            // checkForUpdates() in this same loop runs (the if-blocks in
+            // loop() are sequential, and the OTA-start arm executes first).
+            // In that race `_release_url` points at tag/X but `_latest_url`
+            // still holds the previous channel's resolved URL, so a forced
+            // update would flash the wrong asset.
+            //
+            // Resolve `_latest_url` synchronously here, then verify the
+            // freshly-resolved version equals the pinned tag. If it doesn't
+            // (network error, GitHub redirect quirk, malformed channel), we
+            // refuse the update — never flash a tag we can't confirm.
+            const String pinned = channel.substring(4);
+            ota->checkForUpdates();
+            const String resolved = ota->getCurrentVersion();
+            // GitHub release tags occasionally carry a leading `v` prefix
+            // (`v1.8.2`); the resolver strips it, but the channel string we
+            // stored does not. Treat them as equal so legacy tags still flash.
+            const bool match = resolved == pinned ||
+                               (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
+                               ("v" + resolved) == pinned;
+            if (!match) {
+                ESP_LOGE("WebUIPlugin",
+                         "Refusing forced OTA: pinned tag %s but resolved %s",
+                         pinned.c_str(), resolved.c_str());
+                tagResolved = false;
+            }
+        }
+        bool updateSucceeded = false;
+        if (tagResolved) {
+            updateSucceeded =
+                ota->update(updateComponent != "display", updateComponent != "controller", force);
+        }
         pluginManager->trigger("ota:update:end");
         updating = false;
         if (!updateSucceeded) {
-            updateOTAStatus("Update failed");
+            updateOTAStatus(tagResolved ? "Update failed" : "Update failed (tag not resolved)");
         }
     }
 
