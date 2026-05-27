@@ -113,6 +113,7 @@ const UpdateProgressView = ({ phase, progress }) => (
 const SystemInfoCard = ({ formData, onChannelChange }) => {
   const {
     channel = 'latest',
+    availableVersions = [],
     hardware,
     controllerVersion,
     controllerUpdateAvailable,
@@ -155,9 +156,19 @@ const SystemInfoCard = ({ formData, onChannelChange }) => {
             Update Channel
           </label>
           <select id='channel' name='channel' className='nd-input' value={channel} onChange={onChannelChange}>
-            <option value='latest'>Stable</option>
+            <option value='latest'>Stable (latest)</option>
+            {availableVersions.map(v => (
+              <option key={v} value={`tag:${v}`}>
+                v{v}
+              </option>
+            ))}
             <option value='nightly'>Nightly</option>
           </select>
+          {channel.startsWith('tag:') && (
+            <span className='font-nd-mono text-[12px] text-[var(--color-warning,#d4a843)]'>
+              Pinned to a specific tag. Re-flash and downgrade are allowed; the upgrade-available indicator is bypassed.
+            </span>
+          )}
         </div>
 
         <div className='flex flex-col gap-2'>
@@ -297,7 +308,16 @@ const ActionButtonsSection = memo(
     rebuilding,
     rebuilt,
     rebuildProgress,
-  }) => (
+  }) => {
+    // When the user pinned a specific stable tag, force-enable the flash
+    // buttons regardless of `*UpdateAvailable` flags. The firmware's
+    // upgrade-only guard is bypassed too — re-flash and downgrade both work.
+    const isTagPinned = typeof formData.channel === 'string' && formData.channel.startsWith('tag:');
+    const displayDisabled = isTagPinned ? false : !formData.displayUpdateAvailable;
+    const controllerDisabled = isTagPinned ? false : !formData.controllerUpdateAvailable;
+    const displayLabel = isTagPinned ? 'Flash Display' : 'Update Display';
+    const controllerLabel = isTagPinned ? 'Flash Controller' : 'Update Controller';
+    return (
     <div className='pt-4'>
       <div className='flex flex-col flex-wrap gap-2 sm:flex-row'>
         <ActionButton type='submit' variant='primary' disabled={submitting}>
@@ -307,19 +327,19 @@ const ActionButtonsSection = memo(
         <ActionButton
           type='submit'
           variant='secondary'
-          disabled={!formData.displayUpdateAvailable || submitting}
+          disabled={displayDisabled || submitting}
           onClick={() => onUpdate('display')}
         >
-          Update Display
+          {displayLabel}
         </ActionButton>
 
         <ActionButton
           type='submit'
           variant='secondary'
-          disabled={!formData.controllerUpdateAvailable || submitting}
+          disabled={controllerDisabled || submitting}
           onClick={() => onUpdate('controller')}
         >
-          Update Controller
+          {controllerLabel}
         </ActionButton>
 
         <ActionButton variant='outline' onClick={downloadSupportData}>
@@ -336,11 +356,13 @@ const ActionButtonsSection = memo(
 
       {rebuilding && <RebuildProgressBar rebuildProgress={rebuildProgress} />}
     </div>
-  ),
+    );
+  },
   (prevProps, nextProps) => {
     // Custom comparison for performance optimization
     return (
       prevProps.submitting === nextProps.submitting &&
+      prevProps.formData.channel === nextProps.formData.channel &&
       prevProps.formData.displayUpdateAvailable === nextProps.formData.displayUpdateAvailable &&
       prevProps.formData.controllerUpdateAvailable === nextProps.formData.controllerUpdateAvailable &&
       prevProps.rebuilding === nextProps.rebuilding &&

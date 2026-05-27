@@ -15,3 +15,22 @@ test('falls back to stable for unexpected OTA channel values', () => {
 
   assert.equal(next.channel, 'latest');
 });
+
+test('passes through tag:<semver> for a specific stable tag', () => {
+  const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.10' }, 'tag:2.0.8');
+
+  assert.equal(next.channel, 'tag:2.0.8');
+  assert.equal(next.displayVersion, '2.0.10');
+});
+
+test('falls back to latest for empty tag prefix', () => {
+  const next = updateOtaChannel({ channel: 'nightly' }, 'tag:');
+
+  assert.equal(next.channel, 'latest');
+});
+
+test('passes through latest unchanged', () => {
+  const next = updateOtaChannel({ channel: 'tag:2.0.8' }, 'latest');
+
+  assert.equal(next.channel, 'latest');
+});

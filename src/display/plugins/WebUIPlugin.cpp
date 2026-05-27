@@ -73,6 +73,10 @@ void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
     request->send(response);
 }
 
+// Forward declarations of channel helpers defined below.
+static String resolveReleaseUrl(const String &channel);
+static String normalizeChannel(const String &channel);
+
 void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) {
     this->controller = _controller;
     this->beanManager = _controller->getBeanManager();
@@ -80,7 +84,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
         BUILD_GIT_VERSION, controller->getSystemInfo().version,
-        RELEASE_URL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly"),
+        resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
             pluginManager->trigger("ota:update:phase", "phase", phase);
             updateOTAProgress(phase, 0);
@@ -141,7 +145,11 @@ void WebUIPlugin::relayLoopTask(void *arg) {
 void WebUIPlugin::loop() {
     if (updating) {
         pluginManager->trigger("ota:update:start");
-        const bool updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller");
+        // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
+        // This bypasses the upgrade-only guard so re-flashing the same version
+        // and downgrading both work.
+        const bool force = controller->getSettings().getOTAChannel().startsWith("tag:");
+        const bool updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
         pluginManager->trigger("ota:update:end");
         updating = false;
         if (!updateSucceeded) {
@@ -628,12 +636,49 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     }
 }
 
+// Resolve a stored OTA channel string to the GitHub release URL fragment.
+// "latest"      -> "latest" (resolves to most recent non-prerelease)
+// "nightly"     -> "tag/nightly"
+// "tag:<semver>" (validated against STABLE_VERSIONS allow-list) -> "tag/<semver>"
+// anything else -> "latest"
+static String resolveReleaseUrl(const String &channel) {
+    if (channel == "nightly") {
+        return RELEASE_URL + "tag/nightly";
+    }
+    if (channel.startsWith("tag:")) {
+        const String tag = channel.substring(4);
+        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
+            if (tag == STABLE_VERSIONS[i]) {
+                return RELEASE_URL + "tag/" + tag;
+            }
+        }
+    }
+    return RELEASE_URL + "latest";
+}
+
+// Normalize an incoming channel to the value we persist in settings.
+// Unknown values fall back to "latest" so a malformed websocket payload
+// can never poison the stored setting.
+static String normalizeChannel(const String &channel) {
+    if (channel == "nightly") return "nightly";
+    if (channel.startsWith("tag:")) {
+        const String tag = channel.substring(4);
+        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
+            if (tag == STABLE_VERSIONS[i]) {
+                return channel;
+            }
+        }
+    }
+    return "latest";
+}
+
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     lastUpdateCheck = 0;
     if (request["update"].as<bool>()) {
         if (!request["channel"].isNull()) {
-            controller->getSettings().setOTAChannel(request["channel"].as<String>() == "latest" ? "latest" : "nightly");
-            ota->setReleaseUrl(RELEASE_URL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly"));
+            const String normalized = normalizeChannel(request["channel"].as<String>());
+            controller->getSettings().setOTAChannel(normalized);
+            ota->setReleaseUrl(resolveReleaseUrl(normalized));
         }
     }
     updateOTAStatus("Checking...");
@@ -1097,6 +1142,14 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["hardware"] = controller->getSystemInfo().hardware;
     doc["channel"] = settings.getOTAChannel();
     doc["updating"] = updating;
+    // Surface the build-time list of selectable stable releases so the web UI
+    // can render a "flash a specific tag" dropdown.
+    {
+        JsonArray arr = doc["availableVersions"].to<JsonArray>();
+        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
+            arr.add(STABLE_VERSIONS[i]);
+        }
+    }
     // SPIFFS usage metrics
     {
         size_t total = SPIFFS.totalBytes();

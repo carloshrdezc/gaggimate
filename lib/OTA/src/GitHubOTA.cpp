@@ -95,12 +95,12 @@ bool GitHubOTA::isUpdateAvailable(bool controller) const {
     return update_required(_latest_version, _version);
 }
 
-bool GitHubOTA::update(bool controller, bool display) {
+bool GitHubOTA::update(bool controller, bool display, bool force) {
     const char *TAG = "update";
 
     bool updateExecuted = false;
 
-    if (controller && update_required(_latest_version, _controller_version)) {
+    if (controller && (force || update_required(_latest_version, _controller_version))) {
         ESP_LOGI(TAG, "Controller update is required, running firmware update.");
         this->phase = PHASE_CONTROLLER_FW;
         this->_phase_callback(PHASE_CONTROLLER_FW);
@@ -112,7 +112,7 @@ bool GitHubOTA::update(bool controller, bool display) {
         updateExecuted = true;
     }
 
-    if (display && update_required(_latest_version, _version)) {
+    if (display && (force || update_required(_latest_version, _version))) {
         ESP_LOGI(TAG, "Update is required, running firmware update.");
         this->phase = PHASE_DISPLAY_FW;
         this->_phase_callback(PHASE_DISPLAY_FW);
