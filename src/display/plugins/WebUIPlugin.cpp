@@ -525,7 +525,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:change-grind-target") {
         // 0/1 toggle: selects Time vs Weight mode for the grind target.
         // (The grams value itself is set via req:raise/lower-grind-target.)
-        controller->getSettings().setVolumetricTarget(doc["target"].as<uint8_t>());
+        if (doc["target"].is<uint8_t>()) {
+            controller->getSettings().setVolumetricTarget(doc["target"].as<uint8_t>());
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:change-grind-target ignored: missing or invalid 'target'");
+        }
     } else if (msgType == "req:raise-temp") {
         controller->raiseTemp();
     } else if (msgType == "req:lower-temp") {
