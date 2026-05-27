@@ -99,7 +99,20 @@ bool NimBLEClientController::connectToServer() {
     // fresh pair. Without this the encrypted setpoint write is silently rejected
     // and the boiler never heats, with no automatic recovery. Bounded to a single
     // wipe so an unpairable peer can't trigger an infinite loop.
-    for (int cycle = 0; cycle < 2; ++cycle) {
+    //
+    // Note: after a failed secureConnection() the server's onAuthenticationComplete
+    // disconnects the peer (NimBLEServerController.cpp). The reconnect triggered by
+    // onDisconnect/scan will pick up the wiped-bond state and complete a fresh pair
+    // via the server's native BLE_GAP_EVENT_REPEAT_PAIRING handler.
+    for (size_t cycle = 0; cycle < 2; ++cycle) {
+        // Guard: if the server already dropped us (its onAuthenticationComplete
+        // disconnects on auth failure), skip calling secureConnection() on a dead
+        // link — the bond wipe already happened and the next connectToServer()
+        // will complete the fresh pair.
+        if (!client->isConnected()) {
+            ESP_LOGW(LOG_TAG, "Link dropped during bond recovery; fresh pair will complete on next connect");
+            break;
+        }
         for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
             secure = client->secureConnection();
             if (secure) {
