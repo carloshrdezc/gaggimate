@@ -698,6 +698,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
         <input
           ref={inputRef}
           type='text'
+          inputMode='decimal'
           defaultValue={value.toFixed(1)}
           onBlur={e => commit(e.target.value)}
           onKeyDown={e => {
@@ -707,7 +708,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); setEditing(false); }
           }}
           style={{
-            width: 72,
+            width: '100%',
             fontFamily: 'var(--dm-font-display)',
             fontSize: 26,
             fontWeight: 700,
@@ -715,7 +716,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             background: 'var(--dm-bg-2)',
             border: '1px solid var(--dm-accent)',
             borderRadius: 4,
-            padding: '2px 4px',
+            padding: '4px 6px',
             outline: 'none',
             lineHeight: 1,
           }}
