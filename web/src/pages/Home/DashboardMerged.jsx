@@ -661,7 +661,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
 
   const commit = useCallback(
     raw => {
-      const normalized = String(raw).replace(unit, '').trim().replace(',', '.');
+      const normalized = String(raw).replace(unit, '').trim().replace(/,/g, '.');
       const parsed = parseQuantity(normalized);
       if (parsed !== null && parsed >= min && parsed <= max) onCommit(parsed);
       setEditing(false);
