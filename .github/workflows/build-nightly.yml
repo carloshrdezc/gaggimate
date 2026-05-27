@@ -2,6 +2,7 @@ on:
   push:
     branches:
       - "master"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -53,6 +54,7 @@ jobs:
           cp .pio/build/controller/partitions.bin upload/controller/partitions.bin
           cp .pio/build/controller/bootloader.bin upload/controller/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -79,6 +81,7 @@ jobs:
           cp .pio/build/display/partitions.bin upload/display/partitions.bin
           cp .pio/build/display/bootloader.bin upload/display/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -99,6 +102,7 @@ jobs:
           cp .pio/build/display-headless/partitions.bin upload/headless/partitions.bin
           cp .pio/build/display-headless/bootloader.bin upload/headless/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -130,7 +134,7 @@ jobs:
         id: version
         run: echo "version=$(cat release/version.txt)" >> $GITHUB_OUTPUT
       - name: Update Nightly Release
-        uses: andelf/nightly-release@c5ed4bdb7c1da04a4fa1e40bc5e67306f682563b
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -140,6 +144,11 @@ jobs:
           body: 'Latest nightly release, use the nightly channel in the UI to download this firmware.'
           files: |
             release/*
+          # Force the nightly tag to track the current commit on every run.
+          # Without this, andelf/nightly-release-style desync left the git tag
+          # pointing at an old commit while no Release object existed at all.
+          target_commitish: ${{ github.sha }}
+          make_latest: 'false'
       - name: Deploy to GitHub Pages subdirectory
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
         with:
