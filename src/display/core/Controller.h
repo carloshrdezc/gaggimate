@@ -143,6 +143,7 @@ class Controller {
     void lowerTemp();
     void raiseBrewTarget();
     void lowerBrewTarget();
+    void setBrewTarget(float value);
     void raiseGrindTarget();
     void lowerGrindTarget();
     void activate();

@@ -523,8 +523,12 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:grind:deactivate") {
         controller->deactivateGrind();
     } else if (msgType == "req:change-grind-target") {
+        // 0/1 toggle: selects Time vs Weight mode for the grind target.
+        // (The grams value itself is set via req:raise/lower-grind-target.)
         if (doc["target"].is<uint8_t>()) {
             controller->getSettings().setVolumetricTarget(doc["target"].as<uint8_t>());
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:change-grind-target ignored: missing or invalid 'target'");
         }
     } else if (msgType == "req:raise-temp") {
         controller->raiseTemp();
@@ -563,8 +567,20 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             controller->setMode(newMode);
         }
     } else if (msgType == "req:change-brew-target") {
-        if (doc["target"].is<uint8_t>()) {
-            controller->getSettings().setVolumetricTarget(doc["target"].as<uint8_t>());
+        // Brew target is a grams value (yield) from the Home dashboard YIELD
+        // slider. The previous handler cast it to uint8_t and routed to
+        // Settings::setVolumetricTarget(bool) — the volumetric MODE toggle —
+        // so the dashboard yield silently never reached the active profile.
+        // Accept float|int|uint, route to Controller::setBrewTarget which
+        // mutates the in-memory profile's volumetric target. CAR-252.
+        if (doc["target"].is<float>()) {
+            controller->setBrewTarget(doc["target"].as<float>());
+        } else if (doc["target"].is<int>()) {
+            controller->setBrewTarget(static_cast<float>(doc["target"].as<int>()));
+        } else if (doc["target"].is<uint8_t>()) {
+            controller->setBrewTarget(static_cast<float>(doc["target"].as<uint8_t>()));
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:change-brew-target ignored: missing or invalid 'target'");
         }
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
