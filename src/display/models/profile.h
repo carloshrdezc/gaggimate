@@ -202,6 +202,23 @@ struct Profile {
         }
     }
 
+    // Set the absolute total volumetric target for the brew phase(s).
+    // If the profile already has a volumetric target, scale all brew phases
+    // proportionally so the cumulative volume equals `value`. If the profile
+    // has no volumetric target, do nothing — caller should check
+    // `isVolumetric()` first or fall back to a different code path.
+    void setVolumetricTarget(float value) {
+        if (value <= 0.0f) return;
+        float current = getTotalVolume();
+        if (current <= 0.0f) return; // no volumetric target configured
+        float ratio = value / current;
+        for (auto &phase : phases) {
+            if (phase.hasVolumetricTarget() && phase.phase == PhaseType::PHASE_TYPE_BREW) {
+                phase.adjustVolumetricTarget(ratio);
+            }
+        }
+    }
+
     void removeVolumetricTarget() {
         for (auto &phase : phases) {
             if (phase.hasVolumetricTarget()) {

@@ -598,6 +598,21 @@ void Controller::lowerBrewTarget() {
     handleProfileUpdate();
 }
 
+void Controller::setBrewTarget(float value) {
+    // Apply absolute brew target from the dashboard YIELD slider. When the
+    // active profile is volumetric, set the cumulative target across brew
+    // phases. Otherwise the dashboard YIELD has no meaning — ignore so we
+    // don't accidentally rewrite a time-based profile's duration. Mirrors
+    // the in-memory mutation pattern of raise/lowerBrewTarget — the change
+    // applies to the next shot but is NOT persisted to disk; reloading the
+    // profile restores the saved target.
+    if (!profileManager->getSelectedProfile().isVolumetric()) {
+        return;
+    }
+    profileManager->getSelectedProfile().setVolumetricTarget(value);
+    handleProfileUpdate();
+}
+
 void Controller::raiseGrindTarget() {
     if (settings.isVolumetricTarget() && isVolumetricAvailable()) {
         double newTarget = settings.getTargetGrindVolume() + 0.5;
