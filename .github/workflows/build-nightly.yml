@@ -153,6 +153,25 @@ jobs:
           git push origin :refs/tags/nightly 2>/dev/null || true
           git tag -f nightly "${{ github.sha }}"
           git push origin "refs/tags/nightly" --force
+      - name: Delete any stale nightly release records
+        # If a previous run was cancelled mid-publish, softprops/action-gh-release
+        # can leave behind an orphan draft release that still claims the
+        # 'nightly' tag. The next run then fails at the finalize step with
+        # 'tag_name already_exists' because two release records race for the
+        # same tag. Delete every release that points at 'nightly' (draft or
+        # published) so this run starts from a clean slate.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "nightly") | .id' \
+          | while read -r release_id; do
+              if [[ -n "$release_id" ]]; then
+                echo "Deleting stale nightly release: $release_id"
+                gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id" || true
+              fi
+            done
       - name: Update Nightly Release
         uses: softprops/action-gh-release@v2
         env:
