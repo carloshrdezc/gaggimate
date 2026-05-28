@@ -4,26 +4,48 @@ if (import.meta.env.DEV) {
 }
 import './style.css';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'preact/hooks';
-import { h } from 'preact';
+import { h, render } from 'preact';
 import { initializeTheme } from './utils/themeManager.js';
-import { render } from 'preact';
-import { LocationProvider, Router, Route, ErrorBoundary } from 'preact-iso';
+import { LocationProvider, Router, Route, ErrorBoundary, lazy } from 'preact-iso';
 import { PageShell } from './components/PageShell.jsx';
 import { Home } from './pages/Home/index.jsx';
 import { NotFound } from './pages/_404.jsx';
-import { Settings } from './pages/Settings/index.jsx';
-import { OTA } from './pages/OTA/index.jsx';
-import { Scales } from './pages/Scales/index.jsx';
 import ApiService, { ApiServiceContext } from './services/ApiService.js';
 import { Navigation } from './components/Navigation.jsx';
-import { ProfileList } from './pages/ProfileList/index.jsx';
-import { ProfileEdit } from './pages/ProfileEdit/index.jsx';
-import { BeansPage } from './pages/Beans/index.jsx';
-import { Autotune } from './pages/Autotune/index.jsx';
-import { ShotHistory } from './pages/ShotHistory/index.jsx';
-import { ShotAnalyzer } from './pages/ShotAnalyzer/index.jsx';
-import { ShotToProfile } from './pages/ShotToProfile/index.jsx';
-import { StatisticsPage } from './pages/Statistics/index.jsx';
+
+// Lazily-loaded route components. Each page module exports its component as a
+// named export, so we map it to the `{ default: ... }` shape preact-iso's
+// `lazy()` expects. This splits each route into its own chunk and keeps it
+// out of the initial JS bundle.
+const Settings = lazy(() =>
+  import('./pages/Settings/index.jsx').then(m => ({ default: m.Settings })),
+);
+const OTA = lazy(() => import('./pages/OTA/index.jsx').then(m => ({ default: m.OTA })));
+const Scales = lazy(() => import('./pages/Scales/index.jsx').then(m => ({ default: m.Scales })));
+const ProfileList = lazy(() =>
+  import('./pages/ProfileList/index.jsx').then(m => ({ default: m.ProfileList })),
+);
+const ProfileEdit = lazy(() =>
+  import('./pages/ProfileEdit/index.jsx').then(m => ({ default: m.ProfileEdit })),
+);
+const BeansPage = lazy(() =>
+  import('./pages/Beans/index.jsx').then(m => ({ default: m.BeansPage })),
+);
+const Autotune = lazy(() =>
+  import('./pages/Autotune/index.jsx').then(m => ({ default: m.Autotune })),
+);
+const ShotHistory = lazy(() =>
+  import('./pages/ShotHistory/index.jsx').then(m => ({ default: m.ShotHistory })),
+);
+const ShotAnalyzer = lazy(() =>
+  import('./pages/ShotAnalyzer/index.jsx').then(m => ({ default: m.ShotAnalyzer })),
+);
+const ShotToProfile = lazy(() =>
+  import('./pages/ShotToProfile/index.jsx').then(m => ({ default: m.ShotToProfile })),
+);
+const StatisticsPage = lazy(() =>
+  import('./pages/Statistics/index.jsx').then(m => ({ default: m.StatisticsPage })),
+);
 
 const apiService = new ApiService();
 
@@ -39,7 +61,10 @@ function AppContent() {
   }, [navOpen]);
 
   return (
-    <div className='dm-shell relative min-h-screen overflow-hidden' style={{ background: 'var(--dm-bg-0)' }}>
+    <div
+      className='dm-shell relative min-h-screen overflow-hidden'
+      style={{ background: 'var(--dm-bg-0)' }}
+    >
       <div className='app-shell-glow pointer-events-none absolute inset-0' />
       <div className='relative flex min-h-screen flex-col'>
         <a href='#main-content' className='skip-link'>
@@ -51,7 +76,10 @@ function AppContent() {
             <div className='min-w-0'>
               <ErrorBoundary>
                 <Router>
-                  <Route path='/' component={() => <Home navOpen={navOpen} onNavToggle={onNavToggle} />} />
+                  <Route
+                    path='/'
+                    component={() => <Home navOpen={navOpen} onNavToggle={onNavToggle} />}
+                  />
                   <Route
                     path='/profiles'
                     component={() => (
@@ -174,9 +202,8 @@ const _BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 function BasePathProvider({ children }) {
   const ctx = useContext(LocationProvider.ctx);
   const value = useMemo(() => {
-    const path = _BASE && ctx.path.startsWith(_BASE)
-      ? ctx.path.slice(_BASE.length) || '/'
-      : ctx.path;
+    const path =
+      _BASE && ctx.path.startsWith(_BASE) ? ctx.path.slice(_BASE.length) || '/' : ctx.path;
     return { ...ctx, path };
   }, [ctx]);
   return h(LocationProvider.ctx.Provider, { value }, children);
