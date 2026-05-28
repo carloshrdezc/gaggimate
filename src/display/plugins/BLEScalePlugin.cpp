@@ -1,4 +1,5 @@
 #include "BLEScalePlugin.h"
+#include "BLEScaleScanPolicy.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <cmath> // For isfinite()
@@ -73,7 +74,7 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     }
 
     manager->on("controller:bluetooth:connect", [this](Event const &) {
-        if (this->controller != nullptr && this->controller->getMode() != MODE_STANDBY) {
+        if (this->controller != nullptr && shouldScanForBleScaleMode(this->controller->getMode())) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
@@ -88,7 +89,7 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
     manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
     manager->on("controller:mode:change", [this](Event const &event) {
-        if (event.getInt("value") != MODE_STANDBY) {
+        if (shouldScanForBleScaleMode(event.getInt("value"))) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
