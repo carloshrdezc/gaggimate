@@ -799,18 +799,22 @@ void DefaultUI::setupState() {
 }
 
 void DefaultUI::setupReactive() {
+    // adjustDials() paints the dial arc colors from the live palette using plain (non-themeable) local styles. A theme
+    // switch makes ui_theme_set() reapply the themeable arc-color registrations in ui_comp_dials.c, which would otherwise
+    // overwrite those palette colors until the next dial recalculation. Depending on currentThemeMode here forces a full
+    // restyle on theme change so the dials never snap back to the generated defaults.
     effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustDials(ui_MenuScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; }, [=]() { adjustDials(ui_StatusScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; }, [=]() { adjustDials(ui_BrewScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; }, [=]() { adjustDials(ui_GrindScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { adjustDials(ui_SimpleProcessScreen_dials); }, &pressureAvailable);
+                          [=]() { adjustDials(ui_SimpleProcessScreen_dials); }, &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustDials(ui_ProfileScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; }, [=]() { adjustHeatingIndicator(ui_BrewScreen_dials); },
                           &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
