@@ -18,30 +18,33 @@ void NimBLEServerController::initServer(const String infoString) {
     NimBLEService *pService = server->createService(SERVICE_UUID);
 
     // Output Control Characteristic (Client writes setpoints)
-    outputControlChar = pService->createCharacteristic(OUTPUT_CONTROL_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    // NOTE: plain WRITE (not WRITE_ENC). Encryption is best-effort on the client
+    // side; gating writes on encryption silently rejected the boiler setpoint
+    // and the machine never heated. See revert of CAR-249 encryption.
+    outputControlChar = pService->createCharacteristic(OUTPUT_CONTROL_UUID, NIMBLE_PROPERTY::WRITE);
     outputControlChar->setCallbacks(this); // Use this class as the callback handler
 
     // Alt Control Characteristic (Client writes pin state)
-    altControlChar = pService->createCharacteristic(ALT_CONTROL_CHAR_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    altControlChar = pService->createCharacteristic(ALT_CONTROL_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
     altControlChar->setCallbacks(this); // Use this class as the callback handler
 
     // Ping Characteristic (Client writes ping, Server reads)
-    pingChar = pService->createCharacteristic(PING_CHAR_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    pingChar = pService->createCharacteristic(PING_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
     pingChar->setCallbacks(this); // Use this class as the callback handler
 
     // PID control Characteristic (Client writes PID settings, Server reads)
-    pidControlChar = pService->createCharacteristic(PID_CONTROL_CHAR_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    pidControlChar = pService->createCharacteristic(PID_CONTROL_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
     pidControlChar->setCallbacks(this); // Use this class as the callback handler
 
     // Pump Model Coefficients Characteristic (Client writes pump model coefficients, Server reads)
-    pumpModelCoeffsChar = pService->createCharacteristic(PUMP_MODEL_COEFFS_CHAR_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    pumpModelCoeffsChar = pService->createCharacteristic(PUMP_MODEL_COEFFS_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
     pumpModelCoeffsChar->setCallbacks(this); // Use this class as the callback handler
 
     // Error Characteristic (Server writes error, Client reads)
     errorChar = pService->createCharacteristic(ERROR_CHAR_UUID, NIMBLE_PROPERTY::NOTIFY);
 
     // Ping Characteristic (Client writes autotune, Server reads)
-    autotuneChar = pService->createCharacteristic(AUTOTUNE_CHAR_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    autotuneChar = pService->createCharacteristic(AUTOTUNE_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
     autotuneChar->setCallbacks(this); // Use this class as the callback handler
     autotuneResultChar = pService->createCharacteristic(AUTOTUNE_RESULT_UUID, NIMBLE_PROPERTY::NOTIFY);
 
@@ -58,15 +61,15 @@ void NimBLEServerController::initServer(const String infoString) {
     sensorChar = pService->createCharacteristic(SENSOR_DATA_UUID, NIMBLE_PROPERTY::NOTIFY);
 
     // PID control Characteristic (Client writes pressure settings, Server reads)
-    pressureScaleChar = pService->createCharacteristic(PRESSURE_SCALE_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    pressureScaleChar = pService->createCharacteristic(PRESSURE_SCALE_UUID, NIMBLE_PROPERTY::WRITE);
     pressureScaleChar->setCallbacks(this); // Use this class as the callback handler
 
     volumetricMeasurementChar = pService->createCharacteristic(VOLUMETRIC_MEASUREMENT_UUID, NIMBLE_PROPERTY::NOTIFY);
-    volumetricTareChar = pService->createCharacteristic(VOLUMETRIC_TARE_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    volumetricTareChar = pService->createCharacteristic(VOLUMETRIC_TARE_UUID, NIMBLE_PROPERTY::WRITE);
     volumetricTareChar->setCallbacks(this);
 
     tofMeasurementChar = pService->createCharacteristic(TOF_MEASUREMENT_UUID, NIMBLE_PROPERTY::NOTIFY);
-    ledControlChar = pService->createCharacteristic(LED_CONTROL_UUID, NIMBLE_PROPERTY::WRITE_ENC);
+    ledControlChar = pService->createCharacteristic(LED_CONTROL_UUID, NIMBLE_PROPERTY::WRITE);
     ledControlChar->setCallbacks(this);
 
     pService->start();
@@ -194,40 +197,21 @@ void NimBLEServerController::onAuthenticationComplete(ble_gap_conn_desc *desc) {
         return;
     }
 
+    pendingInitialPair = false;
+
+    // Tolerate any auth outcome on the link. All control characteristics are
+    // plain WRITE, so the peer can use them without encryption — disconnecting
+    // on an unencrypted/not-bonded initial-pair callback would tear down a
+    // perfectly usable link before service discovery completes (Codex review
+    // on PR #114). If a future characteristic is reintroduced as WRITE_ENC,
+    // NimBLE itself will reject writes against it on an unencrypted link;
+    // there is no need for the server to enforce by disconnecting.
     if (desc->sec_state.encrypted) {
         ESP_LOGI(LOG_TAG, "Peer authenticated and encrypted");
-        pendingInitialPair = false;
-        return;
+    } else {
+        ESP_LOGW(LOG_TAG, "Auth callback fired unencrypted (bonded=%d); tolerating, link stays up",
+                 (int)desc->sec_state.bonded);
     }
-
-    // Link reports unencrypted. NimBLE invokes this callback on ANY completed
-    // security procedure on the link (initial pair, re-encryption, link re-key,
-    // BLE_GAP_EVENT_REPEAT_PAIRING, peer-driven SMP re-negotiation). The
-    // sec_state.encrypted flag can be transiently false during those even on
-    // an already-bonded healthy session. Only treat this as a real pairing
-    // failure when:
-    //   - we're still in the initial-pair window for this connection, AND
-    //   - the peer is not bonded (a true "pair failed" shape).
-    // Any other shape: log and let NimBLE's own SMP state machine handle it.
-    // See CAR-231 — the previous unconditional disconnect tore down healthy
-    // encrypted links mid-session whenever a re-encryption transient fired.
-    if (pendingInitialPair && !desc->sec_state.bonded) {
-        ESP_LOGW(LOG_TAG, "Initial pairing failed (unencrypted, not bonded); disconnecting peer");
-        if (server != nullptr) {
-            server->disconnect(desc->conn_handle);
-        }
-        pendingInitialPair = false;
-        return;
-    }
-
-    ESP_LOGW(LOG_TAG, "Auth callback fired unencrypted on settled link (bonded=%d, pendingInitialPair=%d); ignoring",
-             (int)desc->sec_state.bonded, (int)pendingInitialPair);
-    // Close the initial-pair window: only the FIRST auth callback on a
-    // connection can fail it; later unencrypted callbacks (re-key transients,
-    // BLE_GAP_EVENT_REPEAT_PAIRING with bonded=false, etc.) must not be able
-    // to flip back into the disconnect path on a session we've already
-    // tolerated. Codex review on PR #109 caught this stale-flag edge case.
-    pendingInitialPair = false;
 }
 
 void NimBLEServerController::factoryResetBonds() {
