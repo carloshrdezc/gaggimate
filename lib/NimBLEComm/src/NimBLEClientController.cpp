@@ -1,9 +1,6 @@
 #include "NimBLEClientController.h"
 
-#include "BondPolicy.h"
-
 constexpr size_t MAX_CONNECT_RETRIES = 3;
-constexpr size_t MAX_SECURE_CONNECTION_ATTEMPTS = 2;
 
 NimBLEClientController::NimBLEClientController() : client(nullptr) {}
 
@@ -100,30 +97,14 @@ bool NimBLEClientController::connectToServer() {
     // See CAR-231.
     client->updateConnParams(12, 24, 0, 800);
 
-    // Best-effort encryption. The server's control characteristics are plain WRITE,
-    // so a failed secureConnection() must NOT block writes — gating on encryption
-    // silently rejected the boiler setpoint and the machine never heated. Try once
-    // for forward-compat with future encrypted characteristics, log on failure,
-    // and continue. The bond-wipe recovery path is intentionally not invoked here
-    // anymore; factoryResetBonds() (serial 'B' trigger) remains available for
-    // manual recovery if a future char re-introduces encryption.
-    bool secure = false;
-    for (size_t attempt = 1; attempt <= MAX_SECURE_CONNECTION_ATTEMPTS; ++attempt) {
-        if (!client->isConnected()) {
-            break;
-        }
-        secure = client->secureConnection();
-        if (secure) {
-            break;
-        }
-        if (attempt < MAX_SECURE_CONNECTION_ATTEMPTS) {
-            ESP_LOGW(LOG_TAG, "secureConnection() failed; retrying once");
-            delay(250);
-        }
-    }
-    if (!secure) {
-        ESP_LOGW(LOG_TAG, "secureConnection() did not encrypt link; continuing with unencrypted writes");
-    }
+    // Do NOT call secureConnection() here. The server's control characteristics
+    // are plain WRITE — no SMP pairing is required to use them. Initiating SMP
+    // on the central side triggers the peripheral's onAuthenticationComplete
+    // callback with encrypted=false on failure, which would otherwise tear the
+    // link down before service discovery completes (see Codex review on PR #114
+    // and CAR-231). Future encrypted characteristics, if reintroduced, must be
+    // gated at the characteristic level (WRITE_ENC); the link-level pair attempt
+    // is not load-bearing for any current functionality.
     bleAuthFailed = false;
 
     ESP_LOGI(LOG_TAG, "Successfully connected to BLE server");
