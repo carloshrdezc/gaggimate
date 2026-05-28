@@ -21,10 +21,7 @@ images/ui_img_364513079.c
 images/ui_img_1091371356.c
 images/ui_img_1765671371.c
 images/ui_img_1732953241.c
-images/ui_img_untitled_png.c
-images/ui_img_489054950.c
 images/ui_img_340686386.c
-images/ui_img_1455708189.c
 images/ui_img_1951499226.c
 images/ui_img_1220767159.c
 images/ui_img_295763949.c

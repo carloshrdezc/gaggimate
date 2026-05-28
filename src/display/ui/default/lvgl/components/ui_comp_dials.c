@@ -28,11 +28,17 @@ lv_obj_t *ui_dials_create(lv_obj_t *comp_parent) {
     lv_arc_set_bg_angles(cui_tempGauge, 118, 242);
     lv_obj_set_style_arc_width(cui_tempGauge, 35, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_arc_rounded(cui_tempGauge, false, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_img_src(cui_tempGauge, &ui_img_untitled_png, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_tempGauge, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_ARC_COLOR,
+                                           _ui_theme_color_NiceWhite);
+    ui_object_set_themeable_style_property(cui_tempGauge, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_ARC_OPA,
+                                           _ui_theme_alpha_NiceWhite);
 
     lv_obj_set_style_arc_width(cui_tempGauge, 35, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     lv_obj_set_style_arc_rounded(cui_tempGauge, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_img_src(cui_tempGauge, &ui_img_489054950, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_tempGauge, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_ARC_COLOR,
+                                           _ui_theme_color_Heating);
+    ui_object_set_themeable_style_property(cui_tempGauge, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_ARC_OPA,
+                                           _ui_theme_alpha_Heating);
 
     lv_obj_set_style_bg_color(cui_tempGauge, lv_color_hex(0xD10000), LV_PART_KNOB | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(cui_tempGauge, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
@@ -65,11 +71,17 @@ lv_obj_t *ui_dials_create(lv_obj_t *comp_parent) {
     lv_arc_set_mode(cui_pressureGauge, LV_ARC_MODE_REVERSE);
     lv_obj_set_style_arc_width(cui_pressureGauge, 35, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_arc_rounded(cui_pressureGauge, false, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_img_src(cui_pressureGauge, &ui_img_untitled_png, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_pressureGauge, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_ARC_COLOR,
+                                           _ui_theme_color_NiceWhite);
+    ui_object_set_themeable_style_property(cui_pressureGauge, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_ARC_OPA,
+                                           _ui_theme_alpha_NiceWhite);
 
     lv_obj_set_style_arc_width(cui_pressureGauge, 35, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     lv_obj_set_style_arc_rounded(cui_pressureGauge, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_img_src(cui_pressureGauge, &ui_img_1455708189, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_pressureGauge, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_ARC_COLOR,
+                                           _ui_theme_color_Progress);
+    ui_object_set_themeable_style_property(cui_pressureGauge, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_ARC_OPA,
+                                           _ui_theme_alpha_Progress);
 
     lv_obj_set_style_bg_color(cui_pressureGauge, lv_color_hex(0xD10000), LV_PART_KNOB | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(cui_pressureGauge, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
