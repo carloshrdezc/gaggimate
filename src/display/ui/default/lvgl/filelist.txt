@@ -48,3 +48,13 @@ images/ui_img_1829139226.c
 images/ui_img_flowmeter_png.c
 images/ui_img_1510335.c
 images/ui_img_691326438.c
+images/gm_ic_power.c
+images/gm_ic_cup.c
+images/gm_ic_steam.c
+images/gm_ic_drop.c
+images/gm_ic_wifi.c
+images/gm_ic_bt.c
+images/gm_ic_sun.c
+images/gm_ic_thermo.c
+images/gm_ic_scale.c
+images/gm_ic_back.c
