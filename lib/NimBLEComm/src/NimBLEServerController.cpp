@@ -7,8 +7,6 @@ void NimBLEServerController::initServer(const String infoString) {
     NimBLEDevice::init("GPBLS");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
-    NimBLEDevice::setSecurityAuth(/*bonding*/ true, /*MITM*/ false, /*SC*/ true);
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
 
     // Create BLE Server
     server = NimBLEDevice::createServer();
@@ -18,9 +16,6 @@ void NimBLEServerController::initServer(const String infoString) {
     NimBLEService *pService = server->createService(SERVICE_UUID);
 
     // Output Control Characteristic (Client writes setpoints)
-    // NOTE: plain WRITE (not WRITE_ENC). Encryption is best-effort on the client
-    // side; gating writes on encryption silently rejected the boiler setpoint
-    // and the machine never heated. See revert of CAR-249 encryption.
     outputControlChar = pService->createCharacteristic(OUTPUT_CONTROL_UUID, NIMBLE_PROPERTY::WRITE);
     outputControlChar->setCallbacks(this); // Use this class as the callback handler
 
@@ -180,48 +175,13 @@ void NimBLEServerController::registerPumpModelCoeffsCallback(const pump_model_co
 void NimBLEServerController::onConnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client connected.");
     deviceConnected = true;
-    pendingInitialPair = true; // cleared by onAuthenticationComplete or onDisconnect (CAR-231)
     pServer->stopAdvertising();
 }
 
 void NimBLEServerController::onDisconnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client disconnected.");
     deviceConnected = false;
-    pendingInitialPair = false;
     pServer->startAdvertising(); // Restart advertising so clients can reconnect
-}
-
-void NimBLEServerController::onAuthenticationComplete(ble_gap_conn_desc *desc) {
-    if (desc == nullptr) {
-        ESP_LOGW(LOG_TAG, "onAuthenticationComplete with null desc; ignoring");
-        return;
-    }
-
-    pendingInitialPair = false;
-
-    // Tolerate any auth outcome on the link. All control characteristics are
-    // plain WRITE, so the peer can use them without encryption — disconnecting
-    // on an unencrypted/not-bonded initial-pair callback would tear down a
-    // perfectly usable link before service discovery completes (Codex review
-    // on PR #114). If a future characteristic is reintroduced as WRITE_ENC,
-    // NimBLE itself will reject writes against it on an unencrypted link;
-    // there is no need for the server to enforce by disconnecting.
-    if (desc->sec_state.encrypted) {
-        ESP_LOGI(LOG_TAG, "Peer authenticated and encrypted");
-    } else {
-        ESP_LOGW(LOG_TAG, "Auth callback fired unencrypted (bonded=%d); tolerating, link stays up",
-                 (int)desc->sec_state.bonded);
-    }
-}
-
-void NimBLEServerController::factoryResetBonds() {
-    ESP_LOGW(LOG_TAG, "Factory-resetting BLE bonds");
-    NimBLEDevice::deleteAllBonds();
-    if (server != nullptr) {
-        for (const uint16_t connHandle : server->getPeerDevices()) {
-            server->disconnect(connHandle);
-        }
-    }
 }
 
 void NimBLEServerController::onWrite(NimBLECharacteristic *pCharacteristic) {

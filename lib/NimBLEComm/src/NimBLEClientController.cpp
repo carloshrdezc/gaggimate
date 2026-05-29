@@ -8,8 +8,6 @@ void NimBLEClientController::initClient() {
     NimBLEDevice::init("GPBLC");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
-    NimBLEDevice::setSecurityAuth(/*bonding*/ true, /*MITM*/ false, /*SC*/ true);
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     client = NimBLEDevice::createClient();
     scanner = NimBLEDevice::getScan();
     if (client == nullptr) {
@@ -27,11 +25,7 @@ void NimBLEClientController::scan() {
     readyForConnection = false;
     scanner->clearDuplicateCache();
     scanner->setAdvertisedDeviceCallbacks(this, true);
-    // Use a 50% duty cycle (200 ms interval / 100 ms window) so the scanner
-    // sees the controller's advertising packets quickly.  The previous 5%
-    // duty cycle (2000 ms / 100 ms) caused extremely slow discovery and
-    // frequent reconnection failures.
-    scanner->setInterval(200);
+    scanner->setInterval(2000);
     scanner->setWindow(100);
     scanner->setMaxResults(0);
     scanner->setDuplicateFilter(false);
@@ -41,7 +35,7 @@ void NimBLEClientController::scan() {
 
 void NimBLEClientController::tare() {
     if (volumetricTareChar != nullptr && client->isConnected()) {
-        writeRemoteValue(volumetricTareChar, String("1"));
+        volumetricTareChar->writeValue("1");
     }
 }
 
@@ -85,27 +79,12 @@ bool NimBLEClientController::connectToServer() {
 
         if (!client->connect(NimBLEAddress(serverDevice->getAddress()))) {
             ESP_LOGE(LOG_TAG, "Failed connecting to BLE server. Retrying...");
-            vTaskDelay(pdMS_TO_TICKS(500)); // Yield to FreeRTOS instead of spinning
+            delay(500); // Add a small delay to avoid busy-waiting
         }
 
         tries++;
     } while (!client->isConnected());
-    // 12,24 = 15-30 ms connection interval; supervisionTimeout=800 = 8 s.
-    // The previous 6,8,0,400 (7.5-10 ms / 4 s) was too tight for the EMI-rich
-    // environment around an espresso machine (pump SSR, boiler triac, Wi-Fi
-    // crowding) and caused mid-session supervision-timeout disconnects.
-    // See CAR-231.
-    client->updateConnParams(12, 24, 0, 800);
-
-    // Do NOT call secureConnection() here. The server's control characteristics
-    // are plain WRITE — no SMP pairing is required to use them. Initiating SMP
-    // on the central side triggers the peripheral's onAuthenticationComplete
-    // callback with encrypted=false on failure, which would otherwise tear the
-    // link down before service discovery completes (see Codex review on PR #114
-    // and CAR-231). Future encrypted characteristics, if reintroduced, must be
-    // gated at the characteristic level (WRITE_ENC); the link-level pair attempt
-    // is not load-bearing for any current functionality.
-    bleAuthFailed = false;
+    client->updateConnParams(6, 8, 0, 400);
 
     ESP_LOGI(LOG_TAG, "Successfully connected to BLE server");
 
@@ -174,7 +153,7 @@ bool NimBLEClientController::connectToServer() {
                                                       std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
     }
 
-    vTaskDelay(pdMS_TO_TICKS(500)); // Yield to FreeRTOS instead of spinning
+    delay(500);
 
     readyForConnection = false;
     return true;
@@ -194,7 +173,7 @@ void NimBLEClientController::sendAdvancedOutputControl(bool valve, float boilerS
                                   std::to_string(pressureTarget ? 1 : 0) + "," + float_to_string(pressure) + "," +
                                   float_to_string(flow);
         _lastOutputControl = String(value.c_str());
-        writeRemoteValue(outputControlChar, _lastOutputControl, false);
+        outputControlChar->writeValue(_lastOutputControl, false);
     }
 }
 
@@ -203,49 +182,49 @@ void NimBLEClientController::sendOutputControl(bool valve, float pumpSetpoint, f
         const std::string value =
             "0," + std::to_string(valve ? 1 : 0) + "," + std::to_string(pumpSetpoint) + "," + std::to_string(boilerSetpoint);
         _lastOutputControl = String(value.c_str());
-        writeRemoteValue(outputControlChar, _lastOutputControl, false);
+        outputControlChar->writeValue(_lastOutputControl, false);
     }
 }
 
 void NimBLEClientController::sendPidSettings(const String &pid) {
     if (pidControlChar != nullptr && client->isConnected()) {
-        writeRemoteValue(pidControlChar, pid);
+        pidControlChar->writeValue(pid);
     }
 }
 
 void NimBLEClientController::sendPumpModelCoeffs(const String &pumpModelCoeffs) {
     if (pumpModelCoeffsChar != nullptr && client->isConnected()) {
-        writeRemoteValue(pumpModelCoeffsChar, pumpModelCoeffs);
+        pumpModelCoeffsChar->writeValue(pumpModelCoeffs);
     }
 }
 
 void NimBLEClientController::setPressureScale(float scale) {
     if (client->isConnected() && pressureScaleChar != nullptr) {
-        writeRemoteValue(pressureScaleChar, float_to_string(scale));
+        pressureScaleChar->writeValue(float_to_string(scale));
     }
 }
 
 void NimBLEClientController::sendLedControl(uint8_t channel, uint8_t brightness) {
     if (client->isConnected() && ledControlChar != nullptr) {
-        writeRemoteValue(ledControlChar, String(channel) + "," + String(brightness));
+        ledControlChar->writeValue(String(channel) + "," + String(brightness));
     }
 }
 
 void NimBLEClientController::sendAltControl(bool pinState) {
     if (altControlChar != nullptr && client->isConnected()) {
-        writeRemoteValue(altControlChar, String(pinState ? "1" : "0"));
+        altControlChar->writeValue(pinState ? "1" : "0");
     }
 }
 
 void NimBLEClientController::sendPing() {
     if (pingChar != nullptr && client->isConnected()) {
-        writeRemoteValue(pingChar, String("1"));
+        pingChar->writeValue("1");
     }
 }
 
 void NimBLEClientController::sendAutotune(int testTime, int samples) {
     if (autotuneChar != nullptr && client->isConnected()) {
-        writeRemoteValue(autotuneChar, std::to_string(testTime) + "," + std::to_string(samples));
+        autotuneChar->writeValue(std::to_string(testTime) + "," + std::to_string(samples));
     }
 }
 
@@ -294,43 +273,6 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     tofMeasurementChar = nullptr;
     if (disconnectCallback != nullptr) {
         disconnectCallback();
-    }
-    scan();
-}
-
-void NimBLEClientController::onAuthenticationComplete(ble_gap_conn_desc *desc) {
-    if (desc == nullptr) {
-        ESP_LOGW(LOG_TAG, "Auth complete with null desc; marking auth failed");
-        bleAuthFailed = true;
-        return;
-    }
-    if (!desc->sec_state.encrypted) {
-        ESP_LOGW(LOG_TAG, "Auth complete but link not encrypted; marking auth failed");
-        bleAuthFailed = true;
-        return;
-    }
-    ESP_LOGI(LOG_TAG, "BLE link authenticated and encrypted");
-    bleAuthFailed = false;
-}
-
-bool NimBLEClientController::writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const String &value, bool response) {
-    const bool ok = characteristic != nullptr && characteristic->writeValue(value, response);
-    bleAuthFailed = ok ? false : bleAuthFailed || isConnected();
-    return ok;
-}
-
-bool NimBLEClientController::writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const std::string &value, bool response) {
-    const bool ok = characteristic != nullptr && characteristic->writeValue(value, response);
-    bleAuthFailed = ok ? false : bleAuthFailed || isConnected();
-    return ok;
-}
-
-void NimBLEClientController::factoryResetBonds() {
-    ESP_LOGW(LOG_TAG, "Factory-resetting BLE bonds");
-    NimBLEDevice::deleteAllBonds();
-    bleAuthFailed = false;
-    if (client != nullptr && client->isConnected()) {
-        client->disconnect();
     }
     scan();
 }
@@ -414,9 +356,6 @@ void NimBLEClientController::loopTask(void *arg) {
     auto *controller = static_cast<NimBLEClientController *>(arg);
     while (true) {
         controller->loop();
-        // Tick every 1 s so an interrupted scan is restarted within 1 s.
-        // The previous 5 s interval caused multi-second blind spots after any
-        // scan disruption.
-        xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(1000));
+        xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(5000));
     }
 }
