@@ -16,6 +16,13 @@ ui_events.cpp
 fonts/ndot_18.c
 fonts/ndot_24.c
 fonts/ndot_34.c
+fonts/ndot_150.c
+fonts/ndot_120.c
+fonts/ndot_60.c
+fonts/ndot_28.c
+fonts/spacemono_14.c
+fonts/spacemono_11.c
+fonts/grotesk_16.c
 images/ui_img_logo_png.c
 images/ui_img_364513079.c
 images/ui_img_1091371356.c
