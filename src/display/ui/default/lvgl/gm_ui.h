@@ -22,6 +22,7 @@ typedef struct {
     lv_obj_t *clock;        // standby hero
     lv_obj_t *standby_temp; // standby sub
     lv_obj_t *status_label; // STANDBY · READY
+    lv_obj_t *status_time;  // status-bar clock (set live from the update hooks)
 
     lv_obj_t *arc;          // status edge arc
     lv_obj_t *kicker;       // INFUSION / DISPENSING / context

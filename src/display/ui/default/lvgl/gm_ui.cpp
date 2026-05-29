@@ -81,10 +81,11 @@ lv_obj_t *gm_status_bar(lv_obj_t *parent, bool live) {
     gm_icon(bar, &gm_ic_wifi, GM_MUTED, 16);
     gm_icon(bar, &gm_ic_bt, GM_MUTED, 16);
 
-    lv_obj_t *time = lv_label_create(bar);
-    lv_label_set_text(time, "07:42");
-    lv_obj_set_style_text_font(time, &spacemono_14, 0);
-    lv_obj_set_style_text_color(time, GM_CONTENT, 0);
+    // Placeholder until the screen's update hook sets the real device clock.
+    gm_h.status_time = lv_label_create(bar);
+    lv_label_set_text(gm_h.status_time, "--:--");
+    lv_obj_set_style_text_font(gm_h.status_time, &spacemono_14, 0);
+    lv_obj_set_style_text_color(gm_h.status_time, GM_CONTENT, 0);
 
     if (live) {
         lv_obj_t *dot = lv_obj_create(bar);
