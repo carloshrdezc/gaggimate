@@ -82,7 +82,8 @@ LV_FONT_DECLARE(gm_icons_16); // status bar (optional smaller cut)
 #endif
 
 // ── ROUTE B · A8 images (active) ─────────────────────────────
-// 48x48 LV_IMG_CF_ALPHA_8BIT masks; recolor via (bg_)img_recolor.
+// 40x40 LV_IMG_CF_ALPHA_8BIT masks (matches the 40px UI icon slots);
+// recolor via (bg_)img_recolor, scale per-widget with lv_img_set_zoom.
 LV_IMG_DECLARE(gm_ic_power);
 LV_IMG_DECLARE(gm_ic_cup);
 LV_IMG_DECLARE(gm_ic_steam);

@@ -72,7 +72,7 @@ def fmt_bytes(alpha: bytes, per_line: int = 20) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--size", type=int, default=48, help="output icon size in px")
+    ap.add_argument("--size", type=int, default=40, help="output icon size in px")
     args = ap.parse_args()
     size = args.size
 

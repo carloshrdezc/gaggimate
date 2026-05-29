@@ -30,8 +30,8 @@ beside the Ndot numerals without competing with them.
 ## How the icons are wired today (Route B · A8 images)
 
 This is the **active** route — it needs no font toolchain and is what the screens
-use now. Each `gm_ic_<name>` is an `LV_IMG_CF_ALPHA_8BIT` image: an alpha mask that
-LVGL paints in the widget's `(bg_)img_recolor` color. Tint it at runtime:
+use now. Each `gm_ic_<name>` is a 40×40 `LV_IMG_CF_ALPHA_8BIT` image: an alpha mask
+that LVGL paints in the widget's `(bg_)img_recolor` color. Tint it at runtime:
 
 ```c
 lv_img_set_src(icon, &gm_ic_cup);
@@ -43,10 +43,18 @@ lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEF
 > Always set `img_recolor` (or `bg_img_recolor`), or the icon is black-on-black.
 > The existing screen widgets already set this to the theme `NiceWhite`.
 
+**Sizing.** The masters are 40×40 to match the current UI icon slots (the temp
+icons and the standby power button are 40px boxes), so they render 1:1 with no
+clipping. Scale per-widget with `lv_img_set_zoom()` where a different size is
+needed — e.g. the standby status bar (20px tall) zooms Wi-Fi/Bluetooth to ~20px
+(`lv_img_set_zoom(icon, 128)`); keep the object at the asset's native 40px so the
+zoom stays centered. `bg_img` / `lv_imgbtn` can't zoom, so their box must fit the
+asset (the 120px mode buttons center the 40px glyph).
+
 ### Regenerate the image sources
 
 ```sh
-python assets/gm-icons/gen_a8_images.py --size 48   # → src/.../lvgl/images/gm_ic_*.c
+python assets/gm-icons/gen_a8_images.py --size 40   # → src/.../lvgl/images/gm_ic_*.c
 ```
 
 Change `--size` to re-cut at a different resolution (e.g. `--size 96` for the full
