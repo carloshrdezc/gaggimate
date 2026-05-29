@@ -29,6 +29,8 @@ extern "C" {
 #include "ui_theme_manager.h"
 #include "ui_themes.h"
 
+#include "gm_icons.h" // GaggiMate "Nothing" icon set (A8 images + symbol-font codepoints)
+
 ///////////////////// SCREENS ////////////////////
 #include "screens/ui_BrewScreen.h"
 #include "screens/ui_GrindScreen.h"

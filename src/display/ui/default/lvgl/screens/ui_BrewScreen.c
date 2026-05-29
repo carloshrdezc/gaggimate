@@ -410,7 +410,7 @@ void ui_BrewScreen_screen_init(void) {
                                            _ui_theme_alpha_NiceWhite);
 
     ui_BrewScreen_Image5 = lv_img_create(ui_BrewScreen_tempContainer);
-    lv_img_set_src(ui_BrewScreen_Image5, &ui_img_1951499226);
+    lv_img_set_src(ui_BrewScreen_Image5, &gm_ic_thermo);
     lv_obj_set_width(ui_BrewScreen_Image5, 40);
     lv_obj_set_height(ui_BrewScreen_Image5, 40);
     lv_obj_set_x(ui_BrewScreen_Image5, -140);

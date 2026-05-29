@@ -136,7 +136,7 @@ void ui_StatusScreen_screen_init(void) {
                                            _ui_theme_alpha_NiceWhite);
 
     ui_StatusScreen_Image7 = lv_img_create(ui_StatusScreen_contentPanel2);
-    lv_img_set_src(ui_StatusScreen_Image7, &ui_img_1951499226);
+    lv_img_set_src(ui_StatusScreen_Image7, &gm_ic_thermo);
     lv_obj_set_width(ui_StatusScreen_Image7, 40);
     lv_obj_set_height(ui_StatusScreen_Image7, 40);
     lv_obj_set_x(ui_StatusScreen_Image7, -90);

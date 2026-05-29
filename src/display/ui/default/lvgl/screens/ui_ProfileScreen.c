@@ -291,7 +291,7 @@ void ui_ProfileScreen_screen_init(void) {
     lv_obj_set_style_text_font(ui_ProfileScreen_profileName, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ProfileScreen_tempIcon = lv_img_create(ui_ProfileScreen_profileDetails);
-    lv_img_set_src(ui_ProfileScreen_tempIcon, &ui_img_1951499226);
+    lv_img_set_src(ui_ProfileScreen_tempIcon, &gm_ic_thermo);
     lv_obj_set_width(ui_ProfileScreen_tempIcon, 40);
     lv_obj_set_height(ui_ProfileScreen_tempIcon, 40);
     lv_obj_set_x(ui_ProfileScreen_tempIcon, -100);

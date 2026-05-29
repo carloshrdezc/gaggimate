@@ -170,7 +170,7 @@ void ui_SimpleProcessScreen_screen_init(void) {
     lv_obj_set_style_text_font(ui_SimpleProcessScreen_targetTemp, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_SimpleProcessScreen_Image9 = lv_img_create(ui_SimpleProcessScreen_contentPanel5);
-    lv_img_set_src(ui_SimpleProcessScreen_Image9, &ui_img_1951499226);
+    lv_img_set_src(ui_SimpleProcessScreen_Image9, &gm_ic_thermo);
     lv_obj_set_width(ui_SimpleProcessScreen_Image9, 40);
     lv_obj_set_height(ui_SimpleProcessScreen_Image9, 40);
     lv_obj_set_x(ui_SimpleProcessScreen_Image9, 0);

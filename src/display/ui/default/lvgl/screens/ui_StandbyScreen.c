@@ -75,7 +75,7 @@ void ui_StandbyScreen_screen_init(void) {
     lv_obj_clear_flag(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE); /// Flags
 
     ui_StandbyScreen_wifiIcon = lv_img_create(ui_StandbyScreen_statusContainer);
-    lv_img_set_src(ui_StandbyScreen_wifiIcon, &ui_img_364513079);
+    lv_img_set_src(ui_StandbyScreen_wifiIcon, &gm_ic_wifi);
     lv_obj_set_width(ui_StandbyScreen_wifiIcon, LV_SIZE_CONTENT);  /// 1
     lv_obj_set_height(ui_StandbyScreen_wifiIcon, LV_SIZE_CONTENT); /// 1
     lv_obj_set_x(ui_StandbyScreen_wifiIcon, 20);
@@ -94,7 +94,7 @@ void ui_StandbyScreen_screen_init(void) {
                                            _ui_theme_alpha_NiceWhite);
 
     ui_StandbyScreen_bluetoothIcon = lv_img_create(ui_StandbyScreen_statusContainer);
-    lv_img_set_src(ui_StandbyScreen_bluetoothIcon, &ui_img_1091371356);
+    lv_img_set_src(ui_StandbyScreen_bluetoothIcon, &gm_ic_bt);
     lv_obj_set_width(ui_StandbyScreen_bluetoothIcon, LV_SIZE_CONTENT);  /// 1
     lv_obj_set_height(ui_StandbyScreen_bluetoothIcon, LV_SIZE_CONTENT); /// 1
     lv_obj_set_x(ui_StandbyScreen_bluetoothIcon, -20);
