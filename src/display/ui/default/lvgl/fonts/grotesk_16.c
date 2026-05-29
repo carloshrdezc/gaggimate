@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 16 px
  * Bpp: 4
- * Opts: --bpp 4 --no-compress --format lvgl --lv-include lvgl.h --force-fast-kern-format --font assets/fonts/SpaceGrotesk-Medium.ttf --size 16 --range 0x20-0x7F -o src/display/ui/default/lvgl/fonts/grotesk_16.c
+ * Opts: --bpp 4 --no-compress --format lvgl --lv-include lvgl.h --force-fast-kern-format --font assets/fonts/SpaceGrotesk-Medium.ttf --size 16 --range 0x20-0x7F,0xB0 -o src/display/ui/default/lvgl/fonts/grotesk_16.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -751,7 +751,12 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
 
     /* U+007E "~" */
     0x3, 0xde, 0x30, 0xa5, 0x7f, 0xef, 0xee, 0xf6,
-    0x8a, 0x4, 0xed, 0x30, 0x0, 0x0, 0x0, 0x0
+    0x8a, 0x4, 0xed, 0x30, 0x0, 0x0, 0x0, 0x0,
+
+    /* U+00B0 "°" */
+    0x0, 0x0, 0x0, 0x6, 0xff, 0x90, 0x3f, 0x75,
+    0xf6, 0x6f, 0x0, 0xba, 0x4f, 0x42, 0xe7, 0x9,
+    0xff, 0xb0, 0x0, 0x22, 0x0
 };
 
 
@@ -855,7 +860,8 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 3877, .adv_w = 115, .box_w = 7, .box_h = 17, .ofs_x = 0, .ofs_y = -4},
     {.bitmap_index = 3937, .adv_w = 64, .box_w = 2, .box_h = 17, .ofs_x = 1, .ofs_y = -4},
     {.bitmap_index = 3954, .adv_w = 115, .box_w = 7, .box_h = 17, .ofs_x = 0, .ofs_y = -4},
-    {.bitmap_index = 4014, .adv_w = 159, .box_w = 8, .box_h = 4, .ofs_x = 1, .ofs_y = 3}
+    {.bitmap_index = 4014, .adv_w = 159, .box_w = 8, .box_h = 4, .ofs_x = 1, .ofs_y = 3},
+    {.bitmap_index = 4030, .adv_w = 99, .box_w = 6, .box_h = 7, .ofs_x = 0, .ofs_y = 6}
 };
 
 /*---------------------
@@ -869,6 +875,10 @@ static const lv_font_fmt_txt_cmap_t cmaps[] =
 {
     {
         .range_start = 32, .range_length = 95, .glyph_id_start = 1,
+        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
+    },
+    {
+        .range_start = 176, .range_length = 1, .glyph_id_start = 96,
         .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
     }
 };
@@ -892,7 +902,8 @@ static const uint8_t kern_left_class_mapping[] =
     0, 0, 39, 40, 40, 0, 40, 41,
     0, 42, 43, 43, 44, 0, 42, 42,
     40, 40, 0, 45, 46, 47, 0, 48,
-    49, 50, 0, 51, 37, 0, 52, 0
+    49, 50, 0, 51, 37, 0, 52, 0,
+    0
 };
 
 /*Map glyph_ids to kern right classes*/
@@ -909,7 +920,8 @@ static const uint8_t kern_right_class_mapping[] =
     0, 0, 31, 0, 32, 32, 32, 33,
     32, 0, 34, 35, 0, 36, 37, 37,
     32, 37, 32, 37, 38, 39, 40, 41,
-    42, 43, 40, 44, 45, 0, 30, 0
+    42, 43, 40, 44, 45, 0, 30, 0,
+    0
 };
 
 /*Kern values between classes*/
@@ -1240,7 +1252,7 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
     .cmaps = cmaps,
     .kern_dsc = &kern_classes,
     .kern_scale = 16,
-    .cmap_num = 1,
+    .cmap_num = 2,
     .bpp = 4,
     .kern_classes = 1,
     .bitmap_format = 0,

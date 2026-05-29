@@ -10,6 +10,7 @@
 #include <display/drivers/WaveshareDriver.h>
 #include <display/drivers/common/LV_Helper.h>
 #include <display/main.h>
+#include <display/ui/default/lvgl/gm_ui.h>
 #include <display/ui/default/lvgl/ui_theme_manager.h>
 #include <display/ui/default/lvgl/ui_themes.h>
 #include <display/ui/utils/effects.h>
@@ -928,25 +929,24 @@ void DefaultUI::setupReactive() {
                           &updateAvailable);
     effect_mgr.use_effect([=] { return currentScreen == ui_StandbyScreen; },
                           [=]() {
-                              bool deactivated = true;
+                              // Drive the standby kicker line: a state message when not ready,
+                              // otherwise the ambient "STANDBY · READY". (spacemono_14 is
+                              // uppercase-only, so messages are uppercased.)
+                              const char *msg = nullptr;
                               if (updateActive) {
-                                  lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Updating...");
-                              } else if (error) {
-                                  if (controller->getError() == ERROR_CODE_RUNAWAY) {
-                                      lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Temperature error, please restart");
-                                  }
+                                  msg = "UPDATING";
+                              } else if (error && controller->getError() == ERROR_CODE_RUNAWAY) {
+                                  msg = "TEMP ERROR \xC2\xB7 RESTART";
                               } else if (autotuning) {
-                                  lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Autotuning...");
+                                  msg = "AUTOTUNING";
                               } else if (waitingForController) {
-                                  lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Waiting for controller...");
-                              } else {
-                                  deactivated = !initialized;
+                                  msg = "WAITING FOR CONTROLLER";
+                              } else if (!initialized) {
+                                  msg = "STARTING";
                               }
-                              _ui_flag_modify(ui_StandbyScreen_mainLabel, LV_OBJ_FLAG_HIDDEN, deactivated);
-                              _ui_flag_modify(ui_StandbyScreen_touchIcon, LV_OBJ_FLAG_HIDDEN, !deactivated);
-                              _ui_flag_modify(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_HIDDEN, !deactivated);
+                              lv_label_set_text(ui_StandbyScreen_mainLabel, msg ? msg : "STANDBY \xC2\xB7 READY");
                           },
-                          &updateAvailable, &error, &autotuning, &waitingForController, &initialized);
+                          &updateActive, &updateAvailable, &error, &autotuning, &waitingForController, &initialized);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               if (brewVolumetric) {
@@ -1601,47 +1601,13 @@ void DefaultUI::applyScreenVisualLanguage() {
             alignFooterAction(ui_SimpleProcessScreen_goButton, palette, mode == MODE_STEAM ? palette.accentCool : palette.water);
         }
     } else if (activeScreen == ui_StandbyScreen) {
-        ensureStandbyContextLabel();
-        if (lv_obj_is_valid(ui_StandbyScreen_time)) {
-            styleMetricValue(ui_StandbyScreen_time, palette, &ndot_34);
-            lv_obj_set_style_text_letter_space(ui_StandbyScreen_time, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_StandbyScreen_statusContainer)) {
-            stylePanel(ui_StandbyScreen_statusContainer, palette, OPA_185, 999);
-            lv_obj_set_style_pad_left(ui_StandbyScreen_statusContainer, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_right(ui_StandbyScreen_statusContainer, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_top(ui_StandbyScreen_statusContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_bottom(ui_StandbyScreen_statusContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_StandbyScreen_statusContainer, 18, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (standbyContextLabel != nullptr && lv_obj_is_valid(standbyContextLabel)) {
-            styleChip(standbyContextLabel, palette, palette.accent, true);
-        }
-        if (lv_obj_is_valid(ui_StandbyScreen_logo)) {
-            lv_obj_set_style_img_recolor(ui_StandbyScreen_logo, palette.textPrimary, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_logo, LV_OPA_90, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_StandbyScreen_mainLabel)) {
-            lv_label_set_text(ui_StandbyScreen_mainLabel, "Touch to wake");
-            styleSecondary(ui_StandbyScreen_mainLabel, palette);
-            lv_obj_set_style_text_font(ui_StandbyScreen_mainLabel, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (roundDisplay) {
-            lv_obj_align(ui_StandbyScreen_statusContainer, LV_ALIGN_TOP_MID, 0, 24);
-            lv_obj_set_size(ui_StandbyScreen_statusContainer, 180, 36);
-            lv_obj_align(ui_StandbyScreen_time, LV_ALIGN_TOP_MID, 0, 84);
-            lv_img_set_zoom(ui_StandbyScreen_logo, 150);
-            lv_obj_align(ui_StandbyScreen_logo, LV_ALIGN_CENTER, 0, -8);
-            lv_obj_align(ui_StandbyScreen_mainLabel, LV_ALIGN_BOTTOM_MID, 0, -52);
-            if (standbyContextLabel != nullptr) {
-                lv_obj_align(standbyContextLabel, LV_ALIGN_BOTTOM_MID, 0, -92);
-            }
-        }
+        // Nothing-theme standby (CAR-277) styles itself via the gm_* builders in
+        // ui_StandbyScreen_screen_init; nothing to restyle here. The kicker text
+        // and clock/wifi/bt are driven by the standby effect + updateStandbyScreen().
     }
 }
 
 void DefaultUI::updateStandbyScreen() {
-    ensureStandbyContextLabel();
     if (standbyEnterTime > 0) {
         const Settings &settings = controller->getSettings();
         const unsigned long now = millis();
@@ -1674,6 +1640,15 @@ void DefaultUI::updateStandbyScreen() {
                                                      : lv_obj_add_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
     !apActive &&WiFi.status() == WL_CONNECTED ? lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN)
                                               : lv_obj_add_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
+
+    // Temperature sub-line (Nothing theme): "<current>° / <target>°C".
+    if (lv_obj_is_valid(gm_h.standby_temp)) {
+        if (targetTemp > 0) {
+            lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, targetTemp);
+        } else {
+            lv_label_set_text(gm_h.standby_temp, "--");
+        }
+    }
 
     if (standbyContextLabel != nullptr) {
         const String standbyContext = buildContextLine(selectedProfile.label.isEmpty() ? "Ready" : selectedProfile.label, selectedBean);
