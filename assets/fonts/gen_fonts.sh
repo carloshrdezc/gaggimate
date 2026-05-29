@@ -17,7 +17,9 @@ NDOT="web/public/fonts/Ndot57Caps-Regular.otf"
 SMONO="assets/fonts/SpaceMono-Bold.ttf"
 SGRO="assets/fonts/SpaceGrotesk-Medium.ttf"
 OUT="src/display/ui/default/lvgl/fonts"
-CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --format lvgl --lv-include lvgl.h --force-fast-kern-format)
+# --no-compress: this repo builds with LV_USE_FONT_COMPRESSED 0, so fonts must be
+# plain bitmaps (bitmap_format 0); compressed glyphs would render blank.
+CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-include lvgl.h --force-fast-kern-format)
 
 # Ndot numerals (digits, colon, period, degree, g/s/C units)
 "${CONV[@]}" --font "$NDOT" --size 150 --range 0x2E,0x30-0x3A,0x67,0x73,0xB0 -o "$OUT/ndot_150.c"
