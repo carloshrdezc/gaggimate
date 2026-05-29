@@ -12,30 +12,30 @@ import { Home } from './pages/Home/index.jsx';
 import { NotFound } from './pages/_404.jsx';
 import ApiService, { ApiServiceContext } from './services/ApiService.js';
 import { Navigation } from './components/Navigation.jsx';
+import { Scales } from './pages/Scales/index.jsx';
 
-// Lazily-loaded route components. Each page module exports its component as a
-// named export, so we map it to the `{ default: ... }` shape preact-iso's
-// `lazy()` expects. This splits each route into its own chunk and keeps it
-// out of the initial JS bundle.
+// The ESP32 serves the embedded UI from SPIFFS while also keeping WebSocket
+// telemetry alive. Keep Scales in the startup bundle to avoid the observed
+// burst of tiny dependency chunk requests when opening Bluetooth Devices; keep
+// the larger routes lazy.
 const Settings = lazy(() =>
   import('./pages/Settings/index.jsx').then(m => ({ default: m.Settings })),
 );
 const OTA = lazy(() => import('./pages/OTA/index.jsx').then(m => ({ default: m.OTA })));
-const Scales = lazy(() => import('./pages/Scales/index.jsx').then(m => ({ default: m.Scales })));
 const ProfileList = lazy(() =>
   import('./pages/ProfileList/index.jsx').then(m => ({ default: m.ProfileList })),
 );
 const ProfileEdit = lazy(() =>
   import('./pages/ProfileEdit/index.jsx').then(m => ({ default: m.ProfileEdit })),
 );
+const ShotHistory = lazy(() =>
+  import('./pages/ShotHistory/index.jsx').then(m => ({ default: m.ShotHistory })),
+);
 const BeansPage = lazy(() =>
   import('./pages/Beans/index.jsx').then(m => ({ default: m.BeansPage })),
 );
 const Autotune = lazy(() =>
   import('./pages/Autotune/index.jsx').then(m => ({ default: m.Autotune })),
-);
-const ShotHistory = lazy(() =>
-  import('./pages/ShotHistory/index.jsx').then(m => ({ default: m.ShotHistory })),
 );
 const ShotAnalyzer = lazy(() =>
   import('./pages/ShotAnalyzer/index.jsx').then(m => ({ default: m.ShotAnalyzer })),
