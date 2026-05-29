@@ -30,6 +30,7 @@ extern "C" {
 #include "ui_themes.h"
 
 #include "gm_icons.h" // GaggiMate "Nothing" icon set (A8 images + symbol-font codepoints)
+#include "gm_fonts.h" // GaggiMate "Nothing" theme fonts (Ndot numerals + Space Mono/Grotesk)
 
 ///////////////////// SCREENS ////////////////////
 #include "screens/ui_BrewScreen.h"
