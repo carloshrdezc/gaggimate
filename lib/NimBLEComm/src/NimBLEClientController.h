@@ -35,8 +35,6 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void registerDisconnectCallback(const void_callback_t &callback);
     std::string readInfo() const;
     NimBLEClient *getClient() const { return client; };
-    bool isAuthFailed() const { return bleAuthFailed; }
-    void factoryResetBonds();
 
   private:
     NimBLEClient *client;
@@ -65,7 +63,6 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     NimBLERemoteCharacteristic *tofMeasurementChar = nullptr;
     NimBLEAdvertisedDevice *serverDevice = nullptr;
     bool readyForConnection = false;
-    bool bleAuthFailed = false;
     xTaskHandle taskHandle;
 
     remote_err_callback_t remoteErrorCallback = nullptr;
@@ -84,10 +81,6 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
 
     // NimBLEClientCallbacks override
     void onDisconnect(NimBLEClient *pServer) override;
-    void onAuthenticationComplete(ble_gap_conn_desc *desc) override;
-
-    bool writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const String &value, bool response = true);
-    bool writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const std::string &value, bool response = true);
 
     // Notification callback
     void notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length, bool isNotify) const;

@@ -29,16 +29,9 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     void registerTareCallback(const void_callback_t &callback);
     void registerLedControlCallback(const led_control_callback_t &callback);
     void setInfo(String infoString);
-    void factoryResetBonds();
 
   private:
     bool deviceConnected = false;
-    // True only between onConnect and the first authenticated callback for a connection.
-    // Used by onAuthenticationComplete to distinguish a real initial-pair failure
-    // (must hard-disconnect) from a transient unencrypted callback fire on an
-    // already-bonded link (must NOT disconnect — would tear down a healthy session).
-    // See CAR-231.
-    bool pendingInitialPair = false;
     String infoString = "";
     NimBLEAdvertising *advertising = nullptr;
     NimBLEServer *server = nullptr;
@@ -75,7 +68,6 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     // BLEServerCallbacks overrides
     void onConnect(NimBLEServer *pServer) override;
     void onDisconnect(NimBLEServer *pServer) override;
-    void onAuthenticationComplete(ble_gap_conn_desc *desc) override;
 
     // BLECharacteristicCallbacks overrides
     void onWrite(NimBLECharacteristic *pCharacteristic) override;
