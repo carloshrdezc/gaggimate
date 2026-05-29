@@ -43,7 +43,11 @@ echo "=== Step 2b: Verify SPIFFS path lengths ==="
 # Catch the mkspiffs 32-char filename limit BEFORE we try to build the image.
 # mkspiffs silently drops oversized files (and sometimes their dir siblings),
 # producing a broken image that the device happily flashes. See CAR-281.
-"$ROOT_DIR/scripts/check_spiffs_name_lengths.sh"
+#
+# Invoke via `bash` so the guard runs even on hosts where the executable bit
+# was lost in transit (Windows checkouts with core.filemode=false, fresh
+# clones via cmd.exe, etc.).
+bash "$ROOT_DIR/scripts/check_spiffs_name_lengths.sh"
 
 echo "=== Step 3: Build firmware ==="
 # Resolve pio: prefer PATH, fall back to the default PlatformIO install location on Windows
