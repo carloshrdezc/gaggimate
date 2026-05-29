@@ -109,7 +109,13 @@ void ui_StandbyScreen_screen_init(void) {
     lv_obj_add_flag(ui_StandbyScreen_touchIcon, LV_OBJ_FLAG_HIDDEN);
 
     // ── Decorative mode chips (whole screen taps to wake) ──
-    gm_chip_bar(ui_StandbyScreen, 0, GM_CONTENT);
+    // Chips are lv_obj_create() objects (clickable by default). Clear the flag
+    // so taps over the bar area fall through to ui_StandbyScreen's wake handler.
+    lv_obj_t *chip_bar = gm_chip_bar(ui_StandbyScreen, 0, GM_CONTENT);
+    lv_obj_clear_flag(chip_bar, LV_OBJ_FLAG_CLICKABLE);
+    for (int i = 0; i < 4; i++) {
+        lv_obj_clear_flag(gm_h.chips[i], LV_OBJ_FLAG_CLICKABLE);
+    }
 
     lv_obj_add_event_cb(ui_StandbyScreen, ui_event_StandbyScreen, LV_EVENT_ALL, NULL);
 }
