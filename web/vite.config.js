@@ -28,7 +28,6 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        inlineDynamicImports: true,
         entryFileNames: shortChunkName,
         chunkFileNames: shortChunkName,
         assetFileNames: shortAssetName,
