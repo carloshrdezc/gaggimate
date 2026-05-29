@@ -31,7 +31,7 @@ CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-incl
 "${CONV[@]}" --font "$SMONO" --size 14 --range 0x20,0x2E-0x3A,0x41-0x5A,0xB7  -o "$OUT/spacemono_14.c"
 "${CONV[@]}" --font "$SMONO" --size 11 --range 0x20,0x41-0x5A                 -o "$OUT/spacemono_11.c"
 
-# Space Grotesk Medium — body / settings rows (full printable ASCII)
-"${CONV[@]}" --font "$SGRO"  --size 16 --range 0x20-0x7F                      -o "$OUT/grotesk_16.c"
+# Space Grotesk Medium — body / settings rows (full printable ASCII + degree)
+"${CONV[@]}" --font "$SGRO"  --size 16 --range 0x20-0x7F,0xB0                 -o "$OUT/grotesk_16.c"
 
 echo "Generated 7 fonts in $OUT"
