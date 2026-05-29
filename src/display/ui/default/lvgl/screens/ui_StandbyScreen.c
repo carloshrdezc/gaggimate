@@ -73,6 +73,16 @@ void ui_StandbyScreen_screen_init(void) {
     lv_obj_align(ui_StandbyScreen_time, LV_ALIGN_CENTER, 0, -28);
     gm_h.clock = ui_StandbyScreen_time;
 
+    // AM/PM indicator — ndot_120 only covers 0x30-0x3A, so the suffix is a
+    // separate label in spacemono_14. Hidden when 24-hour format is active.
+    gm_h.ampm = lv_label_create(ui_StandbyScreen);
+    lv_label_set_text(gm_h.ampm, "");
+    lv_obj_set_style_text_font(gm_h.ampm, &spacemono_14, 0);
+    lv_obj_set_style_text_color(gm_h.ampm, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(gm_h.ampm, GM_TRACK_KICKER, 0);
+    lv_obj_align(gm_h.ampm, LV_ALIGN_CENTER, 0, 36);
+    lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+
     // ── Kicker / state-message line (driven by the standby effect) ──
     ui_StandbyScreen_mainLabel = lv_label_create(ui_StandbyScreen);
     lv_label_set_text(ui_StandbyScreen_mainLabel, "STANDBY \xC2\xB7 READY");
@@ -118,4 +128,5 @@ void ui_StandbyScreen_screen_destroy(void) {
     ui_StandbyScreen_updateIcon = NULL;
     ui_StandbyScreen_touchIcon = NULL;
     ui_StandbyScreen_mainLabel = NULL;
+    gm_h.ampm = NULL;
 }
