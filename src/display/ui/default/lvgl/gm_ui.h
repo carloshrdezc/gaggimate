@@ -19,7 +19,8 @@ extern "C" {
 // Populated during screen build so update fns can poke values
 // without re-walking the tree every frame.
 typedef struct {
-    lv_obj_t *clock;        // standby hero
+    lv_obj_t *clock;        // standby hero (ndot_120, digits+colon only)
+    lv_obj_t *ampm;         // standby AM/PM suffix (spacemono_14, hidden in 24h mode)
     lv_obj_t *standby_temp; // standby sub
     lv_obj_t *status_label; // STANDBY · READY
     lv_obj_t *status_time;  // status-bar clock (set live from the update hooks)

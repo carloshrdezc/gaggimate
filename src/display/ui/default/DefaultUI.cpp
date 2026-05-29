@@ -1622,19 +1622,33 @@ void DefaultUI::updateStandbyScreen() {
         struct tm timeinfo;
 
         localtime_r(&now, &timeinfo);
-        // allocate enough space for both 12h/24h time formats
         if (getLocalTime(&timeinfo, 500)) {
-            char time[9];
+            char time[6]; // "HH:MM\0"
             Settings &settings = controller->getSettings();
-            const char *format = settings.isClock24hFormat() ? "%H:%M" : "%I:%M %p";
-            strftime(time, sizeof(time), format, &timeinfo);
+            const bool is24h = settings.isClock24hFormat();
+            strftime(time, sizeof(time), is24h ? "%H:%M" : "%I:%M", &timeinfo);
             lv_label_set_text(ui_StandbyScreen_time, time);
             lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+
+            // ndot_120 only covers digits+colon; drive the AM/PM suffix separately
+            if (lv_obj_is_valid(gm_h.ampm)) {
+                if (!is24h) {
+                    char ampm[3]; // "AM\0" / "PM\0"
+                    strftime(ampm, sizeof(ampm), "%p", &timeinfo);
+                    lv_label_set_text(gm_h.ampm, ampm);
+                    lv_obj_clear_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
 
             christmasMode = (timeinfo.tm_mon == 11 && timeinfo.tm_mday < 27) || (timeinfo.tm_mon == 0 && timeinfo.tm_mday < 6);
         }
     } else {
         lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+        if (lv_obj_is_valid(gm_h.ampm)) {
+            lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     controller->getClientController()->isConnected() ? lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN)
                                                      : lv_obj_add_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
