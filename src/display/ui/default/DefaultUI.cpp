@@ -935,8 +935,8 @@ void DefaultUI::setupReactive() {
                               const char *msg = nullptr;
                               if (updateActive) {
                                   msg = "UPDATING";
-                              } else if (error && controller->getError() == ERROR_CODE_RUNAWAY) {
-                                  msg = "TEMP ERROR \xC2\xB7 RESTART";
+                              } else if (error) {
+                                  msg = controller->getError() == ERROR_CODE_RUNAWAY ? "TEMP ERROR \xC2\xB7 RESTART" : "ERROR \xC2\xB7 RESTART";
                               } else if (autotuning) {
                                   msg = "AUTOTUNING";
                               } else if (waitingForController) {
