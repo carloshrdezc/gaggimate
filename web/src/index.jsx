@@ -14,38 +14,67 @@ import ApiService, { ApiServiceContext } from './services/ApiService.js';
 import { Navigation } from './components/Navigation.jsx';
 import { Scales } from './pages/Scales/index.jsx';
 
-// The ESP32 serves the embedded UI from SPIFFS while also keeping WebSocket
-// telemetry alive. Keep Scales in the startup bundle to avoid the observed
-// burst of tiny dependency chunk requests when opening Bluetooth Devices; keep
-// the larger routes lazy.
-const Settings = lazy(() =>
-  import('./pages/Settings/index.jsx').then(m => ({ default: m.Settings })),
+function ShellRoute({
+  component: Component,
+  navOpen,
+  onNavToggle,
+  default: _defaultRoute,
+  path: _path,
+  ...pageProps
+}) {
+  return (
+    <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
+      <Component {...pageProps} />
+    </PageShell>
+  );
+}
+
+function createLazyShellRoute(load, exportName) {
+  return lazy(() =>
+    load().then(module => {
+      const Component = module[exportName];
+      return {
+        default: props => <ShellRoute {...props} component={Component} />,
+      };
+    }),
+  );
+}
+
+const SettingsRoute = createLazyShellRoute(
+  () => import('./pages/Settings/index.jsx'),
+  'Settings',
 );
-const OTA = lazy(() => import('./pages/OTA/index.jsx').then(m => ({ default: m.OTA })));
-const ProfileList = lazy(() =>
-  import('./pages/ProfileList/index.jsx').then(m => ({ default: m.ProfileList })),
+const OTARoute = createLazyShellRoute(() => import('./pages/OTA/index.jsx'), 'OTA');
+const ProfileListRoute = createLazyShellRoute(
+  () => import('./pages/ProfileList/index.jsx'),
+  'ProfileList',
 );
-const ProfileEdit = lazy(() =>
-  import('./pages/ProfileEdit/index.jsx').then(m => ({ default: m.ProfileEdit })),
+const ProfileEditRoute = createLazyShellRoute(
+  () => import('./pages/ProfileEdit/index.jsx'),
+  'ProfileEdit',
 );
-const ShotHistory = lazy(() =>
-  import('./pages/ShotHistory/index.jsx').then(m => ({ default: m.ShotHistory })),
+const ShotHistoryRoute = createLazyShellRoute(
+  () => import('./pages/ShotHistory/index.jsx'),
+  'ShotHistory',
 );
-const BeansPage = lazy(() =>
-  import('./pages/Beans/index.jsx').then(m => ({ default: m.BeansPage })),
+const BeansRoute = createLazyShellRoute(() => import('./pages/Beans/index.jsx'), 'BeansPage');
+const AutotuneRoute = createLazyShellRoute(
+  () => import('./pages/Autotune/index.jsx'),
+  'Autotune',
 );
-const Autotune = lazy(() =>
-  import('./pages/Autotune/index.jsx').then(m => ({ default: m.Autotune })),
+const ShotAnalyzerRoute = createLazyShellRoute(
+  () => import('./pages/ShotAnalyzer/index.jsx'),
+  'ShotAnalyzer',
 );
-const ShotAnalyzer = lazy(() =>
-  import('./pages/ShotAnalyzer/index.jsx').then(m => ({ default: m.ShotAnalyzer })),
+const ShotToProfileRoute = createLazyShellRoute(
+  () => import('./pages/ShotToProfile/index.jsx'),
+  'ShotToProfile',
 );
-const ShotToProfile = lazy(() =>
-  import('./pages/ShotToProfile/index.jsx').then(m => ({ default: m.ShotToProfile })),
+const StatisticsRoute = createLazyShellRoute(
+  () => import('./pages/Statistics/index.jsx'),
+  'StatisticsPage',
 );
-const StatisticsPage = lazy(() =>
-  import('./pages/Statistics/index.jsx').then(m => ({ default: m.StatisticsPage })),
-);
+const ScalesRoute = props => <ShellRoute {...props} component={Scales} />;
 
 const apiService = new ApiService();
 
@@ -82,107 +111,81 @@ function AppContent() {
                   />
                   <Route
                     path='/profiles'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <ProfileList />
-                      </PageShell>
-                    )}
+                    component={ProfileListRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/profiles/:id'
-                    component={props => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <ProfileEdit {...props} />
-                      </PageShell>
-                    )}
+                    component={ProfileEditRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/beans'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <BeansPage />
-                      </PageShell>
-                    )}
+                    component={BeansRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/settings'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <Settings />
-                      </PageShell>
-                    )}
+                    component={SettingsRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/ota'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <OTA />
-                      </PageShell>
-                    )}
+                    component={OTARoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/scales'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <Scales />
-                      </PageShell>
-                    )}
+                    component={ScalesRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/pidtune'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <Autotune />
-                      </PageShell>
-                    )}
+                    component={AutotuneRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/history'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <ShotHistory />
-                      </PageShell>
-                    )}
+                    component={ShotHistoryRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/analyzer'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <ShotAnalyzer />
-                      </PageShell>
-                    )}
+                    component={ShotAnalyzerRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/statistics'
-                    component={() => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <StatisticsPage />
-                      </PageShell>
-                    )}
+                    component={StatisticsRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/statistics/:sourceAlias/:profileName'
-                    component={props => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <StatisticsPage {...props} />
-                      </PageShell>
-                    )}
+                    component={StatisticsRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/analyzer/:source/:id'
-                    component={props => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <ShotAnalyzer {...props} />
-                      </PageShell>
-                    )}
+                    component={ShotAnalyzerRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route
                     path='/shots/:id/to-profile'
-                    component={props => (
-                      <PageShell navOpen={navOpen} onNavToggle={onNavToggle}>
-                        <ShotToProfile {...props} />
-                      </PageShell>
-                    )}
+                    component={ShotToProfileRoute}
+                    navOpen={navOpen}
+                    onNavToggle={onNavToggle}
                   />
                   <Route default component={NotFound} />
                 </Router>

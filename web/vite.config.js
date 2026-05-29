@@ -26,6 +26,11 @@ export default defineConfig({
   plugins: [preact(), tailwindcss()],
 
   build: {
+    // The ESP32 web server struggles with Vite's default dependency preloading
+    // for lazy routes because one navigation can fan out into many parallel
+    // SPIFFS requests while the WebSocket is active. Keep chunks, but load
+    // dependencies only when the browser actually evaluates the route module.
+    modulePreload: false,
     rollupOptions: {
       output: {
         entryFileNames: shortChunkName,
