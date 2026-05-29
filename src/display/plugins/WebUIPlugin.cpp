@@ -367,6 +367,10 @@ void WebUIPlugin::setupServer() {
     server.on("/favicon.ico", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
     server.on("/apple-touch-icon.png", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
     server.on("/apple-touch-icon-precomposed.png", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
+    // Vite emits content-hashed asset names. Cache them aggressively so route
+    // navigation does not repeatedly hit the ESP32 for immutable chunks/fonts.
+    server.serveStatic("/assets/", SPIFFS, "/w/assets/").setCacheControl("public, max-age=31536000, immutable");
+    server.serveStatic("/fonts/", SPIFFS, "/w/fonts/").setCacheControl("public, max-age=31536000, immutable");
     // onNotFound must be registered BEFORE serveStatic so it catches unmatched paths
     server.onNotFound([](AsyncWebServerRequest *request) {
         request->send(SPIFFS, "/w/index.html");
