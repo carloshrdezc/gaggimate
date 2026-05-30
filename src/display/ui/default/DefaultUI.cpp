@@ -1200,6 +1200,13 @@ void DefaultUI::ensureStandbyContextLabel() {
     lv_obj_set_width(standbyContextLabel, 360);
     lv_label_set_long_mode(standbyContextLabel, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(standbyContextLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // Match the Nothing standby palette (GM_BG dark surface) so the dynamically
+    // created label reads correctly. Mirrors the ui_StandbyScreen_mainLabel
+    // kicker treatment in ui_StandbyScreen.c — without this, the label inherits
+    // the default LVGL theme's dark text on our dark background.
+    lv_obj_set_style_text_font(standbyContextLabel, &spacemono_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(standbyContextLabel, GM_MUTED, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_letter_space(standbyContextLabel, GM_TRACK_KICKER, LV_PART_MAIN | LV_STATE_DEFAULT);
     // Sit above gm_chip_bar (aligned BOTTOM_MID,-34, ~58px tall): -92 keeps the
     // profile/bean line readable without overlapping the chip row.
     lv_obj_align(standbyContextLabel, LV_ALIGN_BOTTOM_MID, 0, -92);
