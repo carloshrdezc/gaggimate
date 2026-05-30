@@ -1653,10 +1653,11 @@ void DefaultUI::updateStatusScreen() {
         }
     };
 
-    // setStatus() removed (CAR-278 review #1): gm_h.status_label is owned by
-    // ui_StandbyScreen and NULLed in its destroy hook, so by the time
-    // updateStatusScreen() runs the handle is invalid and writes are dropped.
-    // Active-vs-idle state is conveyed by the kicker + READY pill instead.
+    // setStatus() removed (CAR-278 review #1): gm_h.status_label was a
+    // vestigial field from the SquareLine-generated layout that no screen
+    // actually owned (no writes, no reads, no destroy). The dead field has
+    // been dropped from gm_handles in this fixup. Active-vs-idle state is
+    // now conveyed by the kicker, READY pill, and progress bar (mode-dependent).
 
     if (mode == MODE_BREW) {
         // Hero is brew elapsed time (m:ss); the unit slot stays as 's'.

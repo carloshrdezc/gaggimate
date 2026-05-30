@@ -19,6 +19,8 @@ lv_obj_t *ui_StatusScreen = NULL;
 void ui_event_StatusScreen(lv_event_t *e) {
     lv_event_code_t event_code = lv_event_get_code(e);
 
+    // CAR-278: cancel during brew is reached via top-edge swipe -> menu, by design.
+    // See onStatusScreenLoad in ui_events.cpp for rationale before adding an inline cancel chip.
     if (event_code == LV_EVENT_GESTURE && lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP) {
         lv_indev_wait_release(lv_indev_get_act());
         onMenuClick(e);
