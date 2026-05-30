@@ -47,6 +47,11 @@ lv_obj_t *gm_chip_bar(lv_obj_t *parent, int active, lv_color_t accent);
 lv_obj_t *gm_metric(lv_obj_t *row, const char *label, const char *value, lv_color_t value_col);
 lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent);
 
+// Update an existing metric column's label text. `value` is the handle returned
+// by gm_metric() (the value label); the column label is its sibling.
+// No-op if value is null/invalid.
+void gm_metric_set_label(lv_obj_t *value, const char *new_label);
+
 // ── Status screen mode switch (CAR-278) ──────────────────────
 // Retints accents and shows/hides the appropriate widgets per brewing mode.
 //   mode: 1 = brew (red), 2 = steam (gold), 3 = water (blue); other values

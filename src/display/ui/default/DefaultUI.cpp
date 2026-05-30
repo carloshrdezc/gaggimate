@@ -1363,7 +1363,18 @@ void DefaultUI::applyScreenVisualLanguage() {
         // bean label visibility/text is owned by updateStatusScreen() per mode.
         ensureStatusBeanLabel();
         if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
-            styleChip(statusBeanLabel, palette, palette.accent, true);
+            // CAR-278 review #2: bean label is a Nothing-theme chip styled with
+            // GM_* tokens, not the legacy DisplayPalette — the rest of the screen
+            // uses gm_theme tokens and styleChip() would clash.
+            lv_obj_set_style_bg_color(statusBeanLabel, GM_SURFACE, 0);
+            lv_obj_set_style_bg_opa(statusBeanLabel, LV_OPA_COVER, 0);
+            lv_obj_set_style_text_color(statusBeanLabel, GM_CONTENT, 0);
+            lv_obj_set_style_text_font(statusBeanLabel, &spacemono_14, 0);
+            lv_obj_set_style_radius(statusBeanLabel, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_pad_left(statusBeanLabel, 12, 0);
+            lv_obj_set_style_pad_right(statusBeanLabel, 12, 0);
+            lv_obj_set_style_pad_top(statusBeanLabel, 4, 0);
+            lv_obj_set_style_pad_bottom(statusBeanLabel, 4, 0);
         }
     } else if (activeScreen == ui_ProfileScreen) {
         stylePanel(ui_ProfileScreen_contentPanel, palette, OPA_55, 44);
@@ -1642,11 +1653,10 @@ void DefaultUI::updateStatusScreen() {
         }
     };
 
-    auto setStatus = [&](const char *txt) {
-        if (gm_h.status_label != nullptr && lv_obj_is_valid(gm_h.status_label)) {
-            lv_label_set_text(gm_h.status_label, txt);
-        }
-    };
+    // setStatus() removed (CAR-278 review #1): gm_h.status_label is owned by
+    // ui_StandbyScreen and NULLed in its destroy hook, so by the time
+    // updateStatusScreen() runs the handle is invalid and writes are dropped.
+    // Active-vs-idle state is conveyed by the kicker + READY pill instead.
 
     if (mode == MODE_BREW) {
         // Hero is brew elapsed time (m:ss); the unit slot stays as 's'.
@@ -1675,8 +1685,6 @@ void DefaultUI::updateStatusScreen() {
         } else {
             setKicker("BREW");
         }
-
-        setStatus(active ? "BREWING" : "READY");
 
         // Metric row: WEIGHT / TEMP / PRESS / FLOW (flow shows '--').
         if (gm_h.m_weight != nullptr && lv_obj_is_valid(gm_h.m_weight)) {
@@ -1709,7 +1717,6 @@ void DefaultUI::updateStatusScreen() {
         snprintf(heroBuf, sizeof(heroBuf), "%d", currentTemp);
         setHero(heroBuf, "\xC2\xB0");
         setKicker("STEAM");
-        setStatus(isTemperatureStable ? "READY" : "HEATING");
 
         if (gm_h.m_temp != nullptr && lv_obj_is_valid(gm_h.m_temp)) {
             lv_label_set_text_fmt(gm_h.m_temp, "%d\xC2\xB0", targetTemp);
@@ -1728,7 +1735,6 @@ void DefaultUI::updateStatusScreen() {
         snprintf(heroBuf, sizeof(heroBuf), "%.0f", dispensed);
         setHero(heroBuf, "g");
         setKicker("WATER");
-        setStatus(active ? "DISPENSING" : "READY");
 
         const double target =
             proc.exists && proc.hasVolumetricTarget && proc.volumetricTargetValue > 0.0
@@ -1755,7 +1761,6 @@ void DefaultUI::updateStatusScreen() {
         // Fallback (shouldn't hit on this screen): zero everything.
         setHero("--", "");
         setKicker("");
-        setStatus("");
     }
 
     // Bean label: show only in brew mode when a bean is selected.

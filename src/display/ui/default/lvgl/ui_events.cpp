@@ -151,6 +151,11 @@ void onStatusScreenLoad(lv_event_t *e) {
     // CAR-278 status rebuild removed the SquareLine pause/menu image buttons —
     // the screen now uses a top-edge gesture handler for menu access and the
     // process is canceled from the menu, so there's nothing to widen here.
+    //
+    // CAR-278 review #3: cancel during brew is intentionally menu-driven
+    // (top-edge swipe -> menu -> cancel), not a face button. Do not "fix"
+    // by adding an inline cancel chip without re-opening the design
+    // discussion.
     (void)e;
 }
 

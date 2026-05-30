@@ -157,6 +157,20 @@ lv_obj_t *gm_metric(lv_obj_t *row, const char *label, const char *value, lv_colo
     return v; // return the value label so callers can store the handle
 }
 
+// Update an existing metric column's label text. The metric column built by
+// gm_metric() above has child 0 = label, child 1 = value. `value` is the
+// handle returned by gm_metric(); we walk to its parent column then to the
+// label sibling.
+void gm_metric_set_label(lv_obj_t *value, const char *new_label) {
+    if (value == nullptr || !lv_obj_is_valid(value)) return;
+    lv_obj_t *col = lv_obj_get_parent(value);
+    if (col == nullptr) return;
+    lv_obj_t *label = lv_obj_get_child(col, 0);
+    if (label != nullptr && lv_obj_is_valid(label)) {
+        lv_label_set_text(label, new_label);
+    }
+}
+
 lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent) {
     lv_obj_t *bar = lv_bar_create(parent);
     lv_obj_set_size(bar, 220, 4);
@@ -215,10 +229,9 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
     }
     // Chip bar: highlight the chip for the active mode (1=cup, 2=steam,
     // 3=drop). Index 0 is the standby chip, kept dim.
-    int active_chip = -1;
-    if (mode == 1) active_chip = 1;
-    else if (mode == 2) active_chip = 2;
-    else if (mode == 3) active_chip = 3;
+    // Modes 1/2/3 light their own chip; 0 (standby) and 4 (grind) leave
+    // all chips dim (active_chip stays -1).
+    const int active_chip = (mode >= 1 && mode <= 3) ? mode : -1;
     for (int i = 0; i < 4; i++) {
         lv_obj_t *chip = gm_h.chips[i];
         if (!chip) continue;
@@ -240,6 +253,9 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
             gm_show(gm_h.bar, false);
             gm_show(gm_h.m_weight, false);
             gm_show(gm_h.m_temp, true);
+            // CAR-278 review #6: hero shows current temp; the metric column
+            // below it shows the target, so relabel TEMP → TARGET to match.
+            gm_metric_set_label(gm_h.m_temp, "TARGET");
             gm_show(gm_h.m_press, false);
             gm_show(gm_h.m_flow, false);
             gm_show(gm_h.w_target, false);
@@ -263,10 +279,18 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
         }
         case 1:
         default: { // brew (and fallback) — full metric row, arc, no bar/pill.
+            // mode==0 (standby) and mode>=4 (grind) fall here defensively. In
+            // practice updateStatusScreen() only runs when ui_StatusScreen is
+            // active, so those values shouldn't reach this helper — but if a
+            // future code path dispatches StatusScreen for grind, the brew
+            // layout is the closest sensible default.
             gm_show(gm_h.arc, true);
             gm_show(gm_h.bar, false);
             gm_show(gm_h.m_weight, true);
             gm_show(gm_h.m_temp, true);
+            // CAR-278 review #6: restore TEMP label after switching back from
+            // steam (which relabels this column to TARGET).
+            gm_metric_set_label(gm_h.m_temp, "TEMP");
             gm_show(gm_h.m_press, true);
             gm_show(gm_h.m_flow, true);
             gm_show(gm_h.w_target, false);
