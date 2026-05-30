@@ -44,6 +44,9 @@ void ui_StandbyScreen_screen_init(void) {
     lv_obj_add_event_cb(ui_StandbyScreen, scr_unloaded_delete_cb, LV_EVENT_SCREEN_UNLOADED, ui_StandbyScreen_screen_destroy);
 
     // ── Top status bar: wifi · bt · update dot ──
+    // Container + update dot are lv_obj_create() (clickable by default). Clear
+    // the flag so taps over the status row fall through to ui_StandbyScreen's
+    // wake handler instead of being silently swallowed.
     ui_StandbyScreen_statusContainer = lv_obj_create(ui_StandbyScreen);
     lv_obj_remove_style_all(ui_StandbyScreen_statusContainer);
     lv_obj_set_size(ui_StandbyScreen_statusContainer, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -53,6 +56,7 @@ void ui_StandbyScreen_screen_init(void) {
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(ui_StandbyScreen_statusContainer, 16, 0);
     lv_obj_clear_flag(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_CLICKABLE);
 
     ui_StandbyScreen_wifiIcon = standby_status_icon(ui_StandbyScreen_statusContainer, &gm_ic_wifi, 20);
     ui_StandbyScreen_bluetoothIcon = standby_status_icon(ui_StandbyScreen_statusContainer, &gm_ic_bt, 20);
@@ -64,6 +68,7 @@ void ui_StandbyScreen_screen_init(void) {
     lv_obj_set_style_bg_color(ui_StandbyScreen_updateIcon, GM_GOLD, 0);
     lv_obj_set_style_bg_opa(ui_StandbyScreen_updateIcon, LV_OPA_COVER, 0);
     lv_obj_add_flag(ui_StandbyScreen_updateIcon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_StandbyScreen_updateIcon, LV_OBJ_FLAG_CLICKABLE);
 
     // ── Hero ambient clock ──
     ui_StandbyScreen_time = lv_label_create(ui_StandbyScreen);
