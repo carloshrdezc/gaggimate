@@ -1608,6 +1608,8 @@ void DefaultUI::applyScreenVisualLanguage() {
 }
 
 void DefaultUI::updateStandbyScreen() {
+    ensureStandbyContextLabel();
+
     if (standbyEnterTime > 0) {
         const Settings &settings = controller->getSettings();
         const unsigned long now = millis();
