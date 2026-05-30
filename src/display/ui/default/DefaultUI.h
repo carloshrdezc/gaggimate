@@ -65,7 +65,6 @@ class DefaultUI {
     void updateStatusScreen();
     void applyScreenVisualLanguage();
     void resetCustomScreenHandles();
-    void ensureStandbyContextLabel();
     void ensureStatusBeanLabel();
     void ensureProfileBeanLabel();
     void ensureGrindBeanLabel();
@@ -164,7 +163,6 @@ class DefaultUI {
     lv_obj_t *currentScreen = ui_StandbyScreen;
     void (*targetScreenInit)(void) = &ui_StandbyScreen_screen_init;
     mutable lv_obj_t *statusBeanLabel = nullptr;
-    lv_obj_t *standbyContextLabel = nullptr;
     lv_obj_t *profileBeanLabel = nullptr;
     lv_obj_t *grindBeanLabel = nullptr;
     lv_obj_t *menuBrewLabel = nullptr;
