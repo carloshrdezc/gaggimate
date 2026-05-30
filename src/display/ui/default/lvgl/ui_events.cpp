@@ -148,8 +148,10 @@ void onSimpleProcessScreenLoad(lv_event_t *e) {
 }
 
 void onStatusScreenLoad(lv_event_t *e) {
-    lv_obj_set_ext_click_area(ui_StatusScreen_pauseButton, 25);
-    lv_obj_set_ext_click_area(ui_StatusScreen_ImgButton8, 20);
+    // CAR-278 status rebuild removed the SquareLine pause/menu image buttons —
+    // the screen now uses a top-edge gesture handler for menu access and the
+    // process is canceled from the menu, so there's nothing to widen here.
+    (void)e;
 }
 
 void onGrindScreenLoad(lv_event_t *e) {

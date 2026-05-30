@@ -47,6 +47,16 @@ lv_obj_t *gm_chip_bar(lv_obj_t *parent, int active, lv_color_t accent);
 lv_obj_t *gm_metric(lv_obj_t *row, const char *label, const char *value, lv_color_t value_col);
 lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent);
 
+// ── Status screen mode switch (CAR-278) ──────────────────────
+// Retints accents and shows/hides the appropriate widgets per brewing mode.
+//   mode: 1 = brew (red), 2 = steam (gold), 3 = water (blue); other values
+//         fall back to neutral content. Matches MODE_* in core/constants.h
+//         so callers can pass the controller mode directly.
+//   arc_pct, bar_pct: 0-100 progress values for the edge arc and the
+//         linear progress bar. The arc is hidden in water mode; the bar
+//         is shown in water mode and used as the steam target indicator.
+void gm_status_apply_mode(int mode, int arc_pct, int bar_pct);
+
 #ifdef __cplusplus
 }
 #endif

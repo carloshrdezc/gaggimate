@@ -169,3 +169,111 @@ lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent) {
     lv_bar_set_value(bar, 0, LV_ANIM_OFF);
     return bar;
 }
+
+// ─────────────────────────────────────────────────────────────
+//  STATUS SCREEN MODE SWITCH (CAR-278)
+//
+//  The status screen is built once in brew layout. This switch retints
+//  the accent surfaces and hides/shows the per-mode widget set so the
+//  same screen serves brew/steam/water without rebuilding.
+// ─────────────────────────────────────────────────────────────
+
+static int gm_clamp_pct(int v) {
+    if (v < 0) return 0;
+    if (v > 100) return 100;
+    return v;
+}
+
+static void gm_show(lv_obj_t *o, bool visible) {
+    if (!o) return;
+    if (visible) {
+        lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
+    const lv_color_t accent = gm_accent_for_mode(mode);
+    arc_pct = gm_clamp_pct(arc_pct);
+    bar_pct = gm_clamp_pct(bar_pct);
+
+    // Retint shared accent surfaces.
+    if (gm_h.arc) {
+        lv_obj_set_style_arc_color(gm_h.arc, accent, LV_PART_INDICATOR);
+        lv_arc_set_value(gm_h.arc, arc_pct);
+    }
+    if (gm_h.kicker) {
+        lv_obj_set_style_text_color(gm_h.kicker, accent, 0);
+    }
+    if (gm_h.hero_unit) {
+        lv_obj_set_style_text_color(gm_h.hero_unit, accent, 0);
+    }
+    if (gm_h.bar) {
+        lv_obj_set_style_bg_color(gm_h.bar, accent, LV_PART_INDICATOR);
+        lv_bar_set_value(gm_h.bar, bar_pct, LV_ANIM_OFF);
+    }
+    // Chip bar: highlight the chip for the active mode (1=cup, 2=steam,
+    // 3=drop). Index 0 is the standby chip, kept dim.
+    int active_chip = -1;
+    if (mode == 1) active_chip = 1;
+    else if (mode == 2) active_chip = 2;
+    else if (mode == 3) active_chip = 3;
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *chip = gm_h.chips[i];
+        if (!chip) continue;
+        const bool on = (i == active_chip);
+        lv_obj_set_style_bg_color(chip, accent, 0);
+        lv_obj_set_style_bg_opa(chip, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        // The chip's icon is its first (and only) child; recolor it so the
+        // active chip's glyph reads against the filled accent.
+        lv_obj_t *icon = lv_obj_get_child(chip, 0);
+        if (icon) {
+            lv_obj_set_style_img_recolor(icon, on ? GM_BG : GM_MUTED, 0);
+        }
+    }
+
+    // Per-mode visibility.
+    switch (mode) {
+        case 2: { // steam — only temp metric, arc shows target, READY pill on completion.
+            gm_show(gm_h.arc, true);
+            gm_show(gm_h.bar, false);
+            gm_show(gm_h.m_weight, false);
+            gm_show(gm_h.m_temp, true);
+            gm_show(gm_h.m_press, false);
+            gm_show(gm_h.m_flow, false);
+            gm_show(gm_h.w_target, false);
+            gm_show(gm_h.w_temp, false);
+            gm_show(gm_h.w_flow, false);
+            gm_show(gm_h.pill, bar_pct >= 100);
+            break;
+        }
+        case 3: { // water — w_target/w_temp/w_flow, arc hidden, bar visible.
+            gm_show(gm_h.arc, false);
+            gm_show(gm_h.bar, true);
+            gm_show(gm_h.m_weight, false);
+            gm_show(gm_h.m_temp, false);
+            gm_show(gm_h.m_press, false);
+            gm_show(gm_h.m_flow, false);
+            gm_show(gm_h.w_target, true);
+            gm_show(gm_h.w_temp, true);
+            gm_show(gm_h.w_flow, true);
+            gm_show(gm_h.pill, false);
+            break;
+        }
+        case 1:
+        default: { // brew (and fallback) — full metric row, arc, no bar/pill.
+            gm_show(gm_h.arc, true);
+            gm_show(gm_h.bar, false);
+            gm_show(gm_h.m_weight, true);
+            gm_show(gm_h.m_temp, true);
+            gm_show(gm_h.m_press, true);
+            gm_show(gm_h.m_flow, true);
+            gm_show(gm_h.w_target, false);
+            gm_show(gm_h.w_temp, false);
+            gm_show(gm_h.w_flow, false);
+            gm_show(gm_h.pill, false);
+            break;
+        }
+    }
+}

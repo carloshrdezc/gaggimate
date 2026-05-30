@@ -806,8 +806,9 @@ void DefaultUI::setupReactive() {
     // restyle on theme change so the dials never snap back to the generated defaults.
     effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustDials(ui_MenuScreen_dials); },
                           &pressureAvailable, &currentThemeMode);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; }, [=]() { adjustDials(ui_StatusScreen_dials); },
-                          &pressureAvailable, &currentThemeMode);
+    // CAR-278: ui_StatusScreen no longer hosts a SquareLine dials component —
+    // the rebuilt screen owns its visuals via gm_h. updateStatusScreen() drives
+    // accents and metric values directly, so no use_effect dial reactor here.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; }, [=]() { adjustDials(ui_BrewScreen_dials); },
                           &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; }, [=]() { adjustDials(ui_GrindScreen_dials); },
@@ -826,8 +827,8 @@ void DefaultUI::setupReactive() {
                           [=]() { adjustHeatingIndicator(ui_ProfileScreen_dials); }, &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
                           [=]() { adjustHeatingIndicator(ui_GrindScreen_dials); }, &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() { adjustHeatingIndicator(ui_StatusScreen_dials); }, &isTemperatureStable, &heatingFlash);
+    // CAR-278: status screen no longer has a SquareLine dial widget for the
+    // heating indicator. updateStatusScreen() handles its visuals directly.
     effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
                           [=]() { lv_label_set_text(ui_SimpleProcessScreen_mainLabel5, mode == MODE_STEAM ? "STEAM" : "WATER"); },
                           &mode);
@@ -836,11 +837,8 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_MenuScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(uic_StatusScreen_dials_tempText, "%d°C", currentTemp);
-                          },
-                          &currentTemp);
+    // CAR-278: temp readout for the status screen is driven from the metric
+    // row in updateStatusScreen() via gm_h.m_temp / gm_h.w_temp / gm_h.hero.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_BrewScreen_dials_tempText, "%d°C", currentTemp);
@@ -863,12 +861,8 @@ void DefaultUI::setupReactive() {
                           &currentTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustTempTarget(ui_MenuScreen_dials); },
                           &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(ui_StatusScreen_targetTemp, "%d°C", targetTemp);
-                              adjustTempTarget(ui_StatusScreen_dials);
-                          },
-                          &targetTemp);
+    // CAR-278: target temp surfaces on the status screen via the steam-mode
+    // arc + hero readout, both updated from updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_label_set_text_fmt(ui_BrewScreen_targetTemp, "%d°C", targetTemp);
@@ -891,12 +885,8 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_MenuScreen_dials_pressureText, "%.1f bar", pressure);
                           },
                           &pressure);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() {
-                              lv_arc_set_value(uic_StatusScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_StatusScreen_dials_pressureText, "%.1f bar", pressure);
-                          },
-                          &pressure);
+    // CAR-278: status screen pressure shows in the brew metric row
+    // (gm_h.m_press) — populated from updateStatusScreen() each tick.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_arc_set_value(uic_BrewScreen_dials_pressureGauge, pressure * 10.0f);
@@ -1191,15 +1181,19 @@ bool DefaultUI::isRoundDisplay() const {
 }
 
 void DefaultUI::ensureStatusBeanLabel() {
-    if (lv_scr_act() != ui_StatusScreen || !lv_obj_is_valid(ui_StatusScreen_contentPanel2) || statusBeanLabel != nullptr) {
+    // CAR-278: status screen rebuilt — bean label is anchored to the screen
+    // root (ui_StatusScreen). Visibility/positioning is owned by
+    // updateStatusScreen() so the label tracks the current mode (brew/steam/water).
+    if (lv_scr_act() != ui_StatusScreen || !lv_obj_is_valid(ui_StatusScreen) || statusBeanLabel != nullptr) {
         return;
     }
 
-    statusBeanLabel = lv_label_create(ui_StatusScreen_contentPanel2);
+    statusBeanLabel = lv_label_create(ui_StatusScreen);
     lv_obj_set_width(statusBeanLabel, 240);
-    lv_obj_align_to(statusBeanLabel, ui_StatusScreen_phaseLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
-    lv_label_set_long_mode(statusBeanLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_align(statusBeanLabel, LV_ALIGN_TOP_MID, 0, 92);
+    lv_label_set_long_mode(statusBeanLabel, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(statusBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
 }
 
 void DefaultUI::ensureProfileBeanLabel() {
@@ -1364,57 +1358,12 @@ void DefaultUI::applyScreenVisualLanguage() {
             }
         }
     } else if (activeScreen == ui_StatusScreen) {
-        stylePanel(ui_StatusScreen_contentPanel2, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleHeadline(ui_StatusScreen_phaseLabel, palette, true);
-        styleChip(ui_StatusScreen_stepLabel, palette, active ? palette.success : palette.warning, true);
-        styleHeadline(ui_StatusScreen_currentDuration, palette, true);
-        styleSecondary(ui_StatusScreen_targetDuration, palette);
-        styleSecondary(ui_StatusScreen_brewLabel, palette);
-        styleSecondary(ui_StatusScreen_targetTemp, palette);
-        applyProcessRing(uic_StatusScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_StatusScreen_currentDuration, palette, &ndot_34);
-        styleMetricValue(ui_StatusScreen_brewVolume, palette, &ndot_24);
-        styleIconButton(ui_StatusScreen_ImgButton8, palette, palette.textPrimary);
-        styleIconButton(ui_StatusScreen_pauseButton, palette, active ? palette.danger : palette.success);
-        styleMetricIcon(ui_StatusScreen_Image7, palette.warning);
-        styleMetricIcon(ui_StatusScreen_Image8, palette.accent);
-        if (lv_obj_is_valid(ui_StatusScreen_barContainer)) {
-            stylePanel(ui_StatusScreen_barContainer, palette, OPA_200, 999);
-            lv_obj_set_style_pad_left(ui_StatusScreen_barContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_right(ui_StatusScreen_barContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_top(ui_StatusScreen_barContainer, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_bottom(ui_StatusScreen_barContainer, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_StatusScreen_brewBar)) {
-            lv_obj_set_style_radius(ui_StatusScreen_brewBar, 999, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_radius(ui_StatusScreen_brewBar, 999, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-        }
+        // CAR-278: status screen styles itself via gm_ui builders + gm_theme tokens.
+        // The ensureStatusBeanLabel() call here is intentionally a no-op trigger:
+        // bean label visibility/text is owned by updateStatusScreen() per mode.
         ensureStatusBeanLabel();
         if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
             styleChip(statusBeanLabel, palette, palette.accent, true);
-        }
-        if (roundDisplay) {
-            lv_obj_set_size(ui_StatusScreen_contentPanel2, 372, 372);
-            lv_obj_align(ui_StatusScreen_contentPanel2, LV_ALIGN_CENTER, 0, 4);
-            alignTopBackButton(ui_StatusScreen_ImgButton8, palette, palette.textPrimary);
-            alignMetricPair(ui_StatusScreen_Image7, ui_StatusScreen_targetTemp, -58, -132, palette.warning, palette);
-            alignMetricPair(ui_StatusScreen_Image8, ui_StatusScreen_targetDuration, 64, -132, palette.accent, palette);
-            styleFixedLabel(ui_StatusScreen_stepLabel, 178, 34, &ndot_18, active ? palette.success : palette.warning);
-            styleFixedLabel(ui_StatusScreen_phaseLabel, 254, 32, &ndot_24, palette.textPrimary);
-            lv_obj_align(ui_StatusScreen_stepLabel, LV_ALIGN_TOP_MID, 0, 84);
-            lv_obj_align(ui_StatusScreen_phaseLabel, LV_ALIGN_TOP_MID, 0, 124);
-            if (statusBeanLabel != nullptr) {
-                lv_obj_set_size(statusBeanLabel, 236, 34);
-                lv_obj_align_to(statusBeanLabel, ui_StatusScreen_phaseLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-            }
-            lv_obj_align(ui_StatusScreen_currentDuration, LV_ALIGN_CENTER, 0, 44);
-            lv_obj_set_style_text_font(ui_StatusScreen_currentDuration, &ndot_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_align(ui_StatusScreen_barContainer, LV_ALIGN_BOTTOM_MID, 0, -72);
-            lv_obj_set_size(ui_StatusScreen_barContainer, 240, 22);
-            lv_obj_align(ui_StatusScreen_labelContainer, LV_ALIGN_BOTTOM_MID, 0, -42);
-            lv_obj_set_size(ui_StatusScreen_labelContainer, 240, 18);
-            lv_obj_align(ui_StatusScreen_brewVolume, LV_ALIGN_BOTTOM_MID, 0, -104);
-            alignFooterAction(ui_StatusScreen_pauseButton, palette, active ? palette.danger : palette.success);
         }
     } else if (activeScreen == ui_ProfileScreen) {
         stylePanel(ui_ProfileScreen_contentPanel, palette, OPA_55, 44);
@@ -1653,105 +1602,175 @@ void DefaultUI::updateStandbyScreen() {
 }
 
 void DefaultUI::updateStatusScreen() {
+    // CAR-278: status screen rebuilt in the Nothing theme. Single screen
+    // with three modes — brew (red), steam (gold), water (blue) — driven by
+    // gm_status_apply_mode(). All widgets we touch live on `gm_h`.
+    if (lv_scr_act() != ui_StatusScreen) {
+        return;
+    }
+
     ensureStatusBeanLabel();
-    
-    // Use thread-safe snapshot to avoid use-after-free race conditions
+
+    // Status bar clock — matches the standby pattern.
+    if (gm_h.status_time != nullptr && lv_obj_is_valid(gm_h.status_time)) {
+        time_t nowEpoch = time(nullptr);
+        struct tm timeinfo;
+        if (localtime_r(&nowEpoch, &timeinfo) != nullptr) {
+            char buf[8];
+            strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+            lv_label_set_text(gm_h.status_time, buf);
+        }
+    }
+
+    // Mode-driven defaults. Pull a fresh process snapshot once.
     ProcessSnapshot proc = controller->getProcessSnapshot();
-    
-    if (!proc.exists || !proc.isBrew) {
-        return;
-    }
+    int arcPct = 0;
+    int barPct = 0;
 
-    // Validate phase index
-    if (proc.phaseIndex >= proc.phaseCount) {
-        ESP_LOGE("DefaultUI", "Process phaseIndex out of bounds: %u >= %zu", proc.phaseIndex, proc.phaseCount);
-        return;
-    }
+    auto setHero = [&](const char *value, const char *unit) {
+        if (gm_h.hero != nullptr && lv_obj_is_valid(gm_h.hero)) {
+            lv_label_set_text(gm_h.hero, value);
+        }
+        if (gm_h.hero_unit != nullptr && lv_obj_is_valid(gm_h.hero_unit)) {
+            lv_label_set_text(gm_h.hero_unit, unit);
+        }
+    };
 
-    unsigned long now = millis();
-    if (!proc.isActive && proc.finished > 0) {
-        now = proc.finished;
-    }
+    auto setKicker = [&](const char *txt) {
+        if (gm_h.kicker != nullptr && lv_obj_is_valid(gm_h.kicker)) {
+            lv_label_set_text(gm_h.kicker, txt);
+        }
+    };
 
-    lv_label_set_text(ui_StatusScreen_stepLabel, proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "BREW" : "INFUSION");
-    String phaseText = "Finished";
-    if (proc.isActive) {
-        phaseText = proc.phaseName;
-    } else if (controller->getSettings().isDelayAdjust() && !proc.isComplete) {
-        phaseText = "Calibrating...";
-    }
-    lv_label_set_text(ui_StatusScreen_phaseLabel, phaseText.c_str());
-    if (statusBeanLabel != nullptr) {
-        if (selectedBean.isEmpty()) {
-            lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
+    auto setStatus = [&](const char *txt) {
+        if (gm_h.status_label != nullptr && lv_obj_is_valid(gm_h.status_label)) {
+            lv_label_set_text(gm_h.status_label, txt);
+        }
+    };
+
+    if (mode == MODE_BREW) {
+        // Hero is brew elapsed time (m:ss); the unit slot stays as 's'.
+        unsigned long now = millis();
+        if (proc.exists && !proc.isActive && proc.finished > 0) {
+            now = proc.finished;
+        }
+        unsigned long elapsedMs = 0;
+        if (proc.exists && proc.started > 0 && now >= proc.started) {
+            elapsedMs = now - proc.started;
+        }
+        const auto elapsedSecs = static_cast<int>(elapsedMs / 1000);
+        const int mm = elapsedSecs / 60;
+        const int ss = elapsedSecs % 60;
+        char heroBuf[16];
+        snprintf(heroBuf, sizeof(heroBuf), "%d:%02d", mm, ss);
+        setHero(heroBuf, "s");
+
+        // Kicker: phase name, falling back to BREW.
+        if (proc.exists && proc.isActive && proc.phaseName[0] != '\0') {
+            String phaseUpper = String(proc.phaseName);
+            phaseUpper.toUpperCase();
+            setKicker(phaseUpper.c_str());
+        } else if (proc.exists && !proc.isActive && proc.finished > 0) {
+            setKicker("FINISHED");
         } else {
+            setKicker("BREW");
+        }
+
+        setStatus(active ? "BREWING" : "READY");
+
+        // Metric row: WEIGHT / TEMP / PRESS / FLOW (flow shows '--').
+        if (gm_h.m_weight != nullptr && lv_obj_is_valid(gm_h.m_weight)) {
+            lv_label_set_text_fmt(gm_h.m_weight, "%.1fg",
+                                  proc.exists ? proc.currentVolume : 0.0);
+        }
+        if (gm_h.m_temp != nullptr && lv_obj_is_valid(gm_h.m_temp)) {
+            lv_label_set_text_fmt(gm_h.m_temp, "%d\xC2\xB0", currentTemp);
+        }
+        if (gm_h.m_press != nullptr && lv_obj_is_valid(gm_h.m_press)) {
+            lv_label_set_text_fmt(gm_h.m_press, "%.1f", pressure);
+        }
+        if (gm_h.m_flow != nullptr && lv_obj_is_valid(gm_h.m_flow)) {
+            // ProcessSnapshot has no flow rate field; show placeholder.
+            lv_label_set_text(gm_h.m_flow, "--");
+        }
+
+        // Arc progress: prefer volumetric, else phase time, else 0.
+        if (proc.exists && proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
+            proc.volumetricTargetValue > 0.0) {
+            arcPct = static_cast<int>((proc.currentVolume / proc.volumetricTargetValue) * 100.0);
+        } else if (proc.exists && proc.currentPhaseStarted > 0 && now >= proc.currentPhaseStarted &&
+                   proc.phaseDuration > 0) {
+            const unsigned long progress = now - proc.currentPhaseStarted;
+            arcPct = static_cast<int>((progress * 100UL) / proc.phaseDuration);
+        }
+    } else if (mode == MODE_STEAM) {
+        // Hero is current temp; READY pill appears when stable.
+        char heroBuf[16];
+        snprintf(heroBuf, sizeof(heroBuf), "%d", currentTemp);
+        setHero(heroBuf, "\xC2\xB0");
+        setKicker("STEAM");
+        setStatus(isTemperatureStable ? "READY" : "HEATING");
+
+        if (gm_h.m_temp != nullptr && lv_obj_is_valid(gm_h.m_temp)) {
+            lv_label_set_text_fmt(gm_h.m_temp, "%d\xC2\xB0", targetTemp);
+        }
+
+        // Arc tracks heat-up progress toward target.
+        if (targetTemp > 0) {
+            arcPct = static_cast<int>((static_cast<float>(currentTemp) / targetTemp) * 100.0f);
+        }
+        // bar_pct >= 100 toggles the READY pill in gm_status_apply_mode.
+        barPct = isTemperatureStable ? 100 : 0;
+    } else if (mode == MODE_WATER) {
+        // Hero is water dispensed (g); horizontal bar shows progress.
+        const double dispensed = proc.exists ? proc.currentVolume : 0.0;
+        char heroBuf[16];
+        snprintf(heroBuf, sizeof(heroBuf), "%.0f", dispensed);
+        setHero(heroBuf, "g");
+        setKicker("WATER");
+        setStatus(active ? "DISPENSING" : "READY");
+
+        const double target =
+            proc.exists && proc.hasVolumetricTarget && proc.volumetricTargetValue > 0.0
+                ? proc.volumetricTargetValue
+                : 0.0;
+        if (gm_h.w_target != nullptr && lv_obj_is_valid(gm_h.w_target)) {
+            if (target > 0.0) {
+                lv_label_set_text_fmt(gm_h.w_target, "%.0fg", target);
+            } else {
+                lv_label_set_text(gm_h.w_target, "--");
+            }
+        }
+        if (gm_h.w_temp != nullptr && lv_obj_is_valid(gm_h.w_temp)) {
+            lv_label_set_text_fmt(gm_h.w_temp, "%d\xC2\xB0", currentTemp);
+        }
+        if (gm_h.w_flow != nullptr && lv_obj_is_valid(gm_h.w_flow)) {
+            lv_label_set_text(gm_h.w_flow, "--");
+        }
+
+        if (target > 0.0) {
+            barPct = static_cast<int>((dispensed / target) * 100.0);
+        }
+    } else {
+        // Fallback (shouldn't hit on this screen): zero everything.
+        setHero("--", "");
+        setKicker("");
+        setStatus("");
+    }
+
+    // Bean label: show only in brew mode when a bean is selected.
+    if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
+        if (mode == MODE_BREW && !selectedBean.isEmpty()) {
             lv_obj_clear_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text_fmt(statusBeanLabel, "Bean • %s", selectedBean.c_str());
-        }
-    }
-
-    // Add bounds check for processStarted timestamp
-    if (proc.started > 0 && now >= proc.started) {
-        const unsigned long processDuration = now - proc.started;
-        const double processSecondsDouble = processDuration / 1000.0;
-        const auto processMinutes = static_cast<int>(processSecondsDouble / 60.0);
-        const auto processSeconds = static_cast<int>(processSecondsDouble) % 60;
-        lv_label_set_text_fmt(ui_StatusScreen_currentDuration, "%2d:%02d", processMinutes, processSeconds);
-    } else {
-        lv_label_set_text_fmt(ui_StatusScreen_currentDuration, "00:00");
-    }
-
-    if (proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget) {
-        lv_bar_set_value(ui_StatusScreen_brewBar, proc.currentVolume * 10.0, LV_ANIM_OFF);
-        lv_bar_set_range(ui_StatusScreen_brewBar, 0, proc.volumetricTargetValue * 10.0 + 1.0);
-        lv_label_set_text_fmt(ui_StatusScreen_brewLabel, "%.1f / %.1fg", proc.currentVolume, proc.volumetricTargetValue);
-    } else {
-        // Add bounds check for currentPhaseStarted timestamp
-        if (proc.currentPhaseStarted > 0 && now >= proc.currentPhaseStarted) {
-            const unsigned long progress = now - proc.currentPhaseStarted;
-            lv_bar_set_value(ui_StatusScreen_brewBar, progress, LV_ANIM_OFF);
-            lv_bar_set_range(ui_StatusScreen_brewBar, 0, std::max(static_cast<int>(proc.phaseDuration), 1));
-            lv_label_set_text_fmt(ui_StatusScreen_brewLabel, "%d / %ds", progress / 1000, proc.phaseDuration / 1000);
         } else {
-            lv_bar_set_value(ui_StatusScreen_brewBar, 0, LV_ANIM_OFF);
-            lv_bar_set_range(ui_StatusScreen_brewBar, 0, 1);
-            lv_label_set_text(ui_StatusScreen_brewLabel, "0s");
+            lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
-    if (proc.target == ProcessTarget::TIME) {
-        const double targetSecondsDouble = proc.totalDuration / 1000.0;
-        const auto targetMinutes = static_cast<int>(targetSecondsDouble / 60.0);
-        const auto targetSeconds = static_cast<int>(targetSecondsDouble) % 60;
-        lv_label_set_text_fmt(ui_StatusScreen_targetDuration, "%2d:%02d", targetMinutes, targetSeconds);
-    } else {
-        lv_label_set_text_fmt(ui_StatusScreen_targetDuration, "%.1fg", proc.brewVolume);
-    }
-    lv_img_set_src(ui_StatusScreen_Image8,
-                   proc.target == ProcessTarget::TIME ? &ui_img_360122106 : &ui_img_1424216268);
-
-    if (proc.isAdvancedPump) {
-        const double percentage = 1.0 - static_cast<double>(proc.pumpPressure) / static_cast<double>(pressureScaling);
-        adjustTarget(uic_StatusScreen_dials_pressureTarget, percentage, -62.0, 124.0);
-    } else {
-        const double percentage = 1.0 - 0.5;
-        adjustTarget(uic_StatusScreen_dials_pressureTarget, percentage, -62.0, 124.0);
-    }
-
-    // Brew finished adjustments - use snapshot state only to avoid TOCTOU race
-    if (proc.isActive) {
-        lv_obj_add_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        if (proc.target == ProcessTarget::VOLUMETRIC) {
-            lv_obj_clear_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
-        }
-        lv_obj_add_flag(ui_StatusScreen_barContainer, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(ui_StatusScreen_labelContainer, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text_fmt(ui_StatusScreen_brewVolume, "%.1lfg", proc.currentVolume);
-        lv_imgbtn_set_src(ui_StatusScreen_pauseButton, LV_IMGBTN_STATE_RELEASED, nullptr, &ui_img_631115820, nullptr);
-    }
+    // Drive widget visibility + accent retint per mode.
+    gm_status_apply_mode(mode, arcPct, barPct);
 }
-
 void DefaultUI::adjustDials(lv_obj_t *dials) {
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
     const bool roundDisplay = isRoundDisplay();
