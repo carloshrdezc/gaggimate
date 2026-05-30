@@ -139,5 +139,8 @@ void ui_StandbyScreen_screen_destroy(void) {
     ui_StandbyScreen_updateIcon = NULL;
     ui_StandbyScreen_touchIcon = NULL;
     ui_StandbyScreen_mainLabel = NULL;
+    gm_h.clock = NULL;
     gm_h.ampm = NULL;
+    gm_h.standby_temp = NULL;
+    gm_h.status_label = NULL;
 }

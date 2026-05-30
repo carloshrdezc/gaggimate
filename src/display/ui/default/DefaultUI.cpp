@@ -1170,7 +1170,6 @@ void DefaultUI::handleScreenChange() {
 }
 
 void DefaultUI::resetCustomScreenHandles() {
-    standbyContextLabel = nullptr;
     statusBeanLabel = nullptr;
     profileBeanLabel = nullptr;
     grindBeanLabel = nullptr;
@@ -1189,27 +1188,6 @@ bool DefaultUI::isRoundDisplay() const {
     const lv_coord_t width = lv_disp_get_hor_res(display);
     const lv_coord_t height = lv_disp_get_ver_res(display);
     return width == height && width >= 400;
-}
-
-void DefaultUI::ensureStandbyContextLabel() {
-    if (lv_scr_act() != ui_StandbyScreen || !lv_obj_is_valid(ui_StandbyScreen) || standbyContextLabel != nullptr) {
-        return;
-    }
-
-    standbyContextLabel = lv_label_create(ui_StandbyScreen);
-    lv_obj_set_width(standbyContextLabel, 360);
-    lv_label_set_long_mode(standbyContextLabel, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(standbyContextLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    // Match the Nothing standby palette (GM_BG dark surface) so the dynamically
-    // created label reads correctly. Mirrors the ui_StandbyScreen_mainLabel
-    // kicker treatment in ui_StandbyScreen.c — without this, the label inherits
-    // the default LVGL theme's dark text on our dark background.
-    lv_obj_set_style_text_font(standbyContextLabel, &spacemono_14, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(standbyContextLabel, GM_MUTED, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_letter_space(standbyContextLabel, GM_TRACK_KICKER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    // Sit above gm_chip_bar (aligned BOTTOM_MID,-34, ~58px tall): -92 keeps the
-    // profile/bean line readable without overlapping the chip row.
-    lv_obj_align(standbyContextLabel, LV_ALIGN_BOTTOM_MID, 0, -92);
 }
 
 void DefaultUI::ensureStatusBeanLabel() {
@@ -1617,8 +1595,6 @@ void DefaultUI::applyScreenVisualLanguage() {
 }
 
 void DefaultUI::updateStandbyScreen() {
-    ensureStandbyContextLabel();
-
     if (standbyEnterTime > 0) {
         const Settings &settings = controller->getSettings();
         const unsigned long now = millis();
@@ -1672,16 +1648,6 @@ void DefaultUI::updateStandbyScreen() {
             lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, targetTemp);
         } else {
             lv_label_set_text(gm_h.standby_temp, "--");
-        }
-    }
-
-    if (standbyContextLabel != nullptr) {
-        const String standbyContext = buildContextLine(selectedProfile.label.isEmpty() ? "Ready" : selectedProfile.label, selectedBean);
-        lv_label_set_text(standbyContextLabel, standbyContext.c_str());
-        if (selectedProfile.label.isEmpty() && selectedBean.isEmpty()) {
-            lv_obj_add_flag(standbyContextLabel, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_clear_flag(standbyContextLabel, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
