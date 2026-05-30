@@ -109,6 +109,8 @@ void ui_StandbyScreen_screen_init(void) {
     lv_img_set_src(ui_StandbyScreen_logo, &ui_img_logo_png);
     lv_obj_add_flag(ui_StandbyScreen_logo, LV_OBJ_FLAG_HIDDEN);
 
+    // Repurposed: was an lv_img in the old SquareLine standby; now a label so the
+    // chip-bar pattern can render its glyph. Do not call lv_img_* on this widget.
     ui_StandbyScreen_touchIcon = lv_label_create(ui_StandbyScreen);
     lv_label_set_text(ui_StandbyScreen_touchIcon, "");
     lv_obj_add_flag(ui_StandbyScreen_touchIcon, LV_OBJ_FLAG_HIDDEN);
@@ -143,4 +145,8 @@ void ui_StandbyScreen_screen_destroy(void) {
     gm_h.ampm = NULL;
     gm_h.standby_temp = NULL;
     gm_h.status_label = NULL;
+    gm_h.status_time = NULL;
+    for (int i = 0; i < 4; i++) {
+        gm_h.chips[i] = NULL;
+    }
 }
