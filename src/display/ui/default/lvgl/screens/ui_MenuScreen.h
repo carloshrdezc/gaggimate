@@ -12,6 +12,10 @@ extern "C" {
 extern void ui_MenuScreen_screen_init(void);
 extern void ui_MenuScreen_screen_destroy(void);
 extern void ui_event_MenuScreen(lv_event_t *e);
+// CAR-279 review fix: re-color the Quick-settings children to track the
+// active palette (text/muted/buttonSurface/accent). Called from the
+// ui_MenuScreen branch of DefaultUI::applyScreenVisualLanguage().
+extern void ui_MenuScreen_apply_palette(lv_color_t text, lv_color_t muted, lv_color_t buttonSurface, lv_color_t accent);
 
 extern lv_obj_t *ui_MenuScreen;
 extern lv_obj_t *ui_MenuScreen_contentPanel;

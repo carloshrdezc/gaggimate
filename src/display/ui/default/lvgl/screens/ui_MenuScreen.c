@@ -17,6 +17,18 @@ lv_obj_t *ui_MenuScreen_brewTempMinus = NULL;
 lv_obj_t *ui_MenuScreen_brewTempPlus = NULL;
 lv_obj_t *ui_MenuScreen_scaleSwitch = NULL;
 
+// CAR-279 review fix: track themable children so DefaultUI's palette pass can
+// recolor them on UI_THEME_LIGHT. The Quick-settings layout is built from
+// gm_make_screen + GM_* tokens (dark-themed) and styleScreenBase() repaints
+// the screen background to palette.surfaceBase, so on light themes the
+// originally-near-white text/icons go invisible against a near-white bg.
+static lv_obj_t *qs_kicker = NULL;
+static lv_obj_t *qs_row_icons[3] = {NULL, NULL, NULL};
+static lv_obj_t *qs_row_labels[3] = {NULL, NULL, NULL};
+static lv_obj_t *qs_stepper_minus_label = NULL;
+static lv_obj_t *qs_stepper_plus_label = NULL;
+static int qs_row_count = 0;
+
 void ui_event_MenuScreen(lv_event_t *e) {
     lv_event_code_t event_code = lv_event_get_code(e);
     if (event_code == LV_EVENT_SCREEN_LOADED) {
@@ -43,7 +55,9 @@ static void ui_event_MenuScreen_brightness(lv_event_t *e) { (void)e; }
 // CAR-279 TODO: wire to BLEScales/scale-enabled state.
 static void ui_event_MenuScreen_scale(lv_event_t *e) { (void)e; }
 
-// Helper: build a settings row (icon + label + control)
+// Helper: build a settings row (icon + label + control). Captures the icon
+// and label refs into the qs_row_icons / qs_row_labels arrays so the palette
+// pass in DefaultUI can recolor them on theme change.
 static lv_obj_t *qs_row(lv_obj_t *parent, const lv_img_dsc_t *icon, const char *label) {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -66,6 +80,12 @@ static lv_obj_t *qs_row(lv_obj_t *parent, const lv_img_dsc_t *icon, const char *
     lv_obj_set_style_text_font(lab, &grotesk_16, 0);
     lv_obj_set_style_text_color(lab, GM_CONTENT, 0);
     lv_obj_set_flex_grow(lab, 1);
+
+    if (qs_row_count < 3) {
+        qs_row_icons[qs_row_count] = ic;
+        qs_row_labels[qs_row_count] = lab;
+        qs_row_count++;
+    }
     return row;
 }
 
@@ -73,8 +93,10 @@ void ui_MenuScreen_screen_init(void) {
     ui_MenuScreen = gm_make_screen();
     lv_obj_add_event_cb(ui_MenuScreen, scr_unloaded_delete_cb, LV_EVENT_SCREEN_UNLOADED, ui_MenuScreen_screen_destroy);
 
+    qs_row_count = 0;
+
     // Kicker
-    gm_kicker(ui_MenuScreen, "QUICK SETTINGS", GM_MUTED);
+    qs_kicker = gm_kicker(ui_MenuScreen, "QUICK SETTINGS", GM_MUTED);
 
     // Back button (top-left round) -> mode hub
     ui_MenuScreen_backButton = lv_imgbtn_create(ui_MenuScreen);
@@ -120,6 +142,7 @@ void ui_MenuScreen_screen_init(void) {
         lv_obj_set_style_text_font(minusLab, &ndot_28, 0);
         lv_obj_set_style_text_color(minusLab, GM_CONTENT, 0);
         lv_obj_center(minusLab);
+        qs_stepper_minus_label = minusLab;
         lv_obj_add_event_cb(ui_MenuScreen_brewTempMinus, ui_event_MenuScreen_brewTempLower, LV_EVENT_ALL, NULL);
 
         ui_MenuScreen_brewTempValue = lv_label_create(row);
@@ -140,6 +163,7 @@ void ui_MenuScreen_screen_init(void) {
         lv_obj_set_style_text_font(plusLab, &ndot_28, 0);
         lv_obj_set_style_text_color(plusLab, GM_CONTENT, 0);
         lv_obj_center(plusLab);
+        qs_stepper_plus_label = plusLab;
         lv_obj_add_event_cb(ui_MenuScreen_brewTempPlus, ui_event_MenuScreen_brewTempRaise, LV_EVENT_ALL, NULL);
     }
 
@@ -167,4 +191,48 @@ void ui_MenuScreen_screen_destroy(void) {
     ui_MenuScreen_brewTempMinus = NULL;
     ui_MenuScreen_brewTempPlus = NULL;
     ui_MenuScreen_scaleSwitch = NULL;
+
+    qs_kicker = NULL;
+    qs_row_icons[0] = qs_row_icons[1] = qs_row_icons[2] = NULL;
+    qs_row_labels[0] = qs_row_labels[1] = qs_row_labels[2] = NULL;
+    qs_stepper_minus_label = NULL;
+    qs_stepper_plus_label = NULL;
+    qs_row_count = 0;
+}
+
+// CAR-279 review fix: recolor Quick-settings children with the active palette
+// so the screen stays legible on UI_THEME_LIGHT (where styleScreenBase()
+// repaints the bg from GM_BG black to a near-white surface).
+//   text         - row labels + brew-temp value + stepper +/- glyphs
+//   muted        - QUICK SETTINGS kicker
+//   buttonSurface- minus button background
+//   accent       - plus button background
+void ui_MenuScreen_apply_palette(lv_color_t text, lv_color_t muted, lv_color_t buttonSurface, lv_color_t accent) {
+    if (qs_kicker != NULL && lv_obj_is_valid(qs_kicker)) {
+        lv_obj_set_style_text_color(qs_kicker, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    for (int i = 0; i < qs_row_count; i++) {
+        if (qs_row_icons[i] != NULL && lv_obj_is_valid(qs_row_icons[i])) {
+            lv_obj_set_style_img_recolor(qs_row_icons[i], text, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_img_recolor_opa(qs_row_icons[i], LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        if (qs_row_labels[i] != NULL && lv_obj_is_valid(qs_row_labels[i])) {
+            lv_obj_set_style_text_color(qs_row_labels[i], text, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+    }
+    if (lv_obj_is_valid(ui_MenuScreen_brewTempValue)) {
+        lv_obj_set_style_text_color(ui_MenuScreen_brewTempValue, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (lv_obj_is_valid(ui_MenuScreen_brewTempMinus)) {
+        lv_obj_set_style_bg_color(ui_MenuScreen_brewTempMinus, buttonSurface, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (qs_stepper_minus_label != NULL && lv_obj_is_valid(qs_stepper_minus_label)) {
+        lv_obj_set_style_text_color(qs_stepper_minus_label, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (lv_obj_is_valid(ui_MenuScreen_brewTempPlus)) {
+        lv_obj_set_style_bg_color(ui_MenuScreen_brewTempPlus, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (qs_stepper_plus_label != NULL && lv_obj_is_valid(qs_stepper_plus_label)) {
+        lv_obj_set_style_text_color(qs_stepper_plus_label, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
 }

@@ -1541,15 +1541,16 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_move_foreground(ui_ModeScreen_standbyButton);
         }
     } else if (activeScreen == ui_MenuScreen) {
-        // CAR-279: minimal palette pass for the Quick-settings list. Most of
-        // the screen's visual is built directly with palette-aware tokens in
-        // ui_MenuScreen.c (gm_make_screen + GM_* colors), so this branch only
-        // touches the round back button and the panel fill on round displays.
-        // TODO(CAR-279): style the +/- temp stepper buttons and switch knobs
-        // through palette accents once the wiring is in.
+        // CAR-279: Quick-settings list is built from gm_make_screen + GM_*
+        // tokens (dark-themed) in ui_MenuScreen.c. styleScreenBase() above
+        // repaints the screen background to palette.surfaceBase, so on
+        // UI_THEME_LIGHT the row text/icons would be near-white on near-white
+        // without an explicit palette pass. Recolor the back button (round)
+        // and delegate row/kicker/stepper recolor to the screen module.
         if (lv_obj_is_valid(ui_MenuScreen_backButton)) {
             styleRoundIconButton(ui_MenuScreen_backButton, palette, palette.textPrimary, 44);
         }
+        ui_MenuScreen_apply_palette(palette.textPrimary, palette.textMuted, palette.surface, palette.accent);
     } else if (activeScreen == ui_SimpleProcessScreen) {
         stylePanel(ui_SimpleProcessScreen_contentPanel5, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
         styleHeadline(ui_SimpleProcessScreen_mainLabel5, palette, true);
