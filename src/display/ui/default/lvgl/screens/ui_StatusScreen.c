@@ -144,5 +144,6 @@ void ui_StatusScreen_screen_destroy(void) {
     gm_h.w_target = gm_h.w_temp = gm_h.w_flow = NULL;
     gm_h.pill = NULL;
     gm_h.bar = NULL;
+    gm_h.status_time = NULL; // round-3 follow-up: was missing; gm_ui.h doc requires destroy hook to NULL it
     for (int i = 0; i < 4; i++) gm_h.chips[i] = NULL;
 }
