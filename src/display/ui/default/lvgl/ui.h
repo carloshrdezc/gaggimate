@@ -36,6 +36,7 @@ extern "C" {
 #include "screens/ui_BrewScreen.h"
 #include "screens/ui_GrindScreen.h"
 #include "screens/ui_MenuScreen.h"
+#include "screens/ui_ModeScreen.h"
 #include "screens/ui_ProfileScreen.h"
 #include "screens/ui_SimpleProcessScreen.h"
 #include "screens/ui_StandbyScreen.h"
