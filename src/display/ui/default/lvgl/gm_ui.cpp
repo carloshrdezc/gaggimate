@@ -157,6 +157,31 @@ lv_obj_t *gm_metric(lv_obj_t *row, const char *label, const char *value, lv_colo
     return v; // return the value label so callers can store the handle
 }
 
+// Update an existing metric column's label text. The metric column built by
+// gm_metric() above has child 0 = label, child 1 = value. `value` is the
+// handle returned by gm_metric(); we walk to its parent column then to the
+// label sibling.
+void gm_metric_set_label(lv_obj_t *value, const char *new_label) {
+    if (value == nullptr || !lv_obj_is_valid(value)) return;
+    lv_obj_t *col = lv_obj_get_parent(value);
+    if (col == nullptr) return;
+    lv_obj_t *label = lv_obj_get_child(col, 0);
+    if (label != nullptr && lv_obj_is_valid(label)) {
+        lv_label_set_text(label, new_label);
+    }
+}
+
+void gm_metric_show(lv_obj_t *value, bool visible) {
+    if (value == nullptr || !lv_obj_is_valid(value)) return;
+    lv_obj_t *col = lv_obj_get_parent(value);
+    if (col == nullptr || !lv_obj_is_valid(col)) return;
+    if (visible) {
+        lv_obj_clear_flag(col, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(col, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent) {
     lv_obj_t *bar = lv_bar_create(parent);
     lv_obj_set_size(bar, 220, 4);
@@ -168,4 +193,128 @@ lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent) {
     lv_bar_set_range(bar, 0, 100);
     lv_bar_set_value(bar, 0, LV_ANIM_OFF);
     return bar;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  STATUS SCREEN MODE SWITCH (CAR-278)
+//
+//  The status screen is built once in brew layout. This switch retints
+//  the accent surfaces and hides/shows the per-mode widget set so the
+//  same screen serves brew/steam/water without rebuilding.
+// ─────────────────────────────────────────────────────────────
+
+// Saturate a percentage to the inclusive [0, 100] range. Takes int so callers
+// must convert from float themselves and clamp NaN before calling — pattern is
+// `arcPct = static_cast<int>(...)` in DefaultUI.cpp::updateStatusScreen, where
+// the upstream divisor is already guarded to be non-zero. Do not re-introduce
+// NaN handling here; if a callsite produces float, use isfinite() at that
+// callsite the way clampPercent() does in DefaultUI.cpp.
+static int gm_clamp_pct(int v) {
+    if (v < 0) return 0;
+    if (v > 100) return 100;
+    return v;
+}
+
+static void gm_show(lv_obj_t *o, bool visible) {
+    if (!o) return;
+    if (visible) {
+        lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
+    const lv_color_t accent = gm_accent_for_mode(mode);
+    arc_pct = gm_clamp_pct(arc_pct);
+    bar_pct = gm_clamp_pct(bar_pct);
+
+    // Retint shared accent surfaces.
+    if (gm_h.arc) {
+        lv_obj_set_style_arc_color(gm_h.arc, accent, LV_PART_INDICATOR);
+        lv_arc_set_value(gm_h.arc, arc_pct);
+    }
+    if (gm_h.kicker) {
+        lv_obj_set_style_text_color(gm_h.kicker, accent, 0);
+    }
+    if (gm_h.hero_unit) {
+        lv_obj_set_style_text_color(gm_h.hero_unit, accent, 0);
+    }
+    if (gm_h.bar) {
+        lv_obj_set_style_bg_color(gm_h.bar, accent, LV_PART_INDICATOR);
+        lv_bar_set_value(gm_h.bar, bar_pct, LV_ANIM_OFF);
+    }
+    // Chip bar: highlight the chip for the active mode (1=cup, 2=steam,
+    // 3=drop). Index 0 is the standby chip, kept dim.
+    // Modes 1/2/3 light their own chip; 0 (standby) and 4 (grind) leave
+    // all chips dim (active_chip stays -1).
+    const int active_chip = (mode >= 1 && mode <= 3) ? mode : -1;
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *chip = gm_h.chips[i];
+        if (!chip) continue;
+        const bool on = (i == active_chip);
+        lv_obj_set_style_bg_color(chip, accent, 0);
+        lv_obj_set_style_bg_opa(chip, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        // The chip's icon is its first (and only) child; recolor it so the
+        // active chip's glyph reads against the filled accent.
+        lv_obj_t *icon = lv_obj_get_child(chip, 0);
+        if (icon != nullptr && lv_obj_is_valid(icon)) {
+            lv_obj_set_style_img_recolor(icon, on ? GM_BG : GM_MUTED, 0);
+        }
+    }
+
+    // Per-mode visibility.
+    switch (mode) {
+        case 2: { // steam — only temp metric, arc shows target, READY pill on completion.
+            gm_show(gm_h.arc, true);
+            gm_show(gm_h.bar, false);
+            gm_metric_show(gm_h.m_weight, false);
+            gm_metric_show(gm_h.m_temp, true);
+            // CAR-278 review #6: hero shows current temp; the metric column
+            // below it shows the target, so relabel TEMP → TARGET to match.
+            gm_metric_set_label(gm_h.m_temp, "TARGET");
+            gm_metric_show(gm_h.m_press, false);
+            gm_metric_show(gm_h.m_flow, false);
+            gm_metric_show(gm_h.w_target, false);
+            gm_metric_show(gm_h.w_temp, false);
+            gm_metric_show(gm_h.w_flow, false);
+            gm_show(gm_h.pill, bar_pct >= 100);
+            break;
+        }
+        case 3: { // water — w_target/w_temp/w_flow, arc hidden, bar visible.
+            gm_show(gm_h.arc, false);
+            gm_show(gm_h.bar, true);
+            gm_metric_show(gm_h.m_weight, false);
+            gm_metric_show(gm_h.m_temp, false);
+            gm_metric_show(gm_h.m_press, false);
+            gm_metric_show(gm_h.m_flow, false);
+            gm_metric_show(gm_h.w_target, true);
+            gm_metric_show(gm_h.w_temp, true);
+            gm_metric_show(gm_h.w_flow, true);
+            gm_show(gm_h.pill, false);
+            break;
+        }
+        case 1:
+        default: { // brew (and fallback) — full metric row, arc, no bar/pill.
+            // mode==0 (standby) and mode>=4 (grind) fall here defensively. In
+            // practice updateStatusScreen() only runs when ui_StatusScreen is
+            // active, so those values shouldn't reach this helper — but if a
+            // future code path dispatches StatusScreen for grind, the brew
+            // layout is the closest sensible default.
+            gm_show(gm_h.arc, true);
+            gm_show(gm_h.bar, false);
+            gm_metric_show(gm_h.m_weight, true);
+            gm_metric_show(gm_h.m_temp, true);
+            // CAR-278 review #6: restore TEMP label after switching back from
+            // steam (which relabels this column to TARGET).
+            gm_metric_set_label(gm_h.m_temp, "TEMP");
+            gm_metric_show(gm_h.m_press, true);
+            gm_metric_show(gm_h.m_flow, true);
+            gm_metric_show(gm_h.w_target, false);
+            gm_metric_show(gm_h.w_temp, false);
+            gm_metric_show(gm_h.w_flow, false);
+            gm_show(gm_h.pill, false);
+            break;
+        }
+    }
 }
