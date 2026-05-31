@@ -1200,6 +1200,22 @@ void DefaultUI::ensureStatusBeanLabel() {
     lv_label_set_long_mode(statusBeanLabel, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(statusBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
+
+    // CAR-278 review-comment 4585899391, finding #5: chip-style theming is
+    // static (GM_* tokens never change at runtime), so apply it once here
+    // instead of every applyScreenVisualLanguage() pass. The label is a
+    // Nothing-theme chip styled with GM_* tokens, not the legacy
+    // DisplayPalette — the rest of the screen uses gm_theme tokens and
+    // styleChip() would clash.
+    lv_obj_set_style_bg_color(statusBeanLabel, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(statusBeanLabel, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(statusBeanLabel, GM_CONTENT, 0);
+    lv_obj_set_style_text_font(statusBeanLabel, &spacemono_14, 0);
+    lv_obj_set_style_radius(statusBeanLabel, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(statusBeanLabel, 12, 0);
+    lv_obj_set_style_pad_right(statusBeanLabel, 12, 0);
+    lv_obj_set_style_pad_top(statusBeanLabel, 4, 0);
+    lv_obj_set_style_pad_bottom(statusBeanLabel, 4, 0);
 }
 
 void DefaultUI::ensureProfileBeanLabel() {
@@ -1367,21 +1383,10 @@ void DefaultUI::applyScreenVisualLanguage() {
         // CAR-278: status screen styles itself via gm_ui builders + gm_theme tokens.
         // The ensureStatusBeanLabel() call here is intentionally a no-op trigger:
         // bean label visibility/text is owned by updateStatusScreen() per mode.
+        // Per review-comment 4585899391 finding #5, the chip styling is applied
+        // once inside ensureStatusBeanLabel() (GM_* tokens are static), so
+        // there is no per-call style work to do here.
         ensureStatusBeanLabel();
-        if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
-            // CAR-278 review #2: bean label is a Nothing-theme chip styled with
-            // GM_* tokens, not the legacy DisplayPalette — the rest of the screen
-            // uses gm_theme tokens and styleChip() would clash.
-            lv_obj_set_style_bg_color(statusBeanLabel, GM_SURFACE, 0);
-            lv_obj_set_style_bg_opa(statusBeanLabel, LV_OPA_COVER, 0);
-            lv_obj_set_style_text_color(statusBeanLabel, GM_CONTENT, 0);
-            lv_obj_set_style_text_font(statusBeanLabel, &spacemono_14, 0);
-            lv_obj_set_style_radius(statusBeanLabel, LV_RADIUS_CIRCLE, 0);
-            lv_obj_set_style_pad_left(statusBeanLabel, 12, 0);
-            lv_obj_set_style_pad_right(statusBeanLabel, 12, 0);
-            lv_obj_set_style_pad_top(statusBeanLabel, 4, 0);
-            lv_obj_set_style_pad_bottom(statusBeanLabel, 4, 0);
-        }
     } else if (activeScreen == ui_ProfileScreen) {
         stylePanel(ui_ProfileScreen_contentPanel, palette, OPA_55, 44);
         styleHeadline(ui_ProfileScreen_mainLabel, palette, false);
@@ -1734,9 +1739,15 @@ void DefaultUI::updateStatusScreen() {
             lv_label_set_text_fmt(gm_h.m_temp, "%d\xC2\xB0", targetTemp);
         }
 
-        // Arc tracks heat-up progress toward target.
+        // Arc tracks heat-up progress toward target. Cap at 99 until the
+        // temperature stability flag fires so the arc cannot read full while
+        // the READY pill is still hidden during thermal overshoot
+        // (review-comment 4585899391, finding #2).
         if (targetTemp > 0) {
             arcPct = static_cast<int>((static_cast<float>(currentTemp) / targetTemp) * 100.0f);
+            if (!isTemperatureStable && arcPct > 99) {
+                arcPct = 99;
+            }
         }
         // bar_pct >= 100 toggles the READY pill in gm_status_apply_mode.
         barPct = isTemperatureStable ? 100 : 0;
@@ -1788,6 +1799,7 @@ void DefaultUI::updateStatusScreen() {
     // Drive widget visibility + accent retint per mode.
     gm_status_apply_mode(mode, arcPct, barPct);
 }
+
 void DefaultUI::adjustDials(lv_obj_t *dials) {
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
     const bool roundDisplay = isRoundDisplay();

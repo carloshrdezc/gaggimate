@@ -172,9 +172,9 @@ void gm_metric_set_label(lv_obj_t *value, const char *new_label) {
 }
 
 void gm_metric_show(lv_obj_t *value, bool visible) {
-    if (value == nullptr) return;
+    if (value == nullptr || !lv_obj_is_valid(value)) return;
     lv_obj_t *col = lv_obj_get_parent(value);
-    if (col == nullptr) return;
+    if (col == nullptr || !lv_obj_is_valid(col)) return;
     if (visible) {
         lv_obj_clear_flag(col, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -258,7 +258,7 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
         // The chip's icon is its first (and only) child; recolor it so the
         // active chip's glyph reads against the filled accent.
         lv_obj_t *icon = lv_obj_get_child(chip, 0);
-        if (icon) {
+        if (icon != nullptr && lv_obj_is_valid(icon)) {
             lv_obj_set_style_img_recolor(icon, on ? GM_BG : GM_MUTED, 0);
         }
     }
