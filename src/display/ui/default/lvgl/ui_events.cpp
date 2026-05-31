@@ -96,6 +96,14 @@ void onSettingsClick(lv_event_t *e) {
     controller.getUI()->changeScreen(&ui_MenuScreen, &ui_MenuScreen_screen_init);
 }
 
+void onBackToModeScreen(lv_event_t *e) {
+    // CAR-291 review fix: Quick-settings back button must NOT carry the
+    // deactivate()+setMode(MODE_BREW) side-effects that onMenuClick uses for
+    // the legacy idle-screen entry path. Going back from Quick-settings
+    // should just return to the mode hub without altering controller state.
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
+}
+
 void onGrindScreen(lv_event_t *e) {
     if (!controller.isGrindAvailable())
         return;

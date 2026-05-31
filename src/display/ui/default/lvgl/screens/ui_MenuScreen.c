@@ -1,7 +1,7 @@
 // CAR-279: ui_MenuScreen rebuilt as the Nothing-theme Quick-settings list.
 // The mode-hub role moved to ui_ModeScreen (CAR-291). Layout: kicker on top,
 // 3 settings rows (brightness toggle / brew-temp stepper / scale toggle),
-// back button -> mode hub via onMenuClick. Backend wiring for brightness +
+// back button -> mode hub via onBackToModeScreen. Backend wiring for brightness +
 // scale toggles is intentionally STUBBED for this PR (visual completeness
 // per the design); follow-up will hook them to the real state.
 
@@ -25,7 +25,7 @@ void ui_event_MenuScreen(lv_event_t *e) {
 }
 
 static void ui_event_MenuScreen_back(lv_event_t *e) {
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onMenuClick(e);
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onBackToModeScreen(e);
 }
 
 static void ui_event_MenuScreen_brewTempLower(lv_event_t *e) {
@@ -123,6 +123,8 @@ void ui_MenuScreen_screen_init(void) {
         lv_obj_add_event_cb(ui_MenuScreen_brewTempMinus, ui_event_MenuScreen_brewTempLower, LV_EVENT_ALL, NULL);
 
         ui_MenuScreen_brewTempValue = lv_label_create(row);
+        // Initial placeholder; overridden the moment the screen activates by
+        // the targetTemp reactive effect in DefaultUI::setupReactive().
         lv_label_set_text(ui_MenuScreen_brewTempValue, "93");
         lv_obj_set_style_text_font(ui_MenuScreen_brewTempValue, &ndot_28, 0);
         lv_obj_set_style_text_color(ui_MenuScreen_brewTempValue, GM_CONTENT, 0);

@@ -19,6 +19,7 @@ void onProfileLoad(lv_event_t *e);
 void onMenuScreenLoad(lv_event_t *e);
 void onModeScreenLoad(lv_event_t *e);
 void onSettingsClick(lv_event_t *e);
+void onBackToModeScreen(lv_event_t *e);
 void onStandby(lv_event_t *e);
 void onBrewScreen(lv_event_t *e);
 void onSteamScreen(lv_event_t *e);

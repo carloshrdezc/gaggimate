@@ -867,6 +867,17 @@ void DefaultUI::setupReactive() {
                           &currentTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustTempTarget(ui_ModeScreen_dials); },
                           &targetTemp);
+    // CAR-279 review fix: Quick-settings brew-temp readout is driven by the
+    // same targetTemp signal so the +/- stepper gives immediate feedback and
+    // the initial value reflects the real target instead of the static "93"
+    // placeholder set in ui_MenuScreen_screen_init.
+    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
+                          [=]() {
+                              if (lv_obj_is_valid(ui_MenuScreen_brewTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_brewTempValue, "%d", targetTemp);
+                              }
+                          },
+                          &targetTemp);
     // CAR-278: target temp surfaces on the status screen via the steam-mode
     // arc + hero readout, both updated from updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
@@ -1490,6 +1501,10 @@ void DefaultUI::applyScreenVisualLanguage() {
         ensureMenuActionLabels();
         stylePanel(ui_ModeScreen_contentPanel1, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
         styleIconButton(ui_ModeScreen_standbyButton, palette, palette.textPrimary);
+        // CAR-291 review fix: settings/quick-settings entry needs the same
+        // palette-driven recolor as the standby button so it stays legible on
+        // light themes (otherwise it falls back to the hardcoded NiceWhite).
+        styleIconButton(ui_ModeScreen_settingsButton, palette, palette.textPrimary);
         styleMenuTile(ui_ModeScreen_btnBrew, palette, palette.accent);
         styleMenuTile(ui_ModeScreen_btnSteam, palette, palette.accentCool);
         styleMenuTile(ui_ModeScreen_waterBtn, palette, palette.water);
