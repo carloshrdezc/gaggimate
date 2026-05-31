@@ -542,6 +542,12 @@ void DefaultUI::init() {
         case MODE_GRIND:
             changeScreen(&ui_GrindScreen, &ui_GrindScreen_screen_init);
             break;
+        // TODO(CAR-278 follow-up): MODE_STEAM and MODE_WATER currently route to
+        // ui_SimpleProcessScreen, so the multi-mode arms inside ui_StatusScreen's
+        // gm_status_apply_mode() are scaffolding for a future refactor that
+        // deprecates SimpleProcessScreen. The status-screen mode handling is
+        // exercised today only via brew, but the steam/water arms are kept
+        // ready so the cutover is a one-line routing change.
         case MODE_STEAM:
             changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
             break;
@@ -1644,6 +1650,11 @@ void DefaultUI::updateStatusScreen() {
         }
         if (gm_h.hero_unit != nullptr && lv_obj_is_valid(gm_h.hero_unit)) {
             lv_label_set_text(gm_h.hero_unit, unit);
+            // lv_obj_align_to is one-shot in LVGL v8; re-anchor the unit suffix
+            // every frame so it tracks the hero label's changing text width.
+            if (gm_h.hero != nullptr && lv_obj_is_valid(gm_h.hero)) {
+                lv_obj_align_to(gm_h.hero_unit, gm_h.hero, LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -10);
+            }
         }
     };
 

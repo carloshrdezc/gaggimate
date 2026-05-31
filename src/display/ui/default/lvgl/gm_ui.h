@@ -23,7 +23,10 @@ typedef struct {
     lv_obj_t *ampm;         // standby AM/PM suffix (spacemono_14, hidden in 24h mode)
     lv_obj_t *standby_temp; // standby sub
     lv_obj_t *status_label; // STANDBY · READY (owned by ui_StandbyScreen)
-    lv_obj_t *status_time;  // status-bar clock (set live from the update hooks)
+    lv_obj_t *status_time;  // status-bar clock; created by gm_status_bar() and
+                            // re-bound on each screen build. The active screen
+                            // owns it and must NULL it in its _screen_destroy hook
+                            // (e.g. ui_StatusScreen, ui_StandbyScreen).
 
     lv_obj_t *arc;          // status edge arc
     lv_obj_t *kicker;       // INFUSION / DISPENSING / context
@@ -52,6 +55,12 @@ lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent);
 // No-op if value is null/invalid.
 void gm_metric_set_label(lv_obj_t *value, const char *new_label);
 
+// Show or hide the metric column that owns this value label. Walks from the
+// value handle (returned by gm_metric()) up to its parent column and toggles
+// LV_OBJ_FLAG_HIDDEN there, so layout slots collapse correctly. Use this
+// instead of gm_show() for any handle returned by gm_metric().
+void gm_metric_show(lv_obj_t *value, bool visible);
+
 // ── Status screen mode switch (CAR-278) ──────────────────────
 // Retints accents and shows/hides the appropriate widgets per brewing mode.
 //   mode: 1 = brew (red), 2 = steam (gold), 3 = water (blue); other values
@@ -59,7 +68,9 @@ void gm_metric_set_label(lv_obj_t *value, const char *new_label);
 //         so callers can pass the controller mode directly.
 //   arc_pct, bar_pct: 0-100 progress values for the edge arc and the
 //         linear progress bar. The arc is hidden in water mode; the bar
-//         is shown in water mode and used as the steam target indicator.
+//         is shown only in water mode (dispense progress). In steam mode
+//         the bar stays hidden and bar_pct >= 100 is the trigger for the
+//         READY pill (at-target indicator).
 void gm_status_apply_mode(int mode, int arc_pct, int bar_pct);
 
 #ifdef __cplusplus

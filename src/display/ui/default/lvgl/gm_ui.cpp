@@ -171,6 +171,17 @@ void gm_metric_set_label(lv_obj_t *value, const char *new_label) {
     }
 }
 
+void gm_metric_show(lv_obj_t *value, bool visible) {
+    if (value == nullptr) return;
+    lv_obj_t *col = lv_obj_get_parent(value);
+    if (col == nullptr) return;
+    if (visible) {
+        lv_obj_clear_flag(col, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(col, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent) {
     lv_obj_t *bar = lv_bar_create(parent);
     lv_obj_set_size(bar, 220, 4);
@@ -192,6 +203,12 @@ lv_obj_t *gm_progress(lv_obj_t *parent, lv_color_t accent) {
 //  same screen serves brew/steam/water without rebuilding.
 // ─────────────────────────────────────────────────────────────
 
+// Saturate a percentage to the inclusive [0, 100] range. Takes int so callers
+// must convert from float themselves and clamp NaN before calling — pattern is
+// `arcPct = static_cast<int>(...)` in DefaultUI.cpp::updateStatusScreen, where
+// the upstream divisor is already guarded to be non-zero. Do not re-introduce
+// NaN handling here; if a callsite produces float, use isfinite() at that
+// callsite the way clampPercent() does in DefaultUI.cpp.
 static int gm_clamp_pct(int v) {
     if (v < 0) return 0;
     if (v > 100) return 100;
@@ -251,29 +268,29 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
         case 2: { // steam — only temp metric, arc shows target, READY pill on completion.
             gm_show(gm_h.arc, true);
             gm_show(gm_h.bar, false);
-            gm_show(gm_h.m_weight, false);
-            gm_show(gm_h.m_temp, true);
+            gm_metric_show(gm_h.m_weight, false);
+            gm_metric_show(gm_h.m_temp, true);
             // CAR-278 review #6: hero shows current temp; the metric column
             // below it shows the target, so relabel TEMP → TARGET to match.
             gm_metric_set_label(gm_h.m_temp, "TARGET");
-            gm_show(gm_h.m_press, false);
-            gm_show(gm_h.m_flow, false);
-            gm_show(gm_h.w_target, false);
-            gm_show(gm_h.w_temp, false);
-            gm_show(gm_h.w_flow, false);
+            gm_metric_show(gm_h.m_press, false);
+            gm_metric_show(gm_h.m_flow, false);
+            gm_metric_show(gm_h.w_target, false);
+            gm_metric_show(gm_h.w_temp, false);
+            gm_metric_show(gm_h.w_flow, false);
             gm_show(gm_h.pill, bar_pct >= 100);
             break;
         }
         case 3: { // water — w_target/w_temp/w_flow, arc hidden, bar visible.
             gm_show(gm_h.arc, false);
             gm_show(gm_h.bar, true);
-            gm_show(gm_h.m_weight, false);
-            gm_show(gm_h.m_temp, false);
-            gm_show(gm_h.m_press, false);
-            gm_show(gm_h.m_flow, false);
-            gm_show(gm_h.w_target, true);
-            gm_show(gm_h.w_temp, true);
-            gm_show(gm_h.w_flow, true);
+            gm_metric_show(gm_h.m_weight, false);
+            gm_metric_show(gm_h.m_temp, false);
+            gm_metric_show(gm_h.m_press, false);
+            gm_metric_show(gm_h.m_flow, false);
+            gm_metric_show(gm_h.w_target, true);
+            gm_metric_show(gm_h.w_temp, true);
+            gm_metric_show(gm_h.w_flow, true);
             gm_show(gm_h.pill, false);
             break;
         }
@@ -286,16 +303,16 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
             // layout is the closest sensible default.
             gm_show(gm_h.arc, true);
             gm_show(gm_h.bar, false);
-            gm_show(gm_h.m_weight, true);
-            gm_show(gm_h.m_temp, true);
+            gm_metric_show(gm_h.m_weight, true);
+            gm_metric_show(gm_h.m_temp, true);
             // CAR-278 review #6: restore TEMP label after switching back from
             // steam (which relabels this column to TARGET).
             gm_metric_set_label(gm_h.m_temp, "TEMP");
-            gm_show(gm_h.m_press, true);
-            gm_show(gm_h.m_flow, true);
-            gm_show(gm_h.w_target, false);
-            gm_show(gm_h.w_temp, false);
-            gm_show(gm_h.w_flow, false);
+            gm_metric_show(gm_h.m_press, true);
+            gm_metric_show(gm_h.m_flow, true);
+            gm_metric_show(gm_h.w_target, false);
+            gm_metric_show(gm_h.w_temp, false);
+            gm_metric_show(gm_h.w_flow, false);
             gm_show(gm_h.pill, false);
             break;
         }
