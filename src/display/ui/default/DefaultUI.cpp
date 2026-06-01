@@ -810,7 +810,7 @@ void DefaultUI::setupReactive() {
     // switch makes ui_theme_set() reapply the themeable arc-color registrations in ui_comp_dials.c, which would otherwise
     // overwrite those palette colors until the next dial recalculation. Depending on currentThemeMode here forces a full
     // restyle on theme change so the dials never snap back to the generated defaults.
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustDials(ui_MenuScreen_dials); },
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustDials(ui_ModeScreen_dials); },
                           &pressureAvailable, &currentThemeMode);
     // CAR-278: ui_StatusScreen no longer hosts a SquareLine dials component —
     // the rebuilt screen owns its visuals via gm_h. updateStatusScreen() drives
@@ -827,7 +827,7 @@ void DefaultUI::setupReactive() {
                           &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
                           [=]() { adjustHeatingIndicator(ui_SimpleProcessScreen_dials); }, &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustHeatingIndicator(ui_MenuScreen_dials); },
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustHeatingIndicator(ui_ModeScreen_dials); },
                           &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() { adjustHeatingIndicator(ui_ProfileScreen_dials); }, &isTemperatureStable, &heatingFlash);
@@ -838,9 +838,9 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
                           [=]() { lv_label_set_text(ui_SimpleProcessScreen_mainLabel5, mode == MODE_STEAM ? "STEAM" : "WATER"); },
                           &mode);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
                           [=]() {
-                              lv_label_set_text_fmt(uic_MenuScreen_dials_tempText, "%d°C", currentTemp);
+                              lv_label_set_text_fmt(uic_ModeScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
     // CAR-278: temp readout for the status screen is driven from the metric
@@ -865,7 +865,18 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_ProfileScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustTempTarget(ui_MenuScreen_dials); },
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustTempTarget(ui_ModeScreen_dials); },
+                          &targetTemp);
+    // CAR-279 review fix: Quick-settings brew-temp readout is driven by the
+    // same targetTemp signal so the +/- stepper gives immediate feedback and
+    // the initial value reflects the real target instead of the static "93"
+    // placeholder set in ui_MenuScreen_screen_init.
+    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
+                          [=]() {
+                              if (lv_obj_is_valid(ui_MenuScreen_brewTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_brewTempValue, "%d", targetTemp);
+                              }
+                          },
                           &targetTemp);
     // CAR-278: target temp surfaces on the status screen via the steam-mode
     // arc + hero readout, both updated from updateStatusScreen().
@@ -885,10 +896,10 @@ void DefaultUI::setupReactive() {
                           &targetTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustTempTarget(ui_ProfileScreen_dials); },
                           &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
                           [=]() {
-                              lv_arc_set_value(uic_MenuScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_MenuScreen_dials_pressureText, "%.1f bar", pressure);
+                              lv_arc_set_value(uic_ModeScreen_dials_pressureGauge, pressure * 10.0f);
+                              lv_label_set_text_fmt(uic_ModeScreen_dials_pressureText, "%.1f bar", pressure);
                           },
                           &pressure);
     // CAR-278: status screen pressure shows in the brew metric row
@@ -1064,10 +1075,10 @@ void DefaultUI::setupReactive() {
         &selectedProfileId, &profileLoaded, &selectedBean);
 
     // Show/hide grind button based on SmartGrind setting or Alt Relay function
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
                           [=]() {
-                              grindAvailable ? lv_obj_clear_flag(ui_MenuScreen_grindBtn, LV_OBJ_FLAG_HIDDEN)
-                                             : lv_obj_add_flag(ui_MenuScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                              grindAvailable ? lv_obj_clear_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN)
+                                             : lv_obj_add_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
                           },
                           &grindAvailable);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
@@ -1243,21 +1254,21 @@ void DefaultUI::ensureGrindBeanLabel() {
 }
 
 void DefaultUI::ensureMenuActionLabels() {
-    if (lv_scr_act() != ui_MenuScreen || !lv_obj_is_valid(ui_MenuScreen_contentPanel1)) {
+    if (lv_scr_act() != ui_ModeScreen || !lv_obj_is_valid(ui_ModeScreen_contentPanel1)) {
         return;
     }
 
-    if (menuBrewLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_btnBrew)) {
-        menuBrewLabel = lv_label_create(ui_MenuScreen_btnBrew);
+    if (menuBrewLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_btnBrew)) {
+        menuBrewLabel = lv_label_create(ui_ModeScreen_btnBrew);
     }
-    if (menuSteamLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_btnSteam)) {
-        menuSteamLabel = lv_label_create(ui_MenuScreen_btnSteam);
+    if (menuSteamLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_btnSteam)) {
+        menuSteamLabel = lv_label_create(ui_ModeScreen_btnSteam);
     }
-    if (menuWaterLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_waterBtn)) {
-        menuWaterLabel = lv_label_create(ui_MenuScreen_waterBtn);
+    if (menuWaterLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_waterBtn)) {
+        menuWaterLabel = lv_label_create(ui_ModeScreen_waterBtn);
     }
-    if (menuGrindLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_grindBtn)) {
-        menuGrindLabel = lv_label_create(ui_MenuScreen_grindBtn);
+    if (menuGrindLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_grindBtn)) {
+        menuGrindLabel = lv_label_create(ui_ModeScreen_grindBtn);
     }
 }
 
@@ -1486,45 +1497,60 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_align(ui_GrindScreen_upDurationButton, LV_ALIGN_CENTER, 104, 0);
             alignFooterAction(ui_GrindScreen_startButton, palette, palette.accent);
         }
-    } else if (activeScreen == ui_MenuScreen) {
+    } else if (activeScreen == ui_ModeScreen) {
         ensureMenuActionLabels();
-        stylePanel(ui_MenuScreen_contentPanel1, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleIconButton(ui_MenuScreen_standbyButton, palette, palette.textPrimary);
-        styleMenuTile(ui_MenuScreen_btnBrew, palette, palette.accent);
-        styleMenuTile(ui_MenuScreen_btnSteam, palette, palette.accentCool);
-        styleMenuTile(ui_MenuScreen_waterBtn, palette, palette.water);
-        styleMenuTile(ui_MenuScreen_grindBtn, palette, palette.grind);
+        stylePanel(ui_ModeScreen_contentPanel1, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
+        styleIconButton(ui_ModeScreen_standbyButton, palette, palette.textPrimary);
+        // CAR-291 review fix: settings/quick-settings entry needs the same
+        // palette-driven recolor as the standby button so it stays legible on
+        // light themes (otherwise it falls back to the hardcoded NiceWhite).
+        styleIconButton(ui_ModeScreen_settingsButton, palette, palette.textPrimary);
+        styleMenuTile(ui_ModeScreen_btnBrew, palette, palette.accent);
+        styleMenuTile(ui_ModeScreen_btnSteam, palette, palette.accentCool);
+        styleMenuTile(ui_ModeScreen_waterBtn, palette, palette.water);
+        styleMenuTile(ui_ModeScreen_grindBtn, palette, palette.grind);
         if (menuBrewLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_btnBrew, menuBrewLabel, "BREW", palette.accent);
+            setButtonLabel(ui_ModeScreen_btnBrew, menuBrewLabel, "BREW", palette.accent);
         }
         if (menuSteamLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_btnSteam, menuSteamLabel, "STEAM", palette.accentCool);
+            setButtonLabel(ui_ModeScreen_btnSteam, menuSteamLabel, "STEAM", palette.accentCool);
         }
         if (menuWaterLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_waterBtn, menuWaterLabel, "WATER", palette.water);
+            setButtonLabel(ui_ModeScreen_waterBtn, menuWaterLabel, "WATER", palette.water);
         }
         if (menuGrindLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_grindBtn, menuGrindLabel, "GRIND", palette.grind);
+            setButtonLabel(ui_ModeScreen_grindBtn, menuGrindLabel, "GRIND", palette.grind);
         }
         if (roundDisplay) {
-            lv_obj_set_size(ui_MenuScreen_contentPanel1, 366, 366);
-            lv_obj_set_layout(ui_MenuScreen_contentPanel1, 0);
-            lv_obj_set_style_pad_all(ui_MenuScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_row(ui_MenuScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_MenuScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_align(ui_MenuScreen_contentPanel1, LV_ALIGN_CENTER, 0, 2);
-            lv_obj_set_size(ui_MenuScreen_btnBrew, 106, 106);
-            lv_obj_set_size(ui_MenuScreen_btnSteam, 106, 106);
-            lv_obj_set_size(ui_MenuScreen_waterBtn, 106, 106);
-            lv_obj_set_size(ui_MenuScreen_grindBtn, 106, 106);
-            lv_obj_align(ui_MenuScreen_btnBrew, LV_ALIGN_CENTER, -62, -58);
-            lv_obj_align(ui_MenuScreen_btnSteam, LV_ALIGN_CENTER, 62, -58);
-            lv_obj_align(ui_MenuScreen_waterBtn, LV_ALIGN_CENTER, -62, 66);
-            lv_obj_align(ui_MenuScreen_grindBtn, LV_ALIGN_CENTER, 62, 66);
-            lv_obj_align(ui_MenuScreen_standbyButton, LV_ALIGN_BOTTOM_MID, 0, -22);
-            styleRoundIconButton(ui_MenuScreen_standbyButton, palette, palette.textPrimary, 76, true);
-            lv_obj_move_foreground(ui_MenuScreen_standbyButton);
+            lv_obj_set_size(ui_ModeScreen_contentPanel1, 366, 366);
+            lv_obj_set_layout(ui_ModeScreen_contentPanel1, 0);
+            lv_obj_set_style_pad_all(ui_ModeScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_row(ui_ModeScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_column(ui_ModeScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_align(ui_ModeScreen_contentPanel1, LV_ALIGN_CENTER, 0, 2);
+            lv_obj_set_size(ui_ModeScreen_btnBrew, 106, 106);
+            lv_obj_set_size(ui_ModeScreen_btnSteam, 106, 106);
+            lv_obj_set_size(ui_ModeScreen_waterBtn, 106, 106);
+            lv_obj_set_size(ui_ModeScreen_grindBtn, 106, 106);
+            lv_obj_align(ui_ModeScreen_btnBrew, LV_ALIGN_CENTER, -62, -58);
+            lv_obj_align(ui_ModeScreen_btnSteam, LV_ALIGN_CENTER, 62, -58);
+            lv_obj_align(ui_ModeScreen_waterBtn, LV_ALIGN_CENTER, -62, 66);
+            lv_obj_align(ui_ModeScreen_grindBtn, LV_ALIGN_CENTER, 62, 66);
+            lv_obj_align(ui_ModeScreen_standbyButton, LV_ALIGN_BOTTOM_MID, 0, -22);
+            styleRoundIconButton(ui_ModeScreen_standbyButton, palette, palette.textPrimary, 76, true);
+            lv_obj_move_foreground(ui_ModeScreen_standbyButton);
         }
+    } else if (activeScreen == ui_MenuScreen) {
+        // CAR-279: Quick-settings list is built from gm_make_screen + GM_*
+        // tokens (dark-themed) in ui_MenuScreen.c. styleScreenBase() above
+        // repaints the screen background to palette.surfaceBase, so on
+        // UI_THEME_LIGHT the row text/icons would be near-white on near-white
+        // without an explicit palette pass. Recolor the back button (round)
+        // and delegate row/kicker/stepper recolor to the screen module.
+        if (lv_obj_is_valid(ui_MenuScreen_backButton)) {
+            styleRoundIconButton(ui_MenuScreen_backButton, palette, palette.textPrimary, 44);
+        }
+        ui_MenuScreen_apply_palette(palette.textPrimary, palette.textMuted, palette.surface, palette.accent);
     } else if (activeScreen == ui_SimpleProcessScreen) {
         stylePanel(ui_SimpleProcessScreen_contentPanel5, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
         styleHeadline(ui_SimpleProcessScreen_mainLabel5, palette, true);

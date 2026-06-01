@@ -87,7 +87,21 @@ void onGrindTimeRaise(lv_event_t *e) { controller.raiseGrindTarget(); }
 void onMenuClick(lv_event_t *e) {
     controller.deactivate();
     controller.setMode(MODE_BREW);
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
+}
+
+void onSettingsClick(lv_event_t *e) {
+    // CAR-279: settings entry from the mode hub -> Quick-settings
+    // (the rebuilt ui_MenuScreen).
     controller.getUI()->changeScreen(&ui_MenuScreen, &ui_MenuScreen_screen_init);
+}
+
+void onBackToModeScreen(lv_event_t *e) {
+    // CAR-291 review fix: Quick-settings back button must NOT carry the
+    // deactivate()+setMode(MODE_BREW) side-effects that onMenuClick uses for
+    // the legacy idle-screen entry path. Going back from Quick-settings
+    // should just return to the mode hub without altering controller state.
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
 }
 
 void onGrindScreen(lv_event_t *e) {
@@ -123,11 +137,19 @@ void onProfileScreenLoad(lv_event_t *e) {
 }
 
 void onMenuScreenLoad(lv_event_t *e) {
-    lv_obj_set_ext_click_area(ui_MenuScreen_btnBrew, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_btnSteam, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_waterBtn, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_grindBtn, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_standbyButton, 20);
+    // CAR-279: ui_MenuScreen is now the Quick-settings list. The mode-hub
+    // ext-click widening moved to onModeScreenLoad. No ext-click tweaks
+    // needed here yet; the Quick-settings rows are full-width.
+    (void)e;
+}
+
+void onModeScreenLoad(lv_event_t *e) {
+    lv_obj_set_ext_click_area(ui_ModeScreen_btnBrew, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_btnSteam, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_waterBtn, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_grindBtn, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_standbyButton, 20);
+    lv_obj_set_ext_click_area(ui_ModeScreen_settingsButton, 20);
 }
 
 void onBrewScreenLoad(lv_event_t *e) {
