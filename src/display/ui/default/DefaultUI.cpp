@@ -1364,19 +1364,15 @@ void DefaultUI::applyScreenVisualLanguage() {
             alignFooterAction(ui_ProfileScreen_chooseButton, palette, palette.success);
         }
     } else if (activeScreen == ui_GrindScreen) {
-        stylePanel(ui_GrindScreen_contentPanel7, palette, OPA_55, 44);
-        styleHeadline(ui_GrindScreen_mainLabel7, palette, true);
-        styleSecondary(ui_GrindScreen_targetDuration, palette);
-        applyProcessRing(uic_GrindScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_GrindScreen_targetDuration, palette, &ndot_24);
-        styleIconButton(ui_GrindScreen_ImgButton2, palette, palette.textPrimary);
-        styleIconButton(ui_GrindScreen_startButton, palette, palette.accent);
-        styleIconButton(ui_GrindScreen_downDurationButton, palette, palette.textMuted);
-        styleIconButton(ui_GrindScreen_upDurationButton, palette, palette.accent);
-        stylePanel(ui_GrindScreen_targetContainer, palette, OPA_210, 22);
-        stylePanel(ui_GrindScreen_modeSwitch, palette, OPA_220, 22);
-        styleMetricIcon(ui_GrindScreen_targetSymbol, palette.accent);
+        // CAR-294: GrindScreen self-styles via gm_ui builders + gm_theme tokens.
+        // We only need to: (a) drive the ring overlay, (b) update the kicker
+        // text/tone (GRIND vs GRINDING with palette.grind), (c) refresh the
+        // bean chip, and (d) hand the palette to the screen so it can recolor
+        // on UI_THEME_LIGHT.
         ensureGrindBeanLabel();
+        applyProcessRing(uic_GrindScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
+        ui_GrindScreen_apply_palette(palette.textPrimary, palette.textMuted,
+                                     palette.surface, palette.accent, palette.grind);
         if (grindBeanLabel != nullptr && lv_obj_is_valid(grindBeanLabel)) {
             styleChip(grindBeanLabel, palette, palette.accent, true);
         }
@@ -1386,6 +1382,8 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_set_style_text_color(ui_GrindScreen_mainLabel7, palette.grind, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         if (roundDisplay) {
+            // Round-display layout overrides — the screen ships a 360x360 flat
+            // default; bump to the 372 round circle and re-anchor children.
             lv_obj_set_size(ui_GrindScreen_contentPanel7, 372, 372);
             lv_obj_align(ui_GrindScreen_contentPanel7, LV_ALIGN_CENTER, 0, 4);
             alignTopBackButton(ui_GrindScreen_ImgButton2, palette, palette.textPrimary);
@@ -1399,12 +1397,27 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_align(ui_GrindScreen_modeSwitch, LV_ALIGN_TOP_MID, 0, 104);
             lv_obj_set_size(ui_GrindScreen_weightLabel, 104, 28);
             lv_obj_set_style_text_font(ui_GrindScreen_weightLabel, &ndot_24, LV_PART_MAIN | LV_STATE_DEFAULT);
+            // Round-display target container: drop down/up buttons to the
+            // legacy left/right anchors used pre-CAR-294 so the round layout
+            // keeps the wider feel. Symbol stays paired with the duration.
             lv_obj_set_size(ui_GrindScreen_targetContainer, 254, 54);
             lv_obj_align(ui_GrindScreen_targetContainer, LV_ALIGN_CENTER, 0, 32);
             lv_obj_set_style_pad_all(ui_GrindScreen_targetContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
             alignMetricPair(ui_GrindScreen_targetSymbol, ui_GrindScreen_targetDuration, -10, 0, palette.accent, palette);
-            styleRoundIconButton(ui_GrindScreen_downDurationButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_GrindScreen_upDurationButton, palette, palette.accent, 48);
+            // Round-display: keep the gs_glyph_btn() flat-circle styling
+            // (filled GM_SURFACE / GM_BLUE, no border, no shadow) — do NOT
+            // call styleRoundIconButton() here. The legacy lv_imgbtn versions
+            // of these buttons used PNG glyphs that styleRoundIconButton()
+            // recolored via lv_obj_set_style_img_recolor(); the new lv_btn
+            // containers carry an inner lv_label glyph instead, so those
+            // recolor calls are no-ops AND styleGlassButton (called inside
+            // styleRoundIconButton) overrides the clean Nothing-theme
+            // styling with a translucent gradient + border that erases the
+            // up button's filled accent identity. Resize directly to the
+            // round-display 48px so the layout still feels wide.
+            // Mirrors BrewScreen's round-display branch (DefaultUI.cpp:1291-1303).
+            lv_obj_set_size(ui_GrindScreen_downDurationButton, 48, 48);
+            lv_obj_set_size(ui_GrindScreen_upDurationButton, 48, 48);
             lv_obj_align(ui_GrindScreen_downDurationButton, LV_ALIGN_CENTER, -104, 0);
             lv_obj_align(ui_GrindScreen_upDurationButton, LV_ALIGN_CENTER, 104, 0);
             alignFooterAction(ui_GrindScreen_startButton, palette, palette.accent);
