@@ -17,6 +17,7 @@
 // must be NULLed in screen_destroy. See StatusScreen / StandbyScreen.
 
 #include "../ui.h"
+#include "../components/ui_comp_dials.h" // UI_COMP_DIALS_* indices for ui_comp_get_child
 #include "../gm_ui.h" // GM_* palette, gm_h handles, shared builders
 
 // ── SquareLine globals preserved (DefaultUI / ui_events surface) ──
@@ -212,6 +213,20 @@ void ui_BrewScreen_screen_init(void) {
     ui_BrewScreen_dials = ui_dials_create(ui_BrewScreen);
     lv_obj_set_x(ui_BrewScreen_dials, 0);
     lv_obj_set_y(ui_BrewScreen_dials, 0);
+
+    // Bind the dials' internal child handles. DefaultUI's effects dereference
+    // these (lv_label_set_text_fmt on tempText/pressureText, lv_arc_set_value
+    // on the gauges, applyProcessRing(uic_BrewScreen_dials_tempGauge,...) etc.).
+    // Without this, those globals stay NULL and the brew ring/temp/pressure
+    // updates crash as soon as the BrewScreen effects run. Mirrors the
+    // SquareLine-generated pattern that the original ui_BrewScreen_screen_init
+    // performed right after ui_dials_create().
+    uic_BrewScreen_dials_tempGauge = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_TEMPGAUGE);
+    uic_BrewScreen_dials_tempTarget = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_TEMPTARGET);
+    uic_BrewScreen_dials_pressureGauge = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_PRESSUREGAUGE);
+    uic_BrewScreen_dials_pressureTarget = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_PRESSURETARGET);
+    uic_BrewScreen_dials_pressureText = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_PRESSURETEXT);
+    uic_BrewScreen_dials_tempText = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_TEMPTEXT);
 
     // Top-left back/menu button (round, gm_ic_back). Round-display branch in DefaultUI
     // re-aligns it via alignTopBackButton(); we just give it a sane default position.
@@ -416,9 +431,13 @@ void ui_BrewScreen_screen_init(void) {
                         LV_EVENT_ALL, NULL);
 
     // targetContainer: [-] [icon] [duration/weight] [+] [byTimeButton]
+    // 304 wide gives 5 × 40px slots with 8px gutters. byTimeButton sits at the
+    // far-right edge (only visible in volumetric mode); upDurationButton sits
+    // immediately left of it so the `+` control is never occluded by the
+    // delete/by-time button.
     ui_BrewScreen_targetContainer = lv_obj_create(ui_BrewScreen_adjustments);
     lv_obj_remove_style_all(ui_BrewScreen_targetContainer);
-    lv_obj_set_size(ui_BrewScreen_targetContainer, 254, 54);
+    lv_obj_set_size(ui_BrewScreen_targetContainer, 304, 54);
     lv_obj_set_style_radius(ui_BrewScreen_targetContainer, 22, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_targetContainer, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_targetContainer, LV_OPA_60, 0);
@@ -452,7 +471,9 @@ void ui_BrewScreen_screen_init(void) {
 
     ui_BrewScreen_upDurationButton = bs_glyph_btn(ui_BrewScreen_targetContainer, "+", 40,
                                                   GM_RED, GM_CONTENT, true);
-    lv_obj_align(ui_BrewScreen_upDurationButton, LV_ALIGN_RIGHT_MID, -6, 0);
+    // Positioned one slot left of byTimeButton so the `+` control is not
+    // occluded when the by-time/volumetric-delete button is shown.
+    lv_obj_align(ui_BrewScreen_upDurationButton, LV_ALIGN_RIGHT_MID, -56, 0);
     lv_obj_set_ext_click_area(ui_BrewScreen_upDurationButton, 15);
     lv_obj_add_event_cb(ui_BrewScreen_upDurationButton, ui_event_BrewScreen_upDurationButton,
                         LV_EVENT_ALL, NULL);
