@@ -59,6 +59,11 @@ static int gs_recolor_icon_count = 0;
 // GM_MUTED / GM_CONTENT (designed for the dark OLED base) leaves the status
 // bar near-white-on-white when styleScreenBase() repaints the screen bg.
 static lv_obj_t *gs_status_bar = NULL;
+// Local snapshot of the clock label this screen owns. Captured from
+// gm_h.status_time immediately after gm_status_bar() builds it. Used by the
+// destroy hook to decide whether the global still belongs to *this* screen
+// (see screen_destroy at the bottom of this file for the full rationale).
+static lv_obj_t *gs_status_time = NULL;
 static lv_obj_t *gs_button_surfaces[6] = {NULL}; // round button bg surfaces (down stepper, modeSwitch chip)
 static int gs_button_surface_count = 0;
 static lv_obj_t *gs_accent_surfaces[4] = {NULL}; // accent-colored button surfaces (start, up stepper)
@@ -165,6 +170,10 @@ void ui_GrindScreen_screen_init(void) {
     // Cache the bar handle so apply_palette() can recolor its children on
     // light-theme switches; gm_status_bar() hard-codes GM_MUTED / GM_CONTENT.
     gs_status_bar = gm_status_bar(ui_GrindScreen, true);
+    // Snapshot the clock label gm_status_bar() just stored in the global, so
+    // the destroy hook can tell whether gm_h.status_time still points at our
+    // own clock (vs. having been overwritten by the next screen's init).
+    gs_status_time = gm_h.status_time;
 
     // Dials cluster (preserved). DefaultUI's adjustDials / adjustHeatingIndicator and
     // applyProcessRing(uic_GrindScreen_dials_tempGauge,...) drive these without touching
@@ -378,8 +387,23 @@ void ui_GrindScreen_screen_destroy(void) {
     uic_GrindScreen_dials_pressureText = NULL;
     uic_GrindScreen_dials_tempText = NULL;
 
-    // Status bar handle (owned by this screen while active)
-    gm_h.status_time = NULL;
+    // Status bar handle (owned by this screen while active).
+    //
+    // RACE: DefaultUI::handleScreenChange() builds the next screen
+    // (_ui_screen_change → target_init → gm_status_bar() → re-points
+    // gm_h.status_time at the *next* screen's clock) BEFORE lv_obj_del(current)
+    // fires this destroy hook. Unconditionally NULLing gm_h.status_time here
+    // would clobber the new screen's freshly-stored handle, leaving e.g.
+    // DefaultUI::updateStatusScreen() (DefaultUI.cpp:1543) with a null pointer
+    // — the destination clock would stick at "--:--" forever after the
+    // transition. So only NULL the global if it still refers to OUR clock
+    // (i.e. nothing else has taken ownership yet — typical for terminal
+    // teardown paths). gs_status_time always tracks the label this screen
+    // owns; when the global has moved on, leave it alone.
+    if (gm_h.status_time == gs_status_time) {
+        gm_h.status_time = NULL;
+    }
+    gs_status_time = NULL;
     gs_status_bar = NULL;
 
     // Theme-tracking arrays
