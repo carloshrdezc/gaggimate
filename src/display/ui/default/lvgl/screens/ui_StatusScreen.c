@@ -170,6 +170,11 @@ void ui_StatusScreen_screen_destroy(void) {
     gm_h.bar = NULL;
     // Status bar handle (owned by this screen while active).
     //
+    // History: a plain unguarded `gm_h.status_time = NULL;` was added here
+    // in CAR-278 round-4 (commit 12531166) to satisfy the gm_ui.h ownership
+    // contract that destroy hooks must NULL handles they own. CAR-297
+    // upgrades it to the guarded-clobber pattern below.
+    //
     // RACE: DefaultUI::handleScreenChange() builds the next screen
     // (_ui_screen_change → target_init → gm_status_bar() → re-points
     // gm_h.status_time at the *next* screen's clock) BEFORE lv_obj_del(current)
