@@ -309,7 +309,12 @@ void ui_GrindScreen_screen_init(void) {
     lv_obj_align(ui_GrindScreen_targetSymbol, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_add_flag(ui_GrindScreen_targetSymbol, LV_OBJ_FLAG_ADV_HITTEST);
     lv_obj_clear_flag(ui_GrindScreen_targetSymbol, LV_OBJ_FLAG_SCROLLABLE);
-    gs_track_icon(ui_GrindScreen_targetSymbol);
+    // Intentionally NOT tracked via gs_track_icon: targetSymbol is accent-tinted
+    // (not text-tinted), and the dedicated special-case at the bottom of
+    // apply_palette (search "Re-tint the targetSymbol") already handles its
+    // recolor. Adding it to the generic icon array would just paint it `text`
+    // and force the special-case to overwrite — net same result, twice the work
+    // and an easy footgun if the special-case ever moves.
 
     ui_GrindScreen_targetDuration = lv_label_create(ui_GrindScreen_targetContainer);
     lv_label_set_text(ui_GrindScreen_targetDuration, "0:30");
@@ -320,18 +325,19 @@ void ui_GrindScreen_screen_init(void) {
     gs_track_text(ui_GrindScreen_targetDuration);
 
     // downDurationButton (-) — left of upDurationButton at the right edge.
+    // ext_click_area is owned by ui_events.cpp:onGrindScreenLoad (40px) — keep
+    // a single source of truth so init-time and load-time can't drift.
     ui_GrindScreen_downDurationButton = gs_glyph_btn(ui_GrindScreen_targetContainer, "-", 40,
                                                      GM_SURFACE, GM_CONTENT, false);
     lv_obj_align(ui_GrindScreen_downDurationButton, LV_ALIGN_RIGHT_MID, -56, 0);
-    lv_obj_set_ext_click_area(ui_GrindScreen_downDurationButton, 15);
     lv_obj_add_event_cb(ui_GrindScreen_downDurationButton, ui_event_GrindScreen_downDurationButton,
                         LV_EVENT_ALL, NULL);
 
     // upDurationButton (+) — far right, accent surface.
+    // ext_click_area also owned by onGrindScreenLoad (40px).
     ui_GrindScreen_upDurationButton = gs_glyph_btn(ui_GrindScreen_targetContainer, "+", 40,
                                                    GM_BLUE, GM_CONTENT, true);
     lv_obj_align(ui_GrindScreen_upDurationButton, LV_ALIGN_RIGHT_MID, -6, 0);
-    lv_obj_set_ext_click_area(ui_GrindScreen_upDurationButton, 15);
     lv_obj_add_event_cb(ui_GrindScreen_upDurationButton, ui_event_GrindScreen_upDurationButton,
                         LV_EVENT_ALL, NULL);
 
@@ -447,11 +453,10 @@ void ui_GrindScreen_apply_palette(lv_color_t text, lv_color_t muted,
     for (int i = 0; i < gs_recolor_icon_count; i++) {
         lv_obj_t *o = gs_recolor_icons[i];
         if (o != NULL && lv_obj_is_valid(o)) {
-            // The targetSymbol and the start-button glyph are accent-tinted, but
-            // re-tinting them with `text` here is fine: DefaultUI's ring/start
-            // effects re-apply the accent immediately after this pass. The back
-            // button + volumetricButton + start button icon are intentionally
-            // textPrimary on light themes for legibility against accent surfaces.
+            // Tracked icons in this array are intentionally textPrimary on
+            // light themes for legibility (back button + start-button glyph).
+            // targetSymbol is NOT in this array — it gets accent-tinted by
+            // the dedicated special-case below.
             lv_obj_set_style_img_recolor(o, text, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_img_recolor_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
@@ -468,9 +473,12 @@ void ui_GrindScreen_apply_palette(lv_color_t text, lv_color_t muted,
             lv_obj_set_style_bg_color(o, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
     }
-    // Re-tint the targetSymbol with the accent color (the generic icon-recolor
-    // pass above sets it to `text`, which loses the accent identity). DefaultUI's
-    // volumetricMode effect doesn't recolor this icon, so we own its tint.
+    // Re-tint the targetSymbol with the accent color. It's deliberately kept
+    // out of gs_recolor_icons (which paints `text`) because targetSymbol owns
+    // its accent identity in both themes — the drop/clock glyph reads as the
+    // grind/volumetric mode marker. DefaultUI's volumetricMode effect only
+    // swaps lv_img_set_src on this icon, never recolors it, so this is the
+    // only path that establishes its accent tint on theme change.
     if (ui_GrindScreen_targetSymbol != NULL && lv_obj_is_valid(ui_GrindScreen_targetSymbol)) {
         lv_obj_set_style_img_recolor(ui_GrindScreen_targetSymbol, accent, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_img_recolor_opa(ui_GrindScreen_targetSymbol, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);

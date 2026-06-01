@@ -1404,8 +1404,20 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_align(ui_GrindScreen_targetContainer, LV_ALIGN_CENTER, 0, 32);
             lv_obj_set_style_pad_all(ui_GrindScreen_targetContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
             alignMetricPair(ui_GrindScreen_targetSymbol, ui_GrindScreen_targetDuration, -10, 0, palette.accent, palette);
-            styleRoundIconButton(ui_GrindScreen_downDurationButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_GrindScreen_upDurationButton, palette, palette.accent, 48);
+            // Round-display: keep the gs_glyph_btn() flat-circle styling
+            // (filled GM_SURFACE / GM_BLUE, no border, no shadow) — do NOT
+            // call styleRoundIconButton() here. The legacy lv_imgbtn versions
+            // of these buttons used PNG glyphs that styleRoundIconButton()
+            // recolored via lv_obj_set_style_img_recolor(); the new lv_btn
+            // containers carry an inner lv_label glyph instead, so those
+            // recolor calls are no-ops AND styleGlassButton (called inside
+            // styleRoundIconButton) overrides the clean Nothing-theme
+            // styling with a translucent gradient + border that erases the
+            // up button's filled accent identity. Resize directly to the
+            // round-display 48px so the layout still feels wide.
+            // Mirrors BrewScreen's round-display branch (DefaultUI.cpp:1291-1303).
+            lv_obj_set_size(ui_GrindScreen_downDurationButton, 48, 48);
+            lv_obj_set_size(ui_GrindScreen_upDurationButton, 48, 48);
             lv_obj_align(ui_GrindScreen_downDurationButton, LV_ALIGN_CENTER, -104, 0);
             lv_obj_align(ui_GrindScreen_upDurationButton, LV_ALIGN_CENTER, 104, 0);
             alignFooterAction(ui_GrindScreen_startButton, palette, palette.accent);
