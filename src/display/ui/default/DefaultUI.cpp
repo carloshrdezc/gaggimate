@@ -542,17 +542,15 @@ void DefaultUI::init() {
         case MODE_GRIND:
             changeScreen(&ui_GrindScreen, &ui_GrindScreen_screen_init);
             break;
-        // TODO(CAR-278 follow-up): MODE_STEAM and MODE_WATER currently route to
-        // ui_SimpleProcessScreen, so the multi-mode arms inside ui_StatusScreen's
-        // gm_status_apply_mode() are scaffolding for a future refactor that
-        // deprecates SimpleProcessScreen. The status-screen mode handling is
-        // exercised today only via brew, but the steam/water arms are kept
-        // ready so the cutover is a one-line routing change.
+        // CAR-292: STEAM and WATER share ui_StatusScreen with the brew path.
+        // gm_status_apply_mode() retints + relayouts per mode; updateStatusScreen()
+        // drives hero/kicker/metrics directly from class state, so idle entry
+        // (no live shot) renders the per-mode static layout cleanly.
         case MODE_STEAM:
-            changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
+            changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
             break;
         case MODE_WATER:
-            changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
+            changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
             break;
         default:
             break;
@@ -819,14 +817,12 @@ void DefaultUI::setupReactive() {
                           &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; }, [=]() { adjustDials(ui_GrindScreen_dials); },
                           &pressureAvailable, &currentThemeMode);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { adjustDials(ui_SimpleProcessScreen_dials); }, &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustDials(ui_ProfileScreen_dials); },
                           &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; }, [=]() { adjustHeatingIndicator(ui_BrewScreen_dials); },
                           &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { adjustHeatingIndicator(ui_SimpleProcessScreen_dials); }, &isTemperatureStable, &heatingFlash);
+    // CAR-292: ui_StatusScreen has no SquareLine dials/heating-indicator
+    // widgets; visuals are driven by updateStatusScreen() + gm_status_apply_mode().
     effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustHeatingIndicator(ui_ModeScreen_dials); },
                           &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
@@ -835,9 +831,8 @@ void DefaultUI::setupReactive() {
                           [=]() { adjustHeatingIndicator(ui_GrindScreen_dials); }, &isTemperatureStable, &heatingFlash);
     // CAR-278: status screen no longer has a SquareLine dial widget for the
     // heating indicator. updateStatusScreen() handles its visuals directly.
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { lv_label_set_text(ui_SimpleProcessScreen_mainLabel5, mode == MODE_STEAM ? "STEAM" : "WATER"); },
-                          &mode);
+    // CAR-292: ui_StatusScreen sets the kicker text per mode (BREW / STEAM /
+    // WATER) inline in updateStatusScreen(); no separate effect needed.
     effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_ModeScreen_dials_tempText, "%d°C", currentTemp);
@@ -855,11 +850,8 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_GrindScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(uic_SimpleProcessScreen_dials_tempText, "%d°C", currentTemp);
-                          },
-                          &currentTemp);
+    // CAR-292: current temp on ui_StatusScreen is driven directly through
+    // gm_h.m_temp / gm_h.w_temp / gm_h.hero in updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_ProfileScreen_dials_tempText, "%d°C", currentTemp);
@@ -888,12 +880,8 @@ void DefaultUI::setupReactive() {
                           &targetTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; }, [=]() { adjustTempTarget(ui_GrindScreen_dials); },
                           &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(ui_SimpleProcessScreen_targetTemp, "%d°C", targetTemp);
-                              adjustTempTarget(ui_SimpleProcessScreen_dials);
-                          },
-                          &targetTemp);
+    // CAR-292: target temp on ui_StatusScreen surfaces through the steam-mode
+    // arc + hero readout populated each frame in updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustTempTarget(ui_ProfileScreen_dials); },
                           &targetTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
@@ -916,12 +904,8 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_GrindScreen_dials_pressureText, "%.1f bar", pressure);
                           },
                           &pressure);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              lv_arc_set_value(uic_SimpleProcessScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_SimpleProcessScreen_dials_pressureText, "%.1f bar", pressure);
-                          },
-                          &pressure);
+    // CAR-292: pressure on ui_StatusScreen flows through gm_h.m_press in
+    // updateStatusScreen() — no SimpleProcessScreen effect needed.
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() {
                               lv_arc_set_value(uic_ProfileScreen_dials_pressureGauge, pressure * 10.0f);
@@ -1001,18 +985,9 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
                           [=]() { _ui_flag_modify(ui_GrindScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN, volumetricAvailable); },
                           &volumetricAvailable);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              if (mode == MODE_STEAM) {
-                                  _ui_flag_modify(ui_SimpleProcessScreen_goButton, LV_OBJ_FLAG_HIDDEN, active);
-                                  lv_imgbtn_set_src(ui_SimpleProcessScreen_goButton, LV_IMGBTN_STATE_RELEASED, nullptr,
-                                                    &ui_img_691326438, nullptr);
-                              } else {
-                                  lv_imgbtn_set_src(ui_SimpleProcessScreen_goButton, LV_IMGBTN_STATE_RELEASED, nullptr,
-                                                    active ? &ui_img_1456692430 : &ui_img_445946954, nullptr);
-                              }
-                          },
-                          &active, &mode);
+    // CAR-292: SimpleProcessScreen retired. Steam/water goButton visibility
+    // and graphics were the legacy affordance; ui_StatusScreen conveys
+    // active state via the arc, READY pill, and progress bar instead.
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
                           [=]() {
                               lv_imgbtn_set_src(ui_GrindScreen_startButton, LV_IMGBTN_STATE_RELEASED, nullptr,
@@ -1551,39 +1526,6 @@ void DefaultUI::applyScreenVisualLanguage() {
             styleRoundIconButton(ui_MenuScreen_backButton, palette, palette.textPrimary, 44);
         }
         ui_MenuScreen_apply_palette(palette.textPrimary, palette.textMuted, palette.surface, palette.accent);
-    } else if (activeScreen == ui_SimpleProcessScreen) {
-        stylePanel(ui_SimpleProcessScreen_contentPanel5, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleHeadline(ui_SimpleProcessScreen_mainLabel5, palette, true);
-        applyProcessRing(uic_SimpleProcessScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_SimpleProcessScreen_targetTemp, palette, roundDisplay ? &ndot_34 : &ndot_24);
-        styleIconButton(ui_SimpleProcessScreen_ImgButton6, palette, palette.textPrimary);
-        styleIconButton(ui_SimpleProcessScreen_downTempButton, palette, palette.textMuted);
-        styleIconButton(ui_SimpleProcessScreen_upTempButton, palette, palette.accent);
-        styleIconButton(ui_SimpleProcessScreen_goButton, palette, mode == MODE_STEAM ? palette.accentCool : palette.water);
-        if (lv_obj_is_valid(ui_SimpleProcessScreen_Image9)) {
-            lv_obj_set_style_img_recolor(ui_SimpleProcessScreen_Image9, mode == MODE_STEAM ? palette.accentCool : palette.water,
-                                         LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_SimpleProcessScreen_Image9, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_SimpleProcessScreen_mainLabel5)) {
-            lv_label_set_text(ui_SimpleProcessScreen_mainLabel5, ringVisual.title);
-            lv_obj_set_style_text_color(ui_SimpleProcessScreen_mainLabel5, ringVisual.tone, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_font(ui_SimpleProcessScreen_mainLabel5, &ndot_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (roundDisplay) {
-            lv_obj_set_size(ui_SimpleProcessScreen_contentPanel5, 372, 372);
-            lv_obj_align(ui_SimpleProcessScreen_contentPanel5, LV_ALIGN_CENTER, 0, 4);
-            alignTopBackButton(ui_SimpleProcessScreen_ImgButton6, palette, palette.textPrimary);
-            styleFixedLabel(ui_SimpleProcessScreen_mainLabel5, 220, 32, &ndot_24, ringVisual.tone);
-            lv_obj_align(ui_SimpleProcessScreen_mainLabel5, LV_ALIGN_TOP_MID, 0, 42);
-            alignMetricPair(ui_SimpleProcessScreen_Image9, ui_SimpleProcessScreen_targetTemp, -10, 18,
-                            mode == MODE_STEAM ? palette.accentCool : palette.water, palette);
-            styleRoundIconButton(ui_SimpleProcessScreen_downTempButton, palette, palette.textMuted, 54);
-            styleRoundIconButton(ui_SimpleProcessScreen_upTempButton, palette, palette.accent, 54);
-            lv_obj_align(ui_SimpleProcessScreen_downTempButton, LV_ALIGN_CENTER, -108, 18);
-            lv_obj_align(ui_SimpleProcessScreen_upTempButton, LV_ALIGN_CENTER, 108, 18);
-            alignFooterAction(ui_SimpleProcessScreen_goButton, palette, mode == MODE_STEAM ? palette.accentCool : palette.water);
-        }
     } else if (activeScreen == ui_StandbyScreen) {
         // Nothing-theme standby (CAR-277) styles itself via the gm_* builders in
         // ui_StandbyScreen_screen_init; nothing to restyle here. The kicker text

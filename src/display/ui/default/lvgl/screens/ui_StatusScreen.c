@@ -28,6 +28,12 @@ void ui_event_StatusScreen(lv_event_t *e) {
     if (event_code == LV_EVENT_SCREEN_LOADED) {
         onStatusScreenLoad(e);
     }
+    // CAR-292: tap-to-toggle for water dispense. The handler short-circuits in
+    // every other mode, so this is safe while ui_StatusScreen is also hosting
+    // brew + steam — neither one should react to a body tap.
+    if (event_code == LV_EVENT_CLICKED) {
+        onStatusScreenTap(e);
+    }
 }
 
 // build functions
@@ -126,6 +132,12 @@ void ui_StatusScreen_screen_init(void) {
     gm_status_apply_mode(1, 0, 0);
 
     lv_obj_add_event_cb(ui_StatusScreen, ui_event_StatusScreen, LV_EVENT_ALL, NULL);
+    // CAR-292: tap-to-toggle (water dispense) needs LV_EVENT_CLICKED to fire on
+    // the screen body. Screens are not clickable by default; enabling here is
+    // safe — no inner widget consumes clicks except the chip bar children
+    // (decorative; bubbling triggers the same handler with the same WATER-only
+    // gate inside onStatusScreenTap).
+    lv_obj_add_flag(ui_StatusScreen, LV_OBJ_FLAG_CLICKABLE);
 }
 
 void ui_StatusScreen_screen_destroy(void) {
