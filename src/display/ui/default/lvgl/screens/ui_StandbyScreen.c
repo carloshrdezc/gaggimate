@@ -16,16 +16,6 @@ lv_obj_t *ui_StandbyScreen_updateIcon = NULL;      // update-available dot
 lv_obj_t *ui_StandbyScreen_touchIcon = NULL;       // kept for ABI, unused/hidden
 lv_obj_t *ui_StandbyScreen_mainLabel = NULL;       // kicker / state-message line
 
-// Local snapshot of gm_h.status_time at end of screen_init. StandbyScreen
-// does NOT own the status_time handle (it builds its own status bar manually,
-// without calling gm_status_bar()), but its destroy hook used to NULL the
-// global anyway — clobbering whatever the *next* screen's init already stored
-// there. We snapshot the global at end of init so the destroy hook can detect
-// whether anyone else has taken ownership in between (next-screen init runs
-// before this destroy hook). CAR-297 (mirrors the CAR-294 GrindScreen
-// guarded-clobber fix).
-static lv_obj_t *sb_status_time = NULL;
-
 // event funtions
 void ui_event_StandbyScreen(lv_event_t *e) {
     lv_event_code_t event_code = lv_event_get_code(e);
@@ -135,13 +125,6 @@ void ui_StandbyScreen_screen_init(void) {
     }
 
     lv_obj_add_event_cb(ui_StandbyScreen, ui_event_StandbyScreen, LV_EVENT_ALL, NULL);
-
-    // Snapshot gm_h.status_time so the destroy hook can detect whether the
-    // global has been re-pointed by the next screen's init (which runs before
-    // this destroy hook fires). StandbyScreen never owns the handle, so this
-    // is normally NULL — making the guarded NULL a no-op when nothing else
-    // has taken ownership, and a safe skip when the next screen has. CAR-297.
-    sb_status_time = gm_h.status_time;
 }
 
 void ui_StandbyScreen_screen_destroy(void) {
@@ -162,17 +145,10 @@ void ui_StandbyScreen_screen_destroy(void) {
     gm_h.ampm = NULL;
     gm_h.standby_temp = NULL;
     gm_h.status_label = NULL;
-    // Status bar handle: StandbyScreen does NOT own gm_h.status_time (it has
-    // no gm_status_bar() call), but the destroy hook still has to coordinate
-    // with the gm_ui.h ownership contract. Only NULL if the global still
-    // matches our snapshot — otherwise the next screen's init already stored
-    // its own clock there and we must not clobber it. CAR-297 (mirrors the
-    // CAR-294 GrindScreen guarded-clobber fix). See screen_init for full
-    // rationale.
-    if (gm_h.status_time == sb_status_time) {
-        gm_h.status_time = NULL;
-    }
-    sb_status_time = NULL;
+    // StandbyScreen does NOT own gm_h.status_time — it builds its own status
+    // bar manually without calling gm_status_bar(), so the global belongs to
+    // whichever previous screen owned it (or to the next screen, whose init
+    // runs before this destroy hook). Don't touch it here. CAR-297.
     for (int i = 0; i < 4; i++) {
         gm_h.chips[i] = NULL;
     }
