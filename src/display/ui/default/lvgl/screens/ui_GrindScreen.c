@@ -236,7 +236,15 @@ void ui_GrindScreen_screen_init(void) {
     lv_obj_add_flag(ui_GrindScreen_modeSwitch, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(ui_GrindScreen_modeSwitch, ui_event_GrindScreen_modeSwitch,
                         LV_EVENT_ALL, NULL);
-    gs_track_button_surface(ui_GrindScreen_modeSwitch);
+    // NOTE: modeSwitch is intentionally NOT tracked as a button surface.
+    // DefaultUI's `volumetricMode` effect owns its background color (active state
+    // uses GM_CONTENT/NiceWhite, inactive uses GM_SURFACE/Dark) and the effect
+    // only reruns when `volumetricMode` changes. If we tracked it here,
+    // ui_GrindScreen_apply_palette() — invoked every render via
+    // applyScreenVisualLanguage() in DefaultUI::loop — would clobber the active
+    // state back to GM_SURFACE on the next idle tick until the user toggled the
+    // chip again. See PR #135 Codex review (P2). BrewScreen's modeSwitch is also
+    // untracked, but for a different reason (its chip is stateless there).
 
     ui_GrindScreen_volumetricButton = lv_img_create(ui_GrindScreen_modeSwitch);
     lv_img_set_src(ui_GrindScreen_volumetricButton, &gm_ic_drop);
@@ -244,14 +252,19 @@ void ui_GrindScreen_screen_init(void) {
     lv_obj_set_style_img_recolor_opa(ui_GrindScreen_volumetricButton, LV_OPA_COVER, 0);
     lv_obj_add_flag(ui_GrindScreen_volumetricButton, LV_OBJ_FLAG_ADV_HITTEST);
     lv_obj_clear_flag(ui_GrindScreen_volumetricButton, LV_OBJ_FLAG_SCROLLABLE);
-    gs_track_icon(ui_GrindScreen_volumetricButton);
+    // NOTE: volumetricButton recolor is owned by DefaultUI's `volumetricMode`
+    // effect (Dark vs NiceWhite contrast on the chip). Same rationale as
+    // modeSwitch above — don't track for the generic palette pass.
 
     ui_GrindScreen_weightLabel = lv_label_create(ui_GrindScreen_modeSwitch);
     lv_label_set_text(ui_GrindScreen_weightLabel, "-");
     lv_obj_set_style_text_font(ui_GrindScreen_weightLabel, &ndot_24, 0);
     lv_obj_set_style_text_color(ui_GrindScreen_weightLabel, GM_CONTENT, 0);
     lv_obj_set_style_text_align(ui_GrindScreen_weightLabel, LV_TEXT_ALIGN_CENTER, 0);
-    gs_track_text(ui_GrindScreen_weightLabel);
+    // NOTE: weightLabel text color is owned by DefaultUI's `volumetricMode`
+    // effect (Dark on the active chip's NiceWhite bg vs NiceWhite on the
+    // inactive chip's Dark bg). Same rationale as modeSwitch above — don't
+    // track for the generic palette pass.
 
     // ── targetContainer: [icon] [duration/weight] [-] [+] ──
     // 304 wide gives room for the symbol on the left, the value in the middle,
