@@ -69,6 +69,12 @@ static int bs_text_count = 0;
 static lv_obj_t *bs_kicker_label = NULL; // mainLabel3 (kicker tone)
 static lv_obj_t *bs_recolor_icons[14] = {NULL}; // icon recolor handles (Image4/Image5/back/profile/settings/etc.)
 static int bs_recolor_icon_count = 0;
+// Status-bar handle: captured from gm_status_bar() so apply_palette() can
+// recolor its wifi/bt icons + the clock label when the user switches to the
+// light theme on non-AMOLED panels. Without this, gm_status_bar()'s hard-coded
+// GM_MUTED / GM_CONTENT (designed for the dark OLED base) leaves the status
+// bar near-white-on-white when styleScreenBase() repaints the screen bg.
+static lv_obj_t *bs_status_bar = NULL;
 static lv_obj_t *bs_button_surfaces[8] = {NULL}; // round button bg surfaces (down/up steppers, save, etc.)
 static int bs_button_surface_count = 0;
 static lv_obj_t *bs_accent_surfaces[8] = {NULL}; // accent-colored button surfaces (start, up, profileSelect, accept)
@@ -205,7 +211,9 @@ void ui_BrewScreen_screen_init(void) {
                         ui_BrewScreen_screen_destroy);
 
     // Top status bar (wifi · bt · clock + live dot). Owner; destroy hook NULLs gm_h.status_time.
-    gm_status_bar(ui_BrewScreen, true);
+    // Cache the bar handle so apply_palette() can recolor its children on
+    // light-theme switches; gm_status_bar() hard-codes GM_MUTED / GM_CONTENT.
+    bs_status_bar = gm_status_bar(ui_BrewScreen, true);
 
     // Dials cluster (preserved). DefaultUI's adjustDials / adjustHeatingIndicator and
     // applyProcessRing(uic_BrewScreen_dials_tempGauge,...) drive these without touching
@@ -611,6 +619,7 @@ void ui_BrewScreen_screen_destroy(void) {
 
     // Status bar handle (owned by this screen while active)
     gm_h.status_time = NULL;
+    bs_status_bar = NULL;
 
     // Theme-tracking arrays
     bs_text_count = 0;
@@ -675,5 +684,30 @@ void ui_BrewScreen_apply_palette(lv_color_t text, lv_color_t muted,
     // ensureBrewContextLabel sibling is in the way; safe to recolor by handle.
     if (ui_BrewScreen_Label1 != NULL && lv_obj_is_valid(ui_BrewScreen_Label1)) {
         lv_obj_set_style_text_color(ui_BrewScreen_Label1, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+
+    // Recolor the gm_status_bar() children. The builder hard-codes GM_MUTED
+    // for the wifi/bt icons and GM_CONTENT for the clock label, which were
+    // designed for the dark OLED base. On UI_THEME_LIGHT (non-AMOLED panels)
+    // styleScreenBase() repaints the screen background to white and those
+    // hard-coded near-white tones become invisible. Walk the bar's children
+    // and retint: icons get the muted tone, clock gets primary text. The
+    // live-dot (last child when present) is left alone — its green is a
+    // semantic accent, not a theme tone.
+    if (bs_status_bar != NULL && lv_obj_is_valid(bs_status_bar)) {
+        const uint32_t child_count = lv_obj_get_child_cnt(bs_status_bar);
+        for (uint32_t i = 0; i < child_count; i++) {
+            lv_obj_t *child = lv_obj_get_child(bs_status_bar, i);
+            if (child == NULL || !lv_obj_is_valid(child)) continue;
+            if (child == gm_h.status_time) {
+                lv_obj_set_style_text_color(child, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+            } else if (lv_obj_check_type(child, &lv_img_class)) {
+                // Wifi / bt status icons.
+                lv_obj_set_style_img_recolor(child, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_img_recolor_opa(child, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+            }
+            // Live dot is an lv_obj with a bg_color (not an image, not the
+            // status_time label) — leave its green intact.
+        }
     }
 }
