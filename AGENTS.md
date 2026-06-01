@@ -28,7 +28,7 @@ The agent must drive the issue through these Linear states as work progresses. N
 | QA passes, PR opened | `Ready for Testing` |
 | Bugs found during PR review (mine or reviewer's) | back to `In progress` |
 | PR approved and ready to merge | `PR ready` |
-| PR merged to main | `Done` |
+| PR merged to main | `Done` (then delete the merged branch — see Post-Merge Cleanup) |
 
 **Self-review in QA** means: re-read the diff, run the build (`pio run -e display` and `cd web && npm run build`), check formatting (`scripts/format.sh`), verify the change against the issue's acceptance criteria. If anything fails or feels off, transition back to `In Progress`.
 
@@ -54,6 +54,23 @@ Fixes CAR-123
 6. Review the PR diff yourself; if issues found → **In Progress** → fix → push → re-review → **Ready for Testing**.
 7. When PR is approved and merge-ready, move issue to **PR Ready**.
 8. After merge to main, move issue to **Done**.
+9. **Clean up the merged branch** — see Post-Merge Cleanup below.
+
+### Post-Merge Cleanup (Mandatory)
+
+Once a PR is merged, the work branch is dead weight. Always clean up immediately so the local repo doesn't accumulate stale branches and worktrees.
+
+**Required steps after merge:**
+
+1. **Switch off the merged branch** if you're still on it: `git checkout dev-master`.
+2. **Pull latest dev-master**: `git pull --ff-only origin dev-master` (picks up the squash-merge commit).
+3. **Delete the local branch**: `git branch -D <branch-name>` (use `-D` because squash-merges look "unmerged" to git ancestry checks).
+4. **Prune the remote-tracking ref**: `git fetch --prune origin` (removes `origin/<branch-name>` if GitHub auto-deleted it).
+5. **Remove any worktree** tied to the branch: `git worktree remove --force <path>` then `git worktree prune`.
+
+**One-shot bulk cleanup** (safe to run periodically): `git fetch --prune origin && git branch -vv | awk '/: gone]/ {print $1}' | xargs -r git branch -D` — deletes every local branch whose upstream has been deleted on the remote. Pair with `git worktree list` + `git worktree remove` for the corresponding worktrees.
+
+**Rule of thumb:** if the Linear issue is `Done`, the local branch and any associated worktree should not exist. The only long-lived branches are `dev-master` and `master`.
 
 ### Brainstorming / Research / Spikes
 
