@@ -401,7 +401,7 @@ void ui_BrewScreen_screen_init(void) {
     bs_track_icon(ui_BrewScreen_Image5);
 
     ui_BrewScreen_targetTemp = lv_label_create(ui_BrewScreen_tempContainer);
-    lv_label_set_text(ui_BrewScreen_targetTemp, "93\xC2\xB0C");
+    lv_label_set_text(ui_BrewScreen_targetTemp, "93\xC2\xB0" "C");
     lv_obj_set_style_text_font(ui_BrewScreen_targetTemp, &ndot_24, 0);
     lv_obj_set_style_text_color(ui_BrewScreen_targetTemp, GM_CONTENT, 0);
     lv_obj_set_style_text_align(ui_BrewScreen_targetTemp, LV_TEXT_ALIGN_CENTER, 0);
