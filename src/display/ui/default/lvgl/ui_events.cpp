@@ -49,15 +49,28 @@ void onBrewScreen(lv_event_t *e) {
 }
 
 void onWaterScreen(lv_event_t *e) {
-    controller.getUI()->changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
     controller.setMode(MODE_WATER);
     controller.deactivate();
+    // Drop any prior process (e.g. a finished BREW) so the StatusScreen's water
+    // branch doesn't render stale brew metrics from getProcessSnapshot()'s
+    // lastProcess fallback. ui_SimpleProcessScreen used to mask this; the
+    // Nothing-themed StatusScreen reads the snapshot directly. clear() must
+    // run BEFORE changeScreen() because it emits controller:brew:clear, and
+    // DefaultUI's listener for that event redirects ui_StatusScreen back to
+    // ui_BrewScreen — switching first would briefly enter water then bounce
+    // back to brew. (CAR-292 PR #133)
+    controller.clear();
+    controller.getUI()->changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
 }
 
 void onSteamScreen(lv_event_t *e) {
-    controller.getUI()->changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
     controller.setMode(MODE_STEAM);
     controller.deactivate();
+    // See onWaterScreen() — clear lastProcess before navigating so steam
+    // doesn't inherit a brew snapshot AND the brew-clear listener doesn't
+    // bounce us back to ui_BrewScreen.
+    controller.clear();
+    controller.getUI()->changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
 }
 
 void onWakeup(lv_event_t *e) {
@@ -123,11 +136,17 @@ void onProfileSelect(lv_event_t *e) { controller.getUI()->onProfileSwitch(); }
 
 void onFlush(lv_event_t *e) { controller.onFlush(); }
 
-void onSimpleProcessToggle(lv_event_t *e) {
-    if (controller.getMode() != MODE_STEAM) {
+// CAR-292: onSimpleProcessToggle / onSimpleProcessScreenLoad removed alongside
+// ui_SimpleProcessScreen. ui_StatusScreen replaces the water dispense
+// start/stop affordance with a tap-to-toggle handler on the screen body
+// (steam regulates automatically via PID once the mode is set, and brew has
+// its own start affordance on ui_BrewScreen).
+void onStatusScreenTap(lv_event_t *e) {
+    if (controller.getMode() == MODE_WATER) {
         controller.isActiveSafe() ? controller.deactivate() : controller.activate();
     }
 }
+
 
 void onProfileScreenLoad(lv_event_t *e) {
     lv_obj_set_ext_click_area(ui_ProfileScreen_previousProfileBtn, 30);
@@ -160,13 +179,6 @@ void onBrewScreenLoad(lv_event_t *e) {
     lv_obj_set_ext_click_area(ui_BrewScreen_downDurationButton, 15);
     lv_obj_set_ext_click_area(ui_BrewScreen_upTempButton, 15);
     lv_obj_set_ext_click_area(ui_BrewScreen_downTempButton, 15);
-}
-
-void onSimpleProcessScreenLoad(lv_event_t *e) {
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_downTempButton, 40);
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_upTempButton, 40);
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_goButton, 25);
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_ImgButton6, 20);
 }
 
 void onStatusScreenLoad(lv_event_t *e) {
