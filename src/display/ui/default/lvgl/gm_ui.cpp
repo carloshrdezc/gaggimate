@@ -318,3 +318,35 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
         }
     }
 }
+
+// ── gm_status_bar_apply_palette (CAR-295) ────────────────────
+// Centralized recolor for status-bar children. Owning screens cache the
+// bar handle at build time and call this from their apply_palette() when
+// the theme flips. The walk identifies children by LVGL class rather
+// than by pointer equality with gm_h.status_time: handleScreenChange()
+// runs _ui_screen_change (which builds the new screen and re-points
+// gm_h.status_time at the *new* clock) BEFORE lv_obj_del(current)
+// destroys the previous screen. The previous screen's destroy hook then
+// NULLs gm_h.status_time, clobbering any freshly-stored handle. Pointer
+// comparison would miss the clock and leave it at hard-coded near-white
+// on light backgrounds (CAR-294 / CAR-297). The status bar only owns
+// one label child (wifi/bt are images, live-dot is a bare lv_obj with a
+// bg_color), so class detection is unambiguous. Live-dot green is a
+// semantic accent, not a theme tone — leave it alone.
+void gm_status_bar_apply_palette(lv_obj_t *bar, lv_color_t text, lv_color_t muted) {
+    if (bar == NULL || !lv_obj_is_valid(bar)) return;
+    const uint32_t child_count = lv_obj_get_child_cnt(bar);
+    for (uint32_t i = 0; i < child_count; i++) {
+        lv_obj_t *child = lv_obj_get_child(bar, i);
+        if (child == NULL || !lv_obj_is_valid(child)) continue;
+        if (lv_obj_check_type(child, &lv_label_class)) {
+            // Clock label — only label child of the status bar.
+            lv_obj_set_style_text_color(child, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+        } else if (lv_obj_check_type(child, &lv_img_class)) {
+            // Wifi / bt status icons.
+            lv_obj_set_style_img_recolor(child, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_img_recolor_opa(child, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+        // Live-dot is an lv_obj with a bg_color (not image, not label) — skip.
+    }
+}
