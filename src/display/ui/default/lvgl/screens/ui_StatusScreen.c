@@ -15,6 +15,13 @@
 
 lv_obj_t *ui_StatusScreen = NULL;
 
+// Local snapshot of the clock label this screen owns. Captured from
+// gm_h.status_time immediately after gm_status_bar() builds it. Used by the
+// destroy hook to decide whether the global still belongs to *this* screen
+// (see screen_destroy below for the full rationale). CAR-297 (mirrors the
+// CAR-294 GrindScreen guarded-clobber fix).
+static lv_obj_t *ss_status_time = NULL;
+
 // event functions
 void ui_event_StatusScreen(lv_event_t *e) {
     lv_event_code_t event_code = lv_event_get_code(e);
@@ -44,6 +51,11 @@ void ui_StatusScreen_screen_init(void) {
 
     // ── Top status bar (wifi · bt · clock + live dot) ──
     gm_status_bar(ui_StatusScreen, true);
+    // Snapshot the clock label gm_status_bar() just stored in the global, so
+    // the destroy hook can tell whether gm_h.status_time still points at our
+    // own clock (vs. having been overwritten by the next screen's init).
+    // CAR-297 (mirrors CAR-294 GrindScreen guarded-clobber).
+    ss_status_time = gm_h.status_time;
 
     // ── Edge arc (270° sweep) hugging the bezel ──
     gm_h.arc = gm_edge_arc(ui_StatusScreen, GM_RED);
@@ -156,6 +168,28 @@ void ui_StatusScreen_screen_destroy(void) {
     gm_h.w_target = gm_h.w_temp = gm_h.w_flow = NULL;
     gm_h.pill = NULL;
     gm_h.bar = NULL;
-    gm_h.status_time = NULL; // round-3 follow-up: was missing; gm_ui.h doc requires destroy hook to NULL it
+    // Status bar handle (owned by this screen while active).
+    //
+    // History: a plain unguarded `gm_h.status_time = NULL;` was added here
+    // in CAR-278 round-4 (commit 12531166) to satisfy the gm_ui.h ownership
+    // contract that destroy hooks must NULL handles they own. CAR-297
+    // upgrades it to the guarded-clobber pattern below.
+    //
+    // RACE: DefaultUI::handleScreenChange() builds the next screen
+    // (_ui_screen_change → target_init → gm_status_bar() → re-points
+    // gm_h.status_time at the *next* screen's clock) BEFORE lv_obj_del(current)
+    // fires this destroy hook. Unconditionally NULLing gm_h.status_time here
+    // would clobber the new screen's freshly-stored handle, leaving e.g.
+    // DefaultUI::updateStatusScreen() (DefaultUI.cpp:1543) with a null pointer
+    // — the destination clock would stick at "--:--" forever after the
+    // transition. So only NULL the global if it still refers to OUR clock
+    // (i.e. nothing else has taken ownership yet — typical for terminal
+    // teardown paths). ss_status_time always tracks the label this screen
+    // owns; when the global has moved on, leave it alone. CAR-297 (mirrors
+    // the CAR-294 GrindScreen guarded-clobber fix).
+    if (gm_h.status_time == ss_status_time) {
+        gm_h.status_time = NULL;
+    }
+    ss_status_time = NULL;
     for (int i = 0; i < 4; i++) gm_h.chips[i] = NULL;
 }

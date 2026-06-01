@@ -145,7 +145,10 @@ void ui_StandbyScreen_screen_destroy(void) {
     gm_h.ampm = NULL;
     gm_h.standby_temp = NULL;
     gm_h.status_label = NULL;
-    gm_h.status_time = NULL;
+    // StandbyScreen does NOT own gm_h.status_time — it builds its own status
+    // bar manually without calling gm_status_bar(), so the global belongs to
+    // whichever previous screen owned it (or to the next screen, whose init
+    // runs before this destroy hook). Don't touch it here. CAR-297.
     for (int i = 0; i < 4; i++) {
         gm_h.chips[i] = NULL;
     }
