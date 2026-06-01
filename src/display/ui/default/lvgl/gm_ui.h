@@ -73,6 +73,18 @@ void gm_metric_show(lv_obj_t *value, bool visible);
 //         READY pill (at-target indicator).
 void gm_status_apply_mode(int mode, int arc_pct, int bar_pct);
 
+// ── Status-bar palette retint (CAR-295) ──────────────────────
+// Recolor the children of a gm_status_bar() handle for the active theme.
+// gm_status_bar() hard-codes GM_MUTED (icons) and GM_CONTENT (clock),
+// which are dark-theme tones; on UI_THEME_LIGHT they vanish against a
+// white background. Each owning screen captures its bar handle and calls
+// this from its apply_palette() so the centralized walk stays in one
+// well-tested place. The live-dot keeps its semantic green.
+//   bar:   handle returned by gm_status_bar() (NULL/invalid → no-op)
+//   text:  primary text tone for the clock label
+//   muted: tone for the wifi/bt icons
+void gm_status_bar_apply_palette(lv_obj_t *bar, lv_color_t text, lv_color_t muted);
+
 #ifdef __cplusplus
 }
 #endif

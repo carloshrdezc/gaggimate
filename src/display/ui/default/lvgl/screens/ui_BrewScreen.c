@@ -713,41 +713,8 @@ void ui_BrewScreen_apply_palette(lv_color_t text, lv_color_t muted,
         lv_obj_set_style_text_color(ui_BrewScreen_Label1, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
 
-    // Recolor the gm_status_bar() children. The builder hard-codes GM_MUTED
-    // for the wifi/bt icons and GM_CONTENT for the clock label, which were
-    // designed for the dark OLED base. On UI_THEME_LIGHT (non-AMOLED panels)
-    // styleScreenBase() repaints the screen background to white and those
-    // hard-coded near-white tones become invisible. Walk the bar's children
-    // and retint: icons get the muted tone, clock gets primary text. The
-    // live-dot (last child when present) is left alone — its green is a
-    // semantic accent, not a theme tone.
-    //
-    // NOTE: We identify the clock by lv_label_class rather than by pointer
-    // equality with gm_h.status_time. DefaultUI::handleScreenChange() runs
-    // _ui_screen_change (which builds the new screen and calls
-    // gm_status_bar() — re-pointing gm_h.status_time at the *new* clock)
-    // BEFORE lv_obj_del(current) destroys the previous screen. The previous
-    // screen's destroy hook then NULLs gm_h.status_time, clobbering the
-    // freshly-stored handle. Pointer comparison would fail and the clock
-    // would stay at hard-coded near-white on light backgrounds. The status
-    // bar only has one label child (wifi/bt are images, live-dot is a bare
-    // lv_obj), so class-based detection is unambiguous. CAR-297 (mirrors the
-    // CAR-294 GrindScreen fix).
-    if (bs_status_bar != NULL && lv_obj_is_valid(bs_status_bar)) {
-        const uint32_t child_count = lv_obj_get_child_cnt(bs_status_bar);
-        for (uint32_t i = 0; i < child_count; i++) {
-            lv_obj_t *child = lv_obj_get_child(bs_status_bar, i);
-            if (child == NULL || !lv_obj_is_valid(child)) continue;
-            if (lv_obj_check_type(child, &lv_label_class)) {
-                // Clock label — only label child of the status bar.
-                lv_obj_set_style_text_color(child, text, LV_PART_MAIN | LV_STATE_DEFAULT);
-            } else if (lv_obj_check_type(child, &lv_img_class)) {
-                // Wifi / bt status icons.
-                lv_obj_set_style_img_recolor(child, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
-                lv_obj_set_style_img_recolor_opa(child, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-            }
-            // Live dot is an lv_obj with a bg_color (not an image, not a
-            // label) — leave its green intact.
-        }
-    }
+    // Recolor the gm_status_bar() children via the shared helper. The
+    // class-detection walk + rationale lives in gm_ui.cpp
+    // (gm_status_bar_apply_palette / CAR-295).
+    gm_status_bar_apply_palette(bs_status_bar, text, muted);
 }
