@@ -1270,40 +1270,14 @@ void DefaultUI::applyScreenVisualLanguage() {
     styleScreenBase(activeScreen, palette, roundDisplay);
 
     if (activeScreen == ui_BrewScreen) {
+        // CAR-293: BrewScreen self-styles via gm_ui builders + gm_theme tokens.
+        // We only need to: (a) drive the ring overlay, (b) update the kicker text
+        // to match ringVisual, (c) refresh the bean context label, and (d) hand
+        // the palette to the screen so it can recolor on UI_THEME_LIGHT.
         ensureBrewContextLabel();
-        stylePanel(ui_BrewScreen_contentPanel4, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        stylePanel(ui_BrewScreen_profileInfo, palette, OPA_200, 28);
-        stylePanel(ui_BrewScreen_modeSwitch, palette, OPA_220, 22);
-        stylePanel(ui_BrewScreen_tempContainer, palette, OPA_210, 22);
-        stylePanel(ui_BrewScreen_targetContainer, palette, OPA_210, 22);
-        styleHeadline(ui_BrewScreen_mainLabel3, palette, true);
-        styleSecondary(ui_BrewScreen_Label1, palette);
-        styleHeadline(ui_BrewScreen_profileName, palette, true);
         applyProcessRing(uic_BrewScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_BrewScreen_profileName, palette, &ndot_24);
-        styleMetricValue(ui_BrewScreen_weightLabel, palette, &ndot_24);
-        styleMetricValue(ui_BrewScreen_targetTemp, palette, &ndot_24);
-        styleMetricValue(ui_BrewScreen_targetDuration, palette, &ndot_24);
-        styleIconButton(ui_BrewScreen_ImgButton5, palette, palette.textPrimary);
-        styleIconButton(ui_BrewScreen_startButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_profileSelectBtn, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_settingsButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_downTempButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_upTempButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_downDurationButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_upDurationButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_byTimeButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_saveButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_acceptButton, palette, palette.success);
-        styleIconButton(ui_BrewScreen_saveAsNewButton, palette, palette.warning);
-        if (lv_obj_is_valid(ui_BrewScreen_Image5)) {
-            lv_obj_set_style_img_recolor(ui_BrewScreen_Image5, palette.warning, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image5, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_BrewScreen_Image4)) {
-            lv_obj_set_style_img_recolor(ui_BrewScreen_Image4, palette.accent, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image4, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
+        ui_BrewScreen_apply_palette(palette.textPrimary, palette.textMuted,
+                                    palette.surface, palette.accent, ringVisual.tone);
         if (lv_obj_is_valid(ui_BrewScreen_mainLabel3)) {
             lv_label_set_text(ui_BrewScreen_mainLabel3, ringVisual.title);
             lv_obj_set_style_text_color(ui_BrewScreen_mainLabel3, ringVisual.tone, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1315,52 +1289,15 @@ void DefaultUI::applyScreenVisualLanguage() {
             styleSecondary(brewContextLabel, palette);
         }
         if (roundDisplay) {
+            // Round-display content panel is the round 372x372 circle; the screen
+            // sets a 360x360 default for flat displays, so bump it here.
             lv_obj_set_size(ui_BrewScreen_contentPanel4, 372, 372);
             lv_obj_align(ui_BrewScreen_contentPanel4, LV_ALIGN_CENTER, 0, 4);
-            lv_obj_set_size(ui_BrewScreen_profileInfo, 292, 112);
-            lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 96);
-            lv_obj_set_size(ui_BrewScreen_Container3, 252, 42);
-            lv_obj_set_style_pad_column(ui_BrewScreen_Container3, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_width(ui_BrewScreen_Label1, 252);
-            lv_obj_set_width(ui_BrewScreen_profileName, 160);
-            lv_obj_set_size(ui_BrewScreen_modeSwitch, 180, 52);
-            lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_TOP_MID, 0, 68);
-            lv_obj_align(ui_BrewScreen_mainLabel3, LV_ALIGN_TOP_MID, 0, 34);
-            alignFooterAction(ui_BrewScreen_startButton, palette, palette.accent, -18, 74);
-            lv_obj_align(ui_BrewScreen_controlContainer, LV_ALIGN_CENTER, 0, 18);
-            lv_obj_set_size(ui_BrewScreen_controlContainer, 300, 214);
-            lv_obj_set_style_pad_row(ui_BrewScreen_controlContainer, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_size(ui_BrewScreen_adjustments, 300, 122);
-            lv_obj_set_style_pad_row(ui_BrewScreen_adjustments, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_BrewScreen_adjustments, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_size(ui_BrewScreen_tempContainer, 254, 54);
-            lv_obj_set_size(ui_BrewScreen_targetContainer, 254, 54);
-            lv_obj_set_style_pad_all(ui_BrewScreen_tempContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_all(ui_BrewScreen_targetContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+            // Re-anchor the back button via the shared helper (also restyles it).
             alignTopBackButton(ui_BrewScreen_ImgButton5, palette, palette.textPrimary);
-            lv_obj_align(ui_BrewScreen_profileSelectBtn, LV_ALIGN_LEFT_MID, 18, 0);
-            lv_obj_align(ui_BrewScreen_settingsButton, LV_ALIGN_RIGHT_MID, -18, 0);
-            styleRoundIconButton(ui_BrewScreen_profileSelectBtn, palette, palette.accent, 42);
-            styleRoundIconButton(ui_BrewScreen_settingsButton, palette, palette.textMuted, 42);
-            styleRoundIconButton(ui_BrewScreen_downTempButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_BrewScreen_upTempButton, palette, palette.accent, 48);
-            styleRoundIconButton(ui_BrewScreen_downDurationButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_BrewScreen_upDurationButton, palette, palette.accent, 48);
-            styleRoundIconButton(ui_BrewScreen_byTimeButton, palette, palette.accent, 48);
-            alignMetricPair(ui_BrewScreen_Image5, ui_BrewScreen_targetTemp, -10, 0, palette.warning, palette);
-            alignMetricPair(ui_BrewScreen_Image4, ui_BrewScreen_targetDuration, -10, 0, palette.accent, palette);
-            lv_obj_align(ui_BrewScreen_downTempButton, LV_ALIGN_CENTER, -104, 0);
-            lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_CENTER, 104, 0);
-            lv_obj_align(ui_BrewScreen_downDurationButton, LV_ALIGN_CENTER, -104, 0);
-            lv_obj_align(ui_BrewScreen_upDurationButton, LV_ALIGN_CENTER, 104, 0);
-            lv_obj_align(ui_BrewScreen_byTimeButton, LV_ALIGN_CENTER, 104, 0);
-            lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -78, -32);
-            lv_obj_align(ui_BrewScreen_acceptButton, LV_ALIGN_BOTTOM_MID, 0, -18);
-            lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 78, -32);
-            styleRoundIconButton(ui_BrewScreen_saveButton, palette, palette.textMuted, 52);
-            styleRoundIconButton(ui_BrewScreen_acceptButton, palette, palette.success, 64, true);
-            styleRoundIconButton(ui_BrewScreen_saveAsNewButton, palette, palette.warning, 52);
-            if (brewContextLabel != nullptr) {
+            // brewContextLabel is parented to ui_BrewScreen_profileInfo by
+            // ensureBrewContextLabel(); align it relative to Container3 on round.
+            if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel)) {
                 lv_obj_set_width(brewContextLabel, 238);
                 lv_obj_align_to(brewContextLabel, ui_BrewScreen_Container3, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
             }

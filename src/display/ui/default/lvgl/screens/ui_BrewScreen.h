@@ -66,6 +66,13 @@ extern lv_obj_t *uic_BrewScreen_dials_pressureTarget;
 extern lv_obj_t *uic_BrewScreen_dials_pressureText;
 extern lv_obj_t *uic_BrewScreen_dials_tempText;
 
+// CAR-293: Nothing-theme palette pass. DefaultUI's applyScreenVisualLanguage
+// calls this to recolor tracked themable children for UI_THEME_LIGHT support
+// (the dark default GM_* tokens go invisible against a light bg).
+extern void ui_BrewScreen_apply_palette(lv_color_t text, lv_color_t muted,
+                                        lv_color_t buttonSurface, lv_color_t accent,
+                                        lv_color_t kickerTone);
+
 #ifdef __cplusplus
 } /*extern "C"*/
 #endif
