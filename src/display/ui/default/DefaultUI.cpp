@@ -1607,12 +1607,17 @@ void DefaultUI::updateStandbyScreen() {
     // design (no active process), so targetTemp would always be 0 here and
     // the line fell through to "--". Fall back to the active brew profile's
     // setpoint — that's what wakeup will heat the boiler to.
+    // Only render live values when the BLE controller is connected; otherwise
+    // currentTemp is the stale initial sensor value (refreshed only by BLE
+    // callbacks) and the profile-setpoint fallback would mislead (e.g.
+    // "0° / 93°C" while the kicker says WAITING FOR CONTROLLER).
     if (lv_obj_is_valid(gm_h.standby_temp)) {
+        bool ctrlConnected = controller->getClientController()->isConnected();
         int displayTarget = targetTemp;
         if (displayTarget <= 0) {
             displayTarget = static_cast<int>(profileManager->getSelectedProfile().temperature);
         }
-        if (displayTarget > 0) {
+        if (ctrlConnected && displayTarget > 0) {
             lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, displayTarget);
         } else {
             lv_label_set_text(gm_h.standby_temp, "--");
