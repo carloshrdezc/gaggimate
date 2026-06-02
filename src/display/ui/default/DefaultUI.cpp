@@ -1546,9 +1546,14 @@ void DefaultUI::updateStandbyScreen() {
     // CAR-304: WiFi+NTP are independent of controller BLE pairing — keep the
     // hero clock visible while waitingForController so the kicker
     // "WAITING FOR CONTROLLER" doesn't leave a blank space where time should
-    // be. Other gates (error/updating/autotuning/AP/no-WiFi/pre-init) still
-    // suppress the clock because those states genuinely invalidate it.
-    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning && initialized) {
+    // be. Other gates (error/updating/autotuning/AP/no-WiFi) still suppress
+    // the clock because those states genuinely invalidate it.
+    // CAR-306: also drop the `initialized` gate. `initialized` is only set
+    // true on `controller:bluetooth:connect`, so on a cold boot with WiFi/NTP
+    // up but no controller yet paired, the clock would stay hidden — exactly
+    // the case CAR-304 was meant to cover. Pairing state is conveyed by the
+    // kicker label and the BT icon recolor, not the clock.
+    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning) {
         time_t now;
         struct tm timeinfo;
 
