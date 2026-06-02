@@ -118,17 +118,16 @@ void ui_ModeScreen_screen_init(void) {
     lv_obj_clear_flag(ui_ModeScreen_btnBrew, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(ui_ModeScreen_btnBrew, lv_color_hex(0xFAFAFA), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ModeScreen_btnBrew, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_img_src(ui_ModeScreen_btnBrew, &gm_ic_cup, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnBrew, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR,
-                                           _ui_theme_color_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnBrew, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR_OPA,
-                                           _ui_theme_alpha_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnBrew, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_COLOR,
-                                           _ui_theme_color_Dark);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnBrew, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_OPA,
-                                           _ui_theme_alpha_Dark);
     lv_obj_set_style_shadow_width(ui_ModeScreen_btnBrew, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_spread(ui_ModeScreen_btnBrew, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // CAR-301: foreground lv_img instead of bg_img_src — bg_img + A8 + recolor_opa=COVER
+    // renders as a solid fill on this display (per-pixel alpha ignored in bg path).
+    // styleMenuTile() recolors child[0] on each applyScreenPalette pass.
+    lv_obj_t *ic_brew = lv_img_create(ui_ModeScreen_btnBrew);
+    lv_img_set_src(ic_brew, &gm_ic_cup);
+    lv_obj_set_style_img_recolor(ic_brew, GM_CONTENT, 0);
+    lv_obj_set_style_img_recolor_opa(ic_brew, LV_OPA_COVER, 0);
+    lv_obj_center(ic_brew);
 
     ui_ModeScreen_btnSteam = lv_btn_create(ui_ModeScreen_contentPanel1);
     lv_obj_set_width(ui_ModeScreen_btnSteam, 120);
@@ -138,17 +137,13 @@ void ui_ModeScreen_screen_init(void) {
     lv_obj_clear_flag(ui_ModeScreen_btnSteam, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(ui_ModeScreen_btnSteam, lv_color_hex(0xFAFAFA), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ModeScreen_btnSteam, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_img_src(ui_ModeScreen_btnSteam, &gm_ic_steam, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnSteam, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR,
-                                           _ui_theme_color_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnSteam, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR_OPA,
-                                           _ui_theme_alpha_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnSteam, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_COLOR,
-                                           _ui_theme_color_Dark);
-    ui_object_set_themeable_style_property(ui_ModeScreen_btnSteam, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_OPA,
-                                           _ui_theme_alpha_Dark);
     lv_obj_set_style_shadow_width(ui_ModeScreen_btnSteam, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_spread(ui_ModeScreen_btnSteam, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_t *ic_steam = lv_img_create(ui_ModeScreen_btnSteam);
+    lv_img_set_src(ic_steam, &gm_ic_steam);
+    lv_obj_set_style_img_recolor(ic_steam, GM_CONTENT, 0);
+    lv_obj_set_style_img_recolor_opa(ic_steam, LV_OPA_COVER, 0);
+    lv_obj_center(ic_steam);
 
     ui_ModeScreen_waterBtn = lv_btn_create(ui_ModeScreen_contentPanel1);
     lv_obj_set_width(ui_ModeScreen_waterBtn, 120);
@@ -158,17 +153,13 @@ void ui_ModeScreen_screen_init(void) {
     lv_obj_clear_flag(ui_ModeScreen_waterBtn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(ui_ModeScreen_waterBtn, lv_color_hex(0xFAFAFA), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ModeScreen_waterBtn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_img_src(ui_ModeScreen_waterBtn, &gm_ic_drop, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ModeScreen_waterBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR,
-                                           _ui_theme_color_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_waterBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR_OPA,
-                                           _ui_theme_alpha_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_waterBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_COLOR,
-                                           _ui_theme_color_Dark);
-    ui_object_set_themeable_style_property(ui_ModeScreen_waterBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_OPA,
-                                           _ui_theme_alpha_Dark);
     lv_obj_set_style_shadow_width(ui_ModeScreen_waterBtn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_spread(ui_ModeScreen_waterBtn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_t *ic_water = lv_img_create(ui_ModeScreen_waterBtn);
+    lv_img_set_src(ic_water, &gm_ic_drop);
+    lv_obj_set_style_img_recolor(ic_water, GM_CONTENT, 0);
+    lv_obj_set_style_img_recolor_opa(ic_water, LV_OPA_COVER, 0);
+    lv_obj_center(ic_water);
 
     ui_ModeScreen_grindBtn = lv_btn_create(ui_ModeScreen_contentPanel1);
     lv_obj_set_width(ui_ModeScreen_grindBtn, 120);
@@ -178,17 +169,13 @@ void ui_ModeScreen_screen_init(void) {
     lv_obj_clear_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(ui_ModeScreen_grindBtn, lv_color_hex(0xFAFAFA), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ModeScreen_grindBtn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_img_src(ui_ModeScreen_grindBtn, &ui_img_363557387, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ModeScreen_grindBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR,
-                                           _ui_theme_color_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_grindBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_IMG_RECOLOR_OPA,
-                                           _ui_theme_alpha_NiceWhite);
-    ui_object_set_themeable_style_property(ui_ModeScreen_grindBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_COLOR,
-                                           _ui_theme_color_Dark);
-    ui_object_set_themeable_style_property(ui_ModeScreen_grindBtn, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_SHADOW_OPA,
-                                           _ui_theme_alpha_Dark);
     lv_obj_set_style_shadow_width(ui_ModeScreen_grindBtn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_spread(ui_ModeScreen_grindBtn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_t *ic_grind = lv_img_create(ui_ModeScreen_grindBtn);
+    lv_img_set_src(ic_grind, &ui_img_363557387);
+    lv_obj_set_style_img_recolor(ic_grind, GM_CONTENT, 0);
+    lv_obj_set_style_img_recolor_opa(ic_grind, LV_OPA_COVER, 0);
+    lv_obj_center(ic_grind);
 
     lv_obj_add_event_cb(ui_ModeScreen_standbyButton, ui_event_ModeScreen_standbyButton, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_ModeScreen_settingsButton, ui_event_ModeScreen_settingsButton, LV_EVENT_ALL, NULL);

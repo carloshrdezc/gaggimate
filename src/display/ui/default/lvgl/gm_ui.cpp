@@ -78,8 +78,8 @@ lv_obj_t *gm_status_bar(lv_obj_t *parent, bool live) {
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(bar, 14, 0);
 
-    gm_icon(bar, &gm_ic_wifi, GM_MUTED, 16);
-    gm_icon(bar, &gm_ic_bt, GM_MUTED, 16);
+    gm_icon(bar, &gm_ic_wifi, GM_CONTENT, 16);
+    gm_icon(bar, &gm_ic_bt, GM_CONTENT, 16);
 
     // Placeholder until the screen's update hook sets the real device clock.
     gm_h.status_time = lv_label_create(bar);
