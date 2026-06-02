@@ -422,8 +422,11 @@ void styleMenuTile(lv_obj_t *obj, const DisplayPalette &palette, const lv_color_
     if (obj == nullptr || !lv_obj_is_valid(obj))
         return;
     styleGlassButton(obj, palette, tone, 999, 1, OPA_200);
-    lv_obj_set_style_bg_img_recolor(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_img_recolor_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_t *icon = lv_obj_get_child(obj, 0);
+    if (icon != nullptr && lv_obj_is_valid(icon)) {
+        lv_obj_set_style_img_recolor(icon, tone, 0);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+    }
 }
 
 void styleScreenBase(lv_obj_t *screen, const DisplayPalette &palette, const bool roundDisplay) {
@@ -1464,6 +1467,10 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_align(ui_ModeScreen_standbyButton, LV_ALIGN_BOTTOM_MID, 0, -22);
             styleRoundIconButton(ui_ModeScreen_standbyButton, palette, palette.textPrimary, 76, true);
             lv_obj_move_foreground(ui_ModeScreen_standbyButton);
+            // Settings button at TOP_RIGHT renders off-screen on the round 480px display.
+            lv_obj_set_align(ui_ModeScreen_settingsButton, LV_ALIGN_TOP_MID);
+            lv_obj_set_x(ui_ModeScreen_settingsButton, 0);
+            lv_obj_set_y(ui_ModeScreen_settingsButton, 18);
         }
     } else if (activeScreen == ui_MenuScreen) {
         // CAR-279: Quick-settings list is built from gm_make_screen + GM_*
@@ -1540,11 +1547,11 @@ void DefaultUI::updateStandbyScreen() {
     }
     // WiFi/BT icons always visible — color indicates connection state.
     lv_obj_set_style_img_recolor(ui_StandbyScreen_wifiIcon,
-        (!apActive && WiFi.status() == WL_CONNECTED) ? GM_CONTENT : GM_FAINT, 0);
+        (!apActive && WiFi.status() == WL_CONNECTED) ? GM_CONTENT : GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_wifiIcon, LV_OPA_COVER, 0);
     lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_img_recolor(ui_StandbyScreen_bluetoothIcon,
-        controller->getClientController()->isConnected() ? GM_CONTENT : GM_FAINT, 0);
+        controller->getClientController()->isConnected() ? GM_CONTENT : GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_bluetoothIcon, LV_OPA_COVER, 0);
     lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
 
