@@ -1521,15 +1521,21 @@ void DefaultUI::updateStandbyScreen() {
             christmasMode = (timeinfo.tm_mon == 11 && timeinfo.tm_mday < 27) || (timeinfo.tm_mon == 0 && timeinfo.tm_mday < 6);
         }
     } else {
-        lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(ui_StandbyScreen_time, "--:--");
+        lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
         if (lv_obj_is_valid(gm_h.ampm)) {
             lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    controller->getClientController()->isConnected() ? lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN)
-                                                     : lv_obj_add_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
-    !apActive &&WiFi.status() == WL_CONNECTED ? lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN)
-                                              : lv_obj_add_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
+    // WiFi/BT icons always visible — color indicates connection state.
+    lv_obj_set_style_img_recolor(ui_StandbyScreen_wifiIcon,
+        (!apActive && WiFi.status() == WL_CONNECTED) ? GM_CONTENT : GM_FAINT, 0);
+    lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_wifiIcon, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_img_recolor(ui_StandbyScreen_bluetoothIcon,
+        controller->getClientController()->isConnected() ? GM_CONTENT : GM_FAINT, 0);
+    lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_bluetoothIcon, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
 
     // Temperature sub-line (Nothing theme): "<current>° / <target>°C".
     if (lv_obj_is_valid(gm_h.standby_temp)) {

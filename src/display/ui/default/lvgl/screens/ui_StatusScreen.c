@@ -43,6 +43,20 @@ void ui_event_StatusScreen(lv_event_t *e) {
     }
 }
 
+// Chip-bar tap handlers — each chip navigates to its target screen.
+static void status_chip0_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onMenuClick(e);
+}
+static void status_chip1_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onBrewScreen(e);
+}
+static void status_chip2_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onSteamScreen(e);
+}
+static void status_chip3_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onWaterScreen(e);
+}
+
 // build functions
 
 void ui_StatusScreen_screen_init(void) {
@@ -139,6 +153,11 @@ void ui_StatusScreen_screen_init(void) {
 
     // ── Bottom mode chip bar ──
     gm_chip_bar(ui_StatusScreen, 1, GM_RED); // brew chip lit by default
+    // Wire tap navigation. chip0=Menu, chip1=Brew, chip2=Steam, chip3=Water.
+    if (gm_h.chips[0]) lv_obj_add_event_cb(gm_h.chips[0], status_chip0_cb, LV_EVENT_ALL, NULL);
+    if (gm_h.chips[1]) lv_obj_add_event_cb(gm_h.chips[1], status_chip1_cb, LV_EVENT_ALL, NULL);
+    if (gm_h.chips[2]) lv_obj_add_event_cb(gm_h.chips[2], status_chip2_cb, LV_EVENT_ALL, NULL);
+    if (gm_h.chips[3]) lv_obj_add_event_cb(gm_h.chips[3], status_chip3_cb, LV_EVENT_ALL, NULL);
 
     // Initial state: brew layout populated.
     gm_status_apply_mode(1, 0, 0);
