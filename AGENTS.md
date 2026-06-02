@@ -64,11 +64,11 @@ Once a PR is merged, the work branch is dead weight. Always clean up immediately
 
 1. **Switch off the merged branch** if you're still on it: `git checkout dev-master`.
 2. **Pull latest dev-master**: `git pull --ff-only origin dev-master` (picks up the squash-merge commit).
-3. **Delete the local branch**: `git branch -D <branch-name>` (use `-D` because squash-merges look "unmerged" to git ancestry checks).
-4. **Prune the remote-tracking ref**: `git fetch --prune origin` (removes `origin/<branch-name>` if GitHub auto-deleted it).
-5. **Remove any worktree** tied to the branch: `git worktree remove --force <path>` then `git worktree prune`.
+3. **Remove any worktree** tied to the branch first — Git refuses to delete a branch that is still checked out in a worktree (`fatal: cannot delete branch '<name>' used by worktree at '<path>'`). Run `git worktree list` to find them, then `git worktree remove --force <path>` for each, followed by `git worktree prune` to clean up admin entries.
+4. **Delete the local branch**: `git branch -D <branch-name>` (use `-D` because squash-merges look "unmerged" to git ancestry checks).
+5. **Prune the remote-tracking ref**: `git fetch --prune origin` (removes `origin/<branch-name>` if GitHub auto-deleted it).
 
-**One-shot bulk cleanup** (safe to run periodically): `git fetch --prune origin && git branch -vv | awk '/: gone]/ {print $1}' | xargs -r git branch -D` — deletes every local branch whose upstream has been deleted on the remote. Pair with `git worktree list` + `git worktree remove` for the corresponding worktrees.
+**One-shot bulk cleanup** (safe to run periodically): `git fetch --prune origin` first, then `git worktree list` + `git worktree remove --force <path>` for any worktrees on stale branches, then `git branch -vv | awk '/: gone]/ {print $1}' | xargs -r git branch -D` to delete every local branch whose upstream has been deleted on the remote. Order matters — worktrees first, branch deletes second, otherwise the bulk delete chokes on the worktree-bound ones.
 
 **Rule of thumb:** if the Linear issue is `Done`, the local branch and any associated worktree should not exist. The only long-lived branches are `dev-master` and `master`.
 
