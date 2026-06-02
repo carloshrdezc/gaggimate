@@ -76,7 +76,7 @@ void ui_StatusScreen_screen_init(void) {
 
     // ── Kicker label above the hero ──
     gm_h.kicker = gm_kicker(ui_StatusScreen, "BREW", GM_RED);
-    lv_obj_align(gm_h.kicker, LV_ALIGN_CENTER, 0, -84);
+    lv_obj_align(gm_h.kicker, LV_ALIGN_CENTER, 0, -118);
 
     // ── Hero numeral (timer / temp / weight) ──
     gm_h.hero = lv_label_create(ui_StatusScreen);
@@ -85,7 +85,7 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_set_style_text_color(gm_h.hero, GM_CONTENT, 0);
     // Shift left by half the unit-suffix width so hero+unit read as a
     // visually-centered group (hero_unit aligns OUT_RIGHT_BOTTOM of hero).
-    lv_obj_align(gm_h.hero, LV_ALIGN_CENTER, -16, -8);
+    lv_obj_align(gm_h.hero, LV_ALIGN_CENTER, -16, -54);
 
     // Hero unit suffix — accent-colored, sits to the right of the hero.
     gm_h.hero_unit = lv_label_create(ui_StatusScreen);
@@ -101,13 +101,13 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, 6, 0);
-    lv_obj_align(row, LV_ALIGN_CENTER, 0, 96);
+    lv_obj_align(row, LV_ALIGN_CENTER, 0, 44);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
 
     gm_h.m_weight = gm_metric(row, "WEIGHT", "0.0g", GM_CONTENT);
     gm_h.m_temp   = gm_metric(row, "TEMP",   "0\xC2\xB0", GM_CONTENT);
-    gm_h.m_press  = gm_metric(row, "PRESS",  "0.0",  GM_CONTENT);
+    gm_h.m_press  = gm_metric(row, "PRESS",  "0.0",  GM_RED);
     gm_h.m_flow   = gm_metric(row, "FLOW",   "--",   GM_CONTENT);
 
     // Water-mode metrics share the same row container so they layout in
@@ -119,9 +119,9 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_add_flag(lv_obj_get_parent(gm_h.w_temp),   LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(lv_obj_get_parent(gm_h.w_flow),   LV_OBJ_FLAG_HIDDEN);
 
-    // ── Linear progress bar (water mode dispenser) ──
+    // ── Linear progress bar (brew dose progress + water dispenser) ──
     gm_h.bar = gm_progress(ui_StatusScreen, GM_RED);
-    lv_obj_align(gm_h.bar, LV_ALIGN_CENTER, 0, 140);
+    lv_obj_align(gm_h.bar, LV_ALIGN_CENTER, 0, 100);
     lv_obj_add_flag(gm_h.bar, LV_OBJ_FLAG_HIDDEN);
 
     // ── READY pill (steam mode at-target) ──
@@ -135,11 +135,10 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_set_style_pad_right(gm_h.pill, 14, 0);
     lv_obj_set_style_pad_top(gm_h.pill, 6, 0);
     lv_obj_set_style_pad_bottom(gm_h.pill, 6, 0);
-    // CAR-278 review #7: pill is anchored 20px below the bar so a future
-    // "both visible" bug reads as a vertical pair instead of an invisible
-    // stack (bar sits at +140; pill at +160). The mode switch in
-    // gm_status_apply_mode() currently hides one when the other is shown.
-    lv_obj_align(gm_h.pill, LV_ALIGN_CENTER, 0, 160);
+    // Pill and bar share y+100 because they are never shown simultaneously:
+    // bar is shown in brew/water, pill only in steam at temperature. Sharing
+    // the position keeps them visually anchored to the same content band.
+    lv_obj_align(gm_h.pill, LV_ALIGN_CENTER, 0, 100);
     lv_obj_add_flag(gm_h.pill, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(gm_h.pill, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(gm_h.pill, LV_OBJ_FLAG_CLICKABLE);

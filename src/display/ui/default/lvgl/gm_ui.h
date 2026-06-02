@@ -67,9 +67,9 @@ void gm_metric_show(lv_obj_t *value, bool visible);
 //         fall back to neutral content. Matches MODE_* in core/constants.h
 //         so callers can pass the controller mode directly.
 //   arc_pct, bar_pct: 0-100 progress values for the edge arc and the
-//         linear progress bar. The arc is hidden in water mode; the bar
-//         is shown only in water mode (dispense progress). In steam mode
-//         the bar stays hidden and bar_pct >= 100 is the trigger for the
+//         linear progress bar. Arc is shown only in steam mode (heat-up
+//         progress); bar is shown in brew (dose progress) and water
+//         (dispense progress). In steam mode bar_pct >= 100 triggers the
 //         READY pill (at-target indicator).
 void gm_status_apply_mode(int mode, int arc_pct, int bar_pct);
 

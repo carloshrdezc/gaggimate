@@ -295,14 +295,16 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
             break;
         }
         case 1:
-        default: { // brew (and fallback) — full metric row, arc, no bar/pill.
+        default: { // brew (and fallback) — full metric row, linear bar, no arc/pill.
             // mode==0 (standby) and mode>=4 (grind) fall here defensively. In
             // practice updateStatusScreen() only runs when ui_StatusScreen is
             // active, so those values shouldn't reach this helper — but if a
             // future code path dispatches StatusScreen for grind, the brew
             // layout is the closest sensible default.
-            gm_show(gm_h.arc, true);
-            gm_show(gm_h.bar, false);
+            // CAR-300: arc is for steam/water; brew uses the linear bar to show
+            // dose progress (volumetric fill or phase time as a bottom anchor).
+            gm_show(gm_h.arc, false);
+            gm_show(gm_h.bar, true);
             gm_metric_show(gm_h.m_weight, true);
             gm_metric_show(gm_h.m_temp, true);
             // CAR-278 review #6: restore TEMP label after switching back from

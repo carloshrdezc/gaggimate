@@ -1661,14 +1661,15 @@ void DefaultUI::updateStatusScreen() {
             lv_label_set_text(gm_h.m_flow, "--");
         }
 
-        // Arc progress: prefer volumetric, else phase time, else 0.
+        // CAR-300: brew uses linear bar (not arc) for dose/phase progress.
+        // Prefer volumetric fill, else phase elapsed time, else stay at 0.
         if (proc.exists && proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
             proc.volumetricTargetValue > 0.0) {
-            arcPct = static_cast<int>((proc.currentVolume / proc.volumetricTargetValue) * 100.0);
+            barPct = static_cast<int>((proc.currentVolume / proc.volumetricTargetValue) * 100.0);
         } else if (proc.exists && proc.currentPhaseStarted > 0 && now >= proc.currentPhaseStarted &&
                    proc.phaseDuration > 0) {
             const unsigned long progress = now - proc.currentPhaseStarted;
-            arcPct = static_cast<int>((progress * 100UL) / proc.phaseDuration);
+            barPct = static_cast<int>((progress * 100UL) / proc.phaseDuration);
         }
     } else if (mode == MODE_STEAM) {
         // Hero is current temp; READY pill appears when stable.
@@ -1728,11 +1729,19 @@ void DefaultUI::updateStatusScreen() {
         setKicker("");
     }
 
-    // Bean label: show only in brew mode when a bean is selected.
+    // CAR-300: context label always shows in brew mode (profile · pressure).
+    // When a bean is selected, append it after the profile/pressure line.
     if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
-        if (mode == MODE_BREW && !selectedBean.isEmpty()) {
+        if (mode == MODE_BREW) {
             lv_obj_clear_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(statusBeanLabel, "Bean • %s", selectedBean.c_str());
+            if (!selectedBean.isEmpty()) {
+                lv_label_set_text_fmt(statusBeanLabel, "%s · %.1f bar · %s",
+                                      selectedProfile.label.c_str(), pressure,
+                                      selectedBean.c_str());
+            } else {
+                lv_label_set_text_fmt(statusBeanLabel, "%s · %.1f bar",
+                                      selectedProfile.label.c_str(), pressure);
+            }
         } else {
             lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
         }
