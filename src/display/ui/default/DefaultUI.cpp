@@ -1519,11 +1519,20 @@ void DefaultUI::updateStandbyScreen() {
             }
 
             christmasMode = (timeinfo.tm_mon == 11 && timeinfo.tm_mday < 27) || (timeinfo.tm_mon == 0 && timeinfo.tm_mday < 6);
+        } else {
+            // WiFi up but NTP hasn't synced yet — getLocalTime() returns false.
+            // Without this branch the clock would keep its prior text (often the
+            // screen-init "--:--"), which renders as missing-glyph rectangles in
+            // ndot_120. Hide it like the no-WiFi path does. (CAR-299)
+            lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            if (lv_obj_is_valid(gm_h.ampm)) {
+                lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     } else {
         // ndot_120 only covers 0x30-0x3A (digits + colon); dashes in "--:--"
         // render as LVGL missing-glyph rectangles. Hide the clock instead and
-        // let the kicker label convey state (CAR-300).
+        // let the kicker label convey state (CAR-299).
         lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
         if (lv_obj_is_valid(gm_h.ampm)) {
             lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
