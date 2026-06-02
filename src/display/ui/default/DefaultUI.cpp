@@ -1543,18 +1543,26 @@ void DefaultUI::updateStandbyScreen() {
         }
     }
 
-    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning && !waitingForController &&
-        initialized) {
+    // CAR-304: WiFi+NTP are independent of controller BLE pairing — keep the
+    // hero clock visible while waitingForController so the kicker
+    // "WAITING FOR CONTROLLER" doesn't leave a blank space where time should
+    // be. Other gates (error/updating/autotuning/AP/no-WiFi) still suppress
+    // the clock because those states genuinely invalidate it.
+    // CAR-306: also drop the `initialized` gate. `initialized` is only set
+    // true on `controller:bluetooth:connect`, so on a cold boot with WiFi/NTP
+    // up but no controller yet paired, the clock would stay hidden — exactly
+    // the case CAR-304 was meant to cover. Pairing state is conveyed by the
+    // kicker label and the BT icon recolor, not the clock.
+    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning) {
         time_t now;
         struct tm timeinfo;
 
         localtime_r(&now, &timeinfo);
         if (getLocalTime(&timeinfo, 500)) {
-            char time[6]; // "HH:MM\0"
             Settings &settings = controller->getSettings();
             const bool is24h = settings.isClock24hFormat();
-            strftime(time, sizeof(time), is24h ? "%H:%M" : "%I:%M", &timeinfo);
-            lv_label_set_text(ui_StandbyScreen_time, time);
+            const int hour = is24h ? timeinfo.tm_hour : ((timeinfo.tm_hour % 12 == 0) ? 12 : timeinfo.tm_hour % 12);
+            lv_label_set_text_fmt(ui_StandbyScreen_time, "%02d:#D71921 %02d#", hour, timeinfo.tm_min);
             lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
 
             // ndot_120 only covers digits+colon; drive the AM/PM suffix separately
@@ -1600,9 +1608,22 @@ void DefaultUI::updateStandbyScreen() {
     lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
 
     // Temperature sub-line (Nothing theme): "<current>° / <target>°C".
+    // CAR-303: Controller::getTargetTemp() returns 0 in MODE_STANDBY by
+    // design (no active process), so targetTemp would always be 0 here and
+    // the line fell through to "--". Fall back to the active brew profile's
+    // setpoint — that's what wakeup will heat the boiler to.
+    // Only render live values when the BLE controller is connected; otherwise
+    // currentTemp is the stale initial sensor value (refreshed only by BLE
+    // callbacks) and the profile-setpoint fallback would mislead (e.g.
+    // "0° / 93°C" while the kicker says WAITING FOR CONTROLLER).
     if (lv_obj_is_valid(gm_h.standby_temp)) {
-        if (targetTemp > 0) {
-            lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, targetTemp);
+        bool ctrlConnected = controller->getClientController()->isConnected();
+        int displayTarget = targetTemp;
+        if (displayTarget <= 0) {
+            displayTarget = static_cast<int>(profileManager->getSelectedProfile().temperature);
+        }
+        if (ctrlConnected && displayTarget > 0) {
+            lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, displayTarget);
         } else {
             lv_label_set_text(gm_h.standby_temp, "--");
         }

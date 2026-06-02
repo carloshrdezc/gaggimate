@@ -33,6 +33,7 @@ static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, 
     lv_img_set_src(im, src);
     lv_obj_set_size(im, target_px, target_px);
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));
+    lv_img_set_pivot(im, 0, 0);
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
     return im;
@@ -73,6 +74,7 @@ void ui_StandbyScreen_screen_init(void) {
 
     // ── Hero ambient clock ──
     ui_StandbyScreen_time = lv_label_create(ui_StandbyScreen);
+    lv_label_set_recolor(ui_StandbyScreen_time, true);
     lv_label_set_text(ui_StandbyScreen_time, "--:--");
     lv_obj_set_style_text_font(ui_StandbyScreen_time, &ndot_120, 0);
     lv_obj_set_style_text_color(ui_StandbyScreen_time, GM_CONTENT, 0);
