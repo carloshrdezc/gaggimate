@@ -66,6 +66,15 @@ extern lv_obj_t *uic_BrewScreen_dials_pressureTarget;
 extern lv_obj_t *uic_BrewScreen_dials_pressureText;
 extern lv_obj_t *uic_BrewScreen_dials_tempText;
 
+// CAR-301 (review C2/C3): hero numeral, °-suffix, and ratio sub-line in the
+// chat2 brew-idle redesign. DefaultUI drives these via use_effect:
+//   - hero_value/hero_unit ← currentTemp (mirrors uic_BrewScreen_dials_tempText
+//     for the now-prominent hero numeral)
+//   - ratio_sub ← selectedProfile target volume + duration + max brew pressure
+extern lv_obj_t *uic_BrewScreen_hero_value;
+extern lv_obj_t *uic_BrewScreen_hero_unit;
+extern lv_obj_t *uic_BrewScreen_ratio_sub;
+
 // CAR-293: Nothing-theme palette pass. DefaultUI's applyScreenVisualLanguage
 // calls this to recolor tracked themable children for UI_THEME_LIGHT support
 // (the dark default GM_* tokens go invisible against a light bg).

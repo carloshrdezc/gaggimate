@@ -87,19 +87,24 @@ static lv_obj_t *bs_accent_surfaces[8] = {NULL}; // accent-colored button surfac
 static int bs_accent_surface_count = 0;
 
 // CAR-301 chat2 redesign — file-static handles for the new BrewIdle layout.
-//   s_hero_value : centered hero numeral ("--" → live temp; ndot_150)
-//   s_hero_unit  : "°" suffix (ndot_60, GM_CONTENT)
+//   uic_BrewScreen_hero_value : centered hero numeral ("--" → live temp; ndot_150)
+//   uic_BrewScreen_hero_unit  : "°" suffix (ndot_60, GM_CONTENT)
 //   s_status_pill: pill bg wrapping ui_BrewScreen_mainLabel3 (rounded chip with
 //                  GM_HEAT/GM_RED border tone — DefaultUI overwrites mainLabel3
 //                  text/colour from ringVisual every render)
-//   s_ratio_sub  : small muted line beneath status pill ("18 → 36 · 1:2 · 9 BAR")
+//   uic_BrewScreen_ratio_sub  : small muted line beneath status pill ("18 → 36 · 1:2 · 9 BAR")
 //   s_start_label: "START SHOT" label inside the resized pill startButton
 // These are NOT part of the SquareLine global surface — internal-only, NULLed
 // in screen_destroy alongside the bs_* tracking arrays.
-static lv_obj_t *s_hero_value = NULL;
-static lv_obj_t *s_hero_unit = NULL;
+// CAR-301 review C2/C3: hero numeral and ratio sub-line are now driven by
+// DefaultUI effects (live currentTemp + selectedProfile fields), so these
+// three are exported as `uic_BrewScreen_*` custom variables matching the
+// existing dials/tempText convention. status_pill and start_label remain
+// file-static — DefaultUI never touches them directly.
+lv_obj_t *uic_BrewScreen_hero_value = NULL;
+lv_obj_t *uic_BrewScreen_hero_unit = NULL;
 static lv_obj_t *s_status_pill = NULL;
-static lv_obj_t *s_ratio_sub = NULL;
+lv_obj_t *uic_BrewScreen_ratio_sub = NULL;
 static lv_obj_t *s_start_label = NULL;
 
 static void bs_track_text(lv_obj_t *o) {
@@ -288,10 +293,10 @@ void ui_BrewScreen_screen_init(void) {
     //
     // Layout (480×480, contentPanel4 360×360 centered):
     //   profileInfo (chip)  TOP_MID  y=80   — repositioned below
-    //   hero (s_hero_value) CENTER   y=-10  — large ndot_150 numeral
-    //     + s_hero_unit "°" sits OUT_RIGHT_BOTTOM of hero
+    //   hero (uic_BrewScreen_hero_value) CENTER   y=-10  — large ndot_150 numeral
+    //     + uic_BrewScreen_hero_unit "°" sits OUT_RIGHT_BOTTOM of hero
     //   s_status_pill       CENTER   y=90   — wraps ui_BrewScreen_mainLabel3
-    //   s_ratio_sub         CENTER   y=130  — muted ratio breakdown
+    //   uic_BrewScreen_ratio_sub         CENTER   y=130  — muted ratio breakdown
     //   startButton (pill)  BOTTOM_MID y=-54 — full-width red "START SHOT"
     //
     // The kicker text ("BREW") was removed in chat2 — the status pill now
@@ -301,25 +306,25 @@ void ui_BrewScreen_screen_init(void) {
     // top of the panel.
 
     // Hero numeral — centered, ndot_150, GM_CONTENT.
-    // TODO(CAR-301): wire live temp from uic_BrewScreen_dials_tempText into
-    // s_hero_value via a DefaultUI effect (mirror lv_label_set_text_fmt).
-    // For now it stays at "--" and the dials cluster keeps driving its own
-    // tempText (which is no longer visible behind the new layout).
-    s_hero_value = lv_label_create(ui_BrewScreen_contentPanel4);
-    lv_label_set_text(s_hero_value, "--");
-    lv_obj_set_style_text_font(s_hero_value, &ndot_150, 0);
-    lv_obj_set_style_text_color(s_hero_value, GM_CONTENT, 0);
+    // CAR-301 review C2: wired to live currentTemp via DefaultUI effect
+    // (DefaultUI.cpp brew-screen temp effect now also writes
+    // uic_BrewScreen_hero_value alongside uic_BrewScreen_dials_tempText).
+    // Initial "--" placeholder is overwritten on first temp tick.
+    uic_BrewScreen_hero_value = lv_label_create(ui_BrewScreen_contentPanel4);
+    lv_label_set_text(uic_BrewScreen_hero_value, "--");
+    lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_150, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_hero_value, GM_CONTENT, 0);
     // Shift left by ~half the unit-suffix width so hero+unit read as a
     // visually-centered group (mirrors StatusScreen hero pattern).
-    lv_obj_align(s_hero_value, LV_ALIGN_CENTER, -16, -10);
-    bs_track_text(s_hero_value);
+    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -10);
+    bs_track_text(uic_BrewScreen_hero_value);
 
-    s_hero_unit = lv_label_create(ui_BrewScreen_contentPanel4);
-    lv_label_set_text(s_hero_unit, "\xC2\xB0"); // U+00B0 °
-    lv_obj_set_style_text_font(s_hero_unit, &ndot_60, 0);
-    lv_obj_set_style_text_color(s_hero_unit, GM_CONTENT, 0);
-    lv_obj_align_to(s_hero_unit, s_hero_value, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
-    bs_track_text(s_hero_unit);
+    uic_BrewScreen_hero_unit = lv_label_create(ui_BrewScreen_contentPanel4);
+    lv_label_set_text(uic_BrewScreen_hero_unit, "\xC2\xB0"); // U+00B0 °
+    lv_obj_set_style_text_font(uic_BrewScreen_hero_unit, &ndot_60, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_hero_unit, GM_CONTENT, 0);
+    lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
+    bs_track_text(uic_BrewScreen_hero_unit);
 
     // Status pill — rounded chip wrapping ui_BrewScreen_mainLabel3.
     // Tone: GM_HEAT (heating) or GM_RED (at-target / brew ready). DefaultUI
@@ -355,16 +360,16 @@ void ui_BrewScreen_screen_init(void) {
     bs_kicker_label = ui_BrewScreen_mainLabel3;
 
     // Ratio sub-line — small muted breakdown beneath the status pill.
-    // TODO(CAR-301): wire from selectedProfile (dose-in / dose-out / pressure)
-    // via a DefaultUI effect; for now a static placeholder so the layout
-    // composes correctly.
-    s_ratio_sub = lv_label_create(ui_BrewScreen_contentPanel4);
-    lv_label_set_text(s_ratio_sub, "18 \xE2\x86\x92 36  \xC2\xB7  1:2  \xC2\xB7  9 BAR");
-    lv_obj_set_style_text_font(s_ratio_sub, &spacemono_14, 0);
-    lv_obj_set_style_text_color(s_ratio_sub, GM_MUTED, 0);
-    lv_obj_set_style_text_letter_space(s_ratio_sub, 1, 0);
-    lv_obj_align(s_ratio_sub, LV_ALIGN_CENTER, 0, 130);
-    bs_track_text(s_ratio_sub);
+    // CAR-301 review C3: wired from selectedProfile via DefaultUI effect
+    // (target volume + duration + max brew-phase pressure). Static "--"
+    // placeholder is overwritten on first profile tick.
+    uic_BrewScreen_ratio_sub = lv_label_create(ui_BrewScreen_contentPanel4);
+    lv_label_set_text(uic_BrewScreen_ratio_sub, "--");
+    lv_obj_set_style_text_font(uic_BrewScreen_ratio_sub, &spacemono_14, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_ratio_sub, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(uic_BrewScreen_ratio_sub, 1, 0);
+    lv_obj_align(uic_BrewScreen_ratio_sub, LV_ALIGN_CENTER, 0, 130);
+    bs_track_text(uic_BrewScreen_ratio_sub);
 
     // controlContainer: column flex hosting profileInfo + adjustments + start area.
     // DefaultUI resizes/aligns this on round displays; default rectangular sizing here.
@@ -388,6 +393,13 @@ void ui_BrewScreen_screen_init(void) {
     ui_BrewScreen_profileInfo = lv_obj_create(ui_BrewScreen_contentPanel4);
     lv_obj_remove_style_all(ui_BrewScreen_profileInfo);
     lv_obj_set_size(ui_BrewScreen_profileInfo, 292, 100);
+    // CAR-301 review C1: contentPanel4 has no flex layout, so without an
+    // explicit align this chip lands at the parent's top-left default when
+    // DefaultUI un-hides it in Settings sub-state. Anchor at TOP_MID y=80 to
+    // match the layout comment above and keep the chip centered horizontally
+    // when it becomes visible. (Was implicit in the old controlContainer flex
+    // column; lost during the chat2 reparent.)
+    lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 80);
     lv_obj_set_style_radius(ui_BrewScreen_profileInfo, 28, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_profileInfo, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_profileInfo, LV_OPA_50, 0);
@@ -769,10 +781,10 @@ void ui_BrewScreen_screen_destroy(void) {
     bs_button_surface_count = 0;
     bs_accent_surface_count = 0;
     bs_kicker_label = NULL;
-    s_hero_value = NULL;
-    s_hero_unit = NULL;
+    uic_BrewScreen_hero_value = NULL;
+    uic_BrewScreen_hero_unit = NULL;
     s_status_pill = NULL;
-    s_ratio_sub = NULL;
+    uic_BrewScreen_ratio_sub = NULL;
     s_start_label = NULL;
     for (int i = 0; i < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0])); i++)
         bs_text_labels[i] = NULL;
