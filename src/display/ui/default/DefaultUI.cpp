@@ -846,6 +846,14 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_BrewScreen_dials_tempText, "%d°C", currentTemp);
+                              // CAR-301 review C2: mirror live boiler temp into the new
+                              // chat2 hero numeral. The dials cluster's tempText is no
+                              // longer the prominent readout — the centered ndot_150
+                              // numeral is. Hero is integer-only ("93") with the
+                              // separate "°" suffix label above; no °C unit here.
+                              if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
+                                  lv_label_set_text_fmt(uic_BrewScreen_hero_value, "%d", currentTemp);
+                              }
                           },
                           &currentTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
@@ -1002,8 +1010,44 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text(ui_BrewScreen_profileName, selectedProfile.label.c_str());
                               lv_label_set_text(ui_BrewScreen_Label1,
                                                 selectedBean.isEmpty() ? "PROFILE READY" : buildContextLine("Bean", selectedBean).c_str());
+                              // CAR-301 review C3: drive the chat2 ratio sub-line from
+                              // the selected profile. Without dose-in (bean-side, not on
+                              // Profile), the line shows the achievable target shape:
+                              //   volumetric → "→ {targetVolume}g · {duration}s · {maxBar} BAR"
+                              //   time-based → "{duration}s · {maxBar} BAR"
+                              // maxBar is the maximum pumpAdvanced.pressure across BREW
+                              // phases (or 9 fallback for simple/legacy profiles).
+                              if (uic_BrewScreen_ratio_sub != nullptr && lv_obj_is_valid(uic_BrewScreen_ratio_sub)) {
+                                  float maxBar = 0.0f;
+                                  for (const auto &phase : selectedProfile.phases) {
+                                      if (phase.phase != PhaseType::PHASE_TYPE_BREW) continue;
+                                      if (phase.pumpIsSimple) continue;
+                                      if (phase.pumpAdvanced.target != PumpTarget::PUMP_TARGET_PRESSURE) continue;
+                                      const float p = phase.pumpAdvanced.pressure;
+                                      if (p > maxBar) maxBar = p;
+                                  }
+                                  if (maxBar <= 0.0f) maxBar = 9.0f;
+                                  // CAR-301 review C5: read live targets, not selectedProfile
+                                  // accessors. selectedProfile is a UI-local snapshot refreshed
+                                  // only on profiles:profile:select; +/- and yield-slider edits
+                                  // mutate profileManager's owned profile and fire
+                                  // controller:target{Duration,Volume}:change which keep
+                                  // targetDuration / targetVolume / brewVolumetric current.
+                                  // Mirrors the targetDuration label effect at lines 945-963.
+                                  const int totalDur = static_cast<int>(targetDuration);
+                                  const float vol = targetVolume;
+                                  if (brewVolumetric && vol > 0.0f) {
+                                      lv_label_set_text_fmt(uic_BrewScreen_ratio_sub,
+                                                            "\xE2\x86\x92 %.0fg  \xC2\xB7  %ds  \xC2\xB7  %.0f BAR",
+                                                            vol, totalDur, maxBar);
+                                  } else {
+                                      lv_label_set_text_fmt(uic_BrewScreen_ratio_sub,
+                                                            "%ds  \xC2\xB7  %.0f BAR",
+                                                            totalDur, maxBar);
+                                  }
+                              }
                           },
-                          &selectedProfileId, &selectedBean);
+                          &selectedProfileId, &selectedBean, &targetDuration, &targetVolume, &brewVolumetric);
 
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_ProfileScreen; },

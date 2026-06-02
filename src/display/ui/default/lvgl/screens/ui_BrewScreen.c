@@ -86,6 +86,27 @@ static int bs_button_surface_count = 0;
 static lv_obj_t *bs_accent_surfaces[8] = {NULL}; // accent-colored button surfaces (start, up, profileSelect, accept)
 static int bs_accent_surface_count = 0;
 
+// CAR-301 chat2 redesign — file-static handles for the new BrewIdle layout.
+//   uic_BrewScreen_hero_value : centered hero numeral ("--" → live temp; ndot_150)
+//   uic_BrewScreen_hero_unit  : "°" suffix (ndot_60, GM_CONTENT)
+//   s_status_pill: pill bg wrapping ui_BrewScreen_mainLabel3 (rounded chip with
+//                  GM_HEAT/GM_RED border tone — DefaultUI overwrites mainLabel3
+//                  text/colour from ringVisual every render)
+//   uic_BrewScreen_ratio_sub  : small muted line beneath status pill ("18 → 36 · 1:2 · 9 BAR")
+//   s_start_label: "START SHOT" label inside the resized pill startButton
+// These are NOT part of the SquareLine global surface — internal-only, NULLed
+// in screen_destroy alongside the bs_* tracking arrays.
+// CAR-301 review C2/C3: hero numeral and ratio sub-line are now driven by
+// DefaultUI effects (live currentTemp + selectedProfile fields), so these
+// three are exported as `uic_BrewScreen_*` custom variables matching the
+// existing dials/tempText convention. status_pill and start_label remain
+// file-static — DefaultUI never touches them directly.
+lv_obj_t *uic_BrewScreen_hero_value = NULL;
+lv_obj_t *uic_BrewScreen_hero_unit = NULL;
+static lv_obj_t *s_status_pill = NULL;
+lv_obj_t *uic_BrewScreen_ratio_sub = NULL;
+static lv_obj_t *s_start_label = NULL;
+
 static void bs_track_text(lv_obj_t *o) {
     if (o != NULL && bs_text_count < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0]))) {
         bs_text_labels[bs_text_count++] = o;
@@ -268,14 +289,87 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_clear_flag(ui_BrewScreen_contentPanel4, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(ui_BrewScreen_contentPanel4, LV_OBJ_FLAG_CLICKABLE);
 
+    // ── CAR-301 chat2 redesign: hero numeral, status pill, ratio sub ──
+    //
+    // Layout (480×480, contentPanel4 360×360 centered):
+    //   profileInfo (chip)  TOP_MID  y=80   — repositioned below
+    //   hero (uic_BrewScreen_hero_value) CENTER   y=-10  — large ndot_150 numeral
+    //     + uic_BrewScreen_hero_unit "°" sits OUT_RIGHT_BOTTOM of hero
+    //   s_status_pill       CENTER   y=90   — wraps ui_BrewScreen_mainLabel3
+    //   uic_BrewScreen_ratio_sub         CENTER   y=130  — muted ratio breakdown
+    //   startButton (pill)  BOTTOM_MID y=-54 — full-width red "START SHOT"
+    //
+    // The kicker text ("BREW") was removed in chat2 — the status pill now
+    // carries the brew-state phrase. ui_BrewScreen_mainLabel3 is still created
+    // (DefaultUI.cpp:1284-1287 overwrites its text from ringVisual.title every
+    // render) but lives INSIDE s_status_pill instead of free-floating at the
+    // top of the panel.
+
+    // Hero numeral — centered, ndot_150, GM_CONTENT.
+    // CAR-301 review C2: wired to live currentTemp via DefaultUI effect
+    // (DefaultUI.cpp brew-screen temp effect now also writes
+    // uic_BrewScreen_hero_value alongside uic_BrewScreen_dials_tempText).
+    // Initial "--" placeholder is overwritten on first temp tick.
+    uic_BrewScreen_hero_value = lv_label_create(ui_BrewScreen_contentPanel4);
+    lv_label_set_text(uic_BrewScreen_hero_value, "--");
+    lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_150, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_hero_value, GM_CONTENT, 0);
+    // Shift left by ~half the unit-suffix width so hero+unit read as a
+    // visually-centered group (mirrors StatusScreen hero pattern).
+    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -10);
+    bs_track_text(uic_BrewScreen_hero_value);
+
+    uic_BrewScreen_hero_unit = lv_label_create(ui_BrewScreen_contentPanel4);
+    lv_label_set_text(uic_BrewScreen_hero_unit, "\xC2\xB0"); // U+00B0 °
+    lv_obj_set_style_text_font(uic_BrewScreen_hero_unit, &ndot_60, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_hero_unit, GM_CONTENT, 0);
+    lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
+    bs_track_text(uic_BrewScreen_hero_unit);
+
+    // Status pill — rounded chip wrapping ui_BrewScreen_mainLabel3.
+    // Tone: GM_HEAT (heating) or GM_RED (at-target / brew ready). DefaultUI
+    // overrides mainLabel3 colour from ringVisual.tone every render, so the
+    // visible state colour stays accurate; we set a sensible default here.
+    s_status_pill = lv_obj_create(ui_BrewScreen_contentPanel4);
+    lv_obj_remove_style_all(s_status_pill);
+    lv_obj_set_size(s_status_pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_radius(s_status_pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_status_pill, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(s_status_pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(s_status_pill, GM_HEAT, 0);
+    lv_obj_set_style_border_width(s_status_pill, 1, 0);
+    lv_obj_set_style_border_opa(s_status_pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_left(s_status_pill, 24, 0);
+    lv_obj_set_style_pad_right(s_status_pill, 24, 0);
+    lv_obj_set_style_pad_top(s_status_pill, 8, 0);
+    lv_obj_set_style_pad_bottom(s_status_pill, 8, 0);
+    lv_obj_align(s_status_pill, LV_ALIGN_CENTER, 0, 90);
+    lv_obj_clear_flag(s_status_pill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_status_pill, LV_OBJ_FLAG_CLICKABLE);
+    bs_track_button_surface(s_status_pill);
+
     // Kicker label ("BREW" / "READY" / etc.) — DefaultUI sets text + tone from ringVisual.
-    ui_BrewScreen_mainLabel3 = lv_label_create(ui_BrewScreen_contentPanel4);
-    lv_label_set_text(ui_BrewScreen_mainLabel3, "BREW");
+    // Now lives inside s_status_pill instead of free-floating; DefaultUI keeps
+    // touching only the label, never the pill bg, so this is safe.
+    ui_BrewScreen_mainLabel3 = lv_label_create(s_status_pill);
+    lv_label_set_text(ui_BrewScreen_mainLabel3, "HEATING");
     lv_obj_set_style_text_font(ui_BrewScreen_mainLabel3, &ndot_24, 0);
-    lv_obj_set_style_text_color(ui_BrewScreen_mainLabel3, GM_RED, 0);
+    lv_obj_set_style_text_color(ui_BrewScreen_mainLabel3, GM_HEAT, 0);
     lv_obj_set_style_text_letter_space(ui_BrewScreen_mainLabel3, GM_TRACK_KICKER, 0);
-    lv_obj_align(ui_BrewScreen_mainLabel3, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_center(ui_BrewScreen_mainLabel3);
     bs_kicker_label = ui_BrewScreen_mainLabel3;
+
+    // Ratio sub-line — small muted breakdown beneath the status pill.
+    // CAR-301 review C3: wired from selectedProfile via DefaultUI effect
+    // (target volume + duration + max brew-phase pressure). Static "--"
+    // placeholder is overwritten on first profile tick.
+    uic_BrewScreen_ratio_sub = lv_label_create(ui_BrewScreen_contentPanel4);
+    lv_label_set_text(uic_BrewScreen_ratio_sub, "--");
+    lv_obj_set_style_text_font(uic_BrewScreen_ratio_sub, &spacemono_14, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_ratio_sub, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(uic_BrewScreen_ratio_sub, 1, 0);
+    lv_obj_align(uic_BrewScreen_ratio_sub, LV_ALIGN_CENTER, 0, 130);
+    bs_track_text(uic_BrewScreen_ratio_sub);
 
     // controlContainer: column flex hosting profileInfo + adjustments + start area.
     // DefaultUI resizes/aligns this on round displays; default rectangular sizing here.
@@ -290,11 +384,22 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_clear_flag(ui_BrewScreen_controlContainer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(ui_BrewScreen_controlContainer, LV_OBJ_FLAG_CLICKABLE);
 
-    // ── profileInfo: header row (selectBtn · profileName · settingsButton) + Label1 ──
-    // Pad & rounded-pill background; text/icon recolor handled per-child below.
-    ui_BrewScreen_profileInfo = lv_obj_create(ui_BrewScreen_controlContainer);
+    // ── profileInfo: pill-style chip at TOP_MID (CAR-301 chat2 redesign) ──
+    //
+    // Was a multi-row stack inside controlContainer; now a single horizontal
+    // pill chip parented to contentPanel4 directly so it floats independently
+    // of the Settings adjustments column. DefaultUI.cpp:1097 hides this when
+    // brewScreenState == Brew.
+    ui_BrewScreen_profileInfo = lv_obj_create(ui_BrewScreen_contentPanel4);
     lv_obj_remove_style_all(ui_BrewScreen_profileInfo);
     lv_obj_set_size(ui_BrewScreen_profileInfo, 292, 100);
+    // CAR-301 review C1: contentPanel4 has no flex layout, so without an
+    // explicit align this chip lands at the parent's top-left default when
+    // DefaultUI un-hides it in Settings sub-state. Anchor at TOP_MID y=80 to
+    // match the layout comment above and keep the chip centered horizontally
+    // when it becomes visible. (Was implicit in the old controlContainer flex
+    // column; lost during the chat2 reparent.)
+    lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 80);
     lv_obj_set_style_radius(ui_BrewScreen_profileInfo, 28, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_profileInfo, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_profileInfo, LV_OPA_50, 0);
@@ -513,21 +618,43 @@ void ui_BrewScreen_screen_init(void) {
     bs_track_accent_surface(ui_BrewScreen_byTimeButton);
     bs_track_icon(ui_BrewScreen_byTimeButton);
 
-    // ── startButton: large round below adjustments ──
+    // ── startButton: full-width red pill at the bottom (CAR-301 chat2) ──
+    //
+    // Was a 64×64 round imgbtn with the cup icon. chat2 design moves to a wide
+    // pill with "START SHOT" text, no leading icon. We keep the lv_imgbtn
+    // widget type because:
+    //   - ui_events.cpp:177 references ui_BrewScreen_startButton,
+    //   - DefaultUI.cpp toggles its visibility per BrewScreenState,
+    //   - imgbtn accepts child labels (LVGL renders them on top of the image
+    //     slot), so adding s_start_label as a child works without changing the
+    //     widget class or any of its callers.
+    // We set NULL src on all states so no glyph paints behind the label.
     ui_BrewScreen_startButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
-    lv_imgbtn_set_src(ui_BrewScreen_startButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_cup, NULL);
-    lv_obj_set_size(ui_BrewScreen_startButton, 64, 64);
+    lv_imgbtn_set_src(ui_BrewScreen_startButton, LV_IMGBTN_STATE_RELEASED, NULL, NULL, NULL);
+    lv_obj_set_size(ui_BrewScreen_startButton, 280, 56);
     lv_obj_set_style_radius(ui_BrewScreen_startButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_startButton, GM_RED, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_startButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_startButton, GM_BG, 0);
-    lv_obj_set_style_img_recolor_opa(ui_BrewScreen_startButton, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -18);
-    lv_obj_set_ext_click_area(ui_BrewScreen_startButton, 25);
+    lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -54);
+    lv_obj_set_ext_click_area(ui_BrewScreen_startButton, 16);
     lv_obj_add_event_cb(ui_BrewScreen_startButton, ui_event_BrewScreen_startButton,
                         LV_EVENT_ALL, NULL);
     bs_track_accent_surface(ui_BrewScreen_startButton);
-    bs_track_icon(ui_BrewScreen_startButton);
+
+    // "START SHOT" label inside the pill — centered, light-on-red.
+    s_start_label = lv_label_create(ui_BrewScreen_startButton);
+    lv_label_set_text(s_start_label, "START SHOT");
+    lv_obj_set_style_text_font(s_start_label, &ndot_24, 0);
+    // CAR-301 review (I1): hardcoded white instead of GM_BG. The startButton
+    // bg is palette-tracked as an accent surface (recolored to palette.accent
+    // each frame); GM_BG is the *screen* background and has no contrast
+    // guarantee against an accent that may be muted in light theme. White is
+    // intentionally palette-independent — the red/accent pill stays bold
+    // across both themes — and matches the chat2 design's "light-on-red" cue.
+    lv_obj_set_style_text_color(s_start_label, lv_color_white(), 0);
+    lv_obj_set_style_text_letter_space(s_start_label, GM_TRACK_KICKER, 0);
+    lv_obj_center(s_start_label);
+    // NOTE: not bs_track_text() — fixed light-on-red, palette-independent.
 
     // ── save / accept / saveAsNew trio (Settings mode footer; default hidden) ──
     // DefaultUI's BrewScreenState reactive toggles LV_OBJ_FLAG_HIDDEN on these +
@@ -654,6 +781,11 @@ void ui_BrewScreen_screen_destroy(void) {
     bs_button_surface_count = 0;
     bs_accent_surface_count = 0;
     bs_kicker_label = NULL;
+    uic_BrewScreen_hero_value = NULL;
+    uic_BrewScreen_hero_unit = NULL;
+    s_status_pill = NULL;
+    uic_BrewScreen_ratio_sub = NULL;
+    s_start_label = NULL;
     for (int i = 0; i < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0])); i++)
         bs_text_labels[i] = NULL;
     for (int i = 0; i < (int)(sizeof(bs_recolor_icons) / sizeof(bs_recolor_icons[0])); i++)
