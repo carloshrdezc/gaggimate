@@ -1543,8 +1543,12 @@ void DefaultUI::updateStandbyScreen() {
         }
     }
 
-    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning && !waitingForController &&
-        initialized) {
+    // CAR-304: WiFi+NTP are independent of controller BLE pairing — keep the
+    // hero clock visible while waitingForController so the kicker
+    // "WAITING FOR CONTROLLER" doesn't leave a blank space where time should
+    // be. Other gates (error/updating/autotuning/AP/no-WiFi/pre-init) still
+    // suppress the clock because those states genuinely invalidate it.
+    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning && initialized) {
         time_t now;
         struct tm timeinfo;
 
@@ -1600,9 +1604,17 @@ void DefaultUI::updateStandbyScreen() {
     lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
 
     // Temperature sub-line (Nothing theme): "<current>° / <target>°C".
+    // CAR-303: Controller::getTargetTemp() returns 0 in MODE_STANDBY by
+    // design (no active process), so targetTemp would always be 0 here and
+    // the line fell through to "--". Fall back to the active brew profile's
+    // setpoint — that's what wakeup will heat the boiler to.
     if (lv_obj_is_valid(gm_h.standby_temp)) {
-        if (targetTemp > 0) {
-            lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, targetTemp);
+        int displayTarget = targetTemp;
+        if (displayTarget <= 0) {
+            displayTarget = static_cast<int>(profileManager->getSelectedProfile().temperature);
+        }
+        if (displayTarget > 0) {
+            lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, displayTarget);
         } else {
             lv_label_set_text(gm_h.standby_temp, "--");
         }
