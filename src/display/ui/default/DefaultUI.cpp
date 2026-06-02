@@ -1040,7 +1040,7 @@ void DefaultUI::setupReactive() {
                                   }
                               }
                           },
-                          &selectedProfileId, &selectedBean);
+                          &selectedProfileId, &selectedBean, &targetDuration, &targetVolume, &brewVolumetric);
 
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_ProfileScreen; },
