@@ -1027,9 +1027,16 @@ void DefaultUI::setupReactive() {
                                       if (p > maxBar) maxBar = p;
                                   }
                                   if (maxBar <= 0.0f) maxBar = 9.0f;
-                                  const int totalDur = static_cast<int>(selectedProfile.getTotalDuration());
-                                  const float vol = selectedProfile.getTotalVolume();
-                                  if (selectedProfile.isVolumetric() && vol > 0.0f) {
+                                  // CAR-301 review C5: read live targets, not selectedProfile
+                                  // accessors. selectedProfile is a UI-local snapshot refreshed
+                                  // only on profiles:profile:select; +/- and yield-slider edits
+                                  // mutate profileManager's owned profile and fire
+                                  // controller:target{Duration,Volume}:change which keep
+                                  // targetDuration / targetVolume / brewVolumetric current.
+                                  // Mirrors the targetDuration label effect at lines 945-963.
+                                  const int totalDur = static_cast<int>(targetDuration);
+                                  const float vol = targetVolume;
+                                  if (brewVolumetric && vol > 0.0f) {
                                       lv_label_set_text_fmt(uic_BrewScreen_ratio_sub,
                                                             "\xE2\x86\x92 %.0fg  \xC2\xB7  %ds  \xC2\xB7  %.0f BAR",
                                                             vol, totalDur, maxBar);
