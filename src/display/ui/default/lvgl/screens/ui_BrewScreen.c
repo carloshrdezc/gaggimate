@@ -633,7 +633,13 @@ void ui_BrewScreen_screen_init(void) {
     s_start_label = lv_label_create(ui_BrewScreen_startButton);
     lv_label_set_text(s_start_label, "START SHOT");
     lv_obj_set_style_text_font(s_start_label, &ndot_24, 0);
-    lv_obj_set_style_text_color(s_start_label, GM_BG, 0);
+    // CAR-301 review (I1): hardcoded white instead of GM_BG. The startButton
+    // bg is palette-tracked as an accent surface (recolored to palette.accent
+    // each frame); GM_BG is the *screen* background and has no contrast
+    // guarantee against an accent that may be muted in light theme. White is
+    // intentionally palette-independent — the red/accent pill stays bold
+    // across both themes — and matches the chat2 design's "light-on-red" cue.
+    lv_obj_set_style_text_color(s_start_label, lv_color_white(), 0);
     lv_obj_set_style_text_letter_space(s_start_label, GM_TRACK_KICKER, 0);
     lv_obj_center(s_start_label);
     // NOTE: not bs_track_text() — fixed light-on-red, palette-independent.
