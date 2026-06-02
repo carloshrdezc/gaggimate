@@ -1554,11 +1554,10 @@ void DefaultUI::updateStandbyScreen() {
 
         localtime_r(&now, &timeinfo);
         if (getLocalTime(&timeinfo, 500)) {
-            char time[6]; // "HH:MM\0"
             Settings &settings = controller->getSettings();
             const bool is24h = settings.isClock24hFormat();
-            strftime(time, sizeof(time), is24h ? "%H:%M" : "%I:%M", &timeinfo);
-            lv_label_set_text(ui_StandbyScreen_time, time);
+            const int hour = is24h ? timeinfo.tm_hour : ((timeinfo.tm_hour % 12 == 0) ? 12 : timeinfo.tm_hour % 12);
+            lv_label_set_text_fmt(ui_StandbyScreen_time, "%02d:#D71921 %02d#", hour, timeinfo.tm_min);
             lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
 
             // ndot_120 only covers digits+colon; drive the AM/PM suffix separately

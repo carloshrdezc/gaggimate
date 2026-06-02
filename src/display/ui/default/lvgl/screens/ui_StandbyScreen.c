@@ -74,6 +74,7 @@ void ui_StandbyScreen_screen_init(void) {
 
     // ── Hero ambient clock ──
     ui_StandbyScreen_time = lv_label_create(ui_StandbyScreen);
+    lv_label_set_recolor(ui_StandbyScreen_time, true);
     lv_label_set_text(ui_StandbyScreen_time, "--:--");
     lv_obj_set_style_text_font(ui_StandbyScreen_time, &ndot_120, 0);
     lv_obj_set_style_text_color(ui_StandbyScreen_time, GM_CONTENT, 0);
