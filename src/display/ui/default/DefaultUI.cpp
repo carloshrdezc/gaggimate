@@ -1521,8 +1521,10 @@ void DefaultUI::updateStandbyScreen() {
             christmasMode = (timeinfo.tm_mon == 11 && timeinfo.tm_mday < 27) || (timeinfo.tm_mon == 0 && timeinfo.tm_mday < 6);
         }
     } else {
-        lv_label_set_text(ui_StandbyScreen_time, "--:--");
-        lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+        // ndot_120 only covers 0x30-0x3A (digits + colon); dashes in "--:--"
+        // render as LVGL missing-glyph rectangles. Hide the clock instead and
+        // let the kicker label convey state (CAR-300).
+        lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
         if (lv_obj_is_valid(gm_h.ampm)) {
             lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
         }
