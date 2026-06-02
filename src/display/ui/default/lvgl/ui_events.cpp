@@ -78,9 +78,11 @@ void onWakeup(lv_event_t *e) {
         !controller.getClientController()->isConnected()) {
         return;
     }
-    controller.getUI()->changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
+    // CAR-300: land on the mode hub (Nothing-theme ModeScreen) on wake, not the
+    // old SquareLine BrewScreen dials layout. Mirrors the onMenuClick() path.
     controller.deactivate();
     controller.setMode(MODE_BREW);
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
 }
 
 void onLoadStarted(lv_event_t *e) {}
