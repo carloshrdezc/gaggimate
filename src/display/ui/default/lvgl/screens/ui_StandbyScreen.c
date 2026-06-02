@@ -25,12 +25,13 @@ void ui_event_StandbyScreen(lv_event_t *e) {
     }
 }
 
-// Small recolored status icon: gm_ic_* masters are 40px, keep the object at
-// that size so lv_img_set_zoom stays centered, then scale to target_px.
+// Small recolored status icon: gm_ic_* masters are 40px. Widget is sized to
+// target_px so the flex layout slot matches the rendered size; zoom maps the
+// 40px source down to target_px.
 static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, int target_px) {
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);
-    lv_obj_set_size(im, 40, 40);
+    lv_obj_set_size(im, target_px, target_px);
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);

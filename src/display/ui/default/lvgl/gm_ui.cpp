@@ -12,13 +12,13 @@
 
 gm_handles_t gm_h;
 
-// Place a recolored icon. The gm_ic_* masters are 40px; keep the object
-// at that native size so lv_img_set_zoom stays centered, then scale to
-// target_px. Tint via img_recolor (ALPHA_8BIT draws entirely in it).
+// Place a recolored icon. Widget sized to target_px so the flex layout slot
+// matches the rendered size; zoom maps the 40px source down to target_px.
+// Tint via img_recolor (ALPHA_8BIT draws entirely in it).
 static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);
-    lv_obj_set_size(im, 40, 40);
+    lv_obj_set_size(im, target_px, target_px);
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));
     lv_obj_set_style_img_recolor(im, color, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
