@@ -44,8 +44,16 @@ static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t c
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);                                 // 40px native; pivot defaults to (20,20)
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
-    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // self-size = transformed size
-    // NO lv_obj_set_size — REAL mode auto-sizes the widget to the zoomed result.
+    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // draw the transformed (zoomed) bitmap
+    // PIN the widget box to target_px. REAL mode does NOT auto-size here:
+    // lv_img_set_src() is the only call that refreshes the cached self-size,
+    // and at that point zoom is still NONE + mode VIRTUAL, so the widget caches
+    // its 40px native size. Neither set_zoom nor set_size_mode re-refresh it
+    // (see lvgl/src/widgets/lv_img.c), so a LV_SIZE_CONTENT parent would lay
+    // the icon out as 40px while REAL-mode draw tiles the 20px bitmap 2-3× →
+    // the "garbage glyph" regression (CAR-302/307/309/314). Explicit set_size
+    // pins obj->coords so the draw math produces exactly one centered tile.
+    lv_obj_set_size(im, target_px, target_px);
     // NO lv_img_set_pivot — default centered pivot is what REAL-mode draw expects.
     lv_obj_set_style_img_recolor(im, color, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
