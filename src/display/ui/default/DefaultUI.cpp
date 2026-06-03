@@ -1436,9 +1436,25 @@ void DefaultUI::applyScreenVisualLanguage() {
         }
     } else if (activeScreen == ui_ModeScreen) {
         // CAR-308: Nothing-theme mode launcher styles itself via gm_* builders
-        // in ui_ModeScreen_screen_init; nothing to restyle here. Tile palette,
-        // standby pill, settings round icon, and kicker are all built with
-        // GM_* tokens directly in the screen module.
+        // in ui_ModeScreen_screen_init; tile palette, standby pill, settings
+        // round icon, and kicker are all built with GM_* tokens directly in
+        // the screen module.
+        //
+        // CAR-308 P2 #1 (Codex review): the launcher is *dark-only by design*
+        // — tiles use white@10% bg + GM_FAINT borders, icons are
+        // accent-recolored against a black canvas, and the standby pill +
+        // kicker resolve mono labels in GM_MUTED. There is no light-theme
+        // palette equivalent (the design handoff is single-theme), and the
+        // legacy styleMenuTile() retint machinery was deliberately removed
+        // when the screen was rebuilt. styleScreenBase() above repaints the
+        // screen bg to palette.surface, which on UI_THEME_LIGHT (non-AMOLED
+        // panels) is near-white — that makes the white@10% tiles vanish into
+        // the background. Restore GM_BG here so the launcher always renders
+        // on the dark Nothing canvas regardless of the user's theme setting.
+        // Mirrors the StandbyScreen pattern (also dark-only by design).
+        lv_obj_set_style_bg_color(activeScreen, GM_BG, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_grad_color(activeScreen, GM_BG, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(activeScreen, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     } else if (activeScreen == ui_MenuScreen) {
         // CAR-279: Quick-settings list is built from gm_make_screen + GM_*
         // tokens (dark-themed) in ui_MenuScreen.c. styleScreenBase() above
