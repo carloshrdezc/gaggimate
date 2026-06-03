@@ -12,15 +12,41 @@
 
 gm_handles_t gm_h;
 
-// Place a recolored icon. Widget sized to target_px so the flex layout slot
-// matches the rendered size; zoom maps the 40px source down to target_px.
-// Tint via img_recolor (ALPHA_8BIT draws entirely in it).
+// ─────────────────────────────────────────────────────────────
+//  gm_icon — downscaled recolored icon (LVGL 8.4 idiom)
+// ─────────────────────────────────────────────────────────────
+//
+// The gm_ic_* masters are 40px ALPHA_8BIT (CAR-273); we render them at
+// smaller target sizes via zoom + recolor. The canonical v8 way to do
+// this is REAL size mode + zoom, with NO manual size and NO pivot tweaks.
+//
+// Three regressions on this helper so far — DO NOT "improve" without
+// re-reading lvgl/src/widgets/lv_img.c::draw_img first:
+//   * CAR-302 introduced REAL+zoom+pivot(0,0)+set_size — drifted up-left.
+//   * CAR-307 dropped pivot(0,0) → default center → still wrong combo,
+//     icons rendered then disappeared in some layouts.
+//   * CAR-309 (this fix) drops set_size as well: REAL mode auto-sizes
+//     the widget to the *transformed* (zoomed) area, so the flex slot
+//     already matches the rendered size. Adding set_size on top fights
+//     the self-size and zeroes the draw area.
+//
+// Rules for this helper (LVGL 8.4):
+//   * DO NOT call lv_obj_set_size(...) — REAL+zoom is self-sizing.
+//   * DO NOT call lv_img_set_pivot(...) — the REAL-mode draw path in
+//     lv_img.c (≈line 621-624 of lv_img.c::draw_img) uses the default
+//     centered pivot (w/2, h/2) for its area-compensation math; moving
+//     the pivot breaks that compensation and the icon clips or vanishes.
+//   * Source masters are 40px → zoom factor is 256 * target_px / 40
+//     (LVGL zoom unit: 256 = 1.0×).
+//   * Tint is via img_recolor at LV_OPA_COVER — ALPHA_8BIT sources draw
+//     entirely in the recolor.
 static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
     lv_obj_t *im = lv_img_create(parent);
-    lv_img_set_src(im, src);
-    lv_obj_set_size(im, target_px, target_px);
-    lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));
-    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);
+    lv_img_set_src(im, src);                                 // 40px native; pivot defaults to (20,20)
+    lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
+    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // self-size = transformed size
+    // NO lv_obj_set_size — REAL mode auto-sizes the widget to the zoomed result.
+    // NO lv_img_set_pivot — default centered pivot is what REAL-mode draw expects.
     lv_obj_set_style_img_recolor(im, color, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
     return im;
