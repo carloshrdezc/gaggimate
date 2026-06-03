@@ -63,6 +63,12 @@ class DefaultUI {
 
     void updateStandbyScreen();
     void updateStatusScreen();
+    // CAR-308 P2 #2 (Codex review): factor the gm_h.status_time HH:MM
+    // formatter so it can fire on every screen that owns a gm_status_bar()
+    // (StatusScreen, BrewScreen, GrindScreen, ModeScreen, …) — not just
+    // StatusScreen. Reads gm_h.status_time directly; safe to call from
+    // loop() once per render tick.
+    void updateStatusBarClock();
     void applyScreenVisualLanguage();
     void resetCustomScreenHandles();
     void ensureStatusBeanLabel();

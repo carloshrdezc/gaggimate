@@ -696,6 +696,18 @@ void DefaultUI::loop() {
             updateStandbyScreen();
         if (lv_scr_act() == ui_StatusScreen)
             updateStatusScreen();
+        // CAR-308 P2 #2 (Codex review): drive the status-bar clock on the
+        // mode launcher too. ui_ModeScreen calls gm_status_bar(scr, false)
+        // and points gm_h.status_time at its own clock label, but neither
+        // updateStandbyScreen() nor updateStatusScreen() runs while
+        // ModeScreen is active — so without this branch the launcher's
+        // clock stayed at the gm_status_bar() builder placeholder ("--:--").
+        // updateStatusBarClock() is the shared formatter used by
+        // updateStatusScreen() above; it no-ops when gm_h.status_time is
+        // NULL/invalid, so this is safe to call unconditionally for
+        // ModeScreen.
+        if (lv_scr_act() == ui_ModeScreen)
+            updateStatusBarClock();
         effect_mgr.evaluate_all();
     }
 
@@ -1569,6 +1581,25 @@ void DefaultUI::updateStandbyScreen() {
     }
 }
 
+// CAR-308 P2 #2 (Codex review): shared status-bar clock formatter. Called
+// from updateStatusScreen() and from loop() for every screen that owns a
+// gm_status_bar() and points gm_h.status_time at its own clock label
+// (StatusScreen, BrewScreen, GrindScreen, ModeScreen). NULL/invalid handle
+// is a no-op so callers never have to guard. Format and gating mirror the
+// pre-CAR-308 inline block from updateStatusScreen().
+void DefaultUI::updateStatusBarClock() {
+    if (gm_h.status_time == nullptr || !lv_obj_is_valid(gm_h.status_time)) {
+        return;
+    }
+    time_t nowEpoch = time(nullptr);
+    struct tm timeinfo;
+    if (localtime_r(&nowEpoch, &timeinfo) != nullptr) {
+        char buf[8];
+        strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+        lv_label_set_text(gm_h.status_time, buf);
+    }
+}
+
 void DefaultUI::updateStatusScreen() {
     // CAR-278: status screen rebuilt in the Nothing theme. Single screen
     // with three modes — brew (red), steam (gold), water (blue) — driven by
@@ -1579,16 +1610,10 @@ void DefaultUI::updateStatusScreen() {
 
     ensureStatusBeanLabel();
 
-    // Status bar clock — matches the standby pattern.
-    if (gm_h.status_time != nullptr && lv_obj_is_valid(gm_h.status_time)) {
-        time_t nowEpoch = time(nullptr);
-        struct tm timeinfo;
-        if (localtime_r(&nowEpoch, &timeinfo) != nullptr) {
-            char buf[8];
-            strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
-            lv_label_set_text(gm_h.status_time, buf);
-        }
-    }
+    // Status bar clock — matches the standby pattern. Shared with ModeScreen
+    // (and any other screen that owns a gm_status_bar() and wires
+    // gm_h.status_time on init) via the updateStatusBarClock() helper.
+    updateStatusBarClock();
 
     // Mode-driven defaults. Pull a fresh process snapshot once.
     ProcessSnapshot proc = controller->getProcessSnapshot();
