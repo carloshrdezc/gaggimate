@@ -1448,9 +1448,23 @@ void DefaultUI::applyScreenVisualLanguage() {
         }
     } else if (activeScreen == ui_ModeScreen) {
         // CAR-308: Nothing-theme mode launcher styles itself via gm_* builders
-        // in ui_ModeScreen_screen_init; tile palette, standby pill, settings
-        // round icon, and kicker are all built with GM_* tokens directly in
-        // the screen module.
+        // in ui_ModeScreen_screen_init; tile palette, standby pill, and kicker
+        // are all built with GM_* tokens directly in the screen module.
+        //
+        // CAR-312: the top-corner settings button is built flat in the screen
+        // module (a bare recolored lv_imgbtn glyph), which reads inconsistent
+        // against the other Nothing-theme corner buttons. Give it the round
+        // glass fill + palette-driven icon recolor here, mirroring the
+        // ui_MenuScreen_backButton treatment below (same lv_imgbtn idiom, same
+        // 44px size). The screen is dark-only by design, so palette.textPrimary
+        // resolves to the GM_CONTENT mono tone the launcher already uses.
+        // Placement is unchanged: the button already sits in the top corner
+        // (LV_ALIGN_TOP_RIGHT in the screen module), well clear of the
+        // "SELECT MODE" kicker — the CAR-308 rebuild removed the old top dial
+        // labels CAR-312 called out, so there is no longer anything to crowd.
+        if (lv_obj_is_valid(ui_ModeScreen_settingsButton)) {
+            styleRoundIconButton(ui_ModeScreen_settingsButton, palette, palette.textPrimary, 44);
+        }
         //
         // CAR-308 P2 #1 (Codex review): the launcher is *dark-only by design*
         // — tiles use white@10% bg + GM_FAINT borders, icons are
