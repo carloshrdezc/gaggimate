@@ -25,15 +25,17 @@ void ui_event_StandbyScreen(lv_event_t *e) {
     }
 }
 
-// Small recolored status icon: gm_ic_* masters are 40px. Widget is sized to
-// target_px so the flex layout slot matches the rendered size; zoom maps the
-// 40px source down to target_px.
+// Small recolored status icon: gm_ic_* masters are 40px ALPHA_8BIT.
+// LVGL 8.4 idiom — REAL size mode + zoom self-sizes the widget to the
+// transformed area, no set_size / no pivot manipulation. See the long
+// comment above gm_icon() in gm_ui.cpp for why (CAR-302/307/309).
 static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, int target_px) {
     lv_obj_t *im = lv_img_create(parent);
-    lv_img_set_src(im, src);
-    lv_obj_set_size(im, target_px, target_px);
-    lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));
-    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);
+    lv_img_set_src(im, src);                                 // 40px native; default centered pivot
+    lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
+    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // self-size = transformed size
+    // NO lv_obj_set_size — REAL mode auto-sizes the widget to the zoomed result.
+    // NO lv_img_set_pivot — default centered pivot is what REAL-mode draw expects.
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
     return im;
