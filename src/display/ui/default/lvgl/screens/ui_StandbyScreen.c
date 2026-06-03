@@ -34,7 +34,6 @@ static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, 
     lv_obj_set_size(im, target_px, target_px);
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));
     lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);
-    lv_img_set_pivot(im, 0, 0);
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
     return im;
