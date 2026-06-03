@@ -170,11 +170,15 @@ void ui_ModeScreen_screen_init(void) {
     lv_obj_set_style_pad_column(ui_ModeScreen_standbyButton, 9, 0);
     lv_obj_clear_flag(ui_ModeScreen_standbyButton, LV_OBJ_FLAG_SCROLLABLE);
 
+    // CAR-308 P2 follow-up (Codex review): drop explicit lv_obj_set_size
+    // and let REAL mode self-size the widget to the zoomed draw area —
+    // matches the gm_icon() idiom in gm_ui.cpp:43-53. The earlier
+    // explicit set_size fought LVGL's transformed self-size and could
+    // make the power glyph clip or disappear.
     lv_obj_t *pwr = lv_img_create(ui_ModeScreen_standbyButton);
-    lv_img_set_src(pwr, &gm_ic_power);
-    lv_obj_set_size(pwr, 14, 14);
-    lv_img_set_zoom(pwr, (uint16_t)(256 * 14 / 40));
-    lv_img_set_size_mode(pwr, LV_IMG_SIZE_MODE_REAL);
+    lv_img_set_src(pwr, &gm_ic_power);                       // 40px native; pivot defaults to (20,20)
+    lv_img_set_zoom(pwr, (uint16_t)(256 * 14 / 40));         // map 40 → 14px
+    lv_img_set_size_mode(pwr, LV_IMG_SIZE_MODE_REAL);        // self-size = transformed size
     lv_obj_set_style_img_recolor(pwr, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(pwr, LV_OPA_COVER, 0);
 
