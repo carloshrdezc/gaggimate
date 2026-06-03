@@ -1454,16 +1454,25 @@ void DefaultUI::applyScreenVisualLanguage() {
         // CAR-312: the top-corner settings button is built flat in the screen
         // module (a bare recolored lv_imgbtn glyph), which reads inconsistent
         // against the other Nothing-theme corner buttons. Give it the round
-        // glass fill + palette-driven icon recolor here, mirroring the
-        // ui_MenuScreen_backButton treatment below (same lv_imgbtn idiom, same
-        // 44px size). The screen is dark-only by design, so palette.textPrimary
-        // resolves to the GM_CONTENT mono tone the launcher already uses.
+        // glass fill + icon recolor here, mirroring the ui_MenuScreen_backButton
+        // treatment below (same lv_imgbtn idiom, same 44px size).
+        //
+        // CAR-312 (Codex review): this launcher is *dark-only by design* — the
+        // branch below repaints the screen bg back to GM_BG even on
+        // UI_THEME_LIGHT non-AMOLED panels. Styling the button with the
+        // user-resolved `palette` would, on light theme, render a near-white
+        // glass disc (palette.surfaceStrong ≈ 0xFAFAFA) with a black icon
+        // (palette.textPrimary) sitting on the dark Nothing canvas — exactly the
+        // styling inconsistency this fix is meant to remove. Use a fixed dark
+        // palette + the GM_CONTENT mono tone the launcher already uses for its
+        // icons, so the button matches regardless of the user's theme setting.
         // Placement is unchanged: the button already sits in the top corner
         // (LV_ALIGN_TOP_RIGHT in the screen module), well clear of the
         // "SELECT MODE" kicker — the CAR-308 rebuild removed the old top dial
         // labels CAR-312 called out, so there is no longer anything to crowd.
         if (lv_obj_is_valid(ui_ModeScreen_settingsButton)) {
-            styleRoundIconButton(ui_ModeScreen_settingsButton, palette, palette.textPrimary, 44);
+            const DisplayPalette darkPalette = makeDisplayPalette(UI_THEME_DEFAULT, false);
+            styleRoundIconButton(ui_ModeScreen_settingsButton, darkPalette, GM_CONTENT, 44);
         }
         //
         // CAR-308 P2 #1 (Codex review): the launcher is *dark-only by design*
