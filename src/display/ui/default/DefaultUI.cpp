@@ -418,16 +418,9 @@ void alignMetricPair(lv_obj_t *icon, lv_obj_t *label, const lv_coord_t centerX, 
     lv_obj_align(label, LV_ALIGN_CENTER, centerX + 18, centerY);
 }
 
-void styleMenuTile(lv_obj_t *obj, const DisplayPalette &palette, const lv_color_t tone) {
-    if (obj == nullptr || !lv_obj_is_valid(obj))
-        return;
-    styleGlassButton(obj, palette, tone, 999, 1, OPA_200);
-    lv_obj_t *icon = lv_obj_get_child(obj, 0);
-    if (icon != nullptr && lv_obj_is_valid(icon)) {
-        lv_obj_set_style_img_recolor(icon, tone, 0);
-        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
-    }
-}
+// CAR-308: styleMenuTile() removed. The Nothing-theme mode launcher
+// (ui_ModeScreen) styles its own tiles via gm_* builders + GM_* tokens
+// directly in ui_ModeScreen_screen_init; no shared restyle helper needed.
 
 void styleScreenBase(lv_obj_t *screen, const DisplayPalette &palette, const bool roundDisplay) {
     if (screen == nullptr || !lv_obj_is_valid(screen))
@@ -811,8 +804,9 @@ void DefaultUI::setupReactive() {
     // switch makes ui_theme_set() reapply the themeable arc-color registrations in ui_comp_dials.c, which would otherwise
     // overwrite those palette colors until the next dial recalculation. Depending on currentThemeMode here forces a full
     // restyle on theme change so the dials never snap back to the generated defaults.
-    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustDials(ui_ModeScreen_dials); },
-                          &pressureAvailable, &currentThemeMode);
+    // CAR-308: ui_ModeScreen no longer hosts a SquareLine dials component —
+    // the rebuilt Nothing-theme launcher is a static hub with no live
+    // pressure/temp readouts. No use_effect dial reactor here.
     // CAR-278: ui_StatusScreen no longer hosts a SquareLine dials component —
     // the rebuilt screen owns its visuals via gm_h. updateStatusScreen() drives
     // accents and metric values directly, so no use_effect dial reactor here.
@@ -826,8 +820,8 @@ void DefaultUI::setupReactive() {
                           &isTemperatureStable, &heatingFlash);
     // CAR-292: ui_StatusScreen has no SquareLine dials/heating-indicator
     // widgets; visuals are driven by updateStatusScreen() + gm_status_apply_mode().
-    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustHeatingIndicator(ui_ModeScreen_dials); },
-                          &isTemperatureStable, &heatingFlash);
+    // CAR-308: ui_ModeScreen has no SquareLine dials/heating-indicator widgets
+    // anymore; the Nothing-theme launcher doesn't surface live heating state.
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() { adjustHeatingIndicator(ui_ProfileScreen_dials); }, &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
@@ -836,13 +830,8 @@ void DefaultUI::setupReactive() {
     // heating indicator. updateStatusScreen() handles its visuals directly.
     // CAR-292: ui_StatusScreen sets the kicker text per mode (BREW / STEAM /
     // WATER) inline in updateStatusScreen(); no separate effect needed.
-    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(uic_ModeScreen_dials_tempText, "%d°C", currentTemp);
-                          },
-                          &currentTemp);
-    // CAR-278: temp readout for the status screen is driven from the metric
-    // row in updateStatusScreen() via gm_h.m_temp / gm_h.w_temp / gm_h.hero.
+    // CAR-308: no temp readout on the rebuilt mode launcher — live boiler temp
+    // surfaces on ui_StatusScreen / ui_BrewScreen / ui_GrindScreen instead.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_BrewScreen_dials_tempText, "%d°C", currentTemp);
@@ -868,8 +857,7 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_ProfileScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; }, [=]() { adjustTempTarget(ui_ModeScreen_dials); },
-                          &targetTemp);
+    // CAR-308: no target-temp dial on the rebuilt mode launcher.
     // CAR-279 review fix: Quick-settings brew-temp readout is driven by the
     // same targetTemp signal so the +/- stepper gives immediate feedback and
     // the initial value reflects the real target instead of the static "93"
@@ -895,12 +883,7 @@ void DefaultUI::setupReactive() {
     // arc + hero readout populated each frame in updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustTempTarget(ui_ProfileScreen_dials); },
                           &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
-                          [=]() {
-                              lv_arc_set_value(uic_ModeScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_ModeScreen_dials_pressureText, "%.1f bar", pressure);
-                          },
-                          &pressure);
+    // CAR-308: no pressure dial on the rebuilt mode launcher.
     // CAR-278: status screen pressure shows in the brew metric row
     // (gm_h.m_press) — populated from updateStatusScreen() each tick.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
@@ -1202,10 +1185,6 @@ void DefaultUI::resetCustomScreenHandles() {
     statusBeanLabel = nullptr;
     profileBeanLabel = nullptr;
     grindBeanLabel = nullptr;
-    menuBrewLabel = nullptr;
-    menuSteamLabel = nullptr;
-    menuWaterLabel = nullptr;
-    menuGrindLabel = nullptr;
     brewContextLabel = nullptr;
 }
 
@@ -1275,24 +1254,10 @@ void DefaultUI::ensureGrindBeanLabel() {
     lv_obj_set_style_text_align(grindBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
-void DefaultUI::ensureMenuActionLabels() {
-    if (lv_scr_act() != ui_ModeScreen || !lv_obj_is_valid(ui_ModeScreen_contentPanel1)) {
-        return;
-    }
-
-    if (menuBrewLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_btnBrew)) {
-        menuBrewLabel = lv_label_create(ui_ModeScreen_btnBrew);
-    }
-    if (menuSteamLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_btnSteam)) {
-        menuSteamLabel = lv_label_create(ui_ModeScreen_btnSteam);
-    }
-    if (menuWaterLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_waterBtn)) {
-        menuWaterLabel = lv_label_create(ui_ModeScreen_waterBtn);
-    }
-    if (menuGrindLabel == nullptr && lv_obj_is_valid(ui_ModeScreen_grindBtn)) {
-        menuGrindLabel = lv_label_create(ui_ModeScreen_grindBtn);
-    }
-}
+// CAR-308: ensureMenuActionLabels() removed. The rebuilt ui_ModeScreen
+// creates its tile labels inline in ui_ModeScreen_screen_init (via the
+// build_mode_tile() helper) instead of having DefaultUI lazily attach
+// them on every applyScreenPalette() pass.
 
 void DefaultUI::ensureBrewContextLabel() {
     if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen_profileInfo) || brewContextLabel != nullptr) {
@@ -1470,52 +1435,10 @@ void DefaultUI::applyScreenVisualLanguage() {
             alignFooterAction(ui_GrindScreen_startButton, palette, palette.accent);
         }
     } else if (activeScreen == ui_ModeScreen) {
-        ensureMenuActionLabels();
-        stylePanel(ui_ModeScreen_contentPanel1, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleIconButton(ui_ModeScreen_standbyButton, palette, palette.textPrimary);
-        // CAR-291 review fix: settings/quick-settings entry needs the same
-        // palette-driven recolor as the standby button so it stays legible on
-        // light themes (otherwise it falls back to the hardcoded NiceWhite).
-        styleIconButton(ui_ModeScreen_settingsButton, palette, palette.textPrimary);
-        styleMenuTile(ui_ModeScreen_btnBrew, palette, palette.accent);
-        styleMenuTile(ui_ModeScreen_btnSteam, palette, palette.accentCool);
-        styleMenuTile(ui_ModeScreen_waterBtn, palette, palette.water);
-        styleMenuTile(ui_ModeScreen_grindBtn, palette, palette.grind);
-        if (menuBrewLabel != nullptr) {
-            setButtonLabel(ui_ModeScreen_btnBrew, menuBrewLabel, "BREW", palette.accent);
-        }
-        if (menuSteamLabel != nullptr) {
-            setButtonLabel(ui_ModeScreen_btnSteam, menuSteamLabel, "STEAM", palette.accentCool);
-        }
-        if (menuWaterLabel != nullptr) {
-            setButtonLabel(ui_ModeScreen_waterBtn, menuWaterLabel, "WATER", palette.water);
-        }
-        if (menuGrindLabel != nullptr) {
-            setButtonLabel(ui_ModeScreen_grindBtn, menuGrindLabel, "GRIND", palette.grind);
-        }
-        if (roundDisplay) {
-            lv_obj_set_size(ui_ModeScreen_contentPanel1, 366, 366);
-            lv_obj_set_layout(ui_ModeScreen_contentPanel1, 0);
-            lv_obj_set_style_pad_all(ui_ModeScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_row(ui_ModeScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_ModeScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_align(ui_ModeScreen_contentPanel1, LV_ALIGN_CENTER, 0, 2);
-            lv_obj_set_size(ui_ModeScreen_btnBrew, 106, 106);
-            lv_obj_set_size(ui_ModeScreen_btnSteam, 106, 106);
-            lv_obj_set_size(ui_ModeScreen_waterBtn, 106, 106);
-            lv_obj_set_size(ui_ModeScreen_grindBtn, 106, 106);
-            lv_obj_align(ui_ModeScreen_btnBrew, LV_ALIGN_CENTER, -62, -58);
-            lv_obj_align(ui_ModeScreen_btnSteam, LV_ALIGN_CENTER, 62, -58);
-            lv_obj_align(ui_ModeScreen_waterBtn, LV_ALIGN_CENTER, -62, 66);
-            lv_obj_align(ui_ModeScreen_grindBtn, LV_ALIGN_CENTER, 62, 66);
-            lv_obj_align(ui_ModeScreen_standbyButton, LV_ALIGN_BOTTOM_MID, 0, -22);
-            styleRoundIconButton(ui_ModeScreen_standbyButton, palette, palette.textPrimary, 76, true);
-            lv_obj_move_foreground(ui_ModeScreen_standbyButton);
-            // Settings button at TOP_RIGHT renders off-screen on the round 480px display.
-            lv_obj_set_align(ui_ModeScreen_settingsButton, LV_ALIGN_TOP_MID);
-            lv_obj_set_x(ui_ModeScreen_settingsButton, 0);
-            lv_obj_set_y(ui_ModeScreen_settingsButton, 18);
-        }
+        // CAR-308: Nothing-theme mode launcher styles itself via gm_* builders
+        // in ui_ModeScreen_screen_init; nothing to restyle here. Tile palette,
+        // standby pill, settings round icon, and kicker are all built with
+        // GM_* tokens directly in the screen module.
     } else if (activeScreen == ui_MenuScreen) {
         // CAR-279: Quick-settings list is built from gm_make_screen + GM_*
         // tokens (dark-themed) in ui_MenuScreen.c. styleScreenBase() above

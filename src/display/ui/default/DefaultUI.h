@@ -68,7 +68,6 @@ class DefaultUI {
     void ensureStatusBeanLabel();
     void ensureProfileBeanLabel();
     void ensureGrindBeanLabel();
-    void ensureMenuActionLabels();
     void ensureBrewContextLabel();
 
     void adjustDials(lv_obj_t *dials);
@@ -165,10 +164,6 @@ class DefaultUI {
     mutable lv_obj_t *statusBeanLabel = nullptr;
     lv_obj_t *profileBeanLabel = nullptr;
     lv_obj_t *grindBeanLabel = nullptr;
-    lv_obj_t *menuBrewLabel = nullptr;
-    lv_obj_t *menuSteamLabel = nullptr;
-    lv_obj_t *menuWaterLabel = nullptr;
-    lv_obj_t *menuGrindLabel = nullptr;
     lv_obj_t *brewContextLabel = nullptr;
 
     // Standby brightness control
