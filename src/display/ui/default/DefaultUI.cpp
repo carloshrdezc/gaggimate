@@ -1206,8 +1206,16 @@ void DefaultUI::setupReactive() {
                                         LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
                 }
                 // Weight chip below the hero, START SHOT pinned to the bottom.
-                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch))
+                // modeSwitch is a flex-column child of controlContainer, so a bare
+                // lv_obj_align() would be clobbered on the next layout pass. Reparent
+                // it to contentPanel4 (a non-flex, CENTER-relative container that
+                // already hosts the hero/pill/profileInfo) so the manual align sticks.
+                // lv_obj_set_parent to the same parent is a no-op, so this stays
+                // idempotent across re-runs of this effect.
+                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch)) {
+                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_contentPanel4);
                     lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 92);
+                }
                 lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -8);
             }
         },
