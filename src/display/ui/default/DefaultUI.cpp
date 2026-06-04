@@ -1211,10 +1211,13 @@ void DefaultUI::setupReactive() {
                 // flips true, hide the pill and reveal START SHOT in the same
                 // bottom slot. (isTemperatureStable resets to false on any
                 // setpoint change, so the pill returns if the target moves.)
+                // _ui_flag_modify is tri-state: arg 0 ADDs the flag, 1 REMOVEs
+                // it (ui_helpers.c:80-89), so a bool reads as "true => REMOVE
+                // (show)". To SHOW the pill while heating, pass !atTarget.
                 const bool atTarget = isTemperatureStable;
                 if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
                     lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -10);
-                    _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, atTarget);
+                    _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
                 }
                 // Single-row profile selector — hide the tall "Selected profile"
                 // caption and bean-context label so the pill stays compact and
@@ -1247,8 +1250,10 @@ void DefaultUI::setupReactive() {
                 // CAR-318: gate START SHOT on the boiler being at temperature.
                 // Line 1193 already shows it for the Brew sub-state; here we
                 // re-hide it while heating so only the bottom status pill shows,
-                // then reveal it once atTarget. Runs after 1193, so this wins.
-                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, !atTarget);
+                // Show START SHOT only at target: pass atTarget so true =>
+                // REMOVE HIDDEN (show), heating => 0 => ADD HIDDEN (hide).
+                // Runs after line 1193, so this wins.
+                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, atTarget);
             } else if (isRoundDisplay() && settings) {
                 // CAR-315 (PR #151 review I1/I2/M1): the landing block above
                 // performs one-way geometry mutations (profileInfo height/anchor,
