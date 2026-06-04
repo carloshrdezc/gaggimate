@@ -1193,8 +1193,17 @@ void DefaultUI::setupReactive() {
             _ui_flag_modify(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Brew);
             _ui_flag_modify(ui_BrewScreen_profileInfo, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Brew);
+            // PR #153 review (Codex P1 #3353255295 / P2 #3355129176): the weight/
+            // mode chip is NOT part of the round brew-landing design (chat2
+            // BrewReady: hero → pill → ratio → START SHOT → chip bar, no weight
+            // chip). The old landing reparented it to center+60 where its 180x50
+            // body overlapped the START SHOT button / HEATING pill at BOTTOM_MID
+            // -104 and intercepted their taps. On round, show it ONLY in Settings
+            // (predicate true => REMOVE HIDDEN => shown); the Brew/Profile landing
+            // sub-states hide it. Rectangular keeps the original volumetric gate.
             _ui_flag_modify(ui_BrewScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN,
-                            brewScreenState == BrewScreenState::Brew && volumetricAvailable);
+                            isRoundDisplay() ? (brewScreenState == BrewScreenState::Settings)
+                                             : (brewScreenState == BrewScreenState::Brew && volumetricAvailable));
             if (volumetricAvailable) {
                 lv_img_set_src(ui_BrewScreen_volumetricButton, bluetoothScales ? &ui_img_1424216268 : &ui_img_flowmeter_png);
             }
@@ -1238,19 +1247,11 @@ void DefaultUI::setupReactive() {
                         lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
                                         LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
                 }
-                // Weight chip below the hero, START SHOT pinned to the bottom.
-                // modeSwitch is a flex-column child of controlContainer, so a bare
-                // lv_obj_align() would be clobbered on the next layout pass. Reparent
-                // it to contentPanel4 (a non-flex, CENTER-relative container that
-                // already hosts the hero/pill/profileInfo) so the manual align sticks.
-                // lv_obj_set_parent to the same parent is a no-op, so this stays
-                // idempotent across re-runs of this effect.
-                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch)) {
-                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_contentPanel4);
-                    // CAR-319: nudged up from +92 so it clears the lifted START
-                    // SHOT button (now BOTTOM_MID -104) and the bottom chip bar.
-                    lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 60);
-                }
+                // PR #153 review: the weight/mode chip is hidden on the round
+                // landing (see the modeSwitch gate above), so there is nothing to
+                // reparent/position here anymore — the design's middle stack is
+                // hero → pill → ratio → START SHOT, with no weight chip. The
+                // Settings branch reparents modeSwitch back to controlContainer.
                 lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -104);
                 // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
                 // button and the HEATING status pill swap mutually-exclusively on
