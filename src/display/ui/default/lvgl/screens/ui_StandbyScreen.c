@@ -33,8 +33,14 @@ static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, 
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);                                 // 40px native; default centered pivot
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
-    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // self-size = transformed size
-    // NO lv_obj_set_size — REAL mode auto-sizes the widget to the zoomed result.
+    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // draw the transformed (zoomed) bitmap
+    // PIN the widget box to target_px — must match gm_icon(). REAL mode does NOT
+    // auto-size: the cached self-size is only refreshed by lv_img_set_src (when
+    // zoom is still NONE → caches 40px); set_zoom/set_size_mode never re-refresh
+    // it. This statusContainer is LV_SIZE_CONTENT, so without an explicit size it
+    // lays the icon out at the stale 40px and REAL-mode draw tiles the 20px
+    // bitmap 2-3× = the recurring garbage-icon bug (CAR-314). See gm_ui.cpp.
+    lv_obj_set_size(im, target_px, target_px);
     // NO lv_img_set_pivot — default centered pivot is what REAL-mode draw expects.
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
