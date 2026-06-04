@@ -172,6 +172,13 @@ class DefaultUI {
     lv_obj_t *grindBeanLabel = nullptr;
     lv_obj_t *brewContextLabel = nullptr;
 
+    // CAR-319: bottom mode-chip pill bar on the round BrewScreen landing view
+    // (power/cup/steam/drop). Lazily built once, parented to ui_BrewScreen.
+    lv_obj_t *brewModeChips = nullptr;
+    lv_obj_t *brewModeChip[4] = {nullptr, nullptr, nullptr, nullptr};
+    void ensureBrewModeChips();
+    static void brewModeChipCb(lv_event_t *e);
+
     // Standby brightness control
     unsigned long standbyEnterTime = 0;
 
