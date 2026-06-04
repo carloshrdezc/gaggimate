@@ -15,6 +15,10 @@ lv_obj_t *ui_ModeScreen_waterBtn = NULL;
 lv_obj_t *ui_ModeScreen_grindBtn = NULL;
 lv_obj_t *ui_ModeScreen_standbyButton = NULL;
 lv_obj_t *ui_ModeScreen_settingsButton = NULL;
+// CAR-316: settings *tile* that occupies the 4th grid slot when the Grind
+// tile is hidden (no grinder configured). DefaultUI's grindAvailable effect
+// toggles grind tile vs. settings tile (and the floating gear inversely).
+lv_obj_t *ui_ModeScreen_settingsTile = NULL;
 
 // Snapshot of the gm_h.status_time label this screen owns. Used by the
 // destroy hook to tell whether gm_h.status_time still points at our own
@@ -39,6 +43,10 @@ static void ui_event_ModeScreen_standbyButton(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) onStandby(e);
 }
 static void ui_event_ModeScreen_settingsButton(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) onSettingsClick(e);
+}
+// CAR-316: settings tile shares the floating gear's action.
+static void ui_event_ModeScreen_settingsTile(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) onSettingsClick(e);
 }
 
@@ -144,6 +152,13 @@ void ui_ModeScreen_screen_init(void) {
     ui_ModeScreen_waterBtn = build_mode_tile(ui_ModeScreen_contentPanel1, &gm_ic_drop, "WATER", GM_BLUE);
     // Grind uses the existing coffee-bean PNG asset (no gm_ic_* equivalent yet).
     ui_ModeScreen_grindBtn = build_mode_tile(ui_ModeScreen_contentPanel1, &ui_img_363557387, "GRIND", GM_CONTENT);
+    // CAR-316: settings tile for the same 4th slot. Built right after the grind
+    // tile so it lands in the same grid position; hidden by default. DefaultUI's
+    // grindAvailable effect shows exactly one of {grindBtn, settingsTile} —
+    // because LVGL flex layout skips LV_OBJ_FLAG_HIDDEN children, the visible one
+    // always occupies the bottom-right slot. Reuses the floating gear's asset.
+    ui_ModeScreen_settingsTile = build_mode_tile(ui_ModeScreen_contentPanel1, &ui_img_340148213, "SETTINGS", GM_CONTENT);
+    lv_obj_add_flag(ui_ModeScreen_settingsTile, LV_OBJ_FLAG_HIDDEN);
 
     // ── Standby pill at the bottom ──
     // Rounded-rect ~38px tall, contains a power icon + "STANDBY" label.
@@ -172,12 +187,15 @@ void ui_ModeScreen_screen_init(void) {
 
     // CAR-308 P2 follow-up (Codex review): drop explicit lv_obj_set_size
     // and let REAL mode self-size the widget to the zoomed draw area —
-    // matches the gm_icon() idiom in gm_ui.cpp:43-53. The earlier
-    // explicit set_size fought LVGL's transformed self-size and could
-    // make the power glyph clip or disappear.
+    // matches the gm_icon() idiom in gm_ui.cpp. CAR-316: set_zoom does NOT
+    // refresh the cached self-size (only set_src does, while zoom is still
+    // NONE → caches 40px), so call lv_obj_refresh_self_size AFTER set_zoom to
+    // make the cached self-size equal the transformed (14px) size. Keep REAL
+    // and do NOT re-pin via set_size (that was the CAR-314 regression).
     lv_obj_t *pwr = lv_img_create(ui_ModeScreen_standbyButton);
     lv_img_set_src(pwr, &gm_ic_power);                       // 40px native; pivot defaults to (20,20)
     lv_img_set_zoom(pwr, (uint16_t)(256 * 14 / 40));         // map 40 → 14px
+    lv_obj_refresh_self_size(pwr);                           // cache transformed (14px) size as self-size
     lv_img_set_size_mode(pwr, LV_IMG_SIZE_MODE_REAL);        // self-size = transformed size
     lv_obj_set_style_img_recolor(pwr, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(pwr, LV_OPA_COVER, 0);
@@ -195,6 +213,7 @@ void ui_ModeScreen_screen_init(void) {
     lv_obj_add_event_cb(ui_ModeScreen_btnSteam, ui_event_ModeScreen_btnSteam, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_ModeScreen_waterBtn, ui_event_ModeScreen_waterBtn, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_ModeScreen_grindBtn, ui_event_ModeScreen_grindBtn, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_ModeScreen_settingsTile, ui_event_ModeScreen_settingsTile, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_ModeScreen, ui_event_ModeScreen, LV_EVENT_ALL, NULL);
 }
 
@@ -210,6 +229,7 @@ void ui_ModeScreen_screen_destroy(void) {
     ui_ModeScreen_btnSteam = NULL;
     ui_ModeScreen_waterBtn = NULL;
     ui_ModeScreen_grindBtn = NULL;
+    ui_ModeScreen_settingsTile = NULL;
     // Guarded-clobber for gm_h.status_time (CAR-294 / CAR-297). The next
     // screen's init runs before this destroy, so the global may already
     // point at the next screen's clock — only NULL it if it still refers

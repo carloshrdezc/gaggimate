@@ -20,18 +20,34 @@ gm_handles_t gm_h;
 // smaller target sizes via zoom + recolor. The canonical v8 way to do
 // this is REAL size mode + zoom, with NO manual size and NO pivot tweaks.
 //
-// Three regressions on this helper so far — DO NOT "improve" without
+// Five regressions on this helper so far — DO NOT "improve" without
 // re-reading lvgl/src/widgets/lv_img.c::draw_img first:
 //   * CAR-302 introduced REAL+zoom+pivot(0,0)+set_size — drifted up-left.
 //   * CAR-307 dropped pivot(0,0) → default center → still wrong combo,
 //     icons rendered then disappeared in some layouts.
-//   * CAR-309 (this fix) drops set_size as well: REAL mode auto-sizes
-//     the widget to the *transformed* (zoomed) area, so the flex slot
-//     already matches the rendered size. Adding set_size on top fights
-//     the self-size and zeroes the draw area.
+//   * CAR-309 dropped set_size: REAL mode was assumed to auto-size to the
+//     transformed area — but it does NOT (no call after set_src refreshes
+//     the cached self-size), so SIZE_CONTENT parents laid the icon out at
+//     stale 40px and the draw tiled/clipped.
+//   * CAR-314 re-added lv_obj_set_size(im, target, target) to fix the
+//     layout box — but that was the REGRESSION: REAL-mode draw assumes
+//     object size == transformed size. Pinning a different box (e.g. 14
+//     while img->w stays 40) breaks the centering shift (img->w-transformed)/2
+//     and clips the downscaled alpha mask outside the box → invisible icons.
+//
+// RESOLUTION (CAR-316): keep REAL mode, REMOVE the CAR-314 set_size pin, and
+// call lv_obj_refresh_self_size(im) right AFTER set_zoom. set_src is the only
+// thing that refreshes the cached self-size, and at that point zoom is still
+// NONE + mode VIRTUAL, so the widget caches its 40px native size; neither
+// set_zoom nor set_size_mode re-refresh it (see lvgl/src/widgets/lv_img.c).
+// Refreshing self-size after the zoom makes the cached self-size equal the
+// transformed (zoomed) size, so flex / SIZE_CONTENT parents lay out the
+// correct box AND object == transformed keeps the REAL-mode draw centered —
+// exactly why the native-40px ModeScreen tiles (no zoom, no set_size) render.
 //
 // Rules for this helper (LVGL 8.4):
-//   * DO NOT call lv_obj_set_size(...) — REAL+zoom is self-sizing.
+//   * DO NOT re-pin the size with lv_obj_set_size(...) — that was CAR-314's
+//     regression. refresh_self_size after set_zoom is what fixes the box.
 //   * DO NOT call lv_img_set_pivot(...) — the REAL-mode draw path in
 //     lv_img.c (≈line 621-624 of lv_img.c::draw_img) uses the default
 //     centered pivot (w/2, h/2) for its area-compensation math; moving
@@ -44,17 +60,11 @@ static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t c
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);                                 // 40px native; pivot defaults to (20,20)
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
+    lv_obj_refresh_self_size(im);                            // cache transformed (zoomed) size as self-size
     lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // draw the transformed (zoomed) bitmap
-    // PIN the widget box to target_px. REAL mode does NOT auto-size here:
-    // lv_img_set_src() is the only call that refreshes the cached self-size,
-    // and at that point zoom is still NONE + mode VIRTUAL, so the widget caches
-    // its 40px native size. Neither set_zoom nor set_size_mode re-refresh it
-    // (see lvgl/src/widgets/lv_img.c), so a LV_SIZE_CONTENT parent would lay
-    // the icon out as 40px while REAL-mode draw tiles the 20px bitmap 2-3× →
-    // the "garbage glyph" regression (CAR-302/307/309/314). Explicit set_size
-    // pins obj->coords so the draw math produces exactly one centered tile.
-    lv_obj_set_size(im, target_px, target_px);
-    // NO lv_img_set_pivot — default centered pivot is what REAL-mode draw expects.
+    // NO lv_obj_set_size — REAL-mode draw assumes object == transformed size;
+    // re-pinning the box (CAR-314) clips the downscaled mask. NO lv_img_set_pivot —
+    // default centered pivot is what REAL-mode draw expects.
     lv_obj_set_style_img_recolor(im, color, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
     return im;

@@ -1091,11 +1091,22 @@ void DefaultUI::setupReactive() {
         },
         &selectedProfileId, &profileLoaded, &selectedBean);
 
-    // Show/hide grind button based on SmartGrind setting or Alt Relay function
+    // Show/hide grind button based on SmartGrind setting or Alt Relay function.
+    // CAR-316: when no grinder is available, the bottom-right (4th) grid slot
+    // shows a Settings tile and the floating top-right gear is hidden; when a
+    // grinder is available, keep the Grind tile + floating gear (original
+    // behavior). Driven from this same effect so it tracks the setting live.
     effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
                           [=]() {
-                              grindAvailable ? lv_obj_clear_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN)
-                                             : lv_obj_add_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                              if (grindAvailable) {
+                                  lv_obj_clear_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_add_flag(ui_ModeScreen_settingsTile, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_clear_flag(ui_ModeScreen_settingsButton, LV_OBJ_FLAG_HIDDEN);
+                              } else {
+                                  lv_obj_add_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_clear_flag(ui_ModeScreen_settingsTile, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_add_flag(ui_ModeScreen_settingsButton, LV_OBJ_FLAG_HIDDEN);
+                              }
                           },
                           &grindAvailable);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },

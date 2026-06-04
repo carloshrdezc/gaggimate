@@ -25,6 +25,7 @@ extern lv_obj_t *ui_ModeScreen_waterBtn;
 extern lv_obj_t *ui_ModeScreen_grindBtn;
 extern lv_obj_t *ui_ModeScreen_standbyButton;
 extern lv_obj_t *ui_ModeScreen_settingsButton;
+extern lv_obj_t *ui_ModeScreen_settingsTile;
 
 #ifdef __cplusplus
 } /*extern "C"*/
