@@ -117,10 +117,15 @@ lv_obj_t *gm_status_bar(lv_obj_t *parent, bool live) {
     gm_icon(bar, &gm_ic_bt, GM_CONTENT, 16);
 
     // Placeholder until the screen's update hook sets the real device clock.
+    // CAR-315: start hidden so the "--:--" placeholder never renders (the dash
+    // glyph reads as missing-glyph rectangles on some screens). The shared
+    // DefaultUI::updateStatusBarClock() un-hides it once a valid time exists,
+    // mirroring the CAR-299/CAR-300 StandbyScreen placeholder handling.
     gm_h.status_time = lv_label_create(bar);
     lv_label_set_text(gm_h.status_time, "--:--");
     lv_obj_set_style_text_font(gm_h.status_time, &spacemono_14, 0);
     lv_obj_set_style_text_color(gm_h.status_time, GM_CONTENT, 0);
+    lv_obj_add_flag(gm_h.status_time, LV_OBJ_FLAG_HIDDEN);
 
     if (live) {
         lv_obj_t *dot = lv_obj_create(bar);
