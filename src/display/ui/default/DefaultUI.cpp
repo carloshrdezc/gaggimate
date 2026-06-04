@@ -1252,17 +1252,15 @@ void DefaultUI::setupReactive() {
                     lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 60);
                 }
                 lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -104);
-                // CAR-318 (Codex P2): the START SHOT button is dual-purpose —
-                // CLICK starts a shot, LONG_PRESS flushes (the only display-side
-                // flush affordance, see ui_event_BrewScreen_startButton). Earlier
-                // we re-hid it while heating, which also removed the user's only
-                // way to flush during warm-up. Keep it VISIBLE in both heating
-                // and at-target states (line 1194 governs show/hide for the Brew
-                // sub-state) so long-press flush stays reachable. The shot-START
-                // CLICK is instead gated at temperature in onBrewStart()
-                // (ui_events.cpp), so a shot still can't begin until at-target.
-                // The status pill above shows "HEATING" while warming and hides
-                // at target, communicating that START is not yet armed.
+                // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
+                // button and the HEATING status pill swap mutually-exclusively on
+                // atTarget at the same BOTTOM_MID slot, so they never overlap.
+                // Button is HIDDEN while heating (atTarget==0 => ADD HIDDEN) and
+                // shown once at-target (atTarget==1 => REMOVE HIDDEN); the pill
+                // above does the inverse (!atTarget). Hiding the button while
+                // heating means it can no longer paint over the pill or sit as an
+                // enabled-looking control whose click silently no-ops.
+                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, atTarget);
             } else if (isRoundDisplay() && settings) {
                 // CAR-315 (PR #151 review I1/I2/M1): the landing block above
                 // performs one-way geometry mutations (profileInfo height/anchor,
@@ -1571,9 +1569,13 @@ void DefaultUI::applyScreenVisualLanguage() {
             // accept, or cancel a profile edit. The footer buttons are hidden
             // outside the landing state (lines ~1190-1193); mirror that here so
             // the chip bar only shows on the Brew landing sub-state.
+            // PR #153 review 4424457425 P1: predicate must be inverted. atTarget-
+            // style tri-state: cond==1 REMOVEs HIDDEN (shows). Pass
+            // (state != Settings) so: Settings => false => ADD HIDDEN (hidden);
+            // Brew landing => true => REMOVE HIDDEN (shown).
             if (brewModeChips != nullptr && lv_obj_is_valid(brewModeChips)) {
                 _ui_flag_modify(brewModeChips, LV_OBJ_FLAG_HIDDEN,
-                                brewScreenState == BrewScreenState::Settings);
+                                brewScreenState != BrewScreenState::Settings);
             }
             // brewContextLabel is parented to ui_BrewScreen_profileInfo by
             // ensureBrewContextLabel(); align it relative to Container3 on round.
