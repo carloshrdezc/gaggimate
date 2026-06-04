@@ -16,7 +16,14 @@ void onBrewCancel(lv_event_t *e) {
     controller.clear();
 }
 
-void onBrewStart(lv_event_t *e) { controller.activate(); }
+void onBrewStart(lv_event_t *e) {
+    // CAR-318 (PR #153 review 4424398936 P2): no click-gate needed. The START
+    // SHOT button is hidden while heating on round displays (the button/pill
+    // swap lives in DefaultUI.cpp), so a shot can't be triggered before
+    // at-target — and rectangular layouts (which never hide the button on
+    // heating) are unaffected by a gate that used to fire for all displays.
+    controller.activate();
+}
 
 void onBrewTempLower(lv_event_t *e) {
     controller.getUI()->markProfileDirty();

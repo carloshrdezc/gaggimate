@@ -126,6 +126,7 @@ struct RingVisualContext {
     bool active;
     bool grindActive;
     Controller *controller;
+    bool temperatureStable;
 };
 
 constexpr int MIN_STEAM_TARGET_C = 120;
@@ -252,7 +253,7 @@ RingVisual buildRingVisual(const DisplayPalette &palette, const RingVisualContex
     switch (context.mode) {
     case MODE_BREW:
         return {temperatureProgress(context.currentTemperature, context.targetTemperature), palette.accent,
-                context.currentTemperature < context.targetTemperature ? "HEATING" : "BREW"};
+                context.temperatureStable ? "BREW" : "HEATING"};
     case MODE_STEAM: {
         const int steamTarget =
             context.targetTemperature > MIN_STEAM_TARGET_C ? context.targetTemperature : DEFAULT_STEAM_TARGET_C;
@@ -1192,8 +1193,23 @@ void DefaultUI::setupReactive() {
             _ui_flag_modify(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Brew);
             _ui_flag_modify(ui_BrewScreen_profileInfo, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Brew);
+            // PR #153 review (Codex P1 #3353255295 / P2 #3355129176): the weight/
+            // mode chip is NOT part of the round brew-landing design (chat2
+            // BrewReady: hero → pill → ratio → START SHOT → chip bar, no weight
+            // chip). The old landing reparented it to center+60 where its 180x50
+            // body overlapped the START SHOT button / HEATING pill at BOTTOM_MID
+            // -104 and intercepted their taps. On round, show it ONLY in Settings
+            // AND only when volumetric is available (predicate true => REMOVE
+            // HIDDEN => shown); the Brew/Profile landing sub-states hide it.
+            // PR #153 review (Codex P2 #3356478651): the volumetricAvailable guard
+            // is required here too — without it, Settings on a scaleless round
+            // machine shows a nonfunctional "-" chip that is still long-pressable
+            // and fires onVolumetricHold() tare commands. Rectangular keeps the
+            // original Brew+volumetric gate.
             _ui_flag_modify(ui_BrewScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN,
-                            brewScreenState == BrewScreenState::Brew && volumetricAvailable);
+                            isRoundDisplay()
+                                ? (brewScreenState == BrewScreenState::Settings && volumetricAvailable)
+                                : (brewScreenState == BrewScreenState::Brew && volumetricAvailable));
             if (volumetricAvailable) {
                 lv_img_set_src(ui_BrewScreen_volumetricButton, bluetoothScales ? &ui_img_1424216268 : &ui_img_flowmeter_png);
             }
@@ -1204,9 +1220,23 @@ void DefaultUI::setupReactive() {
             // Panel is the 372×372 round circle (CENTER-relative coords). The
             // rectangular path keeps the original SquareLine positions (AC #8).
             if (isRoundDisplay() && !settings) {
-                // State kicker pill at the very top, profile selector beneath it.
-                if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill))
-                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_TOP_MID, 0, 8);
+                // CAR-318: while the boiler is still heating, the live status
+                // pill ("HEATING") sits at the BOTTOM (clear of the profile
+                // selector) and START SHOT is hidden — you can't pull a shot
+                // until the machine is at temperature. Once isTemperatureStable
+                // flips true, hide the pill and reveal START SHOT in the same
+                // bottom slot. (isTemperatureStable resets to false on any
+                // setpoint change, so the pill returns if the target moves.)
+                // _ui_flag_modify is tri-state: arg 0 ADDs the flag, 1 REMOVEs
+                // it (ui_helpers.c:80-89), so a bool reads as "true => REMOVE
+                // (show)". To SHOW the pill while heating, pass !atTarget.
+                const bool atTarget = isTemperatureStable;
+                if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
+                    // CAR-319: lifted above the bottom mode-chip pill bar (which
+                    // sits at BOTTOM_MID y=-34, ~56px tall). -104 clears it.
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -104);
+                    _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
+                }
                 // Single-row profile selector — hide the tall "Selected profile"
                 // caption and bean-context label so the pill stays compact and
                 // clears the hero numeral.
@@ -1223,18 +1253,21 @@ void DefaultUI::setupReactive() {
                         lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
                                         LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
                 }
-                // Weight chip below the hero, START SHOT pinned to the bottom.
-                // modeSwitch is a flex-column child of controlContainer, so a bare
-                // lv_obj_align() would be clobbered on the next layout pass. Reparent
-                // it to contentPanel4 (a non-flex, CENTER-relative container that
-                // already hosts the hero/pill/profileInfo) so the manual align sticks.
-                // lv_obj_set_parent to the same parent is a no-op, so this stays
-                // idempotent across re-runs of this effect.
-                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch)) {
-                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_contentPanel4);
-                    lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 92);
-                }
-                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -8);
+                // PR #153 review: the weight/mode chip is hidden on the round
+                // landing (see the modeSwitch gate above), so there is nothing to
+                // reparent/position here anymore — the design's middle stack is
+                // hero → pill → ratio → START SHOT, with no weight chip. The
+                // Settings branch reparents modeSwitch back to controlContainer.
+                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -104);
+                // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
+                // button and the HEATING status pill swap mutually-exclusively on
+                // atTarget at the same BOTTOM_MID slot, so they never overlap.
+                // Button is HIDDEN while heating (atTarget==0 => ADD HIDDEN) and
+                // shown once at-target (atTarget==1 => REMOVE HIDDEN); the pill
+                // above does the inverse (!atTarget). Hiding the button while
+                // heating means it can no longer paint over the pill or sit as an
+                // enabled-looking control whose click silently no-ops.
+                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, atTarget);
             } else if (isRoundDisplay() && settings) {
                 // CAR-315 (PR #151 review I1/I2/M1): the landing block above
                 // performs one-way geometry mutations (profileInfo height/anchor,
@@ -1267,7 +1300,7 @@ void DefaultUI::setupReactive() {
                 }
             }
         },
-        &brewScreenState, &volumetricAvailable, &bluetoothScales);
+        &brewScreenState, &volumetricAvailable, &bluetoothScales, &isTemperatureStable);
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
@@ -1325,6 +1358,10 @@ void DefaultUI::resetCustomScreenHandles() {
     profileBeanLabel = nullptr;
     grindBeanLabel = nullptr;
     brewContextLabel = nullptr;
+    // CAR-319: the chip bar lives on ui_BrewScreen and is destroyed with it on
+    // screen change; null the handles so ensureBrewModeChips() rebuilds on re-entry.
+    brewModeChips = nullptr;
+    brewModeChip[0] = brewModeChip[1] = brewModeChip[2] = brewModeChip[3] = nullptr;
 }
 
 bool DefaultUI::isRoundDisplay() const {
@@ -1409,13 +1446,92 @@ void DefaultUI::ensureBrewContextLabel() {
     lv_obj_set_style_text_align(brewContextLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
+// CAR-319: bottom mode-chip pill bar on the round BrewScreen landing view,
+// matching the Claude Design handoff (chat2 "Brew Screen Heating State" +
+// Build Spec mode-chip bar). Four round 44px chips — power/cup/steam/drop — in
+// a rounded translucent container pinned BOTTOM_MID y=-34. Cup (index 1) is the
+// active brew chip (filled GM_RED). Tapping a chip switches machine mode via the
+// same handlers the ModeScreen launcher uses. Built once, lazily, idempotent.
+void DefaultUI::brewModeChipCb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    // The chip index is stashed in the event user-data at build time.
+    const int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    switch (idx) {
+    case 0:
+        onStandby(e); // power → standby
+        break;
+    case 1:
+        break; // cup → already on the brew screen, no-op
+    case 2:
+        onSteamScreen(e); // steam mode
+        break;
+    case 3:
+        onWaterScreen(e); // water mode
+        break;
+    default:
+        break;
+    }
+}
+
+void DefaultUI::ensureBrewModeChips() {
+    if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen) || brewModeChips != nullptr) {
+        return;
+    }
+
+    // Rounded translucent pill container, parented to the screen root so it
+    // floats above contentPanel4. gm-chips: bottom 34, padding 6, gap 6.
+    brewModeChips = lv_obj_create(ui_BrewScreen);
+    lv_obj_remove_style_all(brewModeChips);
+    lv_obj_set_height(brewModeChips, LV_SIZE_CONTENT);
+    lv_obj_set_width(brewModeChips, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(brewModeChips, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(brewModeChips, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(brewModeChips, 6, 0);
+    lv_obj_set_style_pad_gap(brewModeChips, 6, 0);
+    lv_obj_set_style_radius(brewModeChips, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(brewModeChips, GM_CONTENT, 0);
+    lv_obj_set_style_bg_opa(brewModeChips, LV_OPA_10, 0); // ~rgba(255,255,255,0.03-0.10)
+    lv_obj_set_style_border_width(brewModeChips, 1, 0);
+    lv_obj_set_style_border_color(brewModeChips, GM_FAINT, 0);
+    lv_obj_set_style_border_opa(brewModeChips, LV_OPA_60, 0);
+    lv_obj_clear_flag(brewModeChips, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(brewModeChips, LV_ALIGN_BOTTOM_MID, 0, -34);
+
+    const lv_img_dsc_t *icons[4] = {&gm_ic_power, &gm_ic_cup, &gm_ic_steam, &gm_ic_drop};
+    const int activeChip = 1; // cup / brew
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *chip = lv_obj_create(brewModeChips);
+        lv_obj_remove_style_all(chip);
+        lv_obj_set_size(chip, 44, 44);
+        lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
+        lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
+        if (i == activeChip) {
+            lv_obj_set_style_bg_color(chip, GM_RED, 0);
+            lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
+        } else {
+            lv_obj_set_style_bg_opa(chip, LV_OPA_TRANSP, 0);
+        }
+        lv_obj_t *ic = lv_img_create(chip);
+        lv_img_set_src(ic, icons[i]);
+        lv_obj_center(ic);
+        lv_obj_set_style_img_recolor(ic, i == activeChip ? GM_BG : GM_MUTED, 0);
+        lv_obj_set_style_img_recolor_opa(ic, LV_OPA_COVER, 0);
+        lv_obj_add_event_cb(chip, brewModeChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        brewModeChip[i] = chip;
+    }
+}
+
 void DefaultUI::applyScreenVisualLanguage() {
     const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
     const int resolvedThemeMode = resolveDisplayThemeMode(controller->getSettings().getThemeMode(), amoledPanel);
     const DisplayPalette palette = makeDisplayPalette(resolvedThemeMode, amoledPanel);
     lv_obj_t *activeScreen = lv_scr_act();
     const bool roundDisplay = isRoundDisplay();
-    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller};
+    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
+                                        isTemperatureStable != 0};
     const RingVisual ringVisual = buildRingVisual(palette, ringContext);
 
     styleScreenBase(activeScreen, palette, roundDisplay);
@@ -1444,8 +1560,30 @@ void DefaultUI::applyScreenVisualLanguage() {
             // sets a 360x360 default for flat displays, so bump it here.
             lv_obj_set_size(ui_BrewScreen_contentPanel4, 372, 372);
             lv_obj_align(ui_BrewScreen_contentPanel4, LV_ALIGN_CENTER, 0, 4);
-            // Re-anchor the back button via the shared helper (also restyles it).
-            alignTopBackButton(ui_BrewScreen_ImgButton5, palette, palette.textPrimary);
+            // CAR-319: the design replaces the top-left back/menu button with the
+            // bottom mode-chip pill bar (power chip = standby). Hide the back
+            // button on round; navigation now lives in the chip bar. (Kept alive,
+            // not deleted, so its event/ext-click-area references stay valid.)
+            if (lv_obj_is_valid(ui_BrewScreen_ImgButton5)) {
+                lv_obj_add_flag(ui_BrewScreen_ImgButton5, LV_OBJ_FLAG_HIDDEN);
+            }
+            ensureBrewModeChips();
+            // CAR-319 (Codex P1): the mode-chip pill bar is a screen-root child
+            // anchored BOTTOM_MID — the same area as the Settings footer
+            // (saveButton/acceptButton/saveAsNewButton). In the Settings
+            // sub-state it would render above those controls and its clickable
+            // chips would intercept their touches, so the user couldn't save,
+            // accept, or cancel a profile edit. The footer buttons are hidden
+            // outside the landing state (lines ~1190-1193); mirror that here so
+            // the chip bar only shows on the Brew landing sub-state.
+            // PR #153 review 4424457425 P1: predicate must be inverted. atTarget-
+            // style tri-state: cond==1 REMOVEs HIDDEN (shows). Pass
+            // (state != Settings) so: Settings => false => ADD HIDDEN (hidden);
+            // Brew landing => true => REMOVE HIDDEN (shown).
+            if (brewModeChips != nullptr && lv_obj_is_valid(brewModeChips)) {
+                _ui_flag_modify(brewModeChips, LV_OBJ_FLAG_HIDDEN,
+                                brewScreenState != BrewScreenState::Settings);
+            }
             // brewContextLabel is parented to ui_BrewScreen_profileInfo by
             // ensureBrewContextLabel(); align it relative to Container3 on round.
             if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel)) {
@@ -1941,7 +2079,8 @@ void DefaultUI::updateStatusScreen() {
 void DefaultUI::adjustDials(lv_obj_t *dials) {
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
     const bool roundDisplay = isRoundDisplay();
-    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller};
+    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
+                                        isTemperatureStable != 0};
     const RingVisual ringVisual = buildRingVisual(palette, ringContext);
     lv_obj_t *tempGauge = ui_comp_get_child(dials, UI_COMP_DIALS_TEMPGAUGE);
     lv_obj_t *tempText = ui_comp_get_child(dials, UI_COMP_DIALS_TEMPTEXT);
