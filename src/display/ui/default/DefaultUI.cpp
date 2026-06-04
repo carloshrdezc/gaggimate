@@ -1516,9 +1516,20 @@ void DefaultUI::ensureBrewModeChips() {
         }
         lv_obj_t *ic = lv_img_create(chip);
         lv_img_set_src(ic, icons[i]);
+        // Match the proven ui_ModeScreen build_mode_tile() recipe: recolor the
+        // (alpha) icon, force REAL size mode so the self-size equals the bitmap,
+        // THEN center. PR #153 review symptom: inactive chips only showed a dot —
+        // the icons were recolored GM_MUTED (0x8A8A8A) at full opacity which read
+        // as near-invisible against the transparent chip, and the missing REAL
+        // size mode let the centered icon collapse. Fix: active chip = near-black
+        // icon on solid GM_RED; inactive chips = bright GM_CONTENT icon dimmed via
+        // recolor opacity so the icon is clearly shaped/visible yet the selected
+        // (red) chip still stands out.
+        const bool chipActive = (i == activeChip);
+        lv_obj_set_style_img_recolor(ic, chipActive ? GM_BG : GM_CONTENT, 0);
+        lv_obj_set_style_img_recolor_opa(ic, chipActive ? LV_OPA_COVER : LV_OPA_70, 0);
+        lv_img_set_size_mode(ic, LV_IMG_SIZE_MODE_REAL);
         lv_obj_center(ic);
-        lv_obj_set_style_img_recolor(ic, i == activeChip ? GM_BG : GM_MUTED, 0);
-        lv_obj_set_style_img_recolor_opa(ic, LV_OPA_COVER, 0);
         lv_obj_add_event_cb(chip, brewModeChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         brewModeChip[i] = chip;
     }
