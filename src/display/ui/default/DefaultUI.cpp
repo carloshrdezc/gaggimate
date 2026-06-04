@@ -1199,11 +1199,17 @@ void DefaultUI::setupReactive() {
             // chip). The old landing reparented it to center+60 where its 180x50
             // body overlapped the START SHOT button / HEATING pill at BOTTOM_MID
             // -104 and intercepted their taps. On round, show it ONLY in Settings
-            // (predicate true => REMOVE HIDDEN => shown); the Brew/Profile landing
-            // sub-states hide it. Rectangular keeps the original volumetric gate.
+            // AND only when volumetric is available (predicate true => REMOVE
+            // HIDDEN => shown); the Brew/Profile landing sub-states hide it.
+            // PR #153 review (Codex P2 #3356478651): the volumetricAvailable guard
+            // is required here too — without it, Settings on a scaleless round
+            // machine shows a nonfunctional "-" chip that is still long-pressable
+            // and fires onVolumetricHold() tare commands. Rectangular keeps the
+            // original Brew+volumetric gate.
             _ui_flag_modify(ui_BrewScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN,
-                            isRoundDisplay() ? (brewScreenState == BrewScreenState::Settings)
-                                             : (brewScreenState == BrewScreenState::Brew && volumetricAvailable));
+                            isRoundDisplay()
+                                ? (brewScreenState == BrewScreenState::Settings && volumetricAvailable)
+                                : (brewScreenState == BrewScreenState::Brew && volumetricAvailable));
             if (volumetricAvailable) {
                 lv_img_set_src(ui_BrewScreen_volumetricButton, bluetoothScales ? &ui_img_1424216268 : &ui_img_flowmeter_png);
             }
