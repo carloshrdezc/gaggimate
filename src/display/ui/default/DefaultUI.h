@@ -51,6 +51,13 @@ class DefaultUI {
     void markProfileDirty() { profileDirty = true; }
     void markProfileClean() { profileDirty = false; }
 
+    // CAR-318 (Codex P2): expose the boiler-at-temperature signal so the
+    // BrewScreen START SHOT click handler (onBrewStart, ui_events.cpp) can
+    // gate starting a shot to at-target only. The button stays visible while
+    // heating so its long-press FLUSH affordance remains reachable; this
+    // getter lets the click path refuse to start a shot until stable.
+    bool isAtBrewTemperature() const { return isTemperatureStable != 0; }
+
     void applyTheme();
 
   private:

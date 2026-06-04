@@ -1252,13 +1252,17 @@ void DefaultUI::setupReactive() {
                     lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 60);
                 }
                 lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -104);
-                // CAR-318: gate START SHOT on the boiler being at temperature.
-                // Line 1193 already shows it for the Brew sub-state; here we
-                // re-hide it while heating so only the bottom status pill shows,
-                // Show START SHOT only at target: pass atTarget so true =>
-                // REMOVE HIDDEN (show), heating => 0 => ADD HIDDEN (hide).
-                // Runs after line 1193, so this wins.
-                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, atTarget);
+                // CAR-318 (Codex P2): the START SHOT button is dual-purpose —
+                // CLICK starts a shot, LONG_PRESS flushes (the only display-side
+                // flush affordance, see ui_event_BrewScreen_startButton). Earlier
+                // we re-hid it while heating, which also removed the user's only
+                // way to flush during warm-up. Keep it VISIBLE in both heating
+                // and at-target states (line 1194 governs show/hide for the Brew
+                // sub-state) so long-press flush stays reachable. The shot-START
+                // CLICK is instead gated at temperature in onBrewStart()
+                // (ui_events.cpp), so a shot still can't begin until at-target.
+                // The status pill above shows "HEATING" while warming and hides
+                // at target, communicating that START is not yet armed.
             } else if (isRoundDisplay() && settings) {
                 // CAR-315 (PR #151 review I1/I2/M1): the landing block above
                 // performs one-way geometry mutations (profileInfo height/anchor,

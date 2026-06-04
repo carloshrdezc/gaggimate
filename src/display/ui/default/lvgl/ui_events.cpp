@@ -16,7 +16,19 @@ void onBrewCancel(lv_event_t *e) {
     controller.clear();
 }
 
-void onBrewStart(lv_event_t *e) { controller.activate(); }
+void onBrewStart(lv_event_t *e) {
+    // CAR-318 (Codex P2): the BrewScreen START SHOT button is dual-purpose —
+    // CLICK starts a shot, LONG_PRESS flushes. The button stays visible while
+    // the boiler is heating so the long-press FLUSH affordance is reachable
+    // during warm-up, but a shot must not START until the machine is at
+    // temperature. Gate the click here (rather than in the SquareLine-generated
+    // ui_BrewScreen.c) so generated code is untouched. Long-press flush routes
+    // through onFlush() and is intentionally not gated.
+    DefaultUI *ui = controller.getUI();
+    if (ui != nullptr && !ui->isAtBrewTemperature())
+        return;
+    controller.activate();
+}
 
 void onBrewTempLower(lv_event_t *e) {
     controller.getUI()->markProfileDirty();
