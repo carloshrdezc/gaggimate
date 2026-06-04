@@ -716,6 +716,16 @@ void DefaultUI::loop() {
         // safe to call unconditionally while BrewScreen is active.
         if (lv_scr_act() == ui_BrewScreen)
             updateStatusBarClock();
+        // CAR-315 (PR #151 Codex review P2): GrindScreen also owns a
+        // gm_status_bar(ui_GrindScreen, true) and points gm_h.status_time at
+        // its own clock (gs_status_time), but had no per-frame update path.
+        // Since gm_status_bar() now seeds the clock label HIDDEN (so the
+        // "--:--" placeholder never renders as missing-glyph rectangles), a
+        // screen with no update hook would keep its clock hidden forever.
+        // updateStatusBarClock() no-ops on NULL/invalid handles, so this is
+        // safe to call unconditionally while GrindScreen is active.
+        if (lv_scr_act() == ui_GrindScreen)
+            updateStatusBarClock();
         effect_mgr.evaluate_all();
     }
 
