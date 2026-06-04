@@ -126,6 +126,7 @@ struct RingVisualContext {
     bool active;
     bool grindActive;
     Controller *controller;
+    bool temperatureStable;
 };
 
 constexpr int MIN_STEAM_TARGET_C = 120;
@@ -252,7 +253,7 @@ RingVisual buildRingVisual(const DisplayPalette &palette, const RingVisualContex
     switch (context.mode) {
     case MODE_BREW:
         return {temperatureProgress(context.currentTemperature, context.targetTemperature), palette.accent,
-                context.currentTemperature < context.targetTemperature ? "HEATING" : "BREW"};
+                context.temperatureStable ? "BREW" : "HEATING"};
     case MODE_STEAM: {
         const int steamTarget =
             context.targetTemperature > MIN_STEAM_TARGET_C ? context.targetTemperature : DEFAULT_STEAM_TARGET_C;
@@ -1434,7 +1435,8 @@ void DefaultUI::applyScreenVisualLanguage() {
     const DisplayPalette palette = makeDisplayPalette(resolvedThemeMode, amoledPanel);
     lv_obj_t *activeScreen = lv_scr_act();
     const bool roundDisplay = isRoundDisplay();
-    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller};
+    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
+                                        isTemperatureStable != 0};
     const RingVisual ringVisual = buildRingVisual(palette, ringContext);
 
     styleScreenBase(activeScreen, palette, roundDisplay);
@@ -1960,7 +1962,8 @@ void DefaultUI::updateStatusScreen() {
 void DefaultUI::adjustDials(lv_obj_t *dials) {
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
     const bool roundDisplay = isRoundDisplay();
-    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller};
+    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
+                                        isTemperatureStable != 0};
     const RingVisual ringVisual = buildRingVisual(palette, ringContext);
     lv_obj_t *tempGauge = ui_comp_get_child(dials, UI_COMP_DIALS_TEMPGAUGE);
     lv_obj_t *tempText = ui_comp_get_child(dials, UI_COMP_DIALS_TEMPTEXT);
