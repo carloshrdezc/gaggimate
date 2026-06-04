@@ -1563,6 +1563,18 @@ void DefaultUI::applyScreenVisualLanguage() {
                 lv_obj_add_flag(ui_BrewScreen_ImgButton5, LV_OBJ_FLAG_HIDDEN);
             }
             ensureBrewModeChips();
+            // CAR-319 (Codex P1): the mode-chip pill bar is a screen-root child
+            // anchored BOTTOM_MID — the same area as the Settings footer
+            // (saveButton/acceptButton/saveAsNewButton). In the Settings
+            // sub-state it would render above those controls and its clickable
+            // chips would intercept their touches, so the user couldn't save,
+            // accept, or cancel a profile edit. The footer buttons are hidden
+            // outside the landing state (lines ~1190-1193); mirror that here so
+            // the chip bar only shows on the Brew landing sub-state.
+            if (brewModeChips != nullptr && lv_obj_is_valid(brewModeChips)) {
+                _ui_flag_modify(brewModeChips, LV_OBJ_FLAG_HIDDEN,
+                                brewScreenState == BrewScreenState::Settings);
+            }
             // brewContextLabel is parented to ui_BrewScreen_profileInfo by
             // ensureBrewContextLabel(); align it relative to Container3 on round.
             if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel)) {
