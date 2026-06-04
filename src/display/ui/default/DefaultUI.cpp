@@ -708,6 +708,24 @@ void DefaultUI::loop() {
         // ModeScreen.
         if (lv_scr_act() == ui_ModeScreen)
             updateStatusBarClock();
+        // CAR-315: BrewScreen also owns a gm_status_bar() and points
+        // gm_h.status_time at its own clock (bs_status_time), but no
+        // per-frame update path drove it — so the clock stuck at the
+        // builder placeholder and rendered as missing-glyph rectangles.
+        // updateStatusBarClock() no-ops on NULL/invalid handles, so this is
+        // safe to call unconditionally while BrewScreen is active.
+        if (lv_scr_act() == ui_BrewScreen)
+            updateStatusBarClock();
+        // CAR-315 (PR #151 Codex review P2): GrindScreen also owns a
+        // gm_status_bar(ui_GrindScreen, true) and points gm_h.status_time at
+        // its own clock (gs_status_time), but had no per-frame update path.
+        // Since gm_status_bar() now seeds the clock label HIDDEN (so the
+        // "--:--" placeholder never renders as missing-glyph rectangles), a
+        // screen with no update hook would keep its clock hidden forever.
+        // updateStatusBarClock() no-ops on NULL/invalid handles, so this is
+        // safe to call unconditionally while GrindScreen is active.
+        if (lv_scr_act() == ui_GrindScreen)
+            updateStatusBarClock();
         effect_mgr.evaluate_all();
     }
 
@@ -1139,6 +1157,35 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
+            const bool settings = brewScreenState == BrewScreenState::Settings;
+            // CAR-315: the CAR-301 chat2 hero numeral / status pill / ratio sub
+            // were never toggled with the sub-state, so in the Settings (+/-
+            // editor) sub-state they bled through behind the steppers, and in
+            // the landing (Brew) sub-state they stacked on top of profileInfo,
+            // modeSwitch and START SHOT. Treat the two sub-states as distinct
+            // coherent layouts (strategy A): show the hero readout only in the
+            // landing state, hide it while editing, and re-anchor the landing
+            // widgets so nothing overlaps the 135px-tall hero numeral.
+            if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value))
+                _ui_flag_modify(uic_BrewScreen_hero_value, LV_OBJ_FLAG_HIDDEN, !settings);
+            if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit))
+                _ui_flag_modify(uic_BrewScreen_hero_unit, LV_OBJ_FLAG_HIDDEN, !settings);
+            if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill))
+                _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !settings);
+            // ratio sub-line only adds value once a profile/target is in view;
+            // keep it hidden in both sub-states to avoid crowding the hero in
+            // landing and the steppers in Settings (CAR-315). The status pill
+            // and dials ring already convey live state.
+            //
+            // NOTE (PR #151 review M2): this is the DELIBERATE end state for the
+            // CAR-301 ratio_sub widget — it is intentionally dead UI in every
+            // BrewScreen sub-state, not a bug. The widget + its handle are kept
+            // so a future ticket can re-surface a ratio breakdown ("18 -> 36 ·
+            // 1:2 · 9 BAR") without re-adding the layout scaffolding. Do not
+            // "restore" its visibility without a design decision behind it.
+            if (uic_BrewScreen_ratio_sub != nullptr && lv_obj_is_valid(uic_BrewScreen_ratio_sub))
+                lv_obj_add_flag(uic_BrewScreen_ratio_sub, LV_OBJ_FLAG_HIDDEN);
+
             _ui_flag_modify(ui_BrewScreen_adjustments, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_acceptButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_saveButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
@@ -1149,6 +1196,75 @@ void DefaultUI::setupReactive() {
                             brewScreenState == BrewScreenState::Brew && volumetricAvailable);
             if (volumetricAvailable) {
                 lv_img_set_src(ui_BrewScreen_volumetricButton, bluetoothScales ? &ui_img_1424216268 : &ui_img_flowmeter_png);
+            }
+
+            // CAR-315: round-display landing-state layout. Stack everything in
+            // the margins above/below the centered hero numeral so the profile
+            // selector, status pill, weight chip and START SHOT never collide.
+            // Panel is the 372×372 round circle (CENTER-relative coords). The
+            // rectangular path keeps the original SquareLine positions (AC #8).
+            if (isRoundDisplay() && !settings) {
+                // State kicker pill at the very top, profile selector beneath it.
+                if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill))
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_TOP_MID, 0, 8);
+                // Single-row profile selector — hide the tall "Selected profile"
+                // caption and bean-context label so the pill stays compact and
+                // clears the hero numeral.
+                if (lv_obj_is_valid(ui_BrewScreen_Label1))
+                    lv_obj_add_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
+                    lv_obj_add_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_height(ui_BrewScreen_profileInfo, 56);
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 50);
+                // Hero temperature numeral, centered.
+                if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
+                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -14);
+                    if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit))
+                        lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
+                                        LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
+                }
+                // Weight chip below the hero, START SHOT pinned to the bottom.
+                // modeSwitch is a flex-column child of controlContainer, so a bare
+                // lv_obj_align() would be clobbered on the next layout pass. Reparent
+                // it to contentPanel4 (a non-flex, CENTER-relative container that
+                // already hosts the hero/pill/profileInfo) so the manual align sticks.
+                // lv_obj_set_parent to the same parent is a no-op, so this stays
+                // idempotent across re-runs of this effect.
+                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch)) {
+                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_contentPanel4);
+                    lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 92);
+                }
+                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -8);
+            } else if (isRoundDisplay() && settings) {
+                // CAR-315 (PR #151 review I1/I2/M1): the landing block above
+                // performs one-way geometry mutations (profileInfo height/anchor,
+                // modeSwitch reparent, Label1/brewContextLabel hidden). Brew
+                // <-> Settings toggles do NOT rebuild the screen (changeBrewScreenMode
+                // only flips the signal + rerender), so without a symmetric reset
+                // the Settings editor inherits the compacted landing geometry.
+                // Restore the screen_init defaults so the editor sub-state renders
+                // as designed.
+                //
+                // profileInfo: screen_init sets 292x100 @ TOP_MID y=80 specifically
+                // so the chip lands correctly when un-hidden in Settings
+                // (ui_BrewScreen.c:399-405, CAR-301 review C1).
+                lv_obj_set_height(ui_BrewScreen_profileInfo, 100);
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 80);
+                // Re-show the "Selected profile" caption + bean-context label that
+                // the landing block compacts away (M1).
+                if (lv_obj_is_valid(ui_BrewScreen_Label1))
+                    lv_obj_clear_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
+                    lv_obj_clear_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
+                // modeSwitch: reparent back to its controlContainer flex home so it
+                // flows in the editor's control column (I2). Restore the original
+                // child order (modeSwitch first, then adjustments) — reparenting
+                // appends as the last child, so move it back to index 0.
+                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch) &&
+                    lv_obj_get_parent(ui_BrewScreen_modeSwitch) != ui_BrewScreen_controlContainer) {
+                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_controlContainer);
+                    lv_obj_move_to_index(ui_BrewScreen_modeSwitch, 0);
+                }
             }
         },
         &brewScreenState, &volumetricAvailable, &bluetoothScales);
@@ -1625,12 +1741,20 @@ void DefaultUI::updateStatusBarClock() {
     if (gm_h.status_time == nullptr || !lv_obj_is_valid(gm_h.status_time)) {
         return;
     }
+    // CAR-315: gm_status_bar() seeds the label with a "--:--" placeholder in
+    // spacemono_14 and hides it until a real time is available. Mirror the
+    // CAR-299 StandbyScreen handling: only show the clock once NTP has given us
+    // a plausible time (epoch past 2021), otherwise keep it hidden so the
+    // placeholder never renders as missing-glyph rectangles on any screen.
     time_t nowEpoch = time(nullptr);
     struct tm timeinfo;
-    if (localtime_r(&nowEpoch, &timeinfo) != nullptr) {
+    if (nowEpoch > 1609459200 && localtime_r(&nowEpoch, &timeinfo) != nullptr) {
         char buf[8];
         strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
         lv_label_set_text(gm_h.status_time, buf);
+        lv_obj_clear_flag(gm_h.status_time, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(gm_h.status_time, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

@@ -89,7 +89,7 @@ static int bs_accent_surface_count = 0;
 // CAR-301 chat2 redesign — file-static handles for the new BrewIdle layout.
 //   uic_BrewScreen_hero_value : centered hero numeral ("--" → live temp; ndot_150)
 //   uic_BrewScreen_hero_unit  : "°" suffix (ndot_60, GM_CONTENT)
-//   s_status_pill: pill bg wrapping ui_BrewScreen_mainLabel3 (rounded chip with
+//   uic_BrewScreen_status_pill: pill bg wrapping ui_BrewScreen_mainLabel3 (rounded chip with
 //                  GM_HEAT/GM_RED border tone — DefaultUI overwrites mainLabel3
 //                  text/colour from ringVisual every render)
 //   uic_BrewScreen_ratio_sub  : small muted line beneath status pill ("18 → 36 · 1:2 · 9 BAR")
@@ -103,7 +103,10 @@ static int bs_accent_surface_count = 0;
 // file-static — DefaultUI never touches them directly.
 lv_obj_t *uic_BrewScreen_hero_value = NULL;
 lv_obj_t *uic_BrewScreen_hero_unit = NULL;
-static lv_obj_t *s_status_pill = NULL;
+// CAR-315: exported (was file-static uic_BrewScreen_status_pill) so DefaultUI's
+// brewScreenState effect can hide it in the Settings sub-state and re-anchor
+// it as the top kicker in the landing sub-state.
+lv_obj_t *uic_BrewScreen_status_pill = NULL;
 lv_obj_t *uic_BrewScreen_ratio_sub = NULL;
 static lv_obj_t *s_start_label = NULL;
 
@@ -295,14 +298,14 @@ void ui_BrewScreen_screen_init(void) {
     //   profileInfo (chip)  TOP_MID  y=80   — repositioned below
     //   hero (uic_BrewScreen_hero_value) CENTER   y=-10  — large ndot_150 numeral
     //     + uic_BrewScreen_hero_unit "°" sits OUT_RIGHT_BOTTOM of hero
-    //   s_status_pill       CENTER   y=90   — wraps ui_BrewScreen_mainLabel3
+    //   uic_BrewScreen_status_pill       CENTER   y=90   — wraps ui_BrewScreen_mainLabel3
     //   uic_BrewScreen_ratio_sub         CENTER   y=130  — muted ratio breakdown
     //   startButton (pill)  BOTTOM_MID y=-54 — full-width red "START SHOT"
     //
     // The kicker text ("BREW") was removed in chat2 — the status pill now
     // carries the brew-state phrase. ui_BrewScreen_mainLabel3 is still created
     // (DefaultUI.cpp:1284-1287 overwrites its text from ringVisual.title every
-    // render) but lives INSIDE s_status_pill instead of free-floating at the
+    // render) but lives INSIDE uic_BrewScreen_status_pill instead of free-floating at the
     // top of the panel.
 
     // Hero numeral — centered, ndot_150, GM_CONTENT.
@@ -330,28 +333,28 @@ void ui_BrewScreen_screen_init(void) {
     // Tone: GM_HEAT (heating) or GM_RED (at-target / brew ready). DefaultUI
     // overrides mainLabel3 colour from ringVisual.tone every render, so the
     // visible state colour stays accurate; we set a sensible default here.
-    s_status_pill = lv_obj_create(ui_BrewScreen_contentPanel4);
-    lv_obj_remove_style_all(s_status_pill);
-    lv_obj_set_size(s_status_pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_radius(s_status_pill, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(s_status_pill, GM_SURFACE, 0);
-    lv_obj_set_style_bg_opa(s_status_pill, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(s_status_pill, GM_HEAT, 0);
-    lv_obj_set_style_border_width(s_status_pill, 1, 0);
-    lv_obj_set_style_border_opa(s_status_pill, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_left(s_status_pill, 24, 0);
-    lv_obj_set_style_pad_right(s_status_pill, 24, 0);
-    lv_obj_set_style_pad_top(s_status_pill, 8, 0);
-    lv_obj_set_style_pad_bottom(s_status_pill, 8, 0);
-    lv_obj_align(s_status_pill, LV_ALIGN_CENTER, 0, 90);
-    lv_obj_clear_flag(s_status_pill, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(s_status_pill, LV_OBJ_FLAG_CLICKABLE);
-    bs_track_button_surface(s_status_pill);
+    uic_BrewScreen_status_pill = lv_obj_create(ui_BrewScreen_contentPanel4);
+    lv_obj_remove_style_all(uic_BrewScreen_status_pill);
+    lv_obj_set_size(uic_BrewScreen_status_pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_radius(uic_BrewScreen_status_pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(uic_BrewScreen_status_pill, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(uic_BrewScreen_status_pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(uic_BrewScreen_status_pill, GM_HEAT, 0);
+    lv_obj_set_style_border_width(uic_BrewScreen_status_pill, 1, 0);
+    lv_obj_set_style_border_opa(uic_BrewScreen_status_pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_left(uic_BrewScreen_status_pill, 24, 0);
+    lv_obj_set_style_pad_right(uic_BrewScreen_status_pill, 24, 0);
+    lv_obj_set_style_pad_top(uic_BrewScreen_status_pill, 8, 0);
+    lv_obj_set_style_pad_bottom(uic_BrewScreen_status_pill, 8, 0);
+    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_CENTER, 0, 90);
+    lv_obj_clear_flag(uic_BrewScreen_status_pill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(uic_BrewScreen_status_pill, LV_OBJ_FLAG_CLICKABLE);
+    bs_track_button_surface(uic_BrewScreen_status_pill);
 
     // Kicker label ("BREW" / "READY" / etc.) — DefaultUI sets text + tone from ringVisual.
-    // Now lives inside s_status_pill instead of free-floating; DefaultUI keeps
+    // Now lives inside uic_BrewScreen_status_pill instead of free-floating; DefaultUI keeps
     // touching only the label, never the pill bg, so this is safe.
-    ui_BrewScreen_mainLabel3 = lv_label_create(s_status_pill);
+    ui_BrewScreen_mainLabel3 = lv_label_create(uic_BrewScreen_status_pill);
     lv_label_set_text(ui_BrewScreen_mainLabel3, "HEATING");
     lv_obj_set_style_text_font(ui_BrewScreen_mainLabel3, &ndot_24, 0);
     lv_obj_set_style_text_color(ui_BrewScreen_mainLabel3, GM_HEAT, 0);
@@ -783,7 +786,7 @@ void ui_BrewScreen_screen_destroy(void) {
     bs_kicker_label = NULL;
     uic_BrewScreen_hero_value = NULL;
     uic_BrewScreen_hero_unit = NULL;
-    s_status_pill = NULL;
+    uic_BrewScreen_status_pill = NULL;
     uic_BrewScreen_ratio_sub = NULL;
     s_start_label = NULL;
     for (int i = 0; i < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0])); i++)

@@ -74,6 +74,9 @@ extern lv_obj_t *uic_BrewScreen_dials_tempText;
 extern lv_obj_t *uic_BrewScreen_hero_value;
 extern lv_obj_t *uic_BrewScreen_hero_unit;
 extern lv_obj_t *uic_BrewScreen_ratio_sub;
+// CAR-315: status pill container (wraps ui_BrewScreen_mainLabel3). Exported so
+// DefaultUI can toggle/anchor it per BrewScreenState sub-state.
+extern lv_obj_t *uic_BrewScreen_status_pill;
 
 // CAR-293: Nothing-theme palette pass. DefaultUI's applyScreenVisualLanguage
 // calls this to recolor tracked themable children for UI_THEME_LIGHT support
