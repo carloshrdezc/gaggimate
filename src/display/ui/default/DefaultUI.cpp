@@ -1165,6 +1165,13 @@ void DefaultUI::setupReactive() {
             // keep it hidden in both sub-states to avoid crowding the hero in
             // landing and the steppers in Settings (CAR-315). The status pill
             // and dials ring already convey live state.
+            //
+            // NOTE (PR #151 review M2): this is the DELIBERATE end state for the
+            // CAR-301 ratio_sub widget — it is intentionally dead UI in every
+            // BrewScreen sub-state, not a bug. The widget + its handle are kept
+            // so a future ticket can re-surface a ratio breakdown ("18 -> 36 ·
+            // 1:2 · 9 BAR") without re-adding the layout scaffolding. Do not
+            // "restore" its visibility without a design decision behind it.
             if (uic_BrewScreen_ratio_sub != nullptr && lv_obj_is_valid(uic_BrewScreen_ratio_sub))
                 lv_obj_add_flag(uic_BrewScreen_ratio_sub, LV_OBJ_FLAG_HIDDEN);
 
@@ -1217,6 +1224,36 @@ void DefaultUI::setupReactive() {
                     lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 92);
                 }
                 lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -8);
+            } else if (isRoundDisplay() && settings) {
+                // CAR-315 (PR #151 review I1/I2/M1): the landing block above
+                // performs one-way geometry mutations (profileInfo height/anchor,
+                // modeSwitch reparent, Label1/brewContextLabel hidden). Brew
+                // <-> Settings toggles do NOT rebuild the screen (changeBrewScreenMode
+                // only flips the signal + rerender), so without a symmetric reset
+                // the Settings editor inherits the compacted landing geometry.
+                // Restore the screen_init defaults so the editor sub-state renders
+                // as designed.
+                //
+                // profileInfo: screen_init sets 292x100 @ TOP_MID y=80 specifically
+                // so the chip lands correctly when un-hidden in Settings
+                // (ui_BrewScreen.c:399-405, CAR-301 review C1).
+                lv_obj_set_height(ui_BrewScreen_profileInfo, 100);
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 80);
+                // Re-show the "Selected profile" caption + bean-context label that
+                // the landing block compacts away (M1).
+                if (lv_obj_is_valid(ui_BrewScreen_Label1))
+                    lv_obj_clear_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
+                    lv_obj_clear_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
+                // modeSwitch: reparent back to its controlContainer flex home so it
+                // flows in the editor's control column (I2). Restore the original
+                // child order (modeSwitch first, then adjustments) — reparenting
+                // appends as the last child, so move it back to index 0.
+                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch) &&
+                    lv_obj_get_parent(ui_BrewScreen_modeSwitch) != ui_BrewScreen_controlContainer) {
+                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_controlContainer);
+                    lv_obj_move_to_index(ui_BrewScreen_modeSwitch, 0);
+                }
             }
         },
         &brewScreenState, &volumetricAvailable, &bluetoothScales);
