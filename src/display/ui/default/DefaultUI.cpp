@@ -1204,9 +1204,18 @@ void DefaultUI::setupReactive() {
             // Panel is the 372×372 round circle (CENTER-relative coords). The
             // rectangular path keeps the original SquareLine positions (AC #8).
             if (isRoundDisplay() && !settings) {
-                // State kicker pill at the very top, profile selector beneath it.
-                if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill))
-                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_TOP_MID, 0, 8);
+                // CAR-318: while the boiler is still heating, the live status
+                // pill ("HEATING") sits at the BOTTOM (clear of the profile
+                // selector) and START SHOT is hidden — you can't pull a shot
+                // until the machine is at temperature. Once isTemperatureStable
+                // flips true, hide the pill and reveal START SHOT in the same
+                // bottom slot. (isTemperatureStable resets to false on any
+                // setpoint change, so the pill returns if the target moves.)
+                const bool atTarget = isTemperatureStable;
+                if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -10);
+                    _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, atTarget);
+                }
                 // Single-row profile selector — hide the tall "Selected profile"
                 // caption and bean-context label so the pill stays compact and
                 // clears the hero numeral.
@@ -1235,6 +1244,11 @@ void DefaultUI::setupReactive() {
                     lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_CENTER, 0, 92);
                 }
                 lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -8);
+                // CAR-318: gate START SHOT on the boiler being at temperature.
+                // Line 1193 already shows it for the Brew sub-state; here we
+                // re-hide it while heating so only the bottom status pill shows,
+                // then reveal it once atTarget. Runs after 1193, so this wins.
+                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, !atTarget);
             } else if (isRoundDisplay() && settings) {
                 // CAR-315 (PR #151 review I1/I2/M1): the landing block above
                 // performs one-way geometry mutations (profileInfo height/anchor,
@@ -1267,7 +1281,7 @@ void DefaultUI::setupReactive() {
                 }
             }
         },
-        &brewScreenState, &volumetricAvailable, &bluetoothScales);
+        &brewScreenState, &volumetricAvailable, &bluetoothScales, &isTemperatureStable);
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
