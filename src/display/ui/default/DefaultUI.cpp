@@ -1480,58 +1480,33 @@ void DefaultUI::ensureBrewModeChips() {
         return;
     }
 
-    // Rounded translucent pill container, parented to the screen root so it
-    // floats above contentPanel4. gm-chips: bottom 34, padding 6, gap 6.
-    brewModeChips = lv_obj_create(ui_BrewScreen);
-    lv_obj_remove_style_all(brewModeChips);
-    lv_obj_set_height(brewModeChips, LV_SIZE_CONTENT);
-    lv_obj_set_width(brewModeChips, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(brewModeChips, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(brewModeChips, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(brewModeChips, 6, 0);
-    lv_obj_set_style_pad_gap(brewModeChips, 6, 0);
-    lv_obj_set_style_radius(brewModeChips, LV_RADIUS_CIRCLE, 0);
+    // CAR-320: build the bar through the shared gm_chip_bar() builder so there is
+    // ONE icon-render path for every screen. Previously this method hand-rolled a
+    // duplicate chip loop; the lv_obj_center(ic) icon-hiding bug was fixed here but
+    // lived on in gm_chip_bar (icons vanished on Steam/Water/Standby). Delegating
+    // removes the duplication. gm_chip_bar() lights chip index 1 (cup) with the
+    // accent and exposes the chips via gm_h.chips[]; we then apply the BrewScreen
+    // pill-container styling and wire tap navigation on top.
+    brewModeChips = gm_chip_bar(ui_BrewScreen, 1 /* cup */, GM_RED);
+    lv_obj_align(brewModeChips, LV_ALIGN_BOTTOM_MID, 0, -34);
+    // Filled translucent pill container (gm-chips): bg ~rgba(255,255,255,0.10),
+    // faint border. gm_chip_bar() leaves the bar bg transparent with a 10% border,
+    // which suits Standby/Status; the BrewScreen landing wants the visible pill.
     lv_obj_set_style_bg_color(brewModeChips, GM_CONTENT, 0);
-    lv_obj_set_style_bg_opa(brewModeChips, LV_OPA_10, 0); // ~rgba(255,255,255,0.03-0.10)
-    lv_obj_set_style_border_width(brewModeChips, 1, 0);
+    lv_obj_set_style_bg_opa(brewModeChips, LV_OPA_10, 0);
     lv_obj_set_style_border_color(brewModeChips, GM_FAINT, 0);
     lv_obj_set_style_border_opa(brewModeChips, LV_OPA_60, 0);
-    lv_obj_clear_flag(brewModeChips, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(brewModeChips, LV_ALIGN_BOTTOM_MID, 0, -34);
 
-    const lv_img_dsc_t *icons[4] = {&gm_ic_power, &gm_ic_cup, &gm_ic_steam, &gm_ic_drop};
-    const int activeChip = 1; // cup / brew
+    // Capture the chip handles (gm_h.chips[] is shared scratch state, valid until
+    // the next screen builds its own bar) and wire BrewScreen tap navigation:
+    // power->standby, cup->no-op, steam->steam mode, drop->water mode.
     for (int i = 0; i < 4; i++) {
-        lv_obj_t *chip = lv_obj_create(brewModeChips);
-        lv_obj_remove_style_all(chip);
-        lv_obj_set_size(chip, 44, 44);
-        lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
-        lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
-        if (i == activeChip) {
-            lv_obj_set_style_bg_color(chip, GM_RED, 0);
-            lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
-        } else {
-            lv_obj_set_style_bg_opa(chip, LV_OPA_TRANSP, 0);
-        }
-        lv_obj_t *ic = lv_img_create(chip);
-        lv_img_set_src(ic, icons[i]);
-        // Match the proven ui_ModeScreen build_mode_tile() recipe: recolor the
-        // (alpha) icon, force REAL size mode so the self-size equals the bitmap,
-        // THEN center. PR #153 review symptom: inactive chips only showed a dot —
-        // the icons were recolored GM_MUTED (0x8A8A8A) at full opacity which read
-        // as near-invisible against the transparent chip, and the missing REAL
-        // size mode let the centered icon collapse. Fix: active chip = near-black
-        // icon on solid GM_RED; inactive chips = bright GM_CONTENT icon dimmed via
-        // recolor opacity so the icon is clearly shaped/visible yet the selected
-        // (red) chip still stands out.
-        const bool chipActive = (i == activeChip);
-        lv_obj_set_style_img_recolor(ic, chipActive ? GM_BG : GM_CONTENT, 0);
-        lv_obj_set_style_img_recolor_opa(ic, chipActive ? LV_OPA_COVER : LV_OPA_70, 0);
-        lv_img_set_size_mode(ic, LV_IMG_SIZE_MODE_REAL);
-        lv_obj_center(ic);
-        lv_obj_add_event_cb(chip, brewModeChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_t *chip = gm_h.chips[i];
         brewModeChip[i] = chip;
+        if (chip != nullptr && lv_obj_is_valid(chip)) {
+            lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(chip, brewModeChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        }
     }
 }
 
