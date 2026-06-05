@@ -10,6 +10,21 @@
 #include "gm_ui.h"
 #include "gm_icons.h"
 
+// CAR-321: WiFi/BT status icons. Our custom gm_ic_* assets are LV_IMG_CF_ALPHA_8BIT
+// (alpha-only) and render INVISIBLE in the status bar on this AMOLED panel at every
+// size/technique tried (CAR-302/307/309/314/321 — zoom, flex, native 22px, native
+// 40px all failed). The UPSTREAM SquareLine wifi/bt assets are LV_IMG_CF_TRUE_COLOR_ALPHA
+// 20x20 and are PROVEN to render on this exact hardware (original StandbyScreen). Reuse
+// them directly here instead of fighting the A8 path.
+// NOTE: LV_IMG_DECLARE expands to a plain `extern const lv_img_dsc_t`, which in a
+// C++ TU gives these symbols C++ linkage and mangled names. The assets are defined
+// in images/ui_img_*.c as C symbols, so we MUST wrap the declarations in extern "C"
+// to reference the un-mangled names and link successfully (CAR-321 review).
+extern "C" {
+LV_IMG_DECLARE(ui_img_364513079);  // wifi-20x20.png  (TRUE_COLOR_ALPHA)
+LV_IMG_DECLARE(ui_img_1091371356); // bluetooth-alt-20x20.png (TRUE_COLOR_ALPHA)
+}
+
 gm_handles_t gm_h;
 
 // ─────────────────────────────────────────────────────────────
@@ -56,7 +71,7 @@ gm_handles_t gm_h;
 //     (LVGL zoom unit: 256 = 1.0×).
 //   * Tint is via img_recolor at LV_OPA_COVER — ALPHA_8BIT sources draw
 //     entirely in the recolor.
-static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
+__attribute__((unused)) static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);                                 // 40px native; pivot defaults to (20,20)
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
@@ -123,8 +138,22 @@ lv_obj_t *gm_status_bar(lv_obj_t *parent, bool live) {
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(bar, 14, 0);
 
-    gm_icon(bar, &gm_ic_wifi, GM_CONTENT, 16);
-    gm_icon(bar, &gm_ic_bt, GM_CONTENT, 16);
+    // CAR-321: draw WiFi/BT from the upstream TRUE_COLOR_ALPHA 20x20 assets
+    // (proven to render on this panel). Our custom gm_ic_* assets are
+    // LV_IMG_CF_ALPHA_8BIT and render invisible in the status bar on this AMOLED
+    // panel at every size/technique tried (CAR-302/307/309/314/321). recolor->
+    // GM_CONTENT keeps them on-theme. They stay as direct lv_img children of the
+    // bar so gm_status_bar_apply_palette()'s class-walk still recolors them on
+    // theme flips.
+    {
+        const lv_img_dsc_t *SICON[2] = {&ui_img_364513079, &ui_img_1091371356};
+        for (int i = 0; i < 2; i++) {
+            lv_obj_t *ic = lv_img_create(bar);
+            lv_img_set_src(ic, SICON[i]);
+            lv_obj_set_style_img_recolor(ic, GM_CONTENT, 0);
+            lv_obj_set_style_img_recolor_opa(ic, LV_OPA_COVER, 0);
+        }
+    }
 
     // Placeholder until the screen's update hook sets the real device clock.
     // CAR-315: start hidden so the "--:--" placeholder never renders (the dash
