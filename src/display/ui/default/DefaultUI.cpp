@@ -1324,18 +1324,19 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR,
-                                                   profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR_OPA,
-                                                   profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR,
-                                                   profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR_OPA,
-                                                   profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
+            // CAR-325: saveButton is now a text pill ("SAVE"), not an icon button.
+            // Drive the profileDirty cue by recoloring the label text instead of
+            // the (removed) image recolor: bright white when there are unsaved
+            // edits, muted when the profile is clean. saveAsNewButton stays a
+            // fixed light-on-gold accent pill and needs no dirty cue.
+            if (uic_BrewScreen_save_label && lv_obj_is_valid(uic_BrewScreen_save_label)) {
+                ui_object_set_themeable_style_property(uic_BrewScreen_save_label, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                                       LV_STYLE_TEXT_COLOR,
+                                                       profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
+                ui_object_set_themeable_style_property(uic_BrewScreen_save_label, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                                       LV_STYLE_TEXT_OPA,
+                                                       profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
+            }
         },
         &brewScreenState, &profileDirty);
     effect_mgr.use_effect([=] { return currentScreen == ui_StandbyScreen; },

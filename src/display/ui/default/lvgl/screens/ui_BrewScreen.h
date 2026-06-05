@@ -78,6 +78,13 @@ extern lv_obj_t *uic_BrewScreen_ratio_sub;
 // DefaultUI can toggle/anchor it per BrewScreenState sub-state.
 extern lv_obj_t *uic_BrewScreen_status_pill;
 
+// CAR-325: text labels inside the Settings-footer Save / Save-as-New buttons
+// (the buttons are now text pills, not icon buttons). Exported so DefaultUI's
+// profileDirty effect can recolor the SAVE label text (white when dirty, muted
+// when clean) instead of recoloring an image that no longer exists.
+extern lv_obj_t *uic_BrewScreen_save_label;
+extern lv_obj_t *uic_BrewScreen_save_as_label;
+
 // CAR-293: Nothing-theme palette pass. DefaultUI's applyScreenVisualLanguage
 // calls this to recolor tracked themable children for UI_THEME_LIGHT support
 // (the dark default GM_* tokens go invisible against a light bg).
