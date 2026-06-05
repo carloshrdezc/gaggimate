@@ -1234,13 +1234,12 @@ void DefaultUI::setupReactive() {
                 if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
                     // CAR-319: lifted above the bottom mode-chip pill bar (which
                     // sits at BOTTOM_MID y=-34, ~56px tall).
-                    // Heating-overlap fix: at -104 the pill top (~+42 in the
-                    // 372 panel) collided with the bottom of the ndot_150 hero
-                    // numeral (line_height 135 @ CENTER -14 => bottom ~+54).
-                    // Drop it 20px to -84 (pill top ~+62) so it clears the hero
-                    // with ~8px of breathing room while still sitting well above
-                    // the mode-chip bar (pill bottom ~+106 screen vs bar top ~+150).
-                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -84);
+                    // CAR-322: at -104 the pill top (~+42 in the 372 panel)
+                    // collided with the bottom of the ndot_150 hero numeral
+                    // (line_height 135 @ CENTER -14 => bottom ~+54). Dropped to
+                    // -64 so it sits centered in the gap between the hero and the
+                    // mode-chip bar, clearing both.
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -64);
                     _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
                 }
                 // Single-row profile selector — hide the tall "Selected profile"
