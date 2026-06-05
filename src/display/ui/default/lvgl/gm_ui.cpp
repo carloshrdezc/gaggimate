@@ -130,7 +130,13 @@ lv_obj_t *gm_status_bar(lv_obj_t *parent, bool live) {
     // direct lv_img children of the bar so gm_status_bar_apply_palette()'s
     // class-walk still recolors them on theme flips.
     {
-        const lv_img_dsc_t *SICON[2] = {&gm_ic_wifi_sm, &gm_ic_bt_sm};
+        // CAR-321 DIAGNOSTIC: draw WiFi/BT at FULL native 40px using the EXACT
+        // recipe proven to render the mode chips (gm_ic_cup/steam/power/drop).
+        // These wifi/bt assets have never been confirmed to render anywhere, so
+        // this isolates "bad asset data" from "wrong size/layout". If 40px shows
+        // here, the 22px downscaled asset was the problem; if it does NOT show,
+        // the gm_ic_wifi/gm_ic_bt .c data itself is the culprit.
+        const lv_img_dsc_t *SICON[2] = {&gm_ic_wifi, &gm_ic_bt};
         for (int i = 0; i < 2; i++) {
             lv_obj_t *ic = lv_img_create(bar);
             lv_img_set_src(ic, SICON[i]);
