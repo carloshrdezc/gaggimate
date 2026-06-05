@@ -31,20 +31,17 @@ void ui_event_StandbyScreen(lv_event_t *e) {
 // zoomed the 40px ALPHA_8BIT gm_ic_* masters down to 20px — that A8 + zoom path
 // renders INVISIBLE on this hardware (proven across CAR-302/307/309/314/321),
 // which is why the standby wifi/bt icons never appeared. The asset is already
-// 20px native, so no zoom/size-mode juggling is needed: a fixed-size slot with
-// the icon centered, mirroring the proven ModeScreen mode-tile recipe.
+// 20px native, so no zoom/size-mode juggling is needed: the image goes straight
+// into the flex container, mirroring the proven gm_status_bar() recipe.
+// Returns the lv_img itself (NOT a wrapper) so DefaultUI's connection-state
+// recolor of ui_StandbyScreen_wifiIcon/bluetoothIcon retints the actual image.
 static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, int target_px) {
-    lv_obj_t *slot = lv_obj_create(parent);
-    lv_obj_remove_style_all(slot);
-    lv_obj_set_size(slot, target_px + 4, target_px + 4);
-    lv_obj_clear_flag(slot, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(slot, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *im = lv_img_create(slot);
+    (void)target_px; // asset is already 20px native; kept for call-site clarity
+    lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);
-    lv_obj_align(im, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
-    return slot;
+    return im;
 }
 
 // build funtions
