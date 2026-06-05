@@ -215,6 +215,17 @@ static lv_obj_t *bs_glyph_btn(lv_obj_t *parent, const char *glyph, int diameter,
     lv_obj_set_style_border_width(btn, 0, 0);
     lv_obj_set_style_shadow_width(btn, 0, 0);
     lv_obj_set_style_pad_all(btn, 0, 0);
+    // CAR-326: the default LVGL theme paints a red pressed/checked/focused state.
+    // Pin every interactive state to the resting bg + opacity and zero the focus
+    // outline so the steppers never flash red when touched.
+    lv_obj_set_style_bg_color(btn, bg_col, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, bg_col, LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(btn, bg_col, LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(btn, 0, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(btn, 0, LV_STATE_PRESSED);
 
     lv_obj_t *lab = lv_label_create(btn);
     lv_label_set_text(lab, glyph);
@@ -525,7 +536,10 @@ void ui_BrewScreen_screen_init(void) {
     // tempContainer: [-] [thermo] [target temp] [+]
     ui_BrewScreen_tempContainer = lv_obj_create(ui_BrewScreen_adjustments);
     lv_obj_remove_style_all(ui_BrewScreen_tempContainer);
-    lv_obj_set_size(ui_BrewScreen_tempContainer, 254, 54);
+    // CAR-326: width matches targetContainer (304px) so the temp row and the
+    // time row below align in the center-stacked adjustments column (254px made
+    // the temp row look indented).
+    lv_obj_set_size(ui_BrewScreen_tempContainer, 304, 54);
     lv_obj_set_style_radius(ui_BrewScreen_tempContainer, 22, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_tempContainer, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_tempContainer, LV_OPA_60, 0);
@@ -682,6 +696,13 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_saveButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
+    // CAR-326: suppress the default theme's red pressed/focused state.
+    lv_obj_set_style_bg_color(ui_BrewScreen_saveButton, GM_SURFACE, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(ui_BrewScreen_saveButton, GM_SURFACE, LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ui_BrewScreen_saveButton, 0, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ui_BrewScreen_saveButton, 0, LV_STATE_PRESSED);
     lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_saveButton, ui_event_BrewScreen_saveButton,
@@ -703,6 +724,13 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_acceptButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_GREEN, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
+    // CAR-326: suppress the default theme's red pressed/focused state.
+    lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_GREEN, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_GREEN, LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ui_BrewScreen_acceptButton, 0, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ui_BrewScreen_acceptButton, 0, LV_STATE_PRESSED);
     lv_obj_set_style_img_recolor(ui_BrewScreen_acceptButton, GM_BG, 0);
     lv_obj_set_style_img_recolor_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
     lv_obj_align(ui_BrewScreen_acceptButton, LV_ALIGN_BOTTOM_MID, 0, -18);
@@ -718,6 +746,13 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_saveAsNewButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_GOLD, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
+    // CAR-326: suppress the default theme's red pressed/focused state.
+    lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_GOLD, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_GOLD, LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ui_BrewScreen_saveAsNewButton, 0, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ui_BrewScreen_saveAsNewButton, 0, LV_STATE_PRESSED);
     lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_saveAsNewButton, ui_event_BrewScreen_saveAsNewButton,
