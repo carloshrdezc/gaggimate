@@ -1242,6 +1242,16 @@ void DefaultUI::setupReactive() {
                     lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -64);
                     _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
                 }
+                // CAR-323: hide the dials cluster's tempText on the round brew
+                // landing. ui_comp_dials places it at CENTER (-50, -205) ≈ top-
+                // center of the 480px panel, directly behind the LV_OPA_50
+                // profileInfo chip (TOP_MID y=50). Since CAR-301 made the centered
+                // ndot_150 hero numeral the prominent temp readout, this old "%d°C"
+                // label is redundant here — and the half-transparent chip let it
+                // bleed through as an unreadable number behind the profile name.
+                // The dials ring (tempGauge) is left untouched; only the text hides.
+                if (uic_BrewScreen_dials_tempText != nullptr && lv_obj_is_valid(uic_BrewScreen_dials_tempText))
+                    lv_obj_add_flag(uic_BrewScreen_dials_tempText, LV_OBJ_FLAG_HIDDEN);
                 // Single-row profile selector — hide the tall "Selected profile"
                 // caption and bean-context label so the pill stays compact and
                 // clears the hero numeral.
@@ -1292,6 +1302,11 @@ void DefaultUI::setupReactive() {
                 // the landing block compacts away (M1).
                 if (lv_obj_is_valid(ui_BrewScreen_Label1))
                     lv_obj_clear_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                // CAR-323: the landing block hides the dials tempText (it bled
+                // through the profileInfo chip). Restore it here for symmetry so
+                // the editor sub-state inherits the screen_init default visibility.
+                if (uic_BrewScreen_dials_tempText != nullptr && lv_obj_is_valid(uic_BrewScreen_dials_tempText))
+                    lv_obj_clear_flag(uic_BrewScreen_dials_tempText, LV_OBJ_FLAG_HIDDEN);
                 if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
                     lv_obj_clear_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
                 // modeSwitch: reparent back to its controlContainer flex home so it
