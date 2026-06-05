@@ -108,6 +108,8 @@ lv_obj_t *uic_BrewScreen_hero_unit = NULL;
 // it as the top kicker in the landing sub-state.
 lv_obj_t *uic_BrewScreen_status_pill = NULL;
 lv_obj_t *uic_BrewScreen_ratio_sub = NULL;
+lv_obj_t *uic_BrewScreen_save_label = NULL;    // CAR-325
+lv_obj_t *uic_BrewScreen_save_as_label = NULL; // CAR-325
 static lv_obj_t *s_start_label = NULL;
 
 static void bs_track_text(lv_obj_t *o) {
@@ -216,7 +218,10 @@ static lv_obj_t *bs_glyph_btn(lv_obj_t *parent, const char *glyph, int diameter,
 
     lv_obj_t *lab = lv_label_create(btn);
     lv_label_set_text(lab, glyph);
-    lv_obj_set_style_text_font(lab, &ndot_28, 0);
+    // CAR-324: render the +/- stepper glyphs in grotesk (clean sans) rather than
+    // ndot_28 (dot-matrix), whose "+" comes out sparse/asymmetric and reads as
+    // broken next to the digit readouts.
+    lv_obj_set_style_text_font(lab, &grotesk_16, 0);
     lv_obj_set_style_text_color(lab, text_col, 0);
     lv_obj_center(lab);
     bs_track_text(lab);
@@ -663,20 +668,34 @@ void ui_BrewScreen_screen_init(void) {
     // DefaultUI's BrewScreenState reactive toggles LV_OBJ_FLAG_HIDDEN on these +
     // re-aligns on round display. They live on contentPanel4 directly so they sit
     // outside the column flex.
+    //
+    // CAR-325: saveButton/saveAsNewButton previously wore gm_ic_back (back chevron)
+    // and gm_ic_cup (brew cup) glyphs — both misleading, and the icon set has no
+    // save/disk/checkmark glyph. They are now text-label buttons ("SAVE" / "SAVE AS")
+    // following the startButton pattern: keep the lv_imgbtn widget type (referenced
+    // by ui_events.cpp + DefaultUI), set NULL src on all states so no glyph paints,
+    // and host a centered child label. The profileDirty cue (DefaultUI effect) now
+    // recolors the label text instead of the image.
     ui_BrewScreen_saveButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
-    lv_imgbtn_set_src(ui_BrewScreen_saveButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_back, NULL);
-    lv_obj_set_size(ui_BrewScreen_saveButton, 52, 52);
+    lv_imgbtn_set_src(ui_BrewScreen_saveButton, LV_IMGBTN_STATE_RELEASED, NULL, NULL, NULL);
+    lv_obj_set_size(ui_BrewScreen_saveButton, 96, 52);
     lv_obj_set_style_radius(ui_BrewScreen_saveButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_saveButton, GM_MUTED, 0);
-    lv_obj_set_style_img_recolor_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -78, -32);
+    lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_saveButton, ui_event_BrewScreen_saveButton,
                         LV_EVENT_ALL, NULL);
     bs_track_button_surface(ui_BrewScreen_saveButton);
-    bs_track_icon(ui_BrewScreen_saveButton);
+
+    uic_BrewScreen_save_label = lv_label_create(ui_BrewScreen_saveButton);
+    lv_label_set_text(uic_BrewScreen_save_label, "SAVE");
+    lv_obj_set_style_text_font(uic_BrewScreen_save_label, &grotesk_16, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_save_label, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(uic_BrewScreen_save_label, GM_TRACK_KICKER, 0);
+    lv_obj_center(uic_BrewScreen_save_label);
+    // NOTE: not bs_track_text() — DefaultUI's profileDirty effect drives this
+    // label's color (white when dirty, muted when clean).
 
     ui_BrewScreen_acceptButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
     lv_imgbtn_set_src(ui_BrewScreen_acceptButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_cup, NULL);
@@ -694,19 +713,26 @@ void ui_BrewScreen_screen_init(void) {
     bs_track_icon(ui_BrewScreen_acceptButton);
 
     ui_BrewScreen_saveAsNewButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
-    lv_imgbtn_set_src(ui_BrewScreen_saveAsNewButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_cup, NULL);
-    lv_obj_set_size(ui_BrewScreen_saveAsNewButton, 52, 52);
+    lv_imgbtn_set_src(ui_BrewScreen_saveAsNewButton, LV_IMGBTN_STATE_RELEASED, NULL, NULL, NULL);
+    lv_obj_set_size(ui_BrewScreen_saveAsNewButton, 96, 52);
     lv_obj_set_style_radius(ui_BrewScreen_saveAsNewButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_GOLD, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_saveAsNewButton, GM_BG, 0);
-    lv_obj_set_style_img_recolor_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 78, -32);
+    lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_saveAsNewButton, ui_event_BrewScreen_saveAsNewButton,
                         LV_EVENT_ALL, NULL);
     bs_track_accent_surface(ui_BrewScreen_saveAsNewButton);
-    bs_track_icon(ui_BrewScreen_saveAsNewButton);
+
+    uic_BrewScreen_save_as_label = lv_label_create(ui_BrewScreen_saveAsNewButton);
+    lv_label_set_text(uic_BrewScreen_save_as_label, "SAVE AS");
+    lv_obj_set_style_text_font(uic_BrewScreen_save_as_label, &grotesk_16, 0);
+    // Light-on-gold, palette-independent (matches START SHOT cue): the gold
+    // surface is accent-tracked and stays bold across themes.
+    lv_obj_set_style_text_color(uic_BrewScreen_save_as_label, lv_color_white(), 0);
+    lv_obj_set_style_text_letter_space(uic_BrewScreen_save_as_label, GM_TRACK_KICKER, 0);
+    lv_obj_center(uic_BrewScreen_save_as_label);
+    // NOTE: not bs_track_text() — fixed light-on-gold, palette-independent.
 
     // Wire the screen-level event handler (gesture + screen_loaded).
     lv_obj_add_event_cb(ui_BrewScreen, ui_event_BrewScreen, LV_EVENT_ALL, NULL);
@@ -788,6 +814,8 @@ void ui_BrewScreen_screen_destroy(void) {
     uic_BrewScreen_hero_unit = NULL;
     uic_BrewScreen_status_pill = NULL;
     uic_BrewScreen_ratio_sub = NULL;
+    uic_BrewScreen_save_label = NULL;    // CAR-325
+    uic_BrewScreen_save_as_label = NULL; // CAR-325
     s_start_label = NULL;
     for (int i = 0; i < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0])); i++)
         bs_text_labels[i] = NULL;
