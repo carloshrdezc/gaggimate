@@ -35,6 +35,7 @@ LV_FONT_DECLARE(ndot_28);      // metric values
 LV_FONT_DECLARE(spacemono_14); // kickers / status labels
 LV_FONT_DECLARE(spacemono_11); // small metric labels
 LV_FONT_DECLARE(grotesk_16);   // body / settings rows
+LV_FONT_DECLARE(grotesk_28);   // +/- stepper glyphs (subset: 0x2B, 0x2D)
 
 #ifdef __cplusplus
 }

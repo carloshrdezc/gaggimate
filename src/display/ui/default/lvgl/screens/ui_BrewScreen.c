@@ -227,10 +227,10 @@ static lv_obj_t *bs_glyph_btn(lv_obj_t *parent, const char *glyph, int diameter,
 
     lv_obj_t *lab = lv_label_create(btn);
     lv_label_set_text(lab, glyph);
-    // CAR-324: render the +/- stepper glyphs in grotesk (clean sans) rather than
-    // ndot_28 (dot-matrix), whose "+" comes out sparse/asymmetric and reads as
-    // broken next to the digit readouts.
-    lv_obj_set_style_text_font(lab, &grotesk_16, 0);
+    // CAR-324/CAR-327: render the +/- stepper glyphs in grotesk (clean sans).
+    // grotesk_28 (a 2-glyph subset of Space Grotesk Medium) replaces the earlier
+    // grotesk_16 so the +/- fill the 40px button rather than looking tiny.
+    lv_obj_set_style_text_font(lab, &grotesk_28, 0);
     lv_obj_set_style_text_color(lab, text_col, 0);
     lv_obj_center(lab);
     bs_track_text(lab);
@@ -572,7 +572,10 @@ void ui_BrewScreen_screen_init(void) {
     // the "-" stepper treatment for a consistent pair.
     ui_BrewScreen_upTempButton = bs_glyph_btn(ui_BrewScreen_tempContainer, "+", 40,
                                               GM_SURFACE, GM_CONTENT, false);
-    lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_RIGHT_MID, -6, 0);
+    // CAR-327: align at -56 to match upDurationButton below (which reserves the
+    // rightmost slot for byTimeButton). Keeps the two "+" steppers vertically
+    // aligned in the stacked temp/time editor.
+    lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_RIGHT_MID, -56, 0);
     lv_obj_set_ext_click_area(ui_BrewScreen_upTempButton, 15);
     lv_obj_add_event_cb(ui_BrewScreen_upTempButton, ui_event_BrewScreen_upTempButton,
                         LV_EVENT_ALL, NULL);
@@ -725,21 +728,21 @@ void ui_BrewScreen_screen_init(void) {
     lv_imgbtn_set_src(ui_BrewScreen_acceptButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_cup, NULL);
     lv_obj_set_size(ui_BrewScreen_acceptButton, 64, 64);
     lv_obj_set_style_radius(ui_BrewScreen_acceptButton, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_GREEN, 0);
+    lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ui_BrewScreen_acceptButton, 0, 0);
     lv_obj_set_style_shadow_width(ui_BrewScreen_acceptButton, 0, 0);
     lv_obj_set_style_outline_width(ui_BrewScreen_acceptButton, 0, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_acceptButton, GM_BG, 0);
+    lv_obj_set_style_img_recolor(ui_BrewScreen_acceptButton, GM_CONTENT, 0);
     lv_obj_set_style_img_recolor_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
     lv_obj_align(ui_BrewScreen_acceptButton, LV_ALIGN_BOTTOM_MID, 0, -18);
     lv_obj_add_flag(ui_BrewScreen_acceptButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_acceptButton, ui_event_BrewScreen_acceptButton,
                         LV_EVENT_ALL, NULL);
-    // CAR-327: NOT accent-tracked. In brew mode palette.accent==GM_RED, and the
-    // accent repaint in ui_BrewScreen_apply_palette() would turn this green
-    // confirm cup red. Keep the construction-time GM_GREEN by leaving it off the
-    // accent list. Icon recolor (cup glyph) is still tracked for theme contrast.
+    // CAR-327: neutral gray surface matching SAVE (the footer button the user
+    // found clean). Was GM_GREEN + accent-tracked, which the brew-mode accent
+    // repaint turned red; now a plain button-surface like SAVE/SAVE AS.
+    bs_track_button_surface(ui_BrewScreen_acceptButton);
     bs_track_icon(ui_BrewScreen_acceptButton);
 
     ui_BrewScreen_saveAsNewButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
@@ -748,27 +751,27 @@ void ui_BrewScreen_screen_init(void) {
     lv_imgbtn_set_src(ui_BrewScreen_saveAsNewButton, LV_IMGBTN_STATE_RELEASED, NULL, NULL, NULL);
     lv_obj_set_size(ui_BrewScreen_saveAsNewButton, 96, 52);
     lv_obj_set_style_radius(ui_BrewScreen_saveAsNewButton, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_GOLD, 0);
+    lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ui_BrewScreen_saveAsNewButton, 0, 0);
     lv_obj_set_style_shadow_width(ui_BrewScreen_saveAsNewButton, 0, 0);
     lv_obj_set_style_outline_width(ui_BrewScreen_saveAsNewButton, 0, 0);
     lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN);
-    // CAR-327: NOT accent-tracked. Keeps the construction-time GM_GOLD instead
-    // of being repainted to brew-mode accent (GM_RED). See acceptButton.
+    // CAR-327: neutral gray surface matching SAVE. Was GM_GOLD + accent-tracked,
+    // which the brew-mode accent repaint turned red.
+    bs_track_button_surface(ui_BrewScreen_saveAsNewButton);
     lv_obj_add_event_cb(ui_BrewScreen_saveAsNewButton, ui_event_BrewScreen_saveAsNewButton,
                         LV_EVENT_ALL, NULL);
 
     uic_BrewScreen_save_as_label = lv_label_create(ui_BrewScreen_saveAsNewButton);
     lv_label_set_text(uic_BrewScreen_save_as_label, "SAVE AS");
     lv_obj_set_style_text_font(uic_BrewScreen_save_as_label, &grotesk_16, 0);
-    // Light-on-gold, palette-independent (matches START SHOT cue): the gold
-    // surface is accent-tracked and stays bold across themes.
-    lv_obj_set_style_text_color(uic_BrewScreen_save_as_label, lv_color_white(), 0);
+    // CAR-327: muted-on-surface, matching the SAVE button label.
+    lv_obj_set_style_text_color(uic_BrewScreen_save_as_label, GM_MUTED, 0);
     lv_obj_set_style_text_letter_space(uic_BrewScreen_save_as_label, GM_TRACK_KICKER, 0);
     lv_obj_center(uic_BrewScreen_save_as_label);
-    // NOTE: not bs_track_text() — fixed light-on-gold, palette-independent.
+    bs_track_text(uic_BrewScreen_save_as_label);
 
     // Wire the screen-level event handler (gesture + screen_loaded).
     lv_obj_add_event_cb(ui_BrewScreen, ui_event_BrewScreen, LV_EVENT_ALL, NULL);

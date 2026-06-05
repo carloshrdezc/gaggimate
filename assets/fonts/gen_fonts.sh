@@ -33,5 +33,8 @@ CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-incl
 
 # Space Grotesk Medium — body / settings rows (full printable ASCII + degree)
 "${CONV[@]}" --font "$SGRO"  --size 16 --range 0x20-0x7F,0xB0                 -o "$OUT/grotesk_16.c"
+# grotesk_28: +/- stepper glyphs only (subset 0x2B plus 0x2D) — big & crisp in
+# the 40px BrewScreen steppers without the flash cost of the full ASCII range.
+"${CONV[@]}" --font "$SGRO"  --size 28 --range 0x2B,0x2D                      -o "$OUT/grotesk_28.c"
 
 echo "Generated 7 fonts in $OUT"
