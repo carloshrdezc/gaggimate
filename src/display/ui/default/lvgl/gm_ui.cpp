@@ -56,7 +56,7 @@ gm_handles_t gm_h;
 //     (LVGL zoom unit: 256 = 1.0×).
 //   * Tint is via img_recolor at LV_OPA_COVER — ALPHA_8BIT sources draw
 //     entirely in the recolor.
-static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
+__attribute__((unused)) static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
     lv_obj_t *im = lv_img_create(parent);
     lv_img_set_src(im, src);                                 // 40px native; pivot defaults to (20,20)
     lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
@@ -68,24 +68,6 @@ static lv_obj_t *gm_icon(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t c
     lv_obj_set_style_img_recolor(im, color, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
     return im;
-}
-
-// A scaled gm_icon SAFE to drop into a flex/layout parent. A flex layout pass
-// measures and re-pins its children; for a REAL-mode zoomed lv_img that re-pin
-// collapses the downscaled A8 mask to nothing (CAR-321 status-bar WiFi/BT were
-// invisible for exactly this reason; skill defect 3f-a). Fix: wrap the scaled
-// icon in a fixed target_px square, layout-free container and lv_obj_align the
-// icon inside. The flex parent then lays out the plain wrapper (which has a
-// real fixed size), never the scaled image directly, so the mask renders.
-// Returns the wrapper (so callers can style/position the slot if needed).
-static lv_obj_t *gm_icon_slot(lv_obj_t *parent, const lv_img_dsc_t *src, lv_color_t color, int target_px) {
-    lv_obj_t *slot = lv_obj_create(parent);
-    lv_obj_remove_style_all(slot);
-    lv_obj_set_size(slot, target_px, target_px);
-    lv_obj_clear_flag(slot, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *im = gm_icon(slot, src, color, target_px);
-    lv_obj_align(im, LV_ALIGN_CENTER, 0, 0);
-    return slot;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -141,8 +123,22 @@ lv_obj_t *gm_status_bar(lv_obj_t *parent, bool live) {
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(bar, 14, 0);
 
-    gm_icon_slot(bar, &gm_ic_wifi, GM_CONTENT, 16);
-    gm_icon_slot(bar, &gm_ic_bt, GM_CONTENT, 16);
+    // CAR-321: draw the WiFi/BT icons NATIVELY (no zoom) from pre-sized 22px
+    // masters. The gm_icon() zoom/downscale path renders invisible on this
+    // hardware (6 failed attempts: CAR-302/307/309/314/321), while native-size
+    // icons render reliably (ModeScreen tiles, the mode chips). These stay as
+    // direct lv_img children of the bar so gm_status_bar_apply_palette()'s
+    // class-walk still recolors them on theme flips.
+    {
+        const lv_img_dsc_t *SICON[2] = {&gm_ic_wifi_sm, &gm_ic_bt_sm};
+        for (int i = 0; i < 2; i++) {
+            lv_obj_t *ic = lv_img_create(bar);
+            lv_img_set_src(ic, SICON[i]);
+            lv_obj_set_style_img_recolor(ic, GM_CONTENT, 0);
+            lv_obj_set_style_img_recolor_opa(ic, LV_OPA_COVER, 0);
+            lv_img_set_size_mode(ic, LV_IMG_SIZE_MODE_REAL);
+        }
+    }
 
     // Placeholder until the screen's update hook sets the real device clock.
     // CAR-315: start hidden so the "--:--" placeholder never renders (the dash

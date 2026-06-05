@@ -61,6 +61,8 @@ SET(SOURCES components/ui_comp_dials.c
     images/gm_ic_drop.c
     images/gm_ic_wifi.c
     images/gm_ic_bt.c
+    images/gm_ic_wifi_sm.c
+    images/gm_ic_bt_sm.c
     images/gm_ic_sun.c
     images/gm_ic_thermo.c
     images/gm_ic_scale.c

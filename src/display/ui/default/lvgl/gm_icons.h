@@ -90,6 +90,11 @@ LV_IMG_DECLARE(gm_ic_steam);
 LV_IMG_DECLARE(gm_ic_drop);
 LV_IMG_DECLARE(gm_ic_wifi);
 LV_IMG_DECLARE(gm_ic_bt);
+// CAR-321: native-size small variants for the top status bar. The gm_icon()
+// zoom/downscale path renders invisible on this hardware, so the status bar
+// draws these pre-sized 22px masters natively (no zoom) instead.
+LV_IMG_DECLARE(gm_ic_wifi_sm);
+LV_IMG_DECLARE(gm_ic_bt_sm);
 LV_IMG_DECLARE(gm_ic_sun);
 LV_IMG_DECLARE(gm_ic_thermo);
 LV_IMG_DECLARE(gm_ic_scale);
