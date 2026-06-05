@@ -170,29 +170,27 @@ lv_obj_t *gm_chip_bar(lv_obj_t *parent, int active, lv_color_t accent) {
         lv_obj_remove_style_all(chip);
         lv_obj_set_size(chip, 44, 44);
         lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
-        // Center the icon via the chip's own flex layout. gm_icon() builds the
-        // icon in REAL size mode with a zoom-cached self-size; calling
-        // lv_obj_center()/set_pos on the icon afterwards re-pins its box and
-        // collapses the downscaled A8 mask (the exact failure the gm_icon()
-        // header warns about — "5 regressions"). That bug made every chip icon
-        // vanish on the shared bar (Steam/Water/Standby showed only the accent
-        // dot). Flex-centering the parent positions the icon WITHOUT touching
-        // its self-size, so the mask renders.
-        lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
         bool on = (i == active);
         if (on) {
             lv_obj_set_style_bg_color(chip, accent, 0);
             lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
         }
-        // Active icon knocks out to the background over the accent fill; inactive
-        // icons use bright GM_CONTENT (the proven ModeScreen tone) so all four
-        // are clearly visible.
-        lv_obj_t *ic = gm_icon(chip, ICON[i], on ? GM_BG : GM_CONTENT, 28);
-        if (!on) {
-            lv_obj_set_style_img_recolor_opa(ic, LV_OPA_70, 0);
-        }
+        // Icon rendering follows the PROVEN ui_ModeScreen build_mode_tile() recipe
+        // verbatim: native REAL size mode (NO zoom), recolor, then lv_obj_align()
+        // on a NON-flex parent. The 40px A8 masters fit the 44px chip at native
+        // size. Earlier attempts failed because: (a) gm_icon() zooms then the
+        // flex/center re-pinned the box and collapsed the downscaled mask
+        // ("5 regressions" warning on gm_icon), and (b) putting a flex layout on
+        // the chip re-measures the REAL-mode child and clips it the same way.
+        // Keep the chip layout-free and align the icon directly — same as the
+        // ModeScreen tiles, which render correctly on hardware.
+        lv_obj_t *ic = lv_img_create(chip);
+        lv_img_set_src(ic, ICON[i]);
+        lv_obj_set_style_img_recolor(ic, on ? GM_BG : GM_CONTENT, 0);
+        lv_obj_set_style_img_recolor_opa(ic, on ? LV_OPA_COVER : LV_OPA_70, 0);
+        lv_img_set_size_mode(ic, LV_IMG_SIZE_MODE_REAL);
+        lv_obj_align(ic, LV_ALIGN_CENTER, 0, 0);
         gm_h.chips[i] = chip;
     }
     return bar;
