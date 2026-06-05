@@ -25,26 +25,26 @@ void ui_event_StandbyScreen(lv_event_t *e) {
     }
 }
 
-// Small recolored status icon: gm_ic_* masters are 40px ALPHA_8BIT.
-// LVGL 8.4 idiom — REAL size mode + zoom self-sizes the widget to the
-// transformed area, no set_size / no pivot manipulation. See the long
-// comment above gm_icon() in gm_ui.cpp for why (CAR-302/307/309).
+// Small recolored status icon. CAR-321: use the upstream SquareLine
+// TRUE_COLOR_ALPHA 20x20 wifi/bt assets (ui_img_364513079 / ui_img_1091371356),
+// which render reliably on this AMOLED panel. The previous implementation
+// zoomed the 40px ALPHA_8BIT gm_ic_* masters down to 20px — that A8 + zoom path
+// renders INVISIBLE on this hardware (proven across CAR-302/307/309/314/321),
+// which is why the standby wifi/bt icons never appeared. The asset is already
+// 20px native, so no zoom/size-mode juggling is needed: a fixed-size slot with
+// the icon centered, mirroring the proven ModeScreen mode-tile recipe.
 static lv_obj_t *standby_status_icon(lv_obj_t *parent, const lv_img_dsc_t *src, int target_px) {
-    lv_obj_t *im = lv_img_create(parent);
-    lv_img_set_src(im, src);                                 // 40px native; default centered pivot
-    lv_img_set_zoom(im, (uint16_t)(256 * target_px / 40));   // map 40 → target_px
-    lv_img_set_size_mode(im, LV_IMG_SIZE_MODE_REAL);         // draw the transformed (zoomed) bitmap
-    // PIN the widget box to target_px — must match gm_icon(). REAL mode does NOT
-    // auto-size: the cached self-size is only refreshed by lv_img_set_src (when
-    // zoom is still NONE → caches 40px); set_zoom/set_size_mode never re-refresh
-    // it. This statusContainer is LV_SIZE_CONTENT, so without an explicit size it
-    // lays the icon out at the stale 40px and REAL-mode draw tiles the 20px
-    // bitmap 2-3× = the recurring garbage-icon bug (CAR-314). See gm_ui.cpp.
-    lv_obj_set_size(im, target_px, target_px);
-    // NO lv_img_set_pivot — default centered pivot is what REAL-mode draw expects.
+    lv_obj_t *slot = lv_obj_create(parent);
+    lv_obj_remove_style_all(slot);
+    lv_obj_set_size(slot, target_px + 4, target_px + 4);
+    lv_obj_clear_flag(slot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(slot, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *im = lv_img_create(slot);
+    lv_img_set_src(im, src);
+    lv_obj_align(im, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_img_recolor(im, GM_MUTED, 0);
     lv_obj_set_style_img_recolor_opa(im, LV_OPA_COVER, 0);
-    return im;
+    return slot;
 }
 
 // build funtions
@@ -68,8 +68,8 @@ void ui_StandbyScreen_screen_init(void) {
     lv_obj_clear_flag(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_CLICKABLE);
 
-    ui_StandbyScreen_wifiIcon = standby_status_icon(ui_StandbyScreen_statusContainer, &gm_ic_wifi, 20);
-    ui_StandbyScreen_bluetoothIcon = standby_status_icon(ui_StandbyScreen_statusContainer, &gm_ic_bt, 20);
+    ui_StandbyScreen_wifiIcon = standby_status_icon(ui_StandbyScreen_statusContainer, &ui_img_364513079, 20);
+    ui_StandbyScreen_bluetoothIcon = standby_status_icon(ui_StandbyScreen_statusContainer, &ui_img_1091371356, 20);
 
     ui_StandbyScreen_updateIcon = lv_obj_create(ui_StandbyScreen_statusContainer);
     lv_obj_remove_style_all(ui_StandbyScreen_updateIcon);
