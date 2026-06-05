@@ -567,8 +567,11 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_align(ui_BrewScreen_targetTemp, LV_ALIGN_CENTER, 8, 0);
     bs_track_text(ui_BrewScreen_targetTemp);
 
+    // CAR-327: neutral surface (not accent) so the brew-mode accent==GM_RED
+    // repaint in ui_BrewScreen_apply_palette() never turns the "+" red. Matches
+    // the "-" stepper treatment for a consistent pair.
     ui_BrewScreen_upTempButton = bs_glyph_btn(ui_BrewScreen_tempContainer, "+", 40,
-                                              GM_RED, GM_CONTENT, true);
+                                              GM_SURFACE, GM_CONTENT, false);
     lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_RIGHT_MID, -6, 0);
     lv_obj_set_ext_click_area(ui_BrewScreen_upTempButton, 15);
     lv_obj_add_event_cb(ui_BrewScreen_upTempButton, ui_event_BrewScreen_upTempButton,
@@ -613,8 +616,9 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_align(ui_BrewScreen_targetDuration, LV_ALIGN_CENTER, 8, 0);
     bs_track_text(ui_BrewScreen_targetDuration);
 
+    // CAR-327: neutral surface (not accent) — see upTempButton rationale.
     ui_BrewScreen_upDurationButton = bs_glyph_btn(ui_BrewScreen_targetContainer, "+", 40,
-                                                  GM_RED, GM_CONTENT, true);
+                                                  GM_SURFACE, GM_CONTENT, false);
     // Positioned one slot left of byTimeButton so the `+` control is not
     // occluded when the by-time/volumetric-delete button is shown.
     lv_obj_align(ui_BrewScreen_upDurationButton, LV_ALIGN_RIGHT_MID, -56, 0);
@@ -732,7 +736,10 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_add_flag(ui_BrewScreen_acceptButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_acceptButton, ui_event_BrewScreen_acceptButton,
                         LV_EVENT_ALL, NULL);
-    bs_track_accent_surface(ui_BrewScreen_acceptButton);
+    // CAR-327: NOT accent-tracked. In brew mode palette.accent==GM_RED, and the
+    // accent repaint in ui_BrewScreen_apply_palette() would turn this green
+    // confirm cup red. Keep the construction-time GM_GREEN by leaving it off the
+    // accent list. Icon recolor (cup glyph) is still tracked for theme contrast.
     bs_track_icon(ui_BrewScreen_acceptButton);
 
     ui_BrewScreen_saveAsNewButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
@@ -748,9 +755,10 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_outline_width(ui_BrewScreen_saveAsNewButton, 0, 0);
     lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN);
+    // CAR-327: NOT accent-tracked. Keeps the construction-time GM_GOLD instead
+    // of being repainted to brew-mode accent (GM_RED). See acceptButton.
     lv_obj_add_event_cb(ui_BrewScreen_saveAsNewButton, ui_event_BrewScreen_saveAsNewButton,
                         LV_EVENT_ALL, NULL);
-    bs_track_accent_surface(ui_BrewScreen_saveAsNewButton);
 
     uic_BrewScreen_save_as_label = lv_label_create(ui_BrewScreen_saveAsNewButton);
     lv_label_set_text(uic_BrewScreen_save_as_label, "SAVE AS");
