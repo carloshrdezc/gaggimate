@@ -170,13 +170,29 @@ lv_obj_t *gm_chip_bar(lv_obj_t *parent, int active, lv_color_t accent) {
         lv_obj_remove_style_all(chip);
         lv_obj_set_size(chip, 44, 44);
         lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
+        // Center the icon via the chip's own flex layout. gm_icon() builds the
+        // icon in REAL size mode with a zoom-cached self-size; calling
+        // lv_obj_center()/set_pos on the icon afterwards re-pins its box and
+        // collapses the downscaled A8 mask (the exact failure the gm_icon()
+        // header warns about — "5 regressions"). That bug made every chip icon
+        // vanish on the shared bar (Steam/Water/Standby showed only the accent
+        // dot). Flex-centering the parent positions the icon WITHOUT touching
+        // its self-size, so the mask renders.
+        lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
         bool on = (i == active);
         if (on) {
             lv_obj_set_style_bg_color(chip, accent, 0);
             lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
         }
-        lv_obj_t *ic = gm_icon(chip, ICON[i], on ? GM_BG : GM_MUTED, 28);
-        lv_obj_center(ic);
+        // Active icon knocks out to the background over the accent fill; inactive
+        // icons use bright GM_CONTENT (the proven ModeScreen tone) so all four
+        // are clearly visible.
+        lv_obj_t *ic = gm_icon(chip, ICON[i], on ? GM_BG : GM_CONTENT, 28);
+        if (!on) {
+            lv_obj_set_style_img_recolor_opa(ic, LV_OPA_70, 0);
+        }
         gm_h.chips[i] = chip;
     }
     return bar;
