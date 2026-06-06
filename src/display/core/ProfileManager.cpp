@@ -40,9 +40,8 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
                         profile.id = filenameStem(name);
                     }
                     if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
-                        std::find_if(migrations.begin(), migrations.end(), [&](const auto &migration) {
-                            return migration.first == rawId;
-                        }) == migrations.end()) {
+                        std::find_if(migrations.begin(), migrations.end(),
+                                     [&](const auto &migration) { return migration.first == rawId; }) == migrations.end()) {
                         migrations.emplace_back(rawId, profile.id);
                     }
                 }
@@ -52,6 +51,48 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
     }
 
     return migrations;
+}
+
+// Find the on-disk filename stem whose loaded in-file profile id matches the
+// requested id. Returns an empty String when no matching file is found.
+//
+// listProfiles() enumerates profiles by FILENAME STEM, but loadProfile() and
+// the WebUI key profiles by the IN-FILE JSON `id`. For legacy/imported/migrated
+// files those two can diverge, so a direct profilePath(id) lookup misses the
+// file. This scan mirrors the parse used by collectProfileIdMigrations() to
+// resolve the requested id back to its actual on-disk filename stem.
+String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
+    File root = fs->open(dir);
+    if (!root || !root.isDirectory()) {
+        return String();
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+        String name = file.name();
+        if (name.endsWith(".json")) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, file);
+            if (!err) {
+                JsonObject obj = doc.as<JsonObject>();
+                Profile profile{};
+                if (parseProfile(obj, profile)) {
+                    String stem = filenameStem(name);
+                    // Mirror loadProfile()'s id resolution: in-file id wins,
+                    // falling back to the filename stem only when it is safe.
+                    if (profile.id.isEmpty() && isSafeId(stem)) {
+                        profile.id = stem;
+                    }
+                    if (profile.id == id) {
+                        return stem;
+                    }
+                }
+            }
+        }
+        file = root.openNextFile();
+    }
+
+    return String();
 }
 } // namespace
 
@@ -203,7 +244,27 @@ bool ProfileManager::saveProfile(Profile &profile) {
 
 bool ProfileManager::deleteProfile(const String &uuid) {
     removeFavoritedProfile(uuid);
-    return _fs->remove(profilePath(uuid));
+    // Fast path: a file named <uuid>.json exists AND its parsed identity is
+    // actually `uuid`. The id check is essential: with colliding mappings
+    // (e.g. a.json holds id "b" while another file holds id "a", possible with
+    // imported/restored profiles) a bare filename match would delete the wrong
+    // profile. When the direct file's identity does not match, fall through to
+    // the scan so the file genuinely owning `uuid` is the one removed.
+    if (profileExists(uuid)) {
+        Profile direct{};
+        if (loadProfile(uuid, direct) && direct.id == uuid) {
+            return _fs->remove(profilePath(uuid));
+        }
+    }
+    // Legacy/imported/migrated files: the in-file id can differ from the
+    // filename stem, so profilePath(uuid) misses (or misidentifies) the file.
+    // Resolve the id back to its actual on-disk filename and remove that.
+    // Return false only when no matching file exists on disk.
+    String stem = findFilenameStemForId(_fs, _dir, uuid);
+    if (stem.isEmpty()) {
+        return false;
+    }
+    return _fs->remove(profilePath(stem));
 }
 
 bool ProfileManager::profileExists(const String &uuid) { return _fs->exists(profilePath(uuid)); }
