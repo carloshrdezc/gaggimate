@@ -109,7 +109,6 @@ lv_obj_t *uic_BrewScreen_hero_unit = NULL;
 lv_obj_t *uic_BrewScreen_status_pill = NULL;
 lv_obj_t *uic_BrewScreen_ratio_sub = NULL;
 lv_obj_t *uic_BrewScreen_save_label = NULL;    // CAR-325
-lv_obj_t *uic_BrewScreen_save_as_label = NULL; // CAR-325
 static lv_obj_t *s_start_label = NULL;
 
 static void bs_track_text(lv_obj_t *o) {
@@ -351,6 +350,12 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_remove_style_all(uic_BrewScreen_status_pill);
     lv_obj_set_size(uic_BrewScreen_status_pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(uic_BrewScreen_status_pill, LV_RADIUS_CIRCLE, 0);
+    // CAR-330 M4: single-writer assumption for the pill background. This direct
+    // GM_SURFACE set and bs_track_button_surface() below (which lets the theme
+    // repaint drive the surface tone) are the ONLY writers of this object's
+    // bg_color. They agree today (both paint the button-surface tone), so they
+    // don't fight. If a light theme is added, route the pill through ONE writer
+    // (either keep it tracked OR set it directly here) — not both.
     lv_obj_set_style_bg_color(uic_BrewScreen_status_pill, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(uic_BrewScreen_status_pill, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(uic_BrewScreen_status_pill, GM_HEAT, 0);
@@ -781,14 +786,16 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_add_event_cb(ui_BrewScreen_saveAsNewButton, ui_event_BrewScreen_saveAsNewButton,
                         LV_EVENT_ALL, NULL);
 
-    uic_BrewScreen_save_as_label = lv_label_create(ui_BrewScreen_saveAsNewButton);
-    lv_label_set_text(uic_BrewScreen_save_as_label, "SAVE AS");
-    lv_obj_set_style_text_font(uic_BrewScreen_save_as_label, &grotesk_16, 0);
+    // CAR-330: file-local — this label is a fixed pill with no dirty cue, so the
+    // handle does not need to be exported to DefaultUI.
+    lv_obj_t *save_as_label = lv_label_create(ui_BrewScreen_saveAsNewButton);
+    lv_label_set_text(save_as_label, "SAVE AS");
+    lv_obj_set_style_text_font(save_as_label, &grotesk_16, 0);
     // CAR-327: muted-on-surface, matching the SAVE button label.
-    lv_obj_set_style_text_color(uic_BrewScreen_save_as_label, GM_MUTED, 0);
-    lv_obj_set_style_text_letter_space(uic_BrewScreen_save_as_label, GM_TRACK_KICKER, 0);
-    lv_obj_center(uic_BrewScreen_save_as_label);
-    bs_track_text(uic_BrewScreen_save_as_label);
+    lv_obj_set_style_text_color(save_as_label, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(save_as_label, GM_TRACK_KICKER, 0);
+    lv_obj_center(save_as_label);
+    bs_track_text(save_as_label);
 
     // Wire the screen-level event handler (gesture + screen_loaded).
     lv_obj_add_event_cb(ui_BrewScreen, ui_event_BrewScreen, LV_EVENT_ALL, NULL);
@@ -871,7 +878,6 @@ void ui_BrewScreen_screen_destroy(void) {
     uic_BrewScreen_status_pill = NULL;
     uic_BrewScreen_ratio_sub = NULL;
     uic_BrewScreen_save_label = NULL;    // CAR-325
-    uic_BrewScreen_save_as_label = NULL; // CAR-325
     s_start_label = NULL;
     for (int i = 0; i < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0])); i++)
         bs_text_labels[i] = NULL;

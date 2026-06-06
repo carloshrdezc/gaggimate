@@ -83,7 +83,11 @@ extern lv_obj_t *uic_BrewScreen_status_pill;
 // profileDirty effect can recolor the SAVE label text (white when dirty, muted
 // when clean) instead of recoloring an image that no longer exists.
 extern lv_obj_t *uic_BrewScreen_save_label;
-extern lv_obj_t *uic_BrewScreen_save_as_label;
+// CAR-330: the SAVE-AS label is intentionally a fixed pill with no dirty cue
+// (CAR-327 made it neutral-gray, matching SAVE when clean), so DefaultUI never
+// recolours it. The handle was exported but never consumed (dead public API) —
+// removed. The widget is still created/styled in ui_BrewScreen.c as a
+// file-local label.
 
 // CAR-293: Nothing-theme palette pass. DefaultUI's applyScreenVisualLanguage
 // calls this to recolor tracked themable children for UI_THEME_LIGHT support
