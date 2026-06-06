@@ -25,6 +25,10 @@ CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-incl
 "${CONV[@]}" --font "$NDOT" --size 150 --range 0x2E,0x30-0x3A,0x67,0x73,0xB0 -o "$OUT/ndot_150.c"
 "${CONV[@]}" --font "$NDOT" --size 120 --range 0x30-0x3A                      -o "$OUT/ndot_120.c"
 "${CONV[@]}" --font "$NDOT" --size 60  --range 0xB0,0x67,0x73,0x43            -o "$OUT/ndot_60.c"
+# ndot_34: live dial temp readout ("%d°C") — needs digits, colon, period, 'C',
+# and the degree (0xB0). Previously subset to ASCII-only (0x20-0x7E) which made
+# the degree render as a placeholder box on the live temp; include 0xB0 + 0x43.
+"${CONV[@]}" --font "$NDOT" --size 34  --range 0x2E,0x30-0x3A,0x43,0xB0       -o "$OUT/ndot_34.c"
 "${CONV[@]}" --font "$NDOT" --size 28  --range 0x2E,0x30-0x3A                 -o "$OUT/ndot_28.c"
 
 # Space Mono Bold — kickers / metric labels (space, punctuation, A-Z, middot)

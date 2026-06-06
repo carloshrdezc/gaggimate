@@ -412,9 +412,9 @@ void styleFixedLabel(lv_obj_t *obj, const lv_coord_t width, const lv_coord_t hei
 }
 
 void alignMetricPair(lv_obj_t *icon, lv_obj_t *label, const lv_coord_t centerX, const lv_coord_t centerY, const lv_color_t tone,
-                     const DisplayPalette &palette) {
+                     const DisplayPalette &palette, const lv_font_t *font = &ndot_24) {
     styleMetricIcon(icon, tone);
-    styleFixedLabel(label, 82, 28, &ndot_24, palette.textPrimary);
+    styleFixedLabel(label, 82, 28, font, palette.textPrimary);
     lv_obj_align(icon, LV_ALIGN_CENTER, centerX - 38, centerY);
     lv_obj_align(label, LV_ALIGN_CENTER, centerX + 18, centerY);
 }
@@ -1618,7 +1618,10 @@ void DefaultUI::applyScreenVisualLanguage() {
         styleIconButton(ui_ProfileScreen_chooseButton, palette, palette.success);
         applyProcessRing(uic_ProfileScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
         styleMetricValue(ui_ProfileScreen_profileName, palette, &ndot_24);
-        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &ndot_24);
+        // CAR-327: targetTemp2 shows "NN°C" — ndot_24 has no 0xB0 (degree) glyph
+        // and ndot_28's degree is a chunky dot-matrix block. grotesk_16 carries a
+        // clean vector degree (matches the standby screen's working temp sub-line).
+        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &grotesk_16);
         styleMetricValue(ui_ProfileScreen_targetDuration2, palette, &ndot_24);
         if (lv_obj_is_valid(ui_ProfileScreen_Chart1)) {
             stylePanel(ui_ProfileScreen_Chart1, palette, OPA_190, 20);
@@ -1645,7 +1648,11 @@ void DefaultUI::applyScreenVisualLanguage() {
                 lv_obj_set_size(profileBeanLabel, 232, 34);
                 lv_obj_align_to(profileBeanLabel, ui_ProfileScreen_profileName, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
             }
-            alignMetricPair(ui_ProfileScreen_tempIcon, ui_ProfileScreen_targetTemp2, -58, -42, palette.warning, palette);
+            // CAR-327: temp pair shows "NN°C" — ndot_24 (alignMetricPair's
+            // default) has no degree glyph (0xB0) so it boxed. grotesk_16 carries
+            // a clean vector degree (same font as the working brew target editor).
+            alignMetricPair(ui_ProfileScreen_tempIcon, ui_ProfileScreen_targetTemp2, -58, -42, palette.warning, palette,
+                            &grotesk_16);
             alignMetricPair(ui_ProfileScreen_targetIcon, ui_ProfileScreen_targetDuration2, 64, -42, palette.accent, palette);
             lv_obj_set_size(ui_ProfileScreen_simpleContent, 232, 92);
             lv_obj_align(ui_ProfileScreen_simpleContent, LV_ALIGN_CENTER, 0, 56);

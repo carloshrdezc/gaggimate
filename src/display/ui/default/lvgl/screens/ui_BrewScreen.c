@@ -556,12 +556,22 @@ void ui_BrewScreen_screen_init(void) {
     lv_img_set_src(ui_BrewScreen_Image5, &gm_ic_thermo);
     lv_obj_set_style_img_recolor(ui_BrewScreen_Image5, GM_GOLD, 0);
     lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image5, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_Image5, LV_ALIGN_LEFT_MID, 56, 0);
+    // CAR-327: hug the centered temp number instead of pinning to the left edge
+    // (LEFT_MID,56 left a big gap between the thermo icon and the value). Anchor
+    // to container center with a negative x so it sits immediately left of the
+    // centered "93°C" (which is at CENTER,+8). Fixed offset — not align_to —
+    // because targetTemp is created after this icon.
+    lv_obj_align(ui_BrewScreen_Image5, LV_ALIGN_CENTER, -52, 0);
     bs_track_icon(ui_BrewScreen_Image5);
 
     ui_BrewScreen_targetTemp = lv_label_create(ui_BrewScreen_tempContainer);
     lv_label_set_text(ui_BrewScreen_targetTemp, "93\xC2\xB0" "C");
-    lv_obj_set_style_text_font(ui_BrewScreen_targetTemp, &ndot_24, 0);
+    // CAR-327: grotesk_16 — the ndot small-size fonts have no usable degree glyph
+    // (ndot_24 lacks 0xB0 entirely; ndot_28's 0xB0 renders as a chunky dot-matrix
+    // block at this size). grotesk_16 carries a clean vector degree (range
+    // 0x20-0x7F,0xB0) and is the same font the standby screen's "NN° / NN°C"
+    // sub-line uses, where the degree renders correctly.
+    lv_obj_set_style_text_font(ui_BrewScreen_targetTemp, &grotesk_16, 0);
     lv_obj_set_style_text_color(ui_BrewScreen_targetTemp, GM_CONTENT, 0);
     lv_obj_set_style_text_align(ui_BrewScreen_targetTemp, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ui_BrewScreen_targetTemp, LV_ALIGN_CENTER, 8, 0);
@@ -613,7 +623,8 @@ void ui_BrewScreen_screen_init(void) {
 
     ui_BrewScreen_targetDuration = lv_label_create(ui_BrewScreen_targetContainer);
     lv_label_set_text(ui_BrewScreen_targetDuration, "0:30");
-    lv_obj_set_style_text_font(ui_BrewScreen_targetDuration, &ndot_24, 0);
+    // CAR-327: ndot_28 to match targetTemp above (same row geometry).
+    lv_obj_set_style_text_font(ui_BrewScreen_targetDuration, &ndot_28, 0);
     lv_obj_set_style_text_color(ui_BrewScreen_targetDuration, GM_CONTENT, 0);
     lv_obj_set_style_text_align(ui_BrewScreen_targetDuration, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ui_BrewScreen_targetDuration, LV_ALIGN_CENTER, 8, 0);
@@ -704,7 +715,9 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_saveButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(ui_BrewScreen_saveButton, 0, 0);
+    lv_obj_set_style_border_width(ui_BrewScreen_saveButton, 1, 0);
+    lv_obj_set_style_border_color(ui_BrewScreen_saveButton, GM_MUTED, 0);
+    lv_obj_set_style_border_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
     lv_obj_set_style_shadow_width(ui_BrewScreen_saveButton, 0, 0);
     lv_obj_set_style_outline_width(ui_BrewScreen_saveButton, 0, 0);
     lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -100, -32);
@@ -730,7 +743,9 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_acceptButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(ui_BrewScreen_acceptButton, 0, 0);
+    lv_obj_set_style_border_width(ui_BrewScreen_acceptButton, 1, 0);
+    lv_obj_set_style_border_color(ui_BrewScreen_acceptButton, GM_MUTED, 0);
+    lv_obj_set_style_border_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
     lv_obj_set_style_shadow_width(ui_BrewScreen_acceptButton, 0, 0);
     lv_obj_set_style_outline_width(ui_BrewScreen_acceptButton, 0, 0);
     lv_obj_set_style_img_recolor(ui_BrewScreen_acceptButton, GM_CONTENT, 0);
@@ -753,7 +768,9 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_saveAsNewButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(ui_BrewScreen_saveAsNewButton, 0, 0);
+    lv_obj_set_style_border_width(ui_BrewScreen_saveAsNewButton, 1, 0);
+    lv_obj_set_style_border_color(ui_BrewScreen_saveAsNewButton, GM_MUTED, 0);
+    lv_obj_set_style_border_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
     lv_obj_set_style_shadow_width(ui_BrewScreen_saveAsNewButton, 0, 0);
     lv_obj_set_style_outline_width(ui_BrewScreen_saveAsNewButton, 0, 0);
     lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 100, -32);
