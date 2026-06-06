@@ -53,6 +53,48 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
 
     return migrations;
 }
+
+// Find the on-disk filename stem whose loaded in-file profile id matches the
+// requested id. Returns an empty String when no matching file is found.
+//
+// listProfiles() enumerates profiles by FILENAME STEM, but loadProfile() and
+// the WebUI key profiles by the IN-FILE JSON `id`. For legacy/imported/migrated
+// files those two can diverge, so a direct profilePath(id) lookup misses the
+// file. This scan mirrors the parse used by collectProfileIdMigrations() to
+// resolve the requested id back to its actual on-disk filename stem.
+String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
+    File root = fs->open(dir);
+    if (!root || !root.isDirectory()) {
+        return String();
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+        String name = file.name();
+        if (name.endsWith(".json")) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, file);
+            if (!err) {
+                JsonObject obj = doc.as<JsonObject>();
+                Profile profile{};
+                if (parseProfile(obj, profile)) {
+                    String stem = filenameStem(name);
+                    // Mirror loadProfile()'s id resolution: in-file id wins,
+                    // falling back to the filename stem only when it is safe.
+                    if (profile.id.isEmpty() && isSafeId(stem)) {
+                        profile.id = stem;
+                    }
+                    if (profile.id == id) {
+                        return stem;
+                    }
+                }
+            }
+        }
+        file = root.openNextFile();
+    }
+
+    return String();
+}
 } // namespace
 
 ProfileManager::ProfileManager(fs::FS *fs, String dir, Settings &settings, PluginManager *plugin_manager)
@@ -203,7 +245,19 @@ bool ProfileManager::saveProfile(Profile &profile) {
 
 bool ProfileManager::deleteProfile(const String &uuid) {
     removeFavoritedProfile(uuid);
-    return _fs->remove(profilePath(uuid));
+    // Fast path: the requested id matches the filename stem directly.
+    if (profileExists(uuid)) {
+        return _fs->remove(profilePath(uuid));
+    }
+    // Legacy/imported/migrated files: the in-file id can differ from the
+    // filename stem, so profilePath(uuid) misses the file. Resolve the id back
+    // to its actual on-disk filename and remove that. Return false only when no
+    // matching file exists on disk.
+    String stem = findFilenameStemForId(_fs, _dir, uuid);
+    if (stem.isEmpty()) {
+        return false;
+    }
+    return _fs->remove(profilePath(stem));
 }
 
 bool ProfileManager::profileExists(const String &uuid) { return _fs->exists(profilePath(uuid)); }

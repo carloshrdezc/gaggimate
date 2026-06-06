@@ -187,7 +187,13 @@ export default class ApiService {
       const entry = this._pendingRequests.get(message.rid);
       this._pendingRequests.delete(message.rid);
       clearTimeout(entry.timeoutId);
-      entry.resolve(message);
+      // Surface in-band errors as a rejection so callers' try/catch fire instead
+      // of treating a firmware failure (e.g. "Delete failed") as success.
+      if (message.error) {
+        entry.reject(new Error(message.error));
+      } else {
+        entry.resolve(message);
+      }
       // Note: we deliberately fall through so listeners still observe the
       // response (some screens listen on res:* in addition to using request()).
     }
@@ -220,6 +226,9 @@ export default class ApiService {
    * Send a request frame and resolve with the matching response.
    *
    * Rejects with:
+   * - `Error(message.error)` if the response carries a truthy in-band `error`
+   *   field (e.g. firmware "Delete failed" / "Invalid profile id"), so callers
+   *   see failures via their try/catch rather than a success-shaped response.
    * - `WebSocketDisconnectedError` if the socket closes/errors before the
    *   response arrives (no waiting for the timeout).
    * - `Error('Request <tp> timed out')` if no response arrives within
