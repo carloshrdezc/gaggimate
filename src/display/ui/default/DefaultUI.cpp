@@ -1279,7 +1279,14 @@ void DefaultUI::setupReactive() {
                     // unit suffix stays ndot_60 (it carries the 0xB0 degree glyph;
                     // ndot_120 is digits-only) and is re-anchored for the taller hero.
                     lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_180, 0);
-                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -10);
+                    // CAR-328 (review pullrequestreview-4441977312 P2): the ndot_180
+                    // hero has ~162px line height. Centered at -10 its bottom reached
+                    // ~+71 in the 372 panel, which overlapped the at-target START SHOT
+                    // button (BOTTOM_MID -104 => top ~+26). Raise the hero center to
+                    // -26 so its bottom sits at ~+55, and drop START SHOT to -70 (top
+                    // ~+60) so the two never share the band. This also widens the
+                    // heating-state gap to the HEATING pill (top ~+94).
+                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -26);
                     if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit)) {
                         lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
                                         LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -16);
@@ -1290,7 +1297,10 @@ void DefaultUI::setupReactive() {
                 // reparent/position here anymore — the design's middle stack is
                 // hero → pill → ratio → START SHOT, with no weight chip. The
                 // Settings branch reparents modeSwitch back to controlContainer.
-                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -104);
+                // CAR-328 (review pullrequestreview-4441977312 P2): dropped from
+                // -104 to -70 so the at-target START SHOT button (top ~+60) clears
+                // the bottom of the enlarged ndot_180 hero (bottom ~+55).
+                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -70);
                 // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
                 // button and the HEATING status pill swap mutually-exclusively on
                 // atTarget at the same BOTTOM_MID slot, so they never overlap.
