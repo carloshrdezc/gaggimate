@@ -971,7 +971,10 @@ void DefaultUI::setupReactive() {
                                   const double secondsDouble = targetDuration;
                                   const auto minutes = static_cast<int>(secondsDouble / 60.0);
                                   const auto seconds = static_cast<int>(secondsDouble) % 60;
-                                  lv_label_set_text_fmt(ui_BrewScreen_targetDuration, "%2d:%02d", minutes, seconds);
+                                  // CAR-327: %d (not %2d) — the space-padding for
+                                  // single-digit minutes rendered as a placeholder box
+                                  // because the ndot font subset has no space glyph (0x20).
+                                  lv_label_set_text_fmt(ui_BrewScreen_targetDuration, "%d:%02d", minutes, seconds);
                               }
                           },
                           &targetDuration, &targetVolume, &brewVolumetric);
@@ -983,7 +986,8 @@ void DefaultUI::setupReactive() {
                                   const double secondsDouble = grindDuration / 1000.0;
                                   const auto minutes = static_cast<int>(secondsDouble / 60.0);
                                   const auto seconds = static_cast<int>(secondsDouble) % 60;
-                                  lv_label_set_text_fmt(ui_GrindScreen_targetDuration, "%2d:%02d", minutes, seconds);
+                                  // CAR-327: %d (not %2d) — see brew duration above.
+                                  lv_label_set_text_fmt(ui_GrindScreen_targetDuration, "%d:%02d", minutes, seconds);
                               }
                           },
                           &grindDuration, &grindVolume, &volumetricMode);
@@ -1074,7 +1078,8 @@ void DefaultUI::setupReactive() {
 
                 const auto minutes = static_cast<int>(favoritedProfiles[currentProfileIdx].getTotalDuration() / 60.0 - 0.5);
                 const auto seconds = static_cast<int>(favoritedProfiles[currentProfileIdx].getTotalDuration()) % 60;
-                lv_label_set_text_fmt(ui_ProfileScreen_targetDuration2, "%2d:%02d", minutes, seconds);
+                // CAR-327: %d (not %2d) — see brew duration above.
+                lv_label_set_text_fmt(ui_ProfileScreen_targetDuration2, "%d:%02d", minutes, seconds);
                 lv_label_set_text_fmt(ui_ProfileScreen_targetTemp2, "%d°C",
                                       static_cast<int>(favoritedProfiles[currentProfileIdx].temperature));
                 unsigned int phaseCount = favoritedProfiles[currentProfileIdx].getPhaseCount();
@@ -1239,7 +1244,9 @@ void DefaultUI::setupReactive() {
                     // (line_height 135 @ CENTER -14 => bottom ~+54). Dropped to
                     // -64 so it sits centered in the gap between the hero and the
                     // mode-chip bar, clearing both.
-                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -64);
+                    // CAR-328: hero grew to ndot_180, so its bottom dropped ~15px.
+                    // Move the pill down to -52 to restore the clearance gap.
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -52);
                     _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
                 }
                 // CAR-323: hide the dials cluster's tempText on the round brew
@@ -1260,13 +1267,23 @@ void DefaultUI::setupReactive() {
                 if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
                     lv_obj_add_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_set_height(ui_BrewScreen_profileInfo, 56);
-                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 50);
+                // CAR-328: lift the profile pill up a touch (50 -> 36) to open more
+                // vertical room for the enlarged hero numeral below it.
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 36);
                 // Hero temperature numeral, centered.
                 if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
-                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -14);
-                    if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit))
+                    // CAR-328: oversize the heating-landing hero so the live temp
+                    // reads big across the center. Created at ndot_150 in
+                    // ui_BrewScreen.c; bumped to ndot_180 here (landing only — the
+                    // brew timer / steam / water heroes keep ndot_150). The "°"
+                    // unit suffix stays ndot_60 (it carries the 0xB0 degree glyph;
+                    // ndot_120 is digits-only) and is re-anchored for the taller hero.
+                    lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_180, 0);
+                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -10);
+                    if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit)) {
                         lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
-                                        LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
+                                        LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -16);
+                    }
                 }
                 // PR #153 review: the weight/mode chip is hidden on the round
                 // landing (see the modeSwitch gate above), so there is nothing to

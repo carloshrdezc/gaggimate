@@ -22,6 +22,7 @@ OUT="src/display/ui/default/lvgl/fonts"
 CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-include lvgl.h --force-fast-kern-format)
 
 # Ndot numerals (digits, colon, period, degree, g/s/C units)
+"${CONV[@]}" --font "$NDOT" --size 180 --range 0x2E,0x30-0x3A,0x67,0x73,0xB0 -o "$OUT/ndot_180.c"
 "${CONV[@]}" --font "$NDOT" --size 150 --range 0x2E,0x30-0x3A,0x67,0x73,0xB0 -o "$OUT/ndot_150.c"
 "${CONV[@]}" --font "$NDOT" --size 120 --range 0x30-0x3A                      -o "$OUT/ndot_120.c"
 "${CONV[@]}" --font "$NDOT" --size 60  --range 0xB0,0x67,0x73,0x43            -o "$OUT/ndot_60.c"

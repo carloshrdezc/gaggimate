@@ -16,6 +16,7 @@ SET(SOURCES components/ui_comp_dials.c
     fonts/ndot_18.c
     fonts/ndot_24.c
     fonts/ndot_34.c
+    fonts/ndot_180.c
     fonts/ndot_150.c
     fonts/ndot_120.c
     fonts/ndot_60.c

@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+LV_FONT_DECLARE(ndot_180);     // oversized brew-landing hero numeral (heating temp)
 LV_FONT_DECLARE(ndot_150);     // hero numerals: brew timer, steam/water hero
 LV_FONT_DECLARE(ndot_120);     // standby clock
 LV_FONT_DECLARE(ndot_60);      // hero unit suffix (° g s C)
