@@ -108,6 +108,8 @@ lv_obj_t *uic_BrewScreen_hero_unit = NULL;
 // it as the top kicker in the landing sub-state.
 lv_obj_t *uic_BrewScreen_status_pill = NULL;
 lv_obj_t *uic_BrewScreen_ratio_sub = NULL;
+lv_obj_t *uic_BrewScreen_save_label = NULL;    // CAR-325
+lv_obj_t *uic_BrewScreen_save_as_label = NULL; // CAR-325
 static lv_obj_t *s_start_label = NULL;
 
 static void bs_track_text(lv_obj_t *o) {
@@ -206,17 +208,29 @@ void ui_event_BrewScreen_saveAsNewButton(lv_event_t *e) {
 static lv_obj_t *bs_glyph_btn(lv_obj_t *parent, const char *glyph, int diameter,
                               lv_color_t bg_col, lv_color_t text_col, bool accent_surface) {
     lv_obj_t *btn = lv_btn_create(parent);
+    // CAR-326: strip ALL default-theme button styles first. The theme's button
+    // class carries a pressed/focused/checked recolor (orange/brown palette ->
+    // reads as a red highlight) plus a GROW transform; per-state bg pins layered
+    // on top were not enough to suppress it. Removing the theme styles and
+    // rebuilding the look from scratch guarantees no press highlight.
+    lv_obj_remove_style_all(btn);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(btn, diameter, diameter);
     lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(btn, bg_col, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(btn, 0, 0);
     lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_outline_width(btn, 0, 0);
     lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *lab = lv_label_create(btn);
     lv_label_set_text(lab, glyph);
-    lv_obj_set_style_text_font(lab, &ndot_28, 0);
+    // CAR-324/CAR-327: render the +/- stepper glyphs in grotesk (clean sans).
+    // grotesk_28 (a 2-glyph subset of Space Grotesk Medium) replaces the earlier
+    // grotesk_16 so the +/- fill the 40px button rather than looking tiny.
+    lv_obj_set_style_text_font(lab, &grotesk_28, 0);
     lv_obj_set_style_text_color(lab, text_col, 0);
     lv_obj_center(lab);
     bs_track_text(lab);
@@ -520,7 +534,10 @@ void ui_BrewScreen_screen_init(void) {
     // tempContainer: [-] [thermo] [target temp] [+]
     ui_BrewScreen_tempContainer = lv_obj_create(ui_BrewScreen_adjustments);
     lv_obj_remove_style_all(ui_BrewScreen_tempContainer);
-    lv_obj_set_size(ui_BrewScreen_tempContainer, 254, 54);
+    // CAR-326: width matches targetContainer (304px) so the temp row and the
+    // time row below align in the center-stacked adjustments column (254px made
+    // the temp row look indented).
+    lv_obj_set_size(ui_BrewScreen_tempContainer, 304, 54);
     lv_obj_set_style_radius(ui_BrewScreen_tempContainer, 22, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_tempContainer, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_tempContainer, LV_OPA_60, 0);
@@ -539,20 +556,36 @@ void ui_BrewScreen_screen_init(void) {
     lv_img_set_src(ui_BrewScreen_Image5, &gm_ic_thermo);
     lv_obj_set_style_img_recolor(ui_BrewScreen_Image5, GM_GOLD, 0);
     lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image5, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_Image5, LV_ALIGN_LEFT_MID, 56, 0);
+    // CAR-327: hug the centered temp number instead of pinning to the left edge
+    // (LEFT_MID,56 left a big gap between the thermo icon and the value). Anchor
+    // to container center with a negative x so it sits immediately left of the
+    // centered "93°C" (which is at CENTER,+8). Fixed offset — not align_to —
+    // because targetTemp is created after this icon.
+    lv_obj_align(ui_BrewScreen_Image5, LV_ALIGN_CENTER, -52, 0);
     bs_track_icon(ui_BrewScreen_Image5);
 
     ui_BrewScreen_targetTemp = lv_label_create(ui_BrewScreen_tempContainer);
     lv_label_set_text(ui_BrewScreen_targetTemp, "93\xC2\xB0" "C");
-    lv_obj_set_style_text_font(ui_BrewScreen_targetTemp, &ndot_24, 0);
+    // CAR-327: grotesk_16 — the ndot small-size fonts have no usable degree glyph
+    // (ndot_24 lacks 0xB0 entirely; ndot_28's 0xB0 renders as a chunky dot-matrix
+    // block at this size). grotesk_16 carries a clean vector degree (range
+    // 0x20-0x7F,0xB0) and is the same font the standby screen's "NN° / NN°C"
+    // sub-line uses, where the degree renders correctly.
+    lv_obj_set_style_text_font(ui_BrewScreen_targetTemp, &grotesk_16, 0);
     lv_obj_set_style_text_color(ui_BrewScreen_targetTemp, GM_CONTENT, 0);
     lv_obj_set_style_text_align(ui_BrewScreen_targetTemp, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ui_BrewScreen_targetTemp, LV_ALIGN_CENTER, 8, 0);
     bs_track_text(ui_BrewScreen_targetTemp);
 
+    // CAR-327: neutral surface (not accent) so the brew-mode accent==GM_RED
+    // repaint in ui_BrewScreen_apply_palette() never turns the "+" red. Matches
+    // the "-" stepper treatment for a consistent pair.
     ui_BrewScreen_upTempButton = bs_glyph_btn(ui_BrewScreen_tempContainer, "+", 40,
-                                              GM_RED, GM_CONTENT, true);
-    lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_RIGHT_MID, -6, 0);
+                                              GM_SURFACE, GM_CONTENT, false);
+    // CAR-327: align at -56 to match upDurationButton below (which reserves the
+    // rightmost slot for byTimeButton). Keeps the two "+" steppers vertically
+    // aligned in the stacked temp/time editor.
+    lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_RIGHT_MID, -56, 0);
     lv_obj_set_ext_click_area(ui_BrewScreen_upTempButton, 15);
     lv_obj_add_event_cb(ui_BrewScreen_upTempButton, ui_event_BrewScreen_upTempButton,
                         LV_EVENT_ALL, NULL);
@@ -590,14 +623,16 @@ void ui_BrewScreen_screen_init(void) {
 
     ui_BrewScreen_targetDuration = lv_label_create(ui_BrewScreen_targetContainer);
     lv_label_set_text(ui_BrewScreen_targetDuration, "0:30");
-    lv_obj_set_style_text_font(ui_BrewScreen_targetDuration, &ndot_24, 0);
+    // CAR-327: ndot_28 to match targetTemp above (same row geometry).
+    lv_obj_set_style_text_font(ui_BrewScreen_targetDuration, &ndot_28, 0);
     lv_obj_set_style_text_color(ui_BrewScreen_targetDuration, GM_CONTENT, 0);
     lv_obj_set_style_text_align(ui_BrewScreen_targetDuration, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ui_BrewScreen_targetDuration, LV_ALIGN_CENTER, 8, 0);
     bs_track_text(ui_BrewScreen_targetDuration);
 
+    // CAR-327: neutral surface (not accent) — see upTempButton rationale.
     ui_BrewScreen_upDurationButton = bs_glyph_btn(ui_BrewScreen_targetContainer, "+", 40,
-                                                  GM_RED, GM_CONTENT, true);
+                                                  GM_SURFACE, GM_CONTENT, false);
     // Positioned one slot left of byTimeButton so the `+` control is not
     // occluded when the by-time/volumetric-delete button is shown.
     lv_obj_align(ui_BrewScreen_upDurationButton, LV_ALIGN_RIGHT_MID, -56, 0);
@@ -663,50 +698,97 @@ void ui_BrewScreen_screen_init(void) {
     // DefaultUI's BrewScreenState reactive toggles LV_OBJ_FLAG_HIDDEN on these +
     // re-aligns on round display. They live on contentPanel4 directly so they sit
     // outside the column flex.
+    //
+    // CAR-325: saveButton/saveAsNewButton previously wore gm_ic_back (back chevron)
+    // and gm_ic_cup (brew cup) glyphs — both misleading, and the icon set has no
+    // save/disk/checkmark glyph. They are now text-label buttons ("SAVE" / "SAVE AS")
+    // following the startButton pattern: keep the lv_imgbtn widget type (referenced
+    // by ui_events.cpp + DefaultUI), set NULL src on all states so no glyph paints,
+    // and host a centered child label. The profileDirty cue (DefaultUI effect) now
+    // recolors the label text instead of the image.
     ui_BrewScreen_saveButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
-    lv_imgbtn_set_src(ui_BrewScreen_saveButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_back, NULL);
-    lv_obj_set_size(ui_BrewScreen_saveButton, 52, 52);
+    // CAR-326: strip default-theme button styles (pressed/focused palette recolor
+    // + GROW) so the button never flashes a red highlight; rebuild look below.
+    lv_obj_remove_style_all(ui_BrewScreen_saveButton);
+    lv_imgbtn_set_src(ui_BrewScreen_saveButton, LV_IMGBTN_STATE_RELEASED, NULL, NULL, NULL);
+    lv_obj_set_size(ui_BrewScreen_saveButton, 96, 52);
     lv_obj_set_style_radius(ui_BrewScreen_saveButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_saveButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_saveButton, GM_MUTED, 0);
-    lv_obj_set_style_img_recolor_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -78, -32);
+    lv_obj_set_style_border_width(ui_BrewScreen_saveButton, 1, 0);
+    lv_obj_set_style_border_color(ui_BrewScreen_saveButton, GM_MUTED, 0);
+    lv_obj_set_style_border_opa(ui_BrewScreen_saveButton, LV_OPA_COVER, 0);
+    lv_obj_set_style_shadow_width(ui_BrewScreen_saveButton, 0, 0);
+    lv_obj_set_style_outline_width(ui_BrewScreen_saveButton, 0, 0);
+    lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_saveButton, ui_event_BrewScreen_saveButton,
                         LV_EVENT_ALL, NULL);
     bs_track_button_surface(ui_BrewScreen_saveButton);
-    bs_track_icon(ui_BrewScreen_saveButton);
+
+    uic_BrewScreen_save_label = lv_label_create(ui_BrewScreen_saveButton);
+    lv_label_set_text(uic_BrewScreen_save_label, "SAVE");
+    lv_obj_set_style_text_font(uic_BrewScreen_save_label, &grotesk_16, 0);
+    lv_obj_set_style_text_color(uic_BrewScreen_save_label, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(uic_BrewScreen_save_label, GM_TRACK_KICKER, 0);
+    lv_obj_center(uic_BrewScreen_save_label);
+    // NOTE: not bs_track_text() — DefaultUI's profileDirty effect drives this
+    // label's color (white when dirty, muted when clean).
 
     ui_BrewScreen_acceptButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
+    // CAR-326: strip default-theme button styles so no red press highlight.
+    lv_obj_remove_style_all(ui_BrewScreen_acceptButton);
     lv_imgbtn_set_src(ui_BrewScreen_acceptButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_cup, NULL);
     lv_obj_set_size(ui_BrewScreen_acceptButton, 64, 64);
     lv_obj_set_style_radius(ui_BrewScreen_acceptButton, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_GREEN, 0);
+    lv_obj_set_style_bg_color(ui_BrewScreen_acceptButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_acceptButton, GM_BG, 0);
+    lv_obj_set_style_border_width(ui_BrewScreen_acceptButton, 1, 0);
+    lv_obj_set_style_border_color(ui_BrewScreen_acceptButton, GM_MUTED, 0);
+    lv_obj_set_style_border_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
+    lv_obj_set_style_shadow_width(ui_BrewScreen_acceptButton, 0, 0);
+    lv_obj_set_style_outline_width(ui_BrewScreen_acceptButton, 0, 0);
+    lv_obj_set_style_img_recolor(ui_BrewScreen_acceptButton, GM_CONTENT, 0);
     lv_obj_set_style_img_recolor_opa(ui_BrewScreen_acceptButton, LV_OPA_COVER, 0);
     lv_obj_align(ui_BrewScreen_acceptButton, LV_ALIGN_BOTTOM_MID, 0, -18);
     lv_obj_add_flag(ui_BrewScreen_acceptButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ui_BrewScreen_acceptButton, ui_event_BrewScreen_acceptButton,
                         LV_EVENT_ALL, NULL);
-    bs_track_accent_surface(ui_BrewScreen_acceptButton);
+    // CAR-327: neutral gray surface matching SAVE (the footer button the user
+    // found clean). Was GM_GREEN + accent-tracked, which the brew-mode accent
+    // repaint turned red; now a plain button-surface like SAVE/SAVE AS.
+    bs_track_button_surface(ui_BrewScreen_acceptButton);
     bs_track_icon(ui_BrewScreen_acceptButton);
 
     ui_BrewScreen_saveAsNewButton = lv_imgbtn_create(ui_BrewScreen_contentPanel4);
-    lv_imgbtn_set_src(ui_BrewScreen_saveAsNewButton, LV_IMGBTN_STATE_RELEASED, NULL, &gm_ic_cup, NULL);
-    lv_obj_set_size(ui_BrewScreen_saveAsNewButton, 52, 52);
+    // CAR-326: strip default-theme button styles so no red press highlight.
+    lv_obj_remove_style_all(ui_BrewScreen_saveAsNewButton);
+    lv_imgbtn_set_src(ui_BrewScreen_saveAsNewButton, LV_IMGBTN_STATE_RELEASED, NULL, NULL, NULL);
+    lv_obj_set_size(ui_BrewScreen_saveAsNewButton, 96, 52);
     lv_obj_set_style_radius(ui_BrewScreen_saveAsNewButton, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_GOLD, 0);
+    lv_obj_set_style_bg_color(ui_BrewScreen_saveAsNewButton, GM_SURFACE, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_recolor(ui_BrewScreen_saveAsNewButton, GM_BG, 0);
-    lv_obj_set_style_img_recolor_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 78, -32);
+    lv_obj_set_style_border_width(ui_BrewScreen_saveAsNewButton, 1, 0);
+    lv_obj_set_style_border_color(ui_BrewScreen_saveAsNewButton, GM_MUTED, 0);
+    lv_obj_set_style_border_opa(ui_BrewScreen_saveAsNewButton, LV_OPA_COVER, 0);
+    lv_obj_set_style_shadow_width(ui_BrewScreen_saveAsNewButton, 0, 0);
+    lv_obj_set_style_outline_width(ui_BrewScreen_saveAsNewButton, 0, 0);
+    lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 100, -32);
     lv_obj_add_flag(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN);
+    // CAR-327: neutral gray surface matching SAVE. Was GM_GOLD + accent-tracked,
+    // which the brew-mode accent repaint turned red.
+    bs_track_button_surface(ui_BrewScreen_saveAsNewButton);
     lv_obj_add_event_cb(ui_BrewScreen_saveAsNewButton, ui_event_BrewScreen_saveAsNewButton,
                         LV_EVENT_ALL, NULL);
-    bs_track_accent_surface(ui_BrewScreen_saveAsNewButton);
-    bs_track_icon(ui_BrewScreen_saveAsNewButton);
+
+    uic_BrewScreen_save_as_label = lv_label_create(ui_BrewScreen_saveAsNewButton);
+    lv_label_set_text(uic_BrewScreen_save_as_label, "SAVE AS");
+    lv_obj_set_style_text_font(uic_BrewScreen_save_as_label, &grotesk_16, 0);
+    // CAR-327: muted-on-surface, matching the SAVE button label.
+    lv_obj_set_style_text_color(uic_BrewScreen_save_as_label, GM_MUTED, 0);
+    lv_obj_set_style_text_letter_space(uic_BrewScreen_save_as_label, GM_TRACK_KICKER, 0);
+    lv_obj_center(uic_BrewScreen_save_as_label);
+    bs_track_text(uic_BrewScreen_save_as_label);
 
     // Wire the screen-level event handler (gesture + screen_loaded).
     lv_obj_add_event_cb(ui_BrewScreen, ui_event_BrewScreen, LV_EVENT_ALL, NULL);
@@ -788,6 +870,8 @@ void ui_BrewScreen_screen_destroy(void) {
     uic_BrewScreen_hero_unit = NULL;
     uic_BrewScreen_status_pill = NULL;
     uic_BrewScreen_ratio_sub = NULL;
+    uic_BrewScreen_save_label = NULL;    // CAR-325
+    uic_BrewScreen_save_as_label = NULL; // CAR-325
     s_start_label = NULL;
     for (int i = 0; i < (int)(sizeof(bs_text_labels) / sizeof(bs_text_labels[0])); i++)
         bs_text_labels[i] = NULL;

@@ -412,9 +412,9 @@ void styleFixedLabel(lv_obj_t *obj, const lv_coord_t width, const lv_coord_t hei
 }
 
 void alignMetricPair(lv_obj_t *icon, lv_obj_t *label, const lv_coord_t centerX, const lv_coord_t centerY, const lv_color_t tone,
-                     const DisplayPalette &palette) {
+                     const DisplayPalette &palette, const lv_font_t *font = &ndot_24) {
     styleMetricIcon(icon, tone);
-    styleFixedLabel(label, 82, 28, &ndot_24, palette.textPrimary);
+    styleFixedLabel(label, 82, 28, font, palette.textPrimary);
     lv_obj_align(icon, LV_ALIGN_CENTER, centerX - 38, centerY);
     lv_obj_align(label, LV_ALIGN_CENTER, centerX + 18, centerY);
 }
@@ -971,7 +971,10 @@ void DefaultUI::setupReactive() {
                                   const double secondsDouble = targetDuration;
                                   const auto minutes = static_cast<int>(secondsDouble / 60.0);
                                   const auto seconds = static_cast<int>(secondsDouble) % 60;
-                                  lv_label_set_text_fmt(ui_BrewScreen_targetDuration, "%2d:%02d", minutes, seconds);
+                                  // CAR-327: %d (not %2d) — the space-padding for
+                                  // single-digit minutes rendered as a placeholder box
+                                  // because the ndot font subset has no space glyph (0x20).
+                                  lv_label_set_text_fmt(ui_BrewScreen_targetDuration, "%d:%02d", minutes, seconds);
                               }
                           },
                           &targetDuration, &targetVolume, &brewVolumetric);
@@ -983,7 +986,8 @@ void DefaultUI::setupReactive() {
                                   const double secondsDouble = grindDuration / 1000.0;
                                   const auto minutes = static_cast<int>(secondsDouble / 60.0);
                                   const auto seconds = static_cast<int>(secondsDouble) % 60;
-                                  lv_label_set_text_fmt(ui_GrindScreen_targetDuration, "%2d:%02d", minutes, seconds);
+                                  // CAR-327: %d (not %2d) — see brew duration above.
+                                  lv_label_set_text_fmt(ui_GrindScreen_targetDuration, "%d:%02d", minutes, seconds);
                               }
                           },
                           &grindDuration, &grindVolume, &volumetricMode);
@@ -1074,7 +1078,8 @@ void DefaultUI::setupReactive() {
 
                 const auto minutes = static_cast<int>(favoritedProfiles[currentProfileIdx].getTotalDuration() / 60.0 - 0.5);
                 const auto seconds = static_cast<int>(favoritedProfiles[currentProfileIdx].getTotalDuration()) % 60;
-                lv_label_set_text_fmt(ui_ProfileScreen_targetDuration2, "%2d:%02d", minutes, seconds);
+                // CAR-327: %d (not %2d) — see brew duration above.
+                lv_label_set_text_fmt(ui_ProfileScreen_targetDuration2, "%d:%02d", minutes, seconds);
                 lv_label_set_text_fmt(ui_ProfileScreen_targetTemp2, "%d°C",
                                       static_cast<int>(favoritedProfiles[currentProfileIdx].temperature));
                 unsigned int phaseCount = favoritedProfiles[currentProfileIdx].getPhaseCount();
@@ -1233,10 +1238,27 @@ void DefaultUI::setupReactive() {
                 const bool atTarget = isTemperatureStable;
                 if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
                     // CAR-319: lifted above the bottom mode-chip pill bar (which
-                    // sits at BOTTOM_MID y=-34, ~56px tall). -104 clears it.
-                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -104);
+                    // sits at BOTTOM_MID y=-34, ~56px tall).
+                    // CAR-322: at -104 the pill top (~+42 in the 372 panel)
+                    // collided with the bottom of the ndot_150 hero numeral
+                    // (line_height 135 @ CENTER -14 => bottom ~+54). Dropped to
+                    // -64 so it sits centered in the gap between the hero and the
+                    // mode-chip bar, clearing both.
+                    // CAR-328: hero grew to ndot_180, so its bottom dropped ~15px.
+                    // Move the pill down to -52 to restore the clearance gap.
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -52);
                     _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
                 }
+                // CAR-323: hide the dials cluster's tempText on the round brew
+                // landing. ui_comp_dials places it at CENTER (-50, -205) ≈ top-
+                // center of the 480px panel, directly behind the LV_OPA_50
+                // profileInfo chip (TOP_MID y=50). Since CAR-301 made the centered
+                // ndot_150 hero numeral the prominent temp readout, this old "%d°C"
+                // label is redundant here — and the half-transparent chip let it
+                // bleed through as an unreadable number behind the profile name.
+                // The dials ring (tempGauge) is left untouched; only the text hides.
+                if (uic_BrewScreen_dials_tempText != nullptr && lv_obj_is_valid(uic_BrewScreen_dials_tempText))
+                    lv_obj_add_flag(uic_BrewScreen_dials_tempText, LV_OBJ_FLAG_HIDDEN);
                 // Single-row profile selector — hide the tall "Selected profile"
                 // caption and bean-context label so the pill stays compact and
                 // clears the hero numeral.
@@ -1245,20 +1267,40 @@ void DefaultUI::setupReactive() {
                 if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
                     lv_obj_add_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_set_height(ui_BrewScreen_profileInfo, 56);
-                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 50);
+                // CAR-328: lift the profile pill up a touch (50 -> 36) to open more
+                // vertical room for the enlarged hero numeral below it.
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 36);
                 // Hero temperature numeral, centered.
                 if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
-                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -14);
-                    if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit))
+                    // CAR-328: oversize the heating-landing hero so the live temp
+                    // reads big across the center. Created at ndot_150 in
+                    // ui_BrewScreen.c; bumped to ndot_180 here (landing only — the
+                    // brew timer / steam / water heroes keep ndot_150). The "°"
+                    // unit suffix stays ndot_60 (it carries the 0xB0 degree glyph;
+                    // ndot_120 is digits-only) and is re-anchored for the taller hero.
+                    lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_180, 0);
+                    // CAR-328 (review pullrequestreview-4441977312 P2): the ndot_180
+                    // hero has ~162px line height. Centered at -10 its bottom reached
+                    // ~+71 in the 372 panel, which overlapped the at-target START SHOT
+                    // button (BOTTOM_MID -104 => top ~+26). Raise the hero center to
+                    // -26 so its bottom sits at ~+55, and drop START SHOT to -70 (top
+                    // ~+60) so the two never share the band. This also widens the
+                    // heating-state gap to the HEATING pill (top ~+94).
+                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -26);
+                    if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit)) {
                         lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
-                                        LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
+                                        LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -16);
+                    }
                 }
                 // PR #153 review: the weight/mode chip is hidden on the round
                 // landing (see the modeSwitch gate above), so there is nothing to
                 // reparent/position here anymore — the design's middle stack is
                 // hero → pill → ratio → START SHOT, with no weight chip. The
                 // Settings branch reparents modeSwitch back to controlContainer.
-                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -104);
+                // CAR-328 (review pullrequestreview-4441977312 P2): dropped from
+                // -104 to -70 so the at-target START SHOT button (top ~+60) clears
+                // the bottom of the enlarged ndot_180 hero (bottom ~+55).
+                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -70);
                 // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
                 // button and the HEATING status pill swap mutually-exclusively on
                 // atTarget at the same BOTTOM_MID slot, so they never overlap.
@@ -1287,6 +1329,11 @@ void DefaultUI::setupReactive() {
                 // the landing block compacts away (M1).
                 if (lv_obj_is_valid(ui_BrewScreen_Label1))
                     lv_obj_clear_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                // CAR-323: the landing block hides the dials tempText (it bled
+                // through the profileInfo chip). Restore it here for symmetry so
+                // the editor sub-state inherits the screen_init default visibility.
+                if (uic_BrewScreen_dials_tempText != nullptr && lv_obj_is_valid(uic_BrewScreen_dials_tempText))
+                    lv_obj_clear_flag(uic_BrewScreen_dials_tempText, LV_OBJ_FLAG_HIDDEN);
                 if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
                     lv_obj_clear_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
                 // modeSwitch: reparent back to its controlContainer flex home so it
@@ -1304,18 +1351,19 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR,
-                                                   profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR_OPA,
-                                                   profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR,
-                                                   profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR_OPA,
-                                                   profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
+            // CAR-325: saveButton is now a text pill ("SAVE"), not an icon button.
+            // Drive the profileDirty cue by recoloring the label text instead of
+            // the (removed) image recolor: bright white when there are unsaved
+            // edits, muted when the profile is clean. saveAsNewButton stays a
+            // fixed light-on-gold accent pill and needs no dirty cue.
+            if (uic_BrewScreen_save_label && lv_obj_is_valid(uic_BrewScreen_save_label)) {
+                ui_object_set_themeable_style_property(uic_BrewScreen_save_label, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                                       LV_STYLE_TEXT_COLOR,
+                                                       profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
+                ui_object_set_themeable_style_property(uic_BrewScreen_save_label, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                                       LV_STYLE_TEXT_OPA,
+                                                       profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
+            }
         },
         &brewScreenState, &profileDirty);
     effect_mgr.use_effect([=] { return currentScreen == ui_StandbyScreen; },
@@ -1597,7 +1645,10 @@ void DefaultUI::applyScreenVisualLanguage() {
         styleIconButton(ui_ProfileScreen_chooseButton, palette, palette.success);
         applyProcessRing(uic_ProfileScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
         styleMetricValue(ui_ProfileScreen_profileName, palette, &ndot_24);
-        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &ndot_24);
+        // CAR-327: targetTemp2 shows "NN°C" — ndot_24 has no 0xB0 (degree) glyph
+        // and ndot_28's degree is a chunky dot-matrix block. grotesk_16 carries a
+        // clean vector degree (matches the standby screen's working temp sub-line).
+        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &grotesk_16);
         styleMetricValue(ui_ProfileScreen_targetDuration2, palette, &ndot_24);
         if (lv_obj_is_valid(ui_ProfileScreen_Chart1)) {
             stylePanel(ui_ProfileScreen_Chart1, palette, OPA_190, 20);
@@ -1624,7 +1675,11 @@ void DefaultUI::applyScreenVisualLanguage() {
                 lv_obj_set_size(profileBeanLabel, 232, 34);
                 lv_obj_align_to(profileBeanLabel, ui_ProfileScreen_profileName, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
             }
-            alignMetricPair(ui_ProfileScreen_tempIcon, ui_ProfileScreen_targetTemp2, -58, -42, palette.warning, palette);
+            // CAR-327: temp pair shows "NN°C" — ndot_24 (alignMetricPair's
+            // default) has no degree glyph (0xB0) so it boxed. grotesk_16 carries
+            // a clean vector degree (same font as the working brew target editor).
+            alignMetricPair(ui_ProfileScreen_tempIcon, ui_ProfileScreen_targetTemp2, -58, -42, palette.warning, palette,
+                            &grotesk_16);
             alignMetricPair(ui_ProfileScreen_targetIcon, ui_ProfileScreen_targetDuration2, 64, -42, palette.accent, palette);
             lv_obj_set_size(ui_ProfileScreen_simpleContent, 232, 92);
             lv_obj_align(ui_ProfileScreen_simpleContent, LV_ALIGN_CENTER, 0, 56);

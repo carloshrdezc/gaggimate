@@ -22,9 +22,14 @@ OUT="src/display/ui/default/lvgl/fonts"
 CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-include lvgl.h --force-fast-kern-format)
 
 # Ndot numerals (digits, colon, period, degree, g/s/C units)
+"${CONV[@]}" --font "$NDOT" --size 180 --range 0x2E,0x30-0x3A,0x67,0x73,0xB0 -o "$OUT/ndot_180.c"
 "${CONV[@]}" --font "$NDOT" --size 150 --range 0x2E,0x30-0x3A,0x67,0x73,0xB0 -o "$OUT/ndot_150.c"
 "${CONV[@]}" --font "$NDOT" --size 120 --range 0x30-0x3A                      -o "$OUT/ndot_120.c"
 "${CONV[@]}" --font "$NDOT" --size 60  --range 0xB0,0x67,0x73,0x43            -o "$OUT/ndot_60.c"
+# ndot_34: live dial temp readout ("%d°C") — needs digits, colon, period, 'C',
+# and the degree (0xB0). Previously subset to ASCII-only (0x20-0x7E) which made
+# the degree render as a placeholder box on the live temp; include 0xB0 + 0x43.
+"${CONV[@]}" --font "$NDOT" --size 34  --range 0x2E,0x30-0x3A,0x43,0xB0       -o "$OUT/ndot_34.c"
 "${CONV[@]}" --font "$NDOT" --size 28  --range 0x2E,0x30-0x3A                 -o "$OUT/ndot_28.c"
 
 # Space Mono Bold — kickers / metric labels (space, punctuation, A-Z, middot)
@@ -33,5 +38,8 @@ CONV=(npx --yes lv_font_conv@1.5.3 --bpp 4 --no-compress --format lvgl --lv-incl
 
 # Space Grotesk Medium — body / settings rows (full printable ASCII + degree)
 "${CONV[@]}" --font "$SGRO"  --size 16 --range 0x20-0x7F,0xB0                 -o "$OUT/grotesk_16.c"
+# grotesk_28: +/- stepper glyphs only (subset 0x2B plus 0x2D) — big & crisp in
+# the 40px BrewScreen steppers without the flash cost of the full ASCII range.
+"${CONV[@]}" --font "$SGRO"  --size 28 --range 0x2B,0x2D                      -o "$OUT/grotesk_28.c"
 
 echo "Generated 7 fonts in $OUT"
