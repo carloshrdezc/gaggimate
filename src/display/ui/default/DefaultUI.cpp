@@ -831,6 +831,13 @@ void DefaultUI::setupState() {
 }
 
 void DefaultUI::setupReactive() {
+    // CAR-330 M2: _ui_flag_modify() polarity (single canonical explanation;
+    // the per-call repeats below were collapsed to references). It is tri-state
+    // on the third arg (ui_helpers.c:80-89): 0 ADDs the flag, 1 REMOVEs it. For
+    // LV_OBJ_FLAG_HIDDEN that means a passed bool reads as "true => REMOVE HIDDEN
+    // => shown, false => ADD HIDDEN => hidden". So to SHOW a widget, pass the
+    // condition under which it should be visible (e.g. !atTarget to show a pill
+    // only while heating).
     // adjustDials() paints the dial arc colors from the live palette using plain (non-themeable) local styles. A theme
     // switch makes ui_theme_set() reapply the themeable arc-color registrations in ui_comp_dials.c, which would otherwise
     // overwrite those palette colors until the next dial recalculation. Depending on currentThemeMode here forces a full
@@ -1028,44 +1035,19 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text(ui_BrewScreen_profileName, selectedProfile.label.c_str());
                               lv_label_set_text(ui_BrewScreen_Label1,
                                                 selectedBean.isEmpty() ? "PROFILE READY" : buildContextLine("Bean", selectedBean).c_str());
-                              // CAR-301 review C3: drive the chat2 ratio sub-line from
-                              // the selected profile. Without dose-in (bean-side, not on
-                              // Profile), the line shows the achievable target shape:
-                              //   volumetric → "→ {targetVolume}g · {duration}s · {maxBar} BAR"
-                              //   time-based → "{duration}s · {maxBar} BAR"
-                              // maxBar is the maximum pumpAdvanced.pressure across BREW
-                              // phases (or 9 fallback for simple/legacy profiles).
-                              if (uic_BrewScreen_ratio_sub != nullptr && lv_obj_is_valid(uic_BrewScreen_ratio_sub)) {
-                                  float maxBar = 0.0f;
-                                  for (const auto &phase : selectedProfile.phases) {
-                                      if (phase.phase != PhaseType::PHASE_TYPE_BREW) continue;
-                                      if (phase.pumpIsSimple) continue;
-                                      if (phase.pumpAdvanced.target != PumpTarget::PUMP_TARGET_PRESSURE) continue;
-                                      const float p = phase.pumpAdvanced.pressure;
-                                      if (p > maxBar) maxBar = p;
-                                  }
-                                  if (maxBar <= 0.0f) maxBar = 9.0f;
-                                  // CAR-301 review C5: read live targets, not selectedProfile
-                                  // accessors. selectedProfile is a UI-local snapshot refreshed
-                                  // only on profiles:profile:select; +/- and yield-slider edits
-                                  // mutate profileManager's owned profile and fire
-                                  // controller:target{Duration,Volume}:change which keep
-                                  // targetDuration / targetVolume / brewVolumetric current.
-                                  // Mirrors the targetDuration label effect at lines 945-963.
-                                  const int totalDur = static_cast<int>(targetDuration);
-                                  const float vol = targetVolume;
-                                  if (brewVolumetric && vol > 0.0f) {
-                                      lv_label_set_text_fmt(uic_BrewScreen_ratio_sub,
-                                                            "\xE2\x86\x92 %.0fg  \xC2\xB7  %ds  \xC2\xB7  %.0f BAR",
-                                                            vol, totalDur, maxBar);
-                                  } else {
-                                      lv_label_set_text_fmt(uic_BrewScreen_ratio_sub,
-                                                            "%ds  \xC2\xB7  %.0f BAR",
-                                                            totalDur, maxBar);
-                                  }
-                              }
+                              // CAR-330 M1: the CAR-301 ratio sub-line text was
+                              // computed here every profile/target change, but the
+                              // uic_BrewScreen_ratio_sub widget is permanently
+                              // hidden in every BrewScreen sub-state (see the
+                              // brewScreenState effect below). The computation drove
+                              // a widget nobody renders, so it was dead — removed.
+                              // If a future ticket re-surfaces the ratio breakdown,
+                              // restore the volumetric/time formatting (maxBar across
+                              // BREW phases, live targetDuration/targetVolume) here
+                              // and re-add the targetDuration/targetVolume/
+                              // brewVolumetric dependencies below.
                           },
-                          &selectedProfileId, &selectedBean, &targetDuration, &targetVolume, &brewVolumetric);
+                          &selectedProfileId, &selectedBean);
 
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_ProfileScreen; },
@@ -1164,6 +1146,8 @@ void DefaultUI::setupReactive() {
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
             const bool settings = brewScreenState == BrewScreenState::Settings;
+            // CAR-330 M3: hoist the repeated isRoundDisplay() calls in this effect.
+            const bool round = isRoundDisplay();
             // CAR-315: the CAR-301 chat2 hero numeral / status pill / ratio sub
             // were never toggled with the sub-state, so in the Settings (+/-
             // editor) sub-state they bled through behind the steppers, and in
@@ -1212,7 +1196,7 @@ void DefaultUI::setupReactive() {
             // and fires onVolumetricHold() tare commands. Rectangular keeps the
             // original Brew+volumetric gate.
             _ui_flag_modify(ui_BrewScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN,
-                            isRoundDisplay()
+                            round
                                 ? (brewScreenState == BrewScreenState::Settings && volumetricAvailable)
                                 : (brewScreenState == BrewScreenState::Brew && volumetricAvailable));
             if (volumetricAvailable) {
@@ -1224,7 +1208,7 @@ void DefaultUI::setupReactive() {
             // selector, status pill, weight chip and START SHOT never collide.
             // Panel is the 372×372 round circle (CENTER-relative coords). The
             // rectangular path keeps the original SquareLine positions (AC #8).
-            if (isRoundDisplay() && !settings) {
+            if (round && !settings) {
                 // CAR-318: while the boiler is still heating, the live status
                 // pill ("HEATING") sits at the BOTTOM (clear of the profile
                 // selector) and START SHOT is hidden — you can't pull a shot
@@ -1232,9 +1216,8 @@ void DefaultUI::setupReactive() {
                 // flips true, hide the pill and reveal START SHOT in the same
                 // bottom slot. (isTemperatureStable resets to false on any
                 // setpoint change, so the pill returns if the target moves.)
-                // _ui_flag_modify is tri-state: arg 0 ADDs the flag, 1 REMOVEs
-                // it (ui_helpers.c:80-89), so a bool reads as "true => REMOVE
-                // (show)". To SHOW the pill while heating, pass !atTarget.
+                // _ui_flag_modify polarity: see the canonical note at the top of
+                // setupReactive(). To SHOW the pill while heating, pass !atTarget.
                 const bool atTarget = isTemperatureStable;
                 if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
                     // CAR-319: lifted above the bottom mode-chip pill bar (which
@@ -1274,10 +1257,16 @@ void DefaultUI::setupReactive() {
                 if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
                     // CAR-328: oversize the heating-landing hero so the live temp
                     // reads big across the center. Created at ndot_150 in
-                    // ui_BrewScreen.c; bumped to ndot_180 here (landing only — the
-                    // brew timer / steam / water heroes keep ndot_150). The "°"
-                    // unit suffix stays ndot_60 (it carries the 0xB0 degree glyph;
-                    // ndot_120 is digits-only) and is re-anchored for the taller hero.
+                    // ui_BrewScreen.c; bumped to ndot_180 here. CAR-330 (I2): the
+                    // round brew-landing hero is ndot_180 throughout — this block
+                    // covers BOTH the heating and at-target sub-states, so the
+                    // hero font is committed to ndot_180 with no else-reset. The
+                    // separate brew timer / steam / water heroes are unrelated and
+                    // keep their own ndot_150. The "°" unit suffix stays ndot_60
+                    // (it carries the 0xB0 degree glyph; ndot_120 is digits-only)
+                    // and is re-anchored for the taller hero. The at-target layout
+                    // (hero center -26, START SHOT -70, status pill -52) was already
+                    // tuned for ndot_180, so no geometry change is needed here.
                     lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_180, 0);
                     // CAR-328 (review pullrequestreview-4441977312 P2): the ndot_180
                     // hero has ~162px line height. Centered at -10 its bottom reached
@@ -1304,13 +1293,13 @@ void DefaultUI::setupReactive() {
                 // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
                 // button and the HEATING status pill swap mutually-exclusively on
                 // atTarget at the same BOTTOM_MID slot, so they never overlap.
-                // Button is HIDDEN while heating (atTarget==0 => ADD HIDDEN) and
-                // shown once at-target (atTarget==1 => REMOVE HIDDEN); the pill
-                // above does the inverse (!atTarget). Hiding the button while
-                // heating means it can no longer paint over the pill or sit as an
-                // enabled-looking control whose click silently no-ops.
+                // The button passes atTarget (shown only at-target); the pill
+                // above does the inverse (!atTarget) — see the _ui_flag_modify
+                // polarity note at the top of setupReactive(). Hiding the button
+                // while heating means it can no longer paint over the pill or sit
+                // as an enabled-looking control whose click silently no-ops.
                 _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, atTarget);
-            } else if (isRoundDisplay() && settings) {
+            } else if (round && settings) {
                 // CAR-315 (PR #151 review I1/I2/M1): the landing block above
                 // performs one-way geometry mutations (profileInfo height/anchor,
                 // modeSwitch reparent, Label1/brewContextLabel hidden). Brew
@@ -1610,10 +1599,10 @@ void DefaultUI::applyScreenVisualLanguage() {
             // accept, or cancel a profile edit. The footer buttons are hidden
             // outside the landing state (lines ~1190-1193); mirror that here so
             // the chip bar only shows on the Brew landing sub-state.
-            // PR #153 review 4424457425 P1: predicate must be inverted. atTarget-
-            // style tri-state: cond==1 REMOVEs HIDDEN (shows). Pass
-            // (state != Settings) so: Settings => false => ADD HIDDEN (hidden);
-            // Brew landing => true => REMOVE HIDDEN (shown).
+            // PR #153 review 4424457425 P1: predicate must be inverted. Pass
+            // (state != Settings) so the chip bar shows on the Brew landing and
+            // hides in Settings — see the _ui_flag_modify polarity note at the
+            // top of setupReactive().
             if (brewModeChips != nullptr && lv_obj_is_valid(brewModeChips)) {
                 _ui_flag_modify(brewModeChips, LV_OBJ_FLAG_HIDDEN,
                                 brewScreenState != BrewScreenState::Settings);
