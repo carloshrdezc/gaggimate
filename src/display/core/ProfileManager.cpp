@@ -40,9 +40,8 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
                         profile.id = filenameStem(name);
                     }
                     if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
-                        std::find_if(migrations.begin(), migrations.end(), [&](const auto &migration) {
-                            return migration.first == rawId;
-                        }) == migrations.end()) {
+                        std::find_if(migrations.begin(), migrations.end(),
+                                     [&](const auto &migration) { return migration.first == rawId; }) == migrations.end()) {
                         migrations.emplace_back(rawId, profile.id);
                     }
                 }
@@ -245,14 +244,22 @@ bool ProfileManager::saveProfile(Profile &profile) {
 
 bool ProfileManager::deleteProfile(const String &uuid) {
     removeFavoritedProfile(uuid);
-    // Fast path: the requested id matches the filename stem directly.
+    // Fast path: a file named <uuid>.json exists AND its parsed identity is
+    // actually `uuid`. The id check is essential: with colliding mappings
+    // (e.g. a.json holds id "b" while another file holds id "a", possible with
+    // imported/restored profiles) a bare filename match would delete the wrong
+    // profile. When the direct file's identity does not match, fall through to
+    // the scan so the file genuinely owning `uuid` is the one removed.
     if (profileExists(uuid)) {
-        return _fs->remove(profilePath(uuid));
+        Profile direct{};
+        if (loadProfile(uuid, direct) && direct.id == uuid) {
+            return _fs->remove(profilePath(uuid));
+        }
     }
     // Legacy/imported/migrated files: the in-file id can differ from the
-    // filename stem, so profilePath(uuid) misses the file. Resolve the id back
-    // to its actual on-disk filename and remove that. Return false only when no
-    // matching file exists on disk.
+    // filename stem, so profilePath(uuid) misses (or misidentifies) the file.
+    // Resolve the id back to its actual on-disk filename and remove that.
+    // Return false only when no matching file exists on disk.
     String stem = findFilenameStemForId(_fs, _dir, uuid);
     if (stem.isEmpty()) {
         return false;
