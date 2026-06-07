@@ -796,9 +796,23 @@ export function ProfileList() {
         if (typeof result === 'string') {
           setLoading(true);
           try {
-            const profiles = parseProfile(result);
-            for (const p of profiles) {
-              await apiService.request({ tp: 'req:profiles:save', profile: p });
+            const importedProfiles = parseProfile(result);
+            // Build the collision set from the freshest device profile list so a
+            // re-imported backup never silently overwrites a (possibly newer)
+            // profile that already lives on the device (CAR-332).
+            const existingResponse = await apiService.request({ tp: 'req:profiles:list' });
+            const existingIds = new Set(
+              (existingResponse?.profiles ?? []).map(entry => entry.id).filter(Boolean),
+            );
+            for (const p of importedProfiles) {
+              let profile = p;
+              if (p.id && existingIds.has(p.id)) {
+                // Treat the import as a new copy: drop the id so the firmware mints
+                // a fresh safe id via generateShortID() instead of overwriting.
+                const { id: _omitId, ...rest } = p;
+                profile = rest;
+              }
+              await apiService.request({ tp: 'req:profiles:save', profile });
             }
           } catch (err) {
             console.error('Failed to import profiles:', err);
