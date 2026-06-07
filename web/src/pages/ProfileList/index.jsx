@@ -799,7 +799,20 @@ export function ProfileList() {
             const importedProfiles = parseProfile(result);
             // Build the collision set from the freshest device profile list so a
             // re-imported backup never silently overwrites a (possibly newer)
-            // profile that already lives on the device (CAR-332).
+            // profile that already lives on the device (CAR-331). saveProfile
+            // opens <id>.json with "w", so a same-id import would clobber the
+            // device copy; the firmware guard only catches the stem !== in-file-id
+            // legacy case (a matching id is treated as a legit in-place edit), so
+            // the safe default here is to remap a colliding import to a fresh id.
+            //
+            // NOTE: req:profiles:list enumerates by FILENAME STEM but reports the
+            // IN-FILE id, so this set covers in-file-id collisions only. On-disk
+            // filename-stem collisions (e.g. a.json holding id "b", then importing
+            // id "a") are NOT visible here and are deliberately NOT guarded in the
+            // web layer. The ProfileManager::saveProfile() firmware guard is the
+            // authoritative collision check for that case: it loadProfile()s the
+            // file <id>.json would clobber and mints a fresh id when its in-file id
+            // differs. Do not assume this web check alone prevents overwrites.
             const existingResponse = await apiService.request({ tp: 'req:profiles:list' });
             const existingIds = new Set(
               (existingResponse?.profiles ?? []).map(entry => entry.id).filter(Boolean),
@@ -812,7 +825,16 @@ export function ProfileList() {
                 const { id: _omitId, ...rest } = p;
                 profile = rest;
               }
-              await apiService.request({ tp: 'req:profiles:save', profile });
+              const saveResponse = await apiService.request({ tp: 'req:profiles:save', profile });
+              // Track the id the device actually persisted (the save response echoes
+              // the stored profile, including any fresh id the firmware minted). This
+              // keeps two profiles that share an id WITHIN the same import file from
+              // overwriting each other: the first save claims the id, and the second
+              // sees it in the set and gets remapped to a fresh id too.
+              const savedId = saveResponse?.profile?.id;
+              if (savedId) {
+                existingIds.add(savedId);
+              }
             }
           } catch (err) {
             console.error('Failed to import profiles:', err);
