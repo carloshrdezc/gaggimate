@@ -96,7 +96,10 @@ function ProfileCard({
   }, [data.favorite, unfavoriteDisabled, favoriteDisabled, onUnfavorite, onFavorite, data.id]);
 
   const onDownload = useCallback(() => {
-    const { id, selected, favorite, ...profileData } = data;
+    // Keep `id` in the export so a re-imported profile remains addressable
+    // (deletable/selectable/favoritable) on the device. Only `selected` and
+    // `favorite` are device-local state and must not be exported.
+    const { selected, favorite, ...profileData } = data;
     const filename = `profile-${data.id}.json`;
     const prepared = prepareDownload(filename);
 
@@ -712,10 +715,9 @@ export function ProfileList() {
 
   const onExport = useCallback(() => {
     const exportedProfiles = profiles.map(p => {
-      const ep = { ...p };
-      delete ep.id;
-      delete ep.selected;
-      delete ep.favorite;
+      // Keep `id` so re-imported profiles stay addressable on the device.
+      // Only strip device-local state (`selected`/`favorite`).
+      const { selected, favorite, ...ep } = p;
       return ep;
     });
 
