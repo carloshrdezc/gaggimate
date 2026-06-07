@@ -218,6 +218,22 @@ bool ProfileManager::saveProfile(Profile &profile) {
         isNew = true;
     }
 
+    // Guard against clobbering an unrelated profile. saveProfile writes to
+    // <id>.json, but legacy/imported files can have a filename stem that differs
+    // from their in-file id (e.g. a.json holding id "b"). If <profile.id>.json
+    // already exists AND the profile it actually contains is NOT this one,
+    // opening it "w" would destroy that unrelated profile. loadProfile(uuid)
+    // opens exactly the file this save would clobber, so an id mismatch means a
+    // collision; mint a fresh id instead. A matching id is a legitimate in-place
+    // edit and is left untouched.
+    if (!isNew && profileExists(profile.id)) {
+        Profile existing{};
+        if (loadProfile(profile.id, existing) && existing.id != profile.id) {
+            profile.id = generateShortID();
+            isNew = true;
+        }
+    }
+
     ESP_LOGI("ProfileManager", "Saving profile %s", profile.id.c_str());
 
     File file = _fs->open(profilePath(profile.id), "w");

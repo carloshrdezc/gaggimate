@@ -96,7 +96,10 @@ function ProfileCard({
   }, [data.favorite, unfavoriteDisabled, favoriteDisabled, onUnfavorite, onFavorite, data.id]);
 
   const onDownload = useCallback(() => {
-    const { id, selected, favorite, ...profileData } = data;
+    // Keep `id` in the export so a re-imported profile remains addressable
+    // (deletable/selectable/favoritable) on the device. Only `selected` and
+    // `favorite` are device-local state and must not be exported.
+    const { selected, favorite, ...profileData } = data;
     const filename = `profile-${data.id}.json`;
     const prepared = prepareDownload(filename);
 
@@ -712,10 +715,9 @@ export function ProfileList() {
 
   const onExport = useCallback(() => {
     const exportedProfiles = profiles.map(p => {
-      const ep = { ...p };
-      delete ep.id;
-      delete ep.selected;
-      delete ep.favorite;
+      // Keep `id` so re-imported profiles stay addressable on the device.
+      // Only strip device-local state (`selected`/`favorite`).
+      const { selected, favorite, ...ep } = p;
       return ep;
     });
 
@@ -794,9 +796,45 @@ export function ProfileList() {
         if (typeof result === 'string') {
           setLoading(true);
           try {
-            const profiles = parseProfile(result);
-            for (const p of profiles) {
-              await apiService.request({ tp: 'req:profiles:save', profile: p });
+            const importedProfiles = parseProfile(result);
+            // Build the collision set from the freshest device profile list so a
+            // re-imported backup never silently overwrites a (possibly newer)
+            // profile that already lives on the device (CAR-331). saveProfile
+            // opens <id>.json with "w", so a same-id import would clobber the
+            // device copy; the firmware guard only catches the stem !== in-file-id
+            // legacy case (a matching id is treated as a legit in-place edit), so
+            // the safe default here is to remap a colliding import to a fresh id.
+            //
+            // NOTE: req:profiles:list enumerates by FILENAME STEM but reports the
+            // IN-FILE id, so this set covers in-file-id collisions only. On-disk
+            // filename-stem collisions (e.g. a.json holding id "b", then importing
+            // id "a") are NOT visible here and are deliberately NOT guarded in the
+            // web layer. The ProfileManager::saveProfile() firmware guard is the
+            // authoritative collision check for that case: it loadProfile()s the
+            // file <id>.json would clobber and mints a fresh id when its in-file id
+            // differs. Do not assume this web check alone prevents overwrites.
+            const existingResponse = await apiService.request({ tp: 'req:profiles:list' });
+            const existingIds = new Set(
+              (existingResponse?.profiles ?? []).map(entry => entry.id).filter(Boolean),
+            );
+            for (const p of importedProfiles) {
+              let profile = p;
+              if (p.id && existingIds.has(p.id)) {
+                // Treat the import as a new copy: drop the id so the firmware mints
+                // a fresh safe id via generateShortID() instead of overwriting.
+                const { id: _omitId, ...rest } = p;
+                profile = rest;
+              }
+              const saveResponse = await apiService.request({ tp: 'req:profiles:save', profile });
+              // Track the id the device actually persisted (the save response echoes
+              // the stored profile, including any fresh id the firmware minted). This
+              // keeps two profiles that share an id WITHIN the same import file from
+              // overwriting each other: the first save claims the id, and the second
+              // sees it in the set and gets remapped to a fresh id too.
+              const savedId = saveResponse?.profile?.id;
+              if (savedId) {
+                existingIds.add(savedId);
+              }
             }
           } catch (err) {
             console.error('Failed to import profiles:', err);
