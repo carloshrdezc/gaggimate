@@ -195,6 +195,10 @@ class Controller {
 
     // Functional methods
     void updateControl();
+    // Whether the active process drives a real pump pressure/flow target
+    // (advanced-pump brew / manual / steam). False for simple-pump brew, water,
+    // grind, and when inactive. Non-standby helper for hasTargetPressure/Flow.
+    bool hasPumpTarget() const;
 
     // Event handlers
     void onTempRead(float temperature);

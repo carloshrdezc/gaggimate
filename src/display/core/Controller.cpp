@@ -565,12 +565,35 @@ float Controller::getTargetFlow() const {
     return targetFlow;
 }
 
+// Reports whether a pump pressure/flow target is actually applicable for the
+// current active process — used so WebUIPlugin can emit JSON null (not a
+// misleading 0) when there is no target. Mirrors updateControl()'s branch
+// logic: only advanced-pump brews, manual, and steam drive a real pump target;
+// simple-pump brews, water, grind, and the inactive fallthrough leave the
+// member fields at 0 with no actual target. (Standby is handled by the callers
+// via the first-phase helpers, so it never reaches here.)
+bool Controller::hasPumpTarget() const {
+    Process *proc = currentProcess;
+    if (proc == nullptr || !proc->isActive()) {
+        return false;
+    }
+    switch (proc->getType()) {
+    case MODE_BREW:
+        return static_cast<BrewProcess *>(proc)->isAdvancedPump();
+    case MODE_MANUAL:
+    case MODE_STEAM:
+        return true;
+    default: // MODE_WATER, MODE_GRIND — no pump pressure/flow target
+        return false;
+    }
+}
+
 bool Controller::hasTargetPressure() const {
     if (mode == MODE_STANDBY) {
         float v = 0.0f;
         return firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
     }
-    return true;
+    return hasPumpTarget();
 }
 
 bool Controller::hasTargetFlow() const {
@@ -578,7 +601,7 @@ bool Controller::hasTargetFlow() const {
         float v = 0.0f;
         return firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
     }
-    return true;
+    return hasPumpTarget();
 }
 
 void Controller::setTargetTemp(float temperature) {
