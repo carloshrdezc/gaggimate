@@ -9,6 +9,9 @@ static_assert(shouldScanForBleScaleMode(MODE_BREW));
 static_assert(shouldScanForBleScaleMode(MODE_GRIND));
 static_assert(shouldScanForBleScaleMode(MODE_MANUAL));
 
+void setUp(void) {}
+void tearDown(void) {}
+
 void test_scale_scan_skips_modes_that_do_not_use_scale_data(void) {
     TEST_ASSERT_FALSE(shouldScanForBleScaleMode(MODE_STANDBY));
     TEST_ASSERT_FALSE(shouldScanForBleScaleMode(MODE_STEAM));
