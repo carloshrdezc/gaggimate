@@ -515,6 +515,12 @@ static float firstPhasePressureTarget(const Profile &profile) {
     if (first.pumpIsSimple || first.pumpAdvanced.target != PumpTarget::PUMP_TARGET_PRESSURE) {
         return 0.0f;
     }
+    // -1 is the "hold current value at phase start" sentinel, resolved to a live
+    // measurement by BrewProcess during a brew. In standby there is no measurement
+    // to resolve against, so report 0 rather than leaking the raw sentinel to the UI.
+    if (first.pumpAdvanced.pressure < 0.0f) {
+        return 0.0f;
+    }
     return first.pumpAdvanced.pressure;
 }
 
@@ -526,6 +532,10 @@ static float firstPhaseFlowTarget(const Profile &profile) {
     }
     const Phase &first = profile.phases[0];
     if (first.pumpIsSimple || first.pumpAdvanced.target != PumpTarget::PUMP_TARGET_FLOW) {
+        return 0.0f;
+    }
+    // -1 is the "hold current value at phase start" sentinel (see firstPhasePressureTarget).
+    if (first.pumpAdvanced.flow < 0.0f) {
         return 0.0f;
     }
     return first.pumpAdvanced.flow;
