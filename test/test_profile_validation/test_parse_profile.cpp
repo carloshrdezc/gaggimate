@@ -36,11 +36,16 @@ void test_rejects_empty_phases(void) {
     TEST_ASSERT_FALSE(parseProfileJson(R"({"label":"Bad","type":"standard","phases":[]})", profile));
 }
 
-void test_rejects_unsafe_id(void) {
+void test_sanitizes_unsafe_id(void) {
     Profile profile;
-    TEST_ASSERT_FALSE(parseProfileJson(
+    // An unsafe ID (path separators, commas, etc.) must never survive into
+    // profile.id, since it later feeds filesystem helpers. parseProfile does
+    // NOT reject the whole profile over it -- it rescues the profile by blanking
+    // the id (saveProfile regenerates one on next save). See profile.h.
+    TEST_ASSERT_TRUE(parseProfileJson(
         R"({"id":"bad,id","label":"Bad","type":"standard","phases":[{"name":"Brew","phase":"brew","valve":1,"duration":25,"pump":100}]})",
         profile));
+    TEST_ASSERT_TRUE(profile.id.isEmpty());
 }
 
 void test_accepts_valid_standard_profile(void) {
@@ -111,7 +116,7 @@ static int runProfileValidationTests() {
     RUN_TEST(test_rejects_unknown_type);
     RUN_TEST(test_rejects_missing_phases);
     RUN_TEST(test_rejects_empty_phases);
-    RUN_TEST(test_rejects_unsafe_id);
+    RUN_TEST(test_sanitizes_unsafe_id);
     RUN_TEST(test_accepts_valid_standard_profile);
     RUN_TEST(test_accepts_valid_pro_profile_with_advanced_pump);
     RUN_TEST(test_phase_temperature_override_and_default);
