@@ -456,6 +456,8 @@ float Controller::getTargetTemp() const {
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         // If we can't get mutex, return safe default based on mode
         switch (mode) {
+        case MODE_STANDBY:
+            return profileManager->getSelectedProfile().temperature;
         case MODE_BREW:
             return profileManager->getSelectedProfile().temperature;
         case MODE_STEAM:
@@ -473,6 +475,9 @@ float Controller::getTargetTemp() const {
     float result = 0;
     
     switch (mode) {
+    case MODE_STANDBY:
+        result = profileManager->getSelectedProfile().temperature;
+        break;
     case MODE_BREW:
         if (proc != nullptr && proc->isActive() && proc->getType() == MODE_BREW) {
             auto brewProcess = static_cast<BrewProcess *>(proc);
@@ -497,6 +502,47 @@ float Controller::getTargetTemp() const {
     
     xSemaphoreGive(processMutex);
     return result;
+}
+
+// Returns the first phase's pressure target when the selected profile's first
+// phase is advanced and pressure-targeted; 0 otherwise. Used so standby can
+// preview the target before a brew starts.
+static float firstPhasePressureTarget(const Profile &profile) {
+    if (profile.phases.empty()) {
+        return 0.0f;
+    }
+    const Phase &first = profile.phases[0];
+    if (first.pumpIsSimple || first.pumpAdvanced.target != PumpTarget::PUMP_TARGET_PRESSURE) {
+        return 0.0f;
+    }
+    return first.pumpAdvanced.pressure;
+}
+
+// Returns the first phase's flow target when the selected profile's first phase
+// is advanced and flow-targeted; 0 otherwise.
+static float firstPhaseFlowTarget(const Profile &profile) {
+    if (profile.phases.empty()) {
+        return 0.0f;
+    }
+    const Phase &first = profile.phases[0];
+    if (first.pumpIsSimple || first.pumpAdvanced.target != PumpTarget::PUMP_TARGET_FLOW) {
+        return 0.0f;
+    }
+    return first.pumpAdvanced.flow;
+}
+
+float Controller::getTargetPressure() const {
+    if (mode == MODE_STANDBY) {
+        return firstPhasePressureTarget(profileManager->getSelectedProfile());
+    }
+    return targetPressure;
+}
+
+float Controller::getTargetFlow() const {
+    if (mode == MODE_STANDBY) {
+        return firstPhaseFlowTarget(profileManager->getSelectedProfile());
+    }
+    return targetFlow;
 }
 
 void Controller::setTargetTemp(float temperature) {

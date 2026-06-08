@@ -99,8 +99,8 @@ class Controller {
     bool isReady() const;
     bool isVolumetricAvailable() const;
     bool isSDCard() const { return sdcard; }
-    virtual float getTargetPressure() const { return targetPressure; }
-    virtual float getTargetFlow() const { return targetFlow; }
+    virtual float getTargetPressure() const;
+    virtual float getTargetFlow() const;
     virtual float getCurrentPressure() const { return pressure; }
     virtual float getCurrentPuckFlow() const { return currentPuckFlow; }
     virtual float getCurrentPumpFlow() const { return currentPumpFlow; }

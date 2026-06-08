@@ -213,6 +213,7 @@ void WebUIPlugin::loop() {
         doc["pr"] = controller->getCurrentPressure();
         doc["fl"] = controller->getCurrentPumpFlow();
         doc["pt"] = controller->getTargetPressure();
+        doc["tf"] = controller->getTargetFlow();
         doc["m"] = controller->getMode();
         doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
         doc["puid"] = controller->getProfileManager()->getSelectedProfile().id;
