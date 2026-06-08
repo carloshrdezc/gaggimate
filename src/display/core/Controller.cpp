@@ -568,24 +568,42 @@ float Controller::getTargetFlow() const {
 // Reports whether a pump pressure/flow target is actually applicable for the
 // current active process — used so WebUIPlugin can emit JSON null (not a
 // misleading 0) when there is no target. Mirrors updateControl()'s branch
-// logic: only advanced-pump brews, manual, and steam drive a real pump target;
-// simple-pump brews, water, grind, and the inactive fallthrough leave the
-// member fields at 0 with no actual target. (Standby is handled by the callers
-// via the first-phase helpers, so it never reaches here.)
+// logic: only advanced-pump brews, manual, and steam (and only when the
+// hardware has pressure support) drive a real pump target; simple-pump brews,
+// water, grind, and the inactive fallthrough leave the member fields at 0 with
+// no actual target. (Standby is handled by the callers via the first-phase
+// helpers, so it never reaches here.)
+//
+// Takes processMutex before touching currentProcess: status serialization runs
+// on a different task than activate()/deactivate(), which can move and delete
+// the process — dereferencing it unlocked would be a use-after-free. On mutex
+// timeout we return false (treat the target as unavailable) rather than risk it.
 bool Controller::hasPumpTarget() const {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return false;
+    }
+    bool result = false;
     Process *proc = currentProcess;
-    if (proc == nullptr || !proc->isActive()) {
-        return false;
+    if (proc != nullptr && proc->isActive()) {
+        switch (proc->getType()) {
+        case MODE_BREW:
+            result = static_cast<BrewProcess *>(proc)->isAdvancedPump();
+            break;
+        case MODE_MANUAL:
+            result = true;
+            break;
+        case MODE_STEAM:
+            // updateControl() only drives steam pump targets when the hardware
+            // reports pressure capability; otherwise the members stay at 0.
+            result = systemInfo.capabilities.pressure;
+            break;
+        default: // MODE_WATER, MODE_GRIND — no pump pressure/flow target
+            result = false;
+            break;
+        }
     }
-    switch (proc->getType()) {
-    case MODE_BREW:
-        return static_cast<BrewProcess *>(proc)->isAdvancedPump();
-    case MODE_MANUAL:
-    case MODE_STEAM:
-        return true;
-    default: // MODE_WATER, MODE_GRIND — no pump pressure/flow target
-        return false;
-    }
+    xSemaphoreGive(processMutex);
+    return result;
 }
 
 bool Controller::hasTargetPressure() const {
