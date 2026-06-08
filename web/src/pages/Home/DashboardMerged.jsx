@@ -1277,8 +1277,12 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const pressure = s.currentPressure || 0;
   const flowVal = s.currentFlow || 0;
   const tempVal = s.currentTemperature || 0;
-  const targetPressure = isManualMode ? manualDraft.pressure : s.targetPressure || 9;
-  const targetFlow = isManualMode ? manualDraft.flow : s.targetFlow || 2;
+  // Use ?? (not ||) so a legitimate 0 target (e.g. a flow-targeted first phase
+  // with pressure: 0, or a pressure-targeted phase with flow: 0) is preserved
+  // rather than being replaced by the default. Firmware sends null when the
+  // target is genuinely unavailable.
+  const targetPressure = isManualMode ? manualDraft.pressure : s.targetPressure ?? 9;
+  const targetFlow = isManualMode ? manualDraft.flow : s.targetFlow ?? 2;
   const targetTemp = isManualMode ? manualDraft.temperature : s.targetTemperature || 93;
   const currentWeight = s.currentWeight || 0;
   const temperatureRing = getTemperatureRingMetrics({ mode, tempVal, targetTemp });
