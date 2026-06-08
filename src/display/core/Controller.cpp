@@ -504,15 +504,18 @@ float Controller::getTargetTemp() const {
     return result;
 }
 
-// Returns the first phase's pressure target when the selected profile's first
-// phase is advanced and pressure-targeted; 0 otherwise. Used so standby can
-// preview the target before a brew starts.
+// Returns the first phase's configured pressure value when the selected
+// profile's first phase uses an advanced pump; 0 otherwise. For an advanced
+// phase the active-brew path publishes BOTH pressure and flow (the non-primary
+// axis is the configured limit), so standby previews both regardless of which
+// one is the phase's primary target — keeping the standby readout consistent
+// with the first brew tick.
 static float firstPhasePressureTarget(const Profile &profile) {
     if (profile.phases.empty()) {
         return 0.0f;
     }
     const Phase &first = profile.phases[0];
-    if (first.pumpIsSimple || first.pumpAdvanced.target != PumpTarget::PUMP_TARGET_PRESSURE) {
+    if (first.pumpIsSimple) {
         return 0.0f;
     }
     // -1 is the "hold current value at phase start" sentinel, resolved to a live
@@ -524,14 +527,15 @@ static float firstPhasePressureTarget(const Profile &profile) {
     return first.pumpAdvanced.pressure;
 }
 
-// Returns the first phase's flow target when the selected profile's first phase
-// is advanced and flow-targeted; 0 otherwise.
+// Returns the first phase's configured flow value when the selected profile's
+// first phase uses an advanced pump; 0 otherwise. See firstPhasePressureTarget
+// for why both axes are previewed in standby.
 static float firstPhaseFlowTarget(const Profile &profile) {
     if (profile.phases.empty()) {
         return 0.0f;
     }
     const Phase &first = profile.phases[0];
-    if (first.pumpIsSimple || first.pumpAdvanced.target != PumpTarget::PUMP_TARGET_FLOW) {
+    if (first.pumpIsSimple) {
         return 0.0f;
     }
     // -1 is the "hold current value at phase start" sentinel (see firstPhasePressureTarget).
