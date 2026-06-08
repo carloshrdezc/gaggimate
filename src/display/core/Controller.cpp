@@ -568,17 +568,24 @@ float Controller::getTargetFlow() const {
 // Reports whether a pump pressure/flow target is actually applicable for the
 // current active process — used so WebUIPlugin can emit JSON null (not a
 // misleading 0) when there is no target. Mirrors updateControl()'s branch
-// logic: only advanced-pump brews, manual, and steam (and only when the
-// hardware has pressure support) drive a real pump target; simple-pump brews,
-// water, grind, and the inactive fallthrough leave the member fields at 0 with
-// no actual target. (Standby is handled by the callers via the first-phase
-// helpers, so it never reaches here.)
+// logic: the entire target-setting block is gated on
+// systemInfo.capabilities.pressure (Controller.cpp ~L856), so without pressure
+// support NO mode drives a pump target. With pressure support, only
+// advanced-pump brews, manual, and steam set real targets; simple-pump brews,
+// water, grind, and the inactive fallthrough leave the members at 0. (Standby
+// is handled by the callers via the first-phase helpers, so it never reaches
+// here.)
 //
 // Takes processMutex before touching currentProcess: status serialization runs
 // on a different task than activate()/deactivate(), which can move and delete
 // the process — dereferencing it unlocked would be a use-after-free. On mutex
 // timeout we return false (treat the target as unavailable) rather than risk it.
 bool Controller::hasPumpTarget() const {
+    // No pressure hardware → updateControl() never populates pump targets in any
+    // mode, so they are always an unavailable 0.
+    if (!systemInfo.capabilities.pressure) {
+        return false;
+    }
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         return false;
     }
@@ -590,12 +597,8 @@ bool Controller::hasPumpTarget() const {
             result = static_cast<BrewProcess *>(proc)->isAdvancedPump();
             break;
         case MODE_MANUAL:
-            result = true;
-            break;
         case MODE_STEAM:
-            // updateControl() only drives steam pump targets when the hardware
-            // reports pressure capability; otherwise the members stay at 0.
-            result = systemInfo.capabilities.pressure;
+            result = true;
             break;
         default: // MODE_WATER, MODE_GRIND — no pump pressure/flow target
             result = false;
