@@ -504,59 +504,81 @@ float Controller::getTargetTemp() const {
     return result;
 }
 
-// Returns the first phase's configured pressure value when the selected
-// profile's first phase uses an advanced pump; 0 otherwise. For an advanced
-// phase the active-brew path publishes BOTH pressure and flow (the non-primary
-// axis is the configured limit), so standby previews both regardless of which
-// one is the phase's primary target — keeping the standby readout consistent
-// with the first brew tick.
-static float firstPhasePressureTarget(const Profile &profile) {
+// Computes the first phase's configured pressure value for standby preview.
+// Returns true and sets `out` when the selected profile's first phase uses an
+// advanced pump with an applicable (non-sentinel) value; returns false when no
+// target is applicable (simple pump, empty profile, or the "hold current value"
+// -1 sentinel that can't be resolved without a live measurement). For an
+// advanced phase the active-brew path publishes BOTH pressure and flow (the
+// non-primary axis is the configured limit), so standby previews both —
+// keeping the readout consistent with the first brew tick.
+static bool firstPhasePressureTarget(const Profile &profile, float &out) {
     if (profile.phases.empty()) {
-        return 0.0f;
+        return false;
     }
     const Phase &first = profile.phases[0];
     if (first.pumpIsSimple) {
-        return 0.0f;
+        return false;
     }
     // -1 is the "hold current value at phase start" sentinel, resolved to a live
     // measurement by BrewProcess during a brew. In standby there is no measurement
-    // to resolve against, so report 0 rather than leaking the raw sentinel to the UI.
+    // to resolve against, so report it as unavailable rather than a misleading 0.
     if (first.pumpAdvanced.pressure < 0.0f) {
-        return 0.0f;
+        return false;
     }
-    return first.pumpAdvanced.pressure;
+    out = first.pumpAdvanced.pressure;
+    return true;
 }
 
-// Returns the first phase's configured flow value when the selected profile's
-// first phase uses an advanced pump; 0 otherwise. See firstPhasePressureTarget
-// for why both axes are previewed in standby.
-static float firstPhaseFlowTarget(const Profile &profile) {
+// Computes the first phase's configured flow value for standby preview.
+// See firstPhasePressureTarget for semantics.
+static bool firstPhaseFlowTarget(const Profile &profile, float &out) {
     if (profile.phases.empty()) {
-        return 0.0f;
+        return false;
     }
     const Phase &first = profile.phases[0];
     if (first.pumpIsSimple) {
-        return 0.0f;
+        return false;
     }
-    // -1 is the "hold current value at phase start" sentinel (see firstPhasePressureTarget).
     if (first.pumpAdvanced.flow < 0.0f) {
-        return 0.0f;
+        return false;
     }
-    return first.pumpAdvanced.flow;
+    out = first.pumpAdvanced.flow;
+    return true;
 }
 
 float Controller::getTargetPressure() const {
     if (mode == MODE_STANDBY) {
-        return firstPhasePressureTarget(profileManager->getSelectedProfile());
+        float v = 0.0f;
+        firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
+        return v;
     }
     return targetPressure;
 }
 
 float Controller::getTargetFlow() const {
     if (mode == MODE_STANDBY) {
-        return firstPhaseFlowTarget(profileManager->getSelectedProfile());
+        float v = 0.0f;
+        firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
+        return v;
     }
     return targetFlow;
+}
+
+bool Controller::hasTargetPressure() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        return firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
+    }
+    return true;
+}
+
+bool Controller::hasTargetFlow() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        return firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
+    }
+    return true;
 }
 
 void Controller::setTargetTemp(float temperature) {

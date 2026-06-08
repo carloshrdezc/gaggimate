@@ -212,8 +212,19 @@ void WebUIPlugin::loop() {
         doc["tt"] = controller->getTargetTemp();
         doc["pr"] = controller->getCurrentPressure();
         doc["fl"] = controller->getCurrentPumpFlow();
-        doc["pt"] = controller->getTargetPressure();
-        doc["tf"] = controller->getTargetFlow();
+        // Send null (not 0) when no target is applicable in the current mode —
+        // e.g. a simple-pump profile in standby has no pressure/flow target — so
+        // the web UI can fall back to its default instead of showing a false 0.
+        if (controller->hasTargetPressure()) {
+            doc["pt"] = controller->getTargetPressure();
+        } else {
+            doc["pt"] = nullptr;
+        }
+        if (controller->hasTargetFlow()) {
+            doc["tf"] = controller->getTargetFlow();
+        } else {
+            doc["tf"] = nullptr;
+        }
         doc["m"] = controller->getMode();
         doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
         doc["puid"] = controller->getProfileManager()->getSelectedProfile().id;

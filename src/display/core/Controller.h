@@ -101,6 +101,13 @@ class Controller {
     bool isSDCard() const { return sdcard; }
     virtual float getTargetPressure() const;
     virtual float getTargetFlow() const;
+    // True when a target pressure/flow is actually applicable for the current
+    // mode. In standby this is false for simple-pump profiles, empty profiles,
+    // and "hold current value" (-1) phases — letting the API send null rather
+    // than a misleading 0. Always true in active modes (the member field holds
+    // the live target).
+    bool hasTargetPressure() const;
+    bool hasTargetFlow() const;
     virtual float getCurrentPressure() const { return pressure; }
     virtual float getCurrentPuckFlow() const { return currentPuckFlow; }
     virtual float getCurrentPumpFlow() const { return currentPumpFlow; }
