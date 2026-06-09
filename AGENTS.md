@@ -67,6 +67,29 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 - Web assets are gzipped and placed in `data/w/` directory for SPIFFS filesystem
 - Version auto-generated from git tags via `scripts/auto_firmware_version.py` into `src/version.h`
 
+### CI gates (PRs to dev-master) — run these locally before pushing (CAR-341)
+
+`.github/workflows/ci.yml` runs on every PR to `dev-master`; reproduce it locally with:
+
+```sh
+cd web && npm ci && npm run build && cd ..          # web build
+pio run -e display                                  # firmware (-Wall -Wextra, no -Werror)
+pio test -e native                                  # host unit tests
+pio test -e native-sanitize                         # host tests under ASan + UBSan (findings fail CI)
+pio check -e display    --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"   # GATING cppcheck
+pio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"                       # GATING cppcheck
+pio run -e native -t compiledb                       # compile DB for clang-tidy
+clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
+```
+
+- cppcheck is GATING (the display step lost its old `continue-on-error`).
+- clang-tidy (`.clang-tidy`: `bugprone-*` + `cppcoreguidelines-*`) is scoped to
+  hand-written logic via the native compile DB; generated UI (`src/display/ui/**`)
+  and vendored drivers (`src/display/drivers/**`) are excluded.
+- `[env:native-sanitize]` mirrors `[env:native]` plus `-fsanitize=address,undefined`.
+- C++ standard stays at **gnu++17** (CAR-340 / `docs/cpp-standard-spike.md`) — do not change it.
+- See `CONTRIBUTING.md` "Continuous Integration & Local Checks" for full details.
+
 ## Code Formatting
 
 **C++ formatting excludes UI/driver code**: `scripts/format.sh` uses clang-format but explicitly excludes `src/display/ui/**` and `src/display/drivers/**` directories

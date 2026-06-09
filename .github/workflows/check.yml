@@ -20,7 +20,11 @@ jobs:
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
       - name: Run static code analysis for display
-        continue-on-error: true
+        # CAR-341: this step now GATES (no continue-on-error). It analyses the
+        # hand-written display sources (src/display/) and excludes the generated
+        # LVGL UI (src/display/ui). Threshold stays at medium to match the
+        # controller step; if pre-existing medium findings surface here, raise to
+        # --fail-on-defect=high or add inline `// cppcheck-suppress` with a note.
         run: platformio check -e display --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"
       - name: Run static code analysis for controller
         run: platformio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"
