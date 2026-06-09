@@ -135,6 +135,9 @@ jobs:
             echo "compile_commands.json not found at $DB" >&2
             exit 1
           fi
+          echo "::group::compile_commands.json file entries"
+          python -c "import json,sys; [print(e.get('file','')) for e in json.load(open('$DB'))]"
+          echo "::endgroup::"
           FILES=$(python scripts/select_tidy_sources.py "$DB")
           if [ -z "$FILES" ]; then
             echo "No in-scope source files found in compile DB — nothing to lint." >&2
