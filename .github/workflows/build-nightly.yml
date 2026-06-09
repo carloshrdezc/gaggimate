@@ -1,7 +1,8 @@
 on:
   push:
     branches:
-      - "master"
+      - "dev-master"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -53,6 +54,7 @@ jobs:
           cp .pio/build/controller/partitions.bin upload/controller/partitions.bin
           cp .pio/build/controller/bootloader.bin upload/controller/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -79,6 +81,7 @@ jobs:
           cp .pio/build/display/partitions.bin upload/display/partitions.bin
           cp .pio/build/display/bootloader.bin upload/display/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -99,6 +102,7 @@ jobs:
           cp .pio/build/display-headless/partitions.bin upload/headless/partitions.bin
           cp .pio/build/display-headless/bootloader.bin upload/headless/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -121,6 +125,10 @@ jobs:
       pages: write
       pull-requests: write
     steps:
+      - name: Checkout repo (for tag management)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download Firmware Files
         uses: actions/download-artifact@v4
         with:
@@ -129,8 +137,43 @@ jobs:
       - name: Read version
         id: version
         run: echo "version=$(cat release/version.txt)" >> $GITHUB_OUTPUT
+      - name: Force-move nightly tag to current commit
+        # softprops/action-gh-release sets target_commitish only when CREATING
+        # a tag. If the nightly tag already exists from a prior run, the
+        # release source tarball stays pinned to that old commit even though
+        # the assets refresh. Delete-then-recreate the tag so it always
+        # tracks HEAD before the release action runs.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -d nightly 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+          git tag -f nightly "${{ github.sha }}"
+          git push origin "refs/tags/nightly" --force
+      - name: Delete any stale nightly release records
+        # If a previous run was cancelled mid-publish, softprops/action-gh-release
+        # can leave behind an orphan draft release that still claims the
+        # 'nightly' tag. The next run then fails at the finalize step with
+        # 'tag_name already_exists' because two release records race for the
+        # same tag. Delete every release that points at 'nightly' (draft or
+        # published) so this run starts from a clean slate.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "nightly") | .id' \
+          | while read -r release_id; do
+              if [[ -n "$release_id" ]]; then
+                echo "Deleting stale nightly release: $release_id"
+                gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id" || true
+              fi
+            done
       - name: Update Nightly Release
-        uses: andelf/nightly-release@c5ed4bdb7c1da04a4fa1e40bc5e67306f682563b
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -140,6 +183,7 @@ jobs:
           body: 'Latest nightly release, use the nightly channel in the UI to download this firmware.'
           files: |
             release/*
+          make_latest: 'false'
       - name: Deploy to GitHub Pages subdirectory
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
         with:

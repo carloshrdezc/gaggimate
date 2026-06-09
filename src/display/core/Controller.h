@@ -99,8 +99,15 @@ class Controller {
     bool isReady() const;
     bool isVolumetricAvailable() const;
     bool isSDCard() const { return sdcard; }
-    virtual float getTargetPressure() const { return targetPressure; }
-    virtual float getTargetFlow() const { return targetFlow; }
+    virtual float getTargetPressure() const;
+    virtual float getTargetFlow() const;
+    // True when a target pressure/flow is actually applicable for the current
+    // mode. In standby this is false for simple-pump profiles, empty profiles,
+    // and "hold current value" (-1) phases — letting the API send null rather
+    // than a misleading 0. Always true in active modes (the member field holds
+    // the live target).
+    bool hasTargetPressure() const;
+    bool hasTargetFlow() const;
     virtual float getCurrentPressure() const { return pressure; }
     virtual float getCurrentPuckFlow() const { return currentPuckFlow; }
     virtual float getCurrentPumpFlow() const { return currentPumpFlow; }
@@ -114,6 +121,10 @@ class Controller {
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
     Process *getProcess() const { return currentProcess; }
     
+    // DEPRECATED: Direct pointer access is unsafe due to race conditions.
+    // Use getProcessSnapshot() or other thread-safe accessor methods instead.
+    // This method will be removed in a future version.
+    [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
     Process *getLastProcess() const { return lastProcess; }
     
     // Thread-safe methods to get process info without exposing raw pointer
@@ -139,6 +150,7 @@ class Controller {
     void lowerTemp();
     void raiseBrewTarget();
     void lowerBrewTarget();
+    void setBrewTarget(float value);
     void raiseGrindTarget();
     void lowerGrindTarget();
     void activate();
@@ -183,6 +195,10 @@ class Controller {
 
     // Functional methods
     void updateControl();
+    // Whether the active process drives a real pump pressure/flow target
+    // (advanced-pump brew / manual / steam). False for simple-pump brew, water,
+    // grind, and when inactive. Non-standby helper for hasTargetPressure/Flow.
+    bool hasPumpTarget() const;
 
     // Event handlers
     void onTempRead(float temperature);

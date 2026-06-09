@@ -41,14 +41,6 @@ import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
 import { faScaleBalanced } from '@fortawesome/free-solid-svg-icons/faScaleBalanced';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { buildStatisticsProfileHref } from '../Statistics/utils/statisticsRoute.js';
-import { BeanSelectionModal } from './BeanSelectionModal.jsx';
-import {
-  clearCurrentBeanSelection,
-  getLastBeanSelectionForProfile,
-  listBeans,
-  migrateLegacyBeansToDevice,
-  recordBeanSelection,
-} from '../../utils/beanManager.js';
 
 Chart.register(
   LineController,
@@ -96,7 +88,10 @@ function ProfileCard({
   }, [data.favorite, unfavoriteDisabled, favoriteDisabled, onUnfavorite, onFavorite, data.id]);
 
   const onDownload = useCallback(() => {
-    const { id, selected, favorite, ...profileData } = data;
+    // Keep `id` in the export so a re-imported profile remains addressable
+    // (deletable/selectable/favoritable) on the device. Only `selected` and
+    // `favorite` are device-local state and must not be exported.
+    const { selected, favorite, ...profileData } = data;
     const filename = `profile-${data.id}.json`;
     const prepared = prepareDownload(filename);
 
@@ -480,9 +475,6 @@ function SimpleStep({ phase, type, duration, targets }) {
 export function ProfileList() {
   const apiService = useContext(ApiServiceContext);
   const [profiles, setProfiles] = useState([]);
-  const [beans, setBeans] = useState([]);
-  const [beanSelectionProfile, setBeanSelectionProfile] = useState(null);
-  const [selectedBeanId, setSelectedBeanId] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('extraction');
@@ -497,38 +489,16 @@ export function ProfileList() {
     }
   }, [hasUtilityProfiles]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBeans = async () => {
-      try {
-        await migrateLegacyBeansToDevice(apiService);
-        const loadedBeans = await listBeans(apiService);
-        if (!cancelled) {
-          setBeans(loadedBeans.filter(bean => !bean.archived));
-        }
-      } catch (error) {
-        console.error('Failed to load beans:', error);
-      }
-    };
-
-    loadBeans();
-
-    const handleBeansChanged = () => {
-      loadBeans();
-    };
-
-    window.addEventListener('beans-library-changed', handleBeansChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('beans-library-changed', handleBeansChanged);
-    };
-  }, [apiService]);
-
   const loadProfiles = async () => {
-    const response = await apiService.request({ tp: 'req:profiles:list' });
-    setProfiles(response.profiles);
-    setLoading(false);
+    try {
+      const response = await apiService.request({ tp: 'req:profiles:list' });
+      setProfiles(response.profiles);
+    } catch (err) {
+      console.error('Failed to load profiles:', err);
+      alert(`Failed to load profiles: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const orderDebounceRef = useRef(null);
@@ -641,7 +611,12 @@ export function ProfileList() {
   const onDelete = useCallback(
     async id => {
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:delete', id });
+      try {
+        await apiService.request({ tp: 'req:profiles:delete', id });
+      } catch (err) {
+        console.error('Failed to delete profile:', err);
+        alert(`Failed to delete profile: ${err.message}`);
+      }
       await loadProfiles();
     },
     [apiService],
@@ -650,7 +625,12 @@ export function ProfileList() {
   const onFavorite = useCallback(
     async id => {
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:favorite', id });
+      try {
+        await apiService.request({ tp: 'req:profiles:favorite', id });
+      } catch (err) {
+        console.error('Failed to favorite profile:', err);
+        alert(`Failed to favorite profile: ${err.message}`);
+      }
       await loadProfiles();
     },
     [apiService],
@@ -659,7 +639,12 @@ export function ProfileList() {
   const onUnfavorite = useCallback(
     async id => {
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:unfavorite', id });
+      try {
+        await apiService.request({ tp: 'req:profiles:unfavorite', id });
+      } catch (err) {
+        console.error('Failed to unfavorite profile:', err);
+        alert(`Failed to unfavorite profile: ${err.message}`);
+      }
       await loadProfiles();
     },
     [apiService],
@@ -675,7 +660,12 @@ export function ProfileList() {
         delete copy.selected;
         delete copy.favorite;
         copy.label = `${original.label} Copy`;
-        await apiService.request({ tp: 'req:profiles:save', profile: copy });
+        try {
+          await apiService.request({ tp: 'req:profiles:save', profile: copy });
+        } catch (err) {
+          console.error('Failed to duplicate profile:', err);
+          alert(`Failed to duplicate profile: ${err.message}`);
+        }
       }
       await loadProfiles();
     },
@@ -684,10 +674,9 @@ export function ProfileList() {
 
   const onExport = useCallback(() => {
     const exportedProfiles = profiles.map(p => {
-      const ep = { ...p };
-      delete ep.id;
-      delete ep.selected;
-      delete ep.favorite;
+      // Keep `id` so re-imported profiles stay addressable on the device.
+      // Only strip device-local state (`selected`/`favorite`).
+      const { selected, favorite, ...ep } = p;
       return ep;
     });
 
@@ -702,32 +691,18 @@ export function ProfileList() {
   }, [profiles]);
 
   const completeProfileSelect = useCallback(
-    async (profile, beanId = '') => {
+    async profile => {
       if (!profile) return;
 
       setLoading(true);
-      await apiService.request({ tp: 'req:profiles:select', id: profile.id });
-
-      let selectedBeanName = '';
-      if (beanId) {
-        const selectedBean = (await listBeans(apiService)).find(bean => bean.id === beanId);
-        if (selectedBean) {
-          selectedBeanName = selectedBean.name;
-          recordBeanSelection({
-            profileId: profile.id,
-            profileLabel: profile.label,
-            bean: selectedBean,
-          });
-        }
-      } else {
-        clearCurrentBeanSelection();
+      try {
+        await apiService.request({ tp: 'req:profiles:select', id: profile.id });
+      } catch (err) {
+        console.error('Failed to select profile:', err);
+        alert(`Failed to select profile: ${err.message}`);
       }
 
-      apiService.send({ tp: 'req:beans:select', name: selectedBeanName });
-
       await loadProfiles();
-      setBeanSelectionProfile(null);
-      setSelectedBeanId('');
     },
     [apiService],
   );
@@ -737,19 +712,9 @@ export function ProfileList() {
       const profile = profiles.find(entry => entry.id === id);
       if (!profile) return;
 
-      const availableBeans = (await listBeans(apiService)).filter(bean => !bean.archived);
-      setBeans(availableBeans);
-
-      if (availableBeans.length === 0) {
-        await completeProfileSelect(profile);
-        return;
-      }
-
-      const lastBeanSelection = getLastBeanSelectionForProfile(profile);
-      setSelectedBeanId(lastBeanSelection?.beanId || availableBeans[0]?.id || '');
-      setBeanSelectionProfile(profile);
+      await completeProfileSelect(profile);
     },
-    [apiService, profiles, completeProfileSelect],
+    [profiles, completeProfileSelect],
   );
 
   const onUpload = function (evt) {
@@ -761,11 +726,50 @@ export function ProfileList() {
         if (typeof result === 'string') {
           setLoading(true);
           try {
-            const profiles = parseProfile(result);
-            for (const p of profiles) {
-              await apiService.request({ tp: 'req:profiles:save', profile: p });
+            const importedProfiles = parseProfile(result);
+            // Build the collision set from the freshest device profile list so a
+            // re-imported backup never silently overwrites a (possibly newer)
+            // profile that already lives on the device (CAR-331). saveProfile
+            // opens <id>.json with "w", so a same-id import would clobber the
+            // device copy; the firmware guard only catches the stem !== in-file-id
+            // legacy case (a matching id is treated as a legit in-place edit), so
+            // the safe default here is to remap a colliding import to a fresh id.
+            //
+            // NOTE: req:profiles:list enumerates by FILENAME STEM but reports the
+            // IN-FILE id, so this set covers in-file-id collisions only. On-disk
+            // filename-stem collisions (e.g. a.json holding id "b", then importing
+            // id "a") are NOT visible here and are deliberately NOT guarded in the
+            // web layer. The ProfileManager::saveProfile() firmware guard is the
+            // authoritative collision check for that case: it loadProfile()s the
+            // file <id>.json would clobber and mints a fresh id when its in-file id
+            // differs. Do not assume this web check alone prevents overwrites.
+            const existingResponse = await apiService.request({ tp: 'req:profiles:list' });
+            const existingIds = new Set(
+              (existingResponse?.profiles ?? []).map(entry => entry.id).filter(Boolean),
+            );
+            for (const p of importedProfiles) {
+              let profile = p;
+              if (p.id && existingIds.has(p.id)) {
+                // Treat the import as a new copy: drop the id so the firmware mints
+                // a fresh safe id via generateShortID() instead of overwriting.
+                const { id: _omitId, ...rest } = p;
+                profile = rest;
+              }
+              const saveResponse = await apiService.request({ tp: 'req:profiles:save', profile });
+              // Track the id the device actually persisted (the save response echoes
+              // the stored profile, including any fresh id the firmware minted). This
+              // keeps two profiles that share an id WITHIN the same import file from
+              // overwriting each other: the first save claims the id, and the second
+              // sees it in the set and gets remapped to a fresh id too.
+              const savedId = saveResponse?.profile?.id;
+              if (savedId) {
+                existingIds.add(savedId);
+              }
             }
-          } catch {}
+          } catch (err) {
+            console.error('Failed to import profiles:', err);
+            alert(`Failed to import profiles: ${err.message}`);
+          }
           await loadProfiles();
         }
       };
@@ -775,10 +779,15 @@ export function ProfileList() {
 
   const onClear = useCallback(async () => {
     setLoading(true);
-    for (const p of profiles) {
-      if (!p.selected) {
-        await apiService.request({ tp: 'req:profiles:delete', id: p.id });
+    try {
+      for (const p of profiles) {
+        if (!p.selected) {
+          await apiService.request({ tp: 'req:profiles:delete', id: p.id });
+        }
       }
+    } catch (err) {
+      console.error('Failed to clear profiles:', err);
+      alert(`Failed to clear profiles: ${err.message}`);
     }
     await loadProfiles();
   }, [profiles, apiService]);
@@ -904,20 +913,6 @@ export function ProfileList() {
             ))}
         </div>
       </Card>
-
-      <BeanSelectionModal
-        open={!!beanSelectionProfile}
-        profile={beanSelectionProfile}
-        beans={beans}
-        selectedBeanId={selectedBeanId}
-        onBeanChange={setSelectedBeanId}
-        onClose={() => {
-          setBeanSelectionProfile(null);
-          setSelectedBeanId('');
-        }}
-        onSkip={() => completeProfileSelect(beanSelectionProfile)}
-        onConfirm={() => completeProfileSelect(beanSelectionProfile, selectedBeanId)}
-      />
     </div>
   );
 }

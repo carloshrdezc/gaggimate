@@ -1,4 +1,5 @@
 #include "BLEScalePlugin.h"
+#include "BLEScaleScanPolicy.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <cmath> // For isfinite()
@@ -16,9 +17,7 @@
 #include <scales/weighmybru.h>
 
 void on_ble_measurement(float value) {
-    if (&BLEScales != nullptr) {
-        BLEScales.onMeasurement(value);
-    }
+    BLEScales.onMeasurement(value);
 }
 
 BLEScalePlugin BLEScales;
@@ -75,7 +74,7 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     }
 
     manager->on("controller:bluetooth:connect", [this](Event const &) {
-        if (this->controller != nullptr && this->controller->getMode() != MODE_STANDBY) {
+        if (this->controller != nullptr && shouldScanForBleScaleMode(this->controller->getMode())) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
@@ -90,7 +89,7 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
     manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
     manager->on("controller:mode:change", [this](Event const &event) {
-        if (event.getInt("value") != MODE_STANDBY) {
+        if (shouldScanForBleScaleMode(event.getInt("value"))) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
@@ -262,15 +261,11 @@ void BLEScalePlugin::establishConnection() {
             });
 
             scale->setWeightUpdatedCallback([](float weight) {
-                // Check if we're in an ISR context
+                // Skip measurement from ISR context to avoid FreeRTOS deadlocks
                 if (xPortInIsrContext()) {
-                    // Skip measurement to avoid FreeRTOS deadlocks from interrupt context
                     return;
                 }
-                // Safe to call directly from task context with null check
-                if (&BLEScales != nullptr) {
-                    BLEScales.onMeasurement(weight);
-                }
+                BLEScales.onMeasurement(weight);
             });
 
             bool connectResult = scale->connect();

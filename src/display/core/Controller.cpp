@@ -15,7 +15,6 @@
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
 #include <display/plugins/BLEScalePlugin.h>
-#include <display/plugins/BeanconquerorPlugin.h>
 #include <display/plugins/BoilerFillPlugin.h>
 #include <display/plugins/HomekitPlugin.h>
 #include <display/plugins/LedControlPlugin.h>
@@ -82,7 +81,6 @@ void Controller::setup() {
     pluginManager->registerPlugin(new WebUIPlugin());
     pluginManager->registerPlugin(&ShotHistory);
     pluginManager->registerPlugin(&BLEScales);
-    pluginManager->registerPlugin(new BeanconquerorPlugin());
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
     pluginManager->setup(this);
@@ -430,6 +428,20 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
+
+    if (!process->isActive()) {
+        const int endedProcessType = process->getType();
+        xSemaphoreGive(processMutex);
+        delete process;
+        if (endedProcessType == MODE_BREW) {
+            pluginManager->trigger("controller:brew:end");
+        } else if (endedProcessType == MODE_GRIND) {
+            pluginManager->trigger("controller:grind:end");
+        }
+        pluginManager->trigger("controller:process:end", "processType", endedProcessType);
+        updateLastAction();
+        return;
+    }
     
     processCompleted = false;
     this->currentProcess = process;
@@ -444,6 +456,8 @@ float Controller::getTargetTemp() const {
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         // If we can't get mutex, return safe default based on mode
         switch (mode) {
+        case MODE_STANDBY:
+            return profileManager->getSelectedProfile().temperature;
         case MODE_BREW:
             return profileManager->getSelectedProfile().temperature;
         case MODE_STEAM:
@@ -461,6 +475,9 @@ float Controller::getTargetTemp() const {
     float result = 0;
     
     switch (mode) {
+    case MODE_STANDBY:
+        result = profileManager->getSelectedProfile().temperature;
+        break;
     case MODE_BREW:
         if (proc != nullptr && proc->isActive() && proc->getType() == MODE_BREW) {
             auto brewProcess = static_cast<BrewProcess *>(proc);
@@ -485,6 +502,127 @@ float Controller::getTargetTemp() const {
     
     xSemaphoreGive(processMutex);
     return result;
+}
+
+// Computes the first phase's configured pressure value for standby preview.
+// Returns true and sets `out` when the selected profile's first phase uses an
+// advanced pump with an applicable (non-sentinel) value; returns false when no
+// target is applicable (simple pump, empty profile, or the "hold current value"
+// -1 sentinel that can't be resolved without a live measurement). For an
+// advanced phase the active-brew path publishes BOTH pressure and flow (the
+// non-primary axis is the configured limit), so standby previews both —
+// keeping the readout consistent with the first brew tick.
+static bool firstPhasePressureTarget(const Profile &profile, float &out) {
+    if (profile.phases.empty()) {
+        return false;
+    }
+    const Phase &first = profile.phases[0];
+    if (first.pumpIsSimple) {
+        return false;
+    }
+    // -1 is the "hold current value at phase start" sentinel, resolved to a live
+    // measurement by BrewProcess during a brew. In standby there is no measurement
+    // to resolve against, so report it as unavailable rather than a misleading 0.
+    if (first.pumpAdvanced.pressure < 0.0f) {
+        return false;
+    }
+    out = first.pumpAdvanced.pressure;
+    return true;
+}
+
+// Computes the first phase's configured flow value for standby preview.
+// See firstPhasePressureTarget for semantics.
+static bool firstPhaseFlowTarget(const Profile &profile, float &out) {
+    if (profile.phases.empty()) {
+        return false;
+    }
+    const Phase &first = profile.phases[0];
+    if (first.pumpIsSimple) {
+        return false;
+    }
+    if (first.pumpAdvanced.flow < 0.0f) {
+        return false;
+    }
+    out = first.pumpAdvanced.flow;
+    return true;
+}
+
+float Controller::getTargetPressure() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
+        return v;
+    }
+    return targetPressure;
+}
+
+float Controller::getTargetFlow() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
+        return v;
+    }
+    return targetFlow;
+}
+
+// Reports whether a pump pressure/flow target is actually applicable for the
+// current active process — used so WebUIPlugin can emit JSON null (not a
+// misleading 0) when there is no target. Mirrors updateControl()'s branch
+// logic: the entire target-setting block is gated on
+// systemInfo.capabilities.pressure (Controller.cpp ~L856), so without pressure
+// support NO mode drives a pump target. With pressure support, only
+// advanced-pump brews, manual, and steam set real targets; simple-pump brews,
+// water, grind, and the inactive fallthrough leave the members at 0. (Standby
+// is handled by the callers via the first-phase helpers, so it never reaches
+// here.)
+//
+// Takes processMutex before touching currentProcess: status serialization runs
+// on a different task than activate()/deactivate(), which can move and delete
+// the process — dereferencing it unlocked would be a use-after-free. On mutex
+// timeout we return false (treat the target as unavailable) rather than risk it.
+bool Controller::hasPumpTarget() const {
+    // No pressure hardware → updateControl() never populates pump targets in any
+    // mode, so they are always an unavailable 0.
+    if (!systemInfo.capabilities.pressure) {
+        return false;
+    }
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return false;
+    }
+    bool result = false;
+    Process *proc = currentProcess;
+    if (proc != nullptr && proc->isActive()) {
+        switch (proc->getType()) {
+        case MODE_BREW:
+            result = static_cast<BrewProcess *>(proc)->isAdvancedPump();
+            break;
+        case MODE_MANUAL:
+        case MODE_STEAM:
+            result = true;
+            break;
+        default: // MODE_WATER, MODE_GRIND — no pump pressure/flow target
+            result = false;
+            break;
+        }
+    }
+    xSemaphoreGive(processMutex);
+    return result;
+}
+
+bool Controller::hasTargetPressure() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        return firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
+    }
+    return hasPumpTarget();
+}
+
+bool Controller::hasTargetFlow() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        return firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
+    }
+    return hasPumpTarget();
 }
 
 void Controller::setTargetTemp(float temperature) {
@@ -583,6 +721,21 @@ void Controller::lowerBrewTarget() {
     } else {
         profileManager->getSelectedProfile().adjustDuration(-1);
     }
+    handleProfileUpdate();
+}
+
+void Controller::setBrewTarget(float value) {
+    // Apply absolute brew target from the dashboard YIELD slider. When the
+    // active profile is volumetric, set the cumulative target across brew
+    // phases. Otherwise the dashboard YIELD has no meaning — ignore so we
+    // don't accidentally rewrite a time-based profile's duration. Mirrors
+    // the in-memory mutation pattern of raise/lowerBrewTarget — the change
+    // applies to the next shot but is NOT persisted to disk; reloading the
+    // profile restores the saved target.
+    if (!profileManager->getSelectedProfile().isVolumetric()) {
+        return;
+    }
+    profileManager->getSelectedProfile().setVolumetricTarget(value);
     handleProfileUpdate();
 }
 
@@ -737,19 +890,30 @@ void Controller::activate() {
     if (isActiveSafe())
         return;
     clear();
-    clientController.tare();
-    if (isVolumetricAvailable()) {
+    // Tare + settle is only meaningful for modes that consume scale/volumetric
+    // data. Steam and water modes have no scale and no volumetric phase, so
+    // running them here would block the controller task on a synchronous BLE
+    // write-with-response and a 200 ms settle for nothing — visibly freezing
+    // LVGL on the shared core (see CAR-253).
+    const bool needsTare = (mode == MODE_BREW || mode == MODE_MANUAL);
+    if (needsTare) {
+        clientController.tare();
+        if (isVolumetricAvailable()) {
 #ifdef NIGHTLY_BUILD
-        currentVolumetricSource =
-            isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
+            currentVolumetricSource =
+                isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
 #else
-        currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+            currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
 #endif
-        if (mode == MODE_BREW) {
-            pluginManager->trigger("controller:brew:prestart");
+            if (mode == MODE_BREW) {
+                pluginManager->trigger("controller:brew:prestart");
+            }
         }
+        // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
+        // tare to settle.  Arduino delay() spins without yielding and can starve
+        // the WiFi TCP/IP stack, causing WebSocket disconnections.
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
-    delay(200);
     switch (mode) {
     case MODE_BREW:
         startProcess(new BrewProcess(profileManager->getSelectedProfile(),

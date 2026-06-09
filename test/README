@@ -1,11 +1,100 @@
+# GaggiMate firmware tests
 
-This directory is intended for PlatformIO Test Runner and project tests.
+This directory holds the firmware's unit tests, run with
+[PlatformIO's bundled Unity framework](https://docs.platformio.org/en/latest/advanced/unit-testing/index.html).
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+There are two ways tests run:
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+- **Host (`native`) tests** — pure firmware *logic* compiled and run on the dev
+  machine with a normal C++ compiler. No ESP32, no flashing, no board. Fast and
+  what you run during development and (eventually) in CI.
+- **On-target tests** — the same Unity tests can also be built for a real board
+  (e.g. `pio test -e display`). The test files use `#ifdef ARDUINO` to pick
+  `setup()`/`loop()` on-target vs `main()` on host.
+
+## Running the host tests
+
+```sh
+pio test -e native
+```
+
+This builds every `test/test_*/` suite against the host and runs them, printing
+a per-test pass/fail summary. Exit code is non-zero if any assertion fails.
+
+> The `native` platform uses your machine's C/C++ toolchain (gcc/clang on
+> Linux/macOS, MinGW/Clang on Windows). If `pio test -e native` reports a
+> missing compiler, install one (e.g. `apt install build-essential`,
+> `xcode-select --install`, or a MinGW-w64 build on Windows) and retry.
+
+## Directory convention
+
+Each suite lives in its own folder named `test_<thing>/` containing a single
+`*.cpp` with its Unity test functions and a runner:
+
+```
+test/
+  test_event_system/test_event_system.cpp          # plugin/event system
+  test_profile_validation/test_parse_profile.cpp    # profile JSON parsing
+  test_ble_scale_scan_policy/test_ble_scale_scan_policy.cpp
+  native/                                            # host-only build support
+```
+
+PlatformIO discovers each `test_*` folder automatically. Inside a suite, the
+runner is structured so the same file works on host and on-target. Each suite
+also defines empty `setUp()`/`tearDown()` functions, which Unity requires:
+
+```cpp
+void setUp(void) {}
+void tearDown(void) {}
+
+static int runMyTests() {
+    UNITY_BEGIN();
+    RUN_TEST(test_something);
+    return UNITY_END();
+}
+
+#ifdef ARDUINO
+void setup() { runMyTests(); }
+void loop() {}
+#else
+int main(int, char **) { return runMyTests(); }
+#endif
+```
+
+## How the hardware seams work (host builds)
+
+Firmware logic headers `#include <Arduino.h>` for the `String` type and pull in
+`ESP_LOG*` macros, neither of which exist off-target. To compile that logic on
+the host without dragging in FreeRTOS / NimBLE / the ESP-IDF, the `native`
+environment in `platformio.ini` adds `test/native/` to the front of the include
+path. That directory provides the seams:
+
+- **`test/native/Arduino.h`** — a tiny shim: a `std::string`-backed `String`
+  with the subset of the Arduino `WString` API the tested code uses, plus no-op
+  `ESP_LOG*` macros. Because it is first on the include path, `#include
+  <Arduino.h>` resolves here instead of the real platform header.
+- **`test/native/*.cpp`** — host re-implementations of pure, hardware-free free
+  functions that the logic links against but whose production definitions live
+  in translation units that can't compile off-target (today: `isSafeId()`, whose
+  production source is `src/display/core/utils.cpp`). Keep these in sync with the
+  production logic.
+
+`ArduinoJson` is header-only and compiles natively as-is, so profile parsing is
+tested against the real parser. `src/display/core/PluginManager.cpp` is compiled
+straight into the host build (see `build_src_filter` in `[env:native]`) because
+its only platform dependency is `String`, satisfied by the shim.
+
+### Adding a new host test
+
+1. Create `test/test_<thing>/test_<thing>.cpp` with the runner pattern above
+   (including the empty `setUp`/`tearDown`).
+2. If the code under test needs production `.cpp` files, add them to
+   `build_src_filter` in `[env:native]`. Prefer testing logic that lives in
+   headers or that has no hardware dependencies.
+3. If it needs a hardware-free free function whose definition can't build on
+   host, add a host implementation under `test/native/` (and keep it in sync).
+4. Resist growing `test/native/Arduino.h`. If a test needs a lot more of the
+   Arduino surface, that's a signal to seam the production code behind a thin
+   interface / test double instead.
+
+> **CI:** wiring `pio test -e native` into CI is tracked separately in CAR-340.

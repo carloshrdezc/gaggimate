@@ -63,13 +63,17 @@ class DefaultUI {
 
     void updateStandbyScreen();
     void updateStatusScreen();
+    // CAR-308 P2 #2 (Codex review): factor the gm_h.status_time HH:MM
+    // formatter so it can fire on every screen that owns a gm_status_bar()
+    // (StatusScreen, BrewScreen, GrindScreen, ModeScreen, …) — not just
+    // StatusScreen. Reads gm_h.status_time directly; safe to call from
+    // loop() once per render tick.
+    void updateStatusBarClock();
     void applyScreenVisualLanguage();
     void resetCustomScreenHandles();
-    void ensureStandbyContextLabel();
     void ensureStatusBeanLabel();
     void ensureProfileBeanLabel();
     void ensureGrindBeanLabel();
-    void ensureMenuActionLabels();
     void ensureBrewContextLabel();
 
     void adjustDials(lv_obj_t *dials);
@@ -164,14 +168,16 @@ class DefaultUI {
     lv_obj_t *currentScreen = ui_StandbyScreen;
     void (*targetScreenInit)(void) = &ui_StandbyScreen_screen_init;
     mutable lv_obj_t *statusBeanLabel = nullptr;
-    lv_obj_t *standbyContextLabel = nullptr;
     lv_obj_t *profileBeanLabel = nullptr;
     lv_obj_t *grindBeanLabel = nullptr;
-    lv_obj_t *menuBrewLabel = nullptr;
-    lv_obj_t *menuSteamLabel = nullptr;
-    lv_obj_t *menuWaterLabel = nullptr;
-    lv_obj_t *menuGrindLabel = nullptr;
     lv_obj_t *brewContextLabel = nullptr;
+
+    // CAR-319: bottom mode-chip pill bar on the round BrewScreen landing view
+    // (power/cup/steam/drop). Lazily built once, parented to ui_BrewScreen.
+    lv_obj_t *brewModeChips = nullptr;
+    lv_obj_t *brewModeChip[4] = {nullptr, nullptr, nullptr, nullptr};
+    void ensureBrewModeChips();
+    static void brewModeChipCb(lv_event_t *e);
 
     // Standby brightness control
     unsigned long standbyEnterTime = 0;

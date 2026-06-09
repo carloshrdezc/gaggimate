@@ -1,6 +1,7 @@
 #ifndef PROFILE_H
 #define PROFILE_H
 
+#include "../core/utils.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
@@ -192,11 +193,40 @@ struct Profile {
 
     void adjustVolumetricTarget(float amount) {
         float max = getTotalVolume();
+        if (max <= 0.0f) return; // no volumetric target configured; nothing to scale
         float adjustedMax = max + amount;
         float adjustment = adjustedMax / max;
+        // Scale every phase that carries a volumetric target. This MUST match
+        // the phase set that getTotalVolume() (the denominator above) and the
+        // shot-stop logic (Phase::isFinished) read — otherwise the stop phase
+        // is left untouched and the adjustment is a silent no-op. Do NOT filter
+        // on PHASE_TYPE_BREW here: the volumetric stop target can live on a
+        // phase that is not tagged "brew".
         for (auto &phase : phases) {
-            if (phase.hasVolumetricTarget() && phase.phase == PhaseType::PHASE_TYPE_BREW) {
+            if (phase.hasVolumetricTarget()) {
                 phase.adjustVolumetricTarget(adjustment);
+            }
+        }
+    }
+
+    // Set the absolute total volumetric target so the shot stops at `value`.
+    // If the profile already has a volumetric target, scale every volumetric
+    // phase proportionally so the cumulative stop volume equals `value`. If the
+    // profile has no volumetric target, do nothing — caller should check
+    // `isVolumetric()` first or fall back to a different code path.
+    void setVolumetricTarget(float value) {
+        if (value <= 0.0f) return;
+        float current = getTotalVolume();
+        if (current <= 0.0f) return; // no volumetric target configured
+        float ratio = value / current;
+        // Scale the SAME phases that getTotalVolume() and Phase::isFinished
+        // read (every phase with a volumetric target), not just PHASE_TYPE_BREW
+        // phases. The phase carrying the stop target may be tagged
+        // "preinfusion"; filtering on "brew" here would skip it and leave the
+        // shot stopping at the profile's saved target — the CAR-355 bug.
+        for (auto &phase : phases) {
+            if (phase.hasVolumetricTarget()) {
+                phase.adjustVolumetricTarget(ratio);
             }
         }
     }
@@ -211,17 +241,50 @@ struct Profile {
 };
 
 inline bool parseProfile(const JsonObject &obj, Profile &profile) {
-    if (obj["id"].is<String>())
-        profile.id = obj["id"].as<String>();
-    profile.label = obj["label"].as<String>();
-    profile.type = obj["type"].as<String>();
+    if (!obj["label"].is<String>()) {
+        return false;
+    }
+    const String label = obj["label"].as<String>();
+    if (label.isEmpty()) {
+        return false;
+    }
+
+    if (!obj["type"].is<String>()) {
+        return false;
+    }
+    const String profileType = obj["type"].as<String>();
+    if (profileType != "standard" && profileType != "pro") {
+        return false;
+    }
+
+    if (!obj["phases"].is<JsonArray>()) {
+        return false;
+    }
+    auto phasesArray = obj["phases"].as<JsonArray>();
+    if (phasesArray.size() == 0) {
+        return false;
+    }
+
+    const String candidateId = obj["id"].is<String>() ? obj["id"].as<String>() : String("");
+    // Reject IDs containing path separators or other unsafe chars before
+    // they reach any filesystem helper. Empty IDs are tolerated here because
+    // saveProfile() generates one when the field is missing.
+    if (!candidateId.isEmpty() && !isSafeId(candidateId)) {
+        ESP_LOGW("Profile", "Rescuing profile with unsafe ID; will regenerate on next save");
+        profile.id = "";
+    } else {
+        profile.id = candidateId;
+    }
+
+    profile.label = label;
+    profile.type = profileType;
     profile.description = obj["description"].as<String>();
     profile.temperature = obj["temperature"].as<float>();
+
     profile.favorite = obj["favorite"] | false;
     profile.selected = obj["selected"] | false;
     profile.utility = obj["utility"] | false;
 
-    auto phasesArray = obj["phases"].as<JsonArray>();
     for (JsonObject p : phasesArray) {
         Phase phase;
         phase.name = p["name"].as<String>();

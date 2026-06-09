@@ -661,7 +661,8 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
 
   const commit = useCallback(
     raw => {
-      const parsed = parseQuantity(String(raw).replace(unit, '').trim());
+      const normalized = String(raw).replace(unit, '').trim().replace(/,/g, '.');
+      const parsed = parseQuantity(normalized);
       if (parsed !== null && parsed >= min && parsed <= max) onCommit(parsed);
       setEditing(false);
     },
@@ -698,6 +699,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
         <input
           ref={inputRef}
           type='text'
+          inputMode='decimal'
           defaultValue={value.toFixed(1)}
           onBlur={e => commit(e.target.value)}
           onKeyDown={e => {
@@ -707,7 +709,11 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); setEditing(false); }
           }}
           style={{
-            width: 72,
+            display: 'block',
+            width: '100%',
+            maxWidth: '100%',
+            minWidth: 0,
+            boxSizing: 'border-box',
             fontFamily: 'var(--dm-font-display)',
             fontSize: 26,
             fontWeight: 700,
@@ -715,7 +721,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             background: 'var(--dm-bg-2)',
             border: '1px solid var(--dm-accent)',
             borderRadius: 4,
-            padding: '2px 4px',
+            padding: '4px 6px',
             outline: 'none',
             lineHeight: 1,
           }}
@@ -1271,8 +1277,12 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const pressure = s.currentPressure || 0;
   const flowVal = s.currentFlow || 0;
   const tempVal = s.currentTemperature || 0;
-  const targetPressure = isManualMode ? manualDraft.pressure : s.targetPressure || 9;
-  const targetFlow = isManualMode ? manualDraft.flow : s.targetFlow || 2;
+  // Use ?? (not ||) so a legitimate 0 target (e.g. a flow-targeted first phase
+  // with pressure: 0, or a pressure-targeted phase with flow: 0) is preserved
+  // rather than being replaced by the default. Firmware sends null when the
+  // target is genuinely unavailable.
+  const targetPressure = isManualMode ? manualDraft.pressure : s.targetPressure ?? 9;
+  const targetFlow = isManualMode ? manualDraft.flow : s.targetFlow ?? 2;
   const targetTemp = isManualMode ? manualDraft.temperature : s.targetTemperature || 93;
   const currentWeight = s.currentWeight || 0;
   const temperatureRing = getTemperatureRingMetrics({ mode, tempVal, targetTemp });

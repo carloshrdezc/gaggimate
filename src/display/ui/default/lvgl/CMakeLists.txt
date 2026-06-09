@@ -3,8 +3,8 @@ SET(SOURCES components/ui_comp_dials.c
     screens/ui_StandbyScreen.c
     screens/ui_ProfileScreen.c
     screens/ui_MenuScreen.c
+    screens/ui_ModeScreen.c
     screens/ui_BrewScreen.c
-    screens/ui_SimpleProcessScreen.c
     screens/ui_StatusScreen.c
     screens/ui_GrindScreen.c
     ui_theme_manager.cpp
@@ -16,15 +16,20 @@ SET(SOURCES components/ui_comp_dials.c
     fonts/ndot_18.c
     fonts/ndot_24.c
     fonts/ndot_34.c
+    fonts/ndot_180.c
+    fonts/ndot_150.c
+    fonts/ndot_120.c
+    fonts/ndot_60.c
+    fonts/ndot_28.c
+    fonts/spacemono_14.c
+    fonts/spacemono_11.c
+    fonts/grotesk_16.c
     images/ui_img_logo_png.c
     images/ui_img_364513079.c
     images/ui_img_1091371356.c
     images/ui_img_1765671371.c
     images/ui_img_1732953241.c
-    images/ui_img_untitled_png.c
-    images/ui_img_489054950.c
     images/ui_img_340686386.c
-    images/ui_img_1455708189.c
     images/ui_img_1951499226.c
     images/ui_img_1220767159.c
     images/ui_img_295763949.c
@@ -50,6 +55,16 @@ SET(SOURCES components/ui_comp_dials.c
     images/ui_img_1829139226.c
     images/ui_img_flowmeter_png.c
     images/ui_img_1510335.c
-    images/ui_img_691326438.c)
+    images/ui_img_691326438.c
+    images/gm_ic_power.c
+    images/gm_ic_cup.c
+    images/gm_ic_steam.c
+    images/gm_ic_drop.c
+    images/gm_ic_wifi.c
+    images/gm_ic_bt.c
+    images/gm_ic_sun.c
+    images/gm_ic_thermo.c
+    images/gm_ic_scale.c
+    images/gm_ic_back.c)
 
 add_library(ui ${SOURCES})

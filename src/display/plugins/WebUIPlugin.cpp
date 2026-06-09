@@ -5,6 +5,7 @@
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
+#include <display/core/utils.h>
 #include <display/models/profile.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
@@ -22,6 +23,13 @@
 
 static std::unordered_map<uint32_t, std::string> rxBuffers;
 static WebUIPlugin *g_webUIPlugin = nullptr;
+
+// Sentinel value emitted on /api/settings GET in place of any stored secret
+// (Wi-Fi password, Home Assistant password, cloud relay token). The POST
+// handler treats incoming arguments equal to this string as "no change",
+// preserving the stored value. Defined as a constexpr so the same literal is
+// used at every read/write site.
+static constexpr const char *kSecretSentinel = "---unchanged---";
 
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
@@ -65,6 +73,10 @@ void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
     request->send(response);
 }
 
+// Forward declarations of channel helpers defined below.
+static String resolveReleaseUrl(const String &channel);
+static String normalizeChannel(const String &channel);
+
 void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) {
     this->controller = _controller;
     this->beanManager = _controller->getBeanManager();
@@ -72,7 +84,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
         BUILD_GIT_VERSION, controller->getSystemInfo().version,
-        RELEASE_URL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly"),
+        resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
             pluginManager->trigger("ota:update:phase", "phase", phase);
             updateOTAProgress(phase, 0);
@@ -133,25 +145,66 @@ void WebUIPlugin::relayLoopTask(void *arg) {
 void WebUIPlugin::loop() {
     if (updating) {
         pluginManager->trigger("ota:update:start");
-        const bool updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller");
+        // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
+        // This bypasses the upgrade-only guard so re-flashing the same version
+        // and downgrading both work.
+        const String channel = controller->getSettings().getOTAChannel();
+        const bool force = channel.startsWith("tag:");
+        bool tagResolved = true;
+        if (force) {
+            // Defense-in-depth: a WS client can send `req:ota-settings tag:X`
+            // followed immediately by `req:ota-start` before the throttled
+            // checkForUpdates() in this same loop runs (the if-blocks in
+            // loop() are sequential, and the OTA-start arm executes first).
+            // In that race `_release_url` points at tag/X but `_latest_url`
+            // still holds the previous channel's resolved URL, so a forced
+            // update would flash the wrong asset.
+            //
+            // Resolve `_latest_url` synchronously here, then verify the
+            // freshly-resolved version equals the pinned tag. If it doesn't
+            // (network error, GitHub redirect quirk, malformed channel), we
+            // refuse the update — never flash a tag we can't confirm.
+            const String pinned = channel.substring(4);
+            ota->checkForUpdates();
+            const String resolved = ota->getCurrentVersion();
+            // GitHub release tags occasionally carry a leading `v` prefix
+            // (`v1.8.2`); the resolver strips it, but the channel string we
+            // stored does not. Treat them as equal so legacy tags still flash.
+            // Cover both directions in case a future resolver path keeps the
+            // `v` and the channel string drops it.
+            const bool match = resolved == pinned ||
+                               (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
+                               (resolved.startsWith("v") && resolved.substring(1) == pinned);
+            if (!match) {
+                ESP_LOGE("WebUIPlugin",
+                         "Refusing forced OTA: pinned tag %s but resolved %s",
+                         pinned.c_str(), resolved.c_str());
+                tagResolved = false;
+            }
+        }
+        bool updateSucceeded = false;
+        if (tagResolved) {
+            updateSucceeded =
+                ota->update(updateComponent != "display", updateComponent != "controller", force);
+        }
         pluginManager->trigger("ota:update:end");
         updating = false;
         if (!updateSucceeded) {
-            updateOTAStatus("Update failed");
+            updateOTAStatus(tagResolved ? "Update failed" : "Update failed (tag not resolved)");
         }
     }
 
     if (!serverRunning) {
         return;
     }
-    const long now = millis();
-    if ((lastUpdateCheck == 0 || now > lastUpdateCheck + UPDATE_CHECK_INTERVAL)) {
+    const unsigned long now = millis();
+    if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
         ota->checkForUpdates();
         pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
     }
-    if (now > lastStatus + STATUS_PERIOD && (!ws.getClients().empty() || relayConnected)) {
+    if (now - lastStatus > STATUS_PERIOD && (!ws.getClients().empty() || relayConnected)) {
         lastStatus = now;
         JsonDocument doc;
         doc["tp"] = "evt:status";
@@ -159,7 +212,19 @@ void WebUIPlugin::loop() {
         doc["tt"] = controller->getTargetTemp();
         doc["pr"] = controller->getCurrentPressure();
         doc["fl"] = controller->getCurrentPumpFlow();
-        doc["pt"] = controller->getTargetPressure();
+        // Send null (not 0) when no target is applicable in the current mode —
+        // e.g. a simple-pump profile in standby has no pressure/flow target — so
+        // the web UI can fall back to its default instead of showing a false 0.
+        if (controller->hasTargetPressure()) {
+            doc["pt"] = controller->getTargetPressure();
+        } else {
+            doc["pt"] = nullptr;
+        }
+        if (controller->hasTargetFlow()) {
+            doc["tf"] = controller->getTargetFlow();
+        } else {
+            doc["tf"] = nullptr;
+        }
         doc["m"] = controller->getMode();
         doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
         doc["puid"] = controller->getProfileManager()->getSelectedProfile().id;
@@ -248,11 +313,11 @@ void WebUIPlugin::loop() {
 
         broadcastAll(doc.as<String>());
     }
-    if (now > lastCleanup + CLEANUP_PERIOD) {
+    if (now - lastCleanup > CLEANUP_PERIOD) {
         lastCleanup = now;
         ws.cleanupClients();
     }
-    if (now > lastDns + DNS_PERIOD && dnsServer != nullptr) {
+    if (now - lastDns > DNS_PERIOD && dnsServer != nullptr) {
         lastDns = now;
         dnsServer->processNextRequest();
     }
@@ -314,6 +379,10 @@ void WebUIPlugin::setupServer() {
     server.on("/favicon.ico", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
     server.on("/apple-touch-icon.png", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
     server.on("/apple-touch-icon-precomposed.png", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
+    // Vite emits content-hashed asset names. Cache them aggressively so route
+    // navigation does not repeatedly hit the ESP32 for immutable chunks/fonts.
+    server.serveStatic("/assets/", SPIFFS, "/w/assets/").setCacheControl("public, max-age=31536000, immutable");
+    server.serveStatic("/fonts/", SPIFFS, "/w/fonts/").setCacheControl("public, max-age=31536000, immutable");
     // onNotFound must be registered BEFORE serveStatic so it catches unmatched paths
     server.onNotFound([](AsyncWebServerRequest *request) {
         request->send(SPIFFS, "/w/index.html");
@@ -360,10 +429,11 @@ void WebUIPlugin::stop() {
         delete dnsServer;
         dnsServer = nullptr;
     }
-    if (ota != nullptr) {
-        delete ota;
-        ota = nullptr;
-    }
+    // ota is owned by the plugin for its full lifetime: allocated once in
+    // setup() and never freed. Freeing it here used to race with reads on
+    // the Arduino loop task and the AsyncTCP/WS task (see CAR-100). It also
+    // permanently nulled `ota` after the first WiFi cycle since start()
+    // never reallocates it.
     serverRunning = false;
 }
 
@@ -513,8 +583,12 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:grind:deactivate") {
         controller->deactivateGrind();
     } else if (msgType == "req:change-grind-target") {
+        // 0/1 toggle: selects Time vs Weight mode for the grind target.
+        // (The grams value itself is set via req:raise/lower-grind-target.)
         if (doc["target"].is<uint8_t>()) {
             controller->getSettings().setVolumetricTarget(doc["target"].as<uint8_t>());
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:change-grind-target ignored: missing or invalid 'target'");
         }
     } else if (msgType == "req:raise-temp") {
         controller->raiseTemp();
@@ -553,8 +627,20 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             controller->setMode(newMode);
         }
     } else if (msgType == "req:change-brew-target") {
-        if (doc["target"].is<uint8_t>()) {
-            controller->getSettings().setVolumetricTarget(doc["target"].as<uint8_t>());
+        // Brew target is a grams value (yield) from the Home dashboard YIELD
+        // slider. The previous handler cast it to uint8_t and routed to
+        // Settings::setVolumetricTarget(bool) — the volumetric MODE toggle —
+        // so the dashboard yield silently never reached the active profile.
+        // Accept float|int|uint, route to Controller::setBrewTarget which
+        // mutates the in-memory profile's volumetric target. CAR-252.
+        if (doc["target"].is<float>()) {
+            controller->setBrewTarget(doc["target"].as<float>());
+        } else if (doc["target"].is<int>()) {
+            controller->setBrewTarget(static_cast<float>(doc["target"].as<int>()));
+        } else if (doc["target"].is<uint8_t>()) {
+            controller->setBrewTarget(static_cast<float>(doc["target"].as<uint8_t>()));
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:change-brew-target ignored: missing or invalid 'target'");
         }
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
@@ -602,12 +688,49 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     }
 }
 
+// Resolve a stored OTA channel string to the GitHub release URL fragment.
+// "latest"      -> "latest" (resolves to most recent non-prerelease)
+// "nightly"     -> "tag/nightly"
+// "tag:<semver>" (validated against STABLE_VERSIONS allow-list) -> "tag/<semver>"
+// anything else -> "latest"
+static String resolveReleaseUrl(const String &channel) {
+    if (channel == "nightly") {
+        return RELEASE_URL + "tag/nightly";
+    }
+    if (channel.startsWith("tag:")) {
+        const String tag = channel.substring(4);
+        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
+            if (tag == STABLE_VERSIONS[i]) {
+                return RELEASE_URL + "tag/" + tag;
+            }
+        }
+    }
+    return RELEASE_URL + "latest";
+}
+
+// Normalize an incoming channel to the value we persist in settings.
+// Unknown values fall back to "latest" so a malformed websocket payload
+// can never poison the stored setting.
+static String normalizeChannel(const String &channel) {
+    if (channel == "nightly") return "nightly";
+    if (channel.startsWith("tag:")) {
+        const String tag = channel.substring(4);
+        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
+            if (tag == STABLE_VERSIONS[i]) {
+                return channel;
+            }
+        }
+    }
+    return "latest";
+}
+
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     lastUpdateCheck = 0;
     if (request["update"].as<bool>()) {
         if (!request["channel"].isNull()) {
-            controller->getSettings().setOTAChannel(request["channel"].as<String>() == "latest" ? "latest" : "nightly");
-            ota->setReleaseUrl(RELEASE_URL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly"));
+            const String normalized = normalizeChannel(request["channel"].as<String>());
+            controller->getSettings().setOTAChannel(normalized);
+            ota->setReleaseUrl(resolveReleaseUrl(normalized));
         }
     }
     updateOTAStatus("Checking...");
@@ -645,6 +768,11 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
         }
     } else if (type == "req:profiles:load") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         Profile profile;
         if (profileManager->loadProfile(id, profile)) {
             auto obj = response["profile"].to<JsonObject>();
@@ -655,7 +783,11 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
     } else if (type == "req:profiles:save") {
         auto obj = request["profile"].as<JsonObject>();
         Profile profile;
-        parseProfile(obj, profile);
+        if (!parseProfile(obj, profile)) {
+            response["error"] = F("Invalid profile");
+            sendResponse(clientId, response);
+            return;
+        }
         if (!profileManager->saveProfile(profile)) {
             response["error"] = F("Save failed");
         }
@@ -663,17 +795,37 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
         writeProfile(respObj, profile);
     } else if (type == "req:profiles:delete") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         if (!profileManager->deleteProfile(id)) {
             response["error"] = F("Delete failed");
         }
     } else if (type == "req:profiles:select") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         profileManager->selectProfile(id);
     } else if (type == "req:profiles:favorite") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         profileManager->addFavoritedProfile(id);
     } else if (type == "req:profiles:unfavorite") {
         auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid profile id");
+            sendResponse(clientId, response);
+            return;
+        }
         profileManager->removeFavoritedProfile(id);
     } else if (type == "req:profiles:reorder") {
         // Expect an array of profile IDs in desired order
@@ -682,7 +834,7 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
             for (JsonVariant v : request["order"].as<JsonArray>()) {
                 if (v.is<String>()) {
                     String id = v.as<String>();
-                    if (!id.isEmpty() && std::find(order.begin(), order.end(), id) == order.end()) {
+                    if (isSafeId(id) && std::find(order.begin(), order.end(), id) == order.end()) {
                         order.emplace_back(std::move(id));
                     }
                 }
@@ -707,10 +859,15 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
             writeBean(obj, bean);
         }
     } else if (type == "req:beans:load") {
-        BeanEntry bean{};
-        if (beanManager->loadBean(request["id"].as<String>(), bean)) {
+        auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid bean id");
+            sendResponse(clientId, response);
+            return;
+        }
+        if (auto bean = beanManager->loadBean(id)) {
             auto obj = response["bean"].to<JsonObject>();
-            writeBean(obj, bean);
+            writeBean(obj, *bean);
         } else {
             response["error"] = F("Load failed");
         }
@@ -723,12 +880,17 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
             writeBean(obj, bean);
         }
     } else if (type == "req:beans:delete") {
-        BeanEntry bean{};
-        if (beanManager->loadBean(request["id"].as<String>(), bean) && controller->getSettings().getSelectedBean() == bean.name) {
+        auto id = request["id"].as<String>();
+        if (!isSafeId(id)) {
+            response["error"] = F("Invalid bean id");
+            sendResponse(clientId, response);
+            return;
+        }
+        if (auto bean = beanManager->loadBean(id); bean && controller->getSettings().getSelectedBean() == bean->name) {
             controller->getSettings().setSelectedBean("");
             pluginManager->trigger("beans:selected", "name", "");
         }
-        if (!beanManager->deleteBean(request["id"].as<String>())) {
+        if (!beanManager->deleteBean(id)) {
             response["error"] = F("Delete failed");
         }
     }
@@ -757,7 +919,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setWifiSsid(request->arg("wifiSsid"));
             if (request->hasArg("mdnsName"))
                 settings->setMdnsName(request->arg("mdnsName"));
-            if (request->hasArg("wifiPassword") && request->arg("wifiPassword") != "---unchanged---")
+            if (request->hasArg("wifiPassword") && request->arg("wifiPassword") != kSecretSentinel)
                 settings->setWifiPassword(request->arg("wifiPassword"));
             settings->setHomekit(request->hasArg("homekit"));
             settings->setBoilerFillActive(request->hasArg("boilerFillActive"));
@@ -773,7 +935,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             settings->setHomeAssistant(request->hasArg("homeAssistant"));
             if (request->hasArg("haUser"))
                 settings->setHomeAssistantUser(request->arg("haUser"));
-            if (request->hasArg("haPassword"))
+            if (request->hasArg("haPassword") && request->arg("haPassword") != kSecretSentinel)
                 settings->setHomeAssistantPassword(request->arg("haPassword"));
             if (request->hasArg("haIP"))
                 settings->setHomeAssistantIP(request->arg("haIP"));
@@ -867,7 +1029,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFlushDuration(request->arg("flushDuration").toInt() * 1000);
             if (request->hasArg("cloudRelayUrl"))
                 settings->setCloudRelayUrl(request->arg("cloudRelayUrl"));
-            if (request->hasArg("cloudRelayToken"))
+            if (request->hasArg("cloudRelayToken") && request->arg("cloudRelayToken") != kSecretSentinel)
                 settings->setCloudRelayToken(request->arg("cloudRelayToken"));
             if (request->hasArg("cloudRelayEnabled"))
                 settings->setCloudRelayEnabled(request->arg("cloudRelayEnabled") == "1");
@@ -892,14 +1054,17 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["homekit"] = settings.isHomekit();
     doc["homeAssistant"] = settings.isHomeAssistant();
     doc["haUser"] = settings.getHomeAssistantUser();
-    doc["haPassword"] = settings.getHomeAssistantPassword();
+    doc["haPassword"] = kSecretSentinel;
     doc["haIP"] = settings.getHomeAssistantIP();
     doc["haPort"] = settings.getHomeAssistantPort();
     doc["haTopic"] = settings.getHomeAssistantTopic();
     doc["pid"] = settings.getPid();
     doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();
-    doc["wifiPassword"] = apMode ? "---unchanged---" : settings.getWifiPassword();
+    // Always mask: never return the plaintext WiFi password to clients. The
+    // previous AP-mode-only mask leaked it over HTTP whenever the device was
+    // on the user's Wi-Fi.
+    doc["wifiPassword"] = kSecretSentinel;
     doc["mdnsName"] = settings.getMdnsName();
     doc["temperatureOffset"] = String(settings.getTemperatureOffset());
     doc["pressureScaling"] = String(settings.getPressureScaling());
@@ -934,7 +1099,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["autowakeupEnabled"] = settings.isAutoWakeupEnabled();
     doc["flushDuration"] = settings.getFlushDuration() / 1000;
     doc["cloudRelayUrl"] = settings.getCloudRelayUrl();
-    doc["cloudRelayToken"] = settings.getCloudRelayToken();
+    doc["cloudRelayToken"] = kSecretSentinel;
     doc["cloudRelayEnabled"] = settings.isCloudRelayEnabled();
 
     // Add schedule format with days
@@ -1027,6 +1192,14 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["hardware"] = controller->getSystemInfo().hardware;
     doc["channel"] = settings.getOTAChannel();
     doc["updating"] = updating;
+    // Surface the build-time list of selectable stable releases so the web UI
+    // can render a "flash a specific tag" dropdown.
+    {
+        JsonArray arr = doc["availableVersions"].to<JsonArray>();
+        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
+            arr.add(STABLE_VERSIONS[i]);
+        }
+    }
     // SPIFFS usage metrics
     {
         size_t total = SPIFFS.totalBytes();

@@ -103,7 +103,7 @@ export function StandardProfileForm(props) {
                   type='number'
                   className='grow'
                   value={data?.temperature}
-                  onChange={e => onFieldChange('temperature', e.target.value)}
+                  onChange={e => onFieldChange('temperature', parseFloat(e.target.value))}
                   aria-label='Temperature in degrees Celsius'
                   min='0'
                   max='150'
@@ -269,7 +269,7 @@ function Phase({ phase, index, onChange, onRemove, pressureAvailable }) {
                 type='number'
                 min='1'
                 value={phase.duration}
-                onChange={e => onFieldChange('duration', e.target.value)}
+                onChange={e => onFieldChange('duration', parseFloat(e.target.value))}
                 aria-label='Duration in seconds'
               />
               <span aria-label='seconds'>s</span>

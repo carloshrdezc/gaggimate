@@ -60,6 +60,9 @@ components:
         tp:
           type: string
           enum: ['evt:status']
+        baf:
+          type: boolean
+          description: BLE authentication failed. True after pairing failure or rejected encrypted write; cleared on the next successful encrypted link.
         ct:
           type: number
           description: Current temperature

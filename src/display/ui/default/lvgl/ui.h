@@ -29,12 +29,15 @@ extern "C" {
 #include "ui_theme_manager.h"
 #include "ui_themes.h"
 
+#include "gm_icons.h" // GaggiMate "Nothing" icon set (A8 images + symbol-font codepoints)
+#include "gm_fonts.h" // GaggiMate "Nothing" theme fonts (Ndot numerals + Space Mono/Grotesk)
+
 ///////////////////// SCREENS ////////////////////
 #include "screens/ui_BrewScreen.h"
 #include "screens/ui_GrindScreen.h"
 #include "screens/ui_MenuScreen.h"
+#include "screens/ui_ModeScreen.h"
 #include "screens/ui_ProfileScreen.h"
-#include "screens/ui_SimpleProcessScreen.h"
 #include "screens/ui_StandbyScreen.h"
 #include "screens/ui_StatusScreen.h"
 
@@ -49,10 +52,7 @@ LV_IMG_DECLARE(ui_img_364513079);     // assets/wifi-20x20.png
 LV_IMG_DECLARE(ui_img_1091371356);    // assets/bluetooth-alt-20x20.png
 LV_IMG_DECLARE(ui_img_1765671371);    // assets/refresh-20x20.png
 LV_IMG_DECLARE(ui_img_1732953241);    // assets/tap-60x60.png
-LV_IMG_DECLARE(ui_img_untitled_png);  // assets/Untitled.png
-LV_IMG_DECLARE(ui_img_489054950);     // assets/gauge-fill.png
 LV_IMG_DECLARE(ui_img_340686386);     // assets/indicator-small.png
-LV_IMG_DECLARE(ui_img_1455708189);    // assets/pressure-filled.png
 LV_IMG_DECLARE(ui_img_1951499226);    // assets/thermometer-half-40x40.png
 LV_IMG_DECLARE(ui_img_1220767159);    // assets/tachometer-fast-40x40.png
 LV_IMG_DECLARE(ui_img_295763949);     // assets/angle-up-40x40.png
