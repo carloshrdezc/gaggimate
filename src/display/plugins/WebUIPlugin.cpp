@@ -865,10 +865,9 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
             sendResponse(clientId, response);
             return;
         }
-        BeanEntry bean{};
-        if (beanManager->loadBean(id, bean)) {
+        if (auto bean = beanManager->loadBean(id)) {
             auto obj = response["bean"].to<JsonObject>();
-            writeBean(obj, bean);
+            writeBean(obj, *bean);
         } else {
             response["error"] = F("Load failed");
         }
@@ -887,8 +886,7 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
             sendResponse(clientId, response);
             return;
         }
-        BeanEntry bean{};
-        if (beanManager->loadBean(id, bean) && controller->getSettings().getSelectedBean() == bean.name) {
+        if (auto bean = beanManager->loadBean(id); bean && controller->getSettings().getSelectedBean() == bean->name) {
             controller->getSettings().setSelectedBean("");
             pluginManager->trigger("beans:selected", "name", "");
         }

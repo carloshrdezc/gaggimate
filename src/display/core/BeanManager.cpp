@@ -94,29 +94,30 @@ std::vector<BeanEntry> BeanManager::listBeans() {
     return beans;
 }
 
-bool BeanManager::loadBean(const String &uuid, BeanEntry &outBean) {
+std::optional<BeanEntry> BeanManager::loadBean(const String &uuid) {
     File file = _fs->open(beanPath(uuid), "r");
     if (!file) {
-        return false;
+        return std::nullopt;
     }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, file);
     file.close();
     if (err) {
-        return false;
+        return std::nullopt;
     }
 
+    BeanEntry outBean{};
     if (!parseBean(doc.as<JsonObject>(), outBean)) {
-        return false;
+        return std::nullopt;
     }
 
     if (!applyFallbackBeanId(outBean, uuid)) {
         ESP_LOGW("BeanManager", "Skipping unrescuable bean file (no safe id derivable): %s", uuid.c_str());
-        return false;
+        return std::nullopt;
     }
 
-    return true;
+    return outBean;
 }
 
 bool BeanManager::saveBean(BeanEntry &bean) {

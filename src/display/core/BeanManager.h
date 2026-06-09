@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <ctime>
 #include <display/core/utils.h>
+#include <optional>
 #include <vector>
 
 struct BeanEntry {
@@ -117,7 +118,7 @@ class BeanManager {
 
     void setup();
     std::vector<BeanEntry> listBeans();
-    bool loadBean(const String &uuid, BeanEntry &outBean);
+    std::optional<BeanEntry> loadBean(const String &uuid);
     bool saveBean(BeanEntry &bean);
     bool deleteBean(const String &uuid);
     bool beanExists(const String &uuid);
