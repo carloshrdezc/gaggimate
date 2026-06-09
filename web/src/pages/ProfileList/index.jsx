@@ -41,14 +41,7 @@ import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
 import { faScaleBalanced } from '@fortawesome/free-solid-svg-icons/faScaleBalanced';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { buildStatisticsProfileHref } from '../Statistics/utils/statisticsRoute.js';
-import { BeanSelectionModal } from './BeanSelectionModal.jsx';
-import {
-  clearCurrentBeanSelection,
-  getLastBeanSelectionForProfile,
-  listBeans,
-  migrateLegacyBeansToDevice,
-  recordBeanSelection,
-} from '../../utils/beanManager.js';
+import { migrateLegacyBeansToDevice } from '../../utils/beanManager.js';
 
 Chart.register(
   LineController,
@@ -484,8 +477,6 @@ export function ProfileList() {
   const apiService = useContext(ApiServiceContext);
   const [profiles, setProfiles] = useState([]);
   const [beans, setBeans] = useState([]);
-  const [beanSelectionProfile, setBeanSelectionProfile] = useState(null);
-  const [selectedBeanId, setSelectedBeanId] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('extraction');
@@ -732,37 +723,18 @@ export function ProfileList() {
   }, [profiles]);
 
   const completeProfileSelect = useCallback(
-    async (profile, beanId = '') => {
+    async profile => {
       if (!profile) return;
 
       setLoading(true);
       try {
         await apiService.request({ tp: 'req:profiles:select', id: profile.id });
-
-        let selectedBeanName = '';
-        if (beanId) {
-          const selectedBean = (await listBeans(apiService)).find(bean => bean.id === beanId);
-          if (selectedBean) {
-            selectedBeanName = selectedBean.name;
-            recordBeanSelection({
-              profileId: profile.id,
-              profileLabel: profile.label,
-              bean: selectedBean,
-            });
-          }
-        } else {
-          clearCurrentBeanSelection();
-        }
-
-        apiService.send({ tp: 'req:beans:select', name: selectedBeanName });
       } catch (err) {
         console.error('Failed to select profile:', err);
         alert(`Failed to select profile: ${err.message}`);
       }
 
       await loadProfiles();
-      setBeanSelectionProfile(null);
-      setSelectedBeanId('');
     },
     [apiService],
   );
@@ -772,17 +744,7 @@ export function ProfileList() {
       const profile = profiles.find(entry => entry.id === id);
       if (!profile) return;
 
-      const availableBeans = (await listBeans(apiService)).filter(bean => !bean.archived);
-      setBeans(availableBeans);
-
-      if (availableBeans.length === 0) {
-        await completeProfileSelect(profile);
-        return;
-      }
-
-      const lastBeanSelection = getLastBeanSelectionForProfile(profile);
-      setSelectedBeanId(lastBeanSelection?.beanId || availableBeans[0]?.id || '');
-      setBeanSelectionProfile(profile);
+      await completeProfileSelect(profile);
     },
     [apiService, profiles, completeProfileSelect],
   );
@@ -983,20 +945,6 @@ export function ProfileList() {
             ))}
         </div>
       </Card>
-
-      <BeanSelectionModal
-        open={!!beanSelectionProfile}
-        profile={beanSelectionProfile}
-        beans={beans}
-        selectedBeanId={selectedBeanId}
-        onBeanChange={setSelectedBeanId}
-        onClose={() => {
-          setBeanSelectionProfile(null);
-          setSelectedBeanId('');
-        }}
-        onSkip={() => completeProfileSelect(beanSelectionProfile)}
-        onConfirm={() => completeProfileSelect(beanSelectionProfile, selectedBeanId)}
-      />
     </div>
   );
 }
