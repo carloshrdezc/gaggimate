@@ -1,0 +1,148 @@
+# CAR-341: Unified CI gate for pull requests targeting dev-master.
+#
+# Runs the full local-equivalent check suite on every PR to dev-master:
+#   1. web        — cd web && npm ci && npm run build
+#   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
+#   3. native     — pio test -e native-sanitize (ASan/UBSan; findings fail CI)
+#   4. analysis   — pio check (cppcheck, GATING) + clang-tidy over in-scope logic
+#
+# pio check display/controller gating also runs in check.yml on push; this
+# workflow re-runs it scoped to PRs so dev-master is protected by one cohesive
+# required-checks set. Keep the setup (cache + setup-python + PlatformIO install)
+# in sync with check.yml / build.yml.
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - dev-master
+
+jobs:
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build web UI
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+  firmware:
+    name: Firmware build (display)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+      # -Wall -Wextra are on (display_common.build_flags). Warnings are allowed
+      # to surface — the build must still succeed (no -Werror, see platformio.ini).
+      - name: Build display firmware
+        run: pio run -e display
+
+  native:
+    name: Native tests (ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+      # Sanitizer findings must fail the suite. halt_on_error / abort_on_error
+      # turn the first ASan/UBSan report into a non-zero exit.
+      - name: Run sanitized host tests
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
+        run: pio test -e native-sanitize
+
+  analysis:
+    name: Static analysis (cppcheck + clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+          clang-tidy --version
+      # GATING cppcheck — mirrors check.yml. Display excludes generated UI;
+      # controller analyses its own sources. Pre-existing findings will surface
+      # here; if they are noise, raise the threshold or add inline suppressions.
+      - name: Static code analysis for display (gating)
+        run: platformio check -e display --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"
+      - name: Static code analysis for controller (gating)
+        run: platformio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"
+      # clang-tidy runs against the NATIVE env's compile database — the only
+      # compile DB we can build without the full xtensa ESP32 toolchain. This
+      # covers the same platform-independent logic slice the native tests cover
+      # (src/display/core/**). Generated UI (src/display/ui) and vendored drivers
+      # (src/display/drivers) are excluded by construction (not in the native
+      # build) and by .clang-tidy's HeaderFilterRegex.
+      - name: Generate native compile database
+        run: pio run -e native -t compiledb
+      - name: Run clang-tidy over in-scope logic
+        run: |
+          DB=.pio/build/native/compile_commands.json
+          if [ ! -f "$DB" ]; then
+            echo "compile_commands.json not found at $DB" >&2
+            exit 1
+          fi
+          FILES=$(python scripts/select_tidy_sources.py "$DB")
+          if [ -z "$FILES" ]; then
+            echo "No in-scope source files found in compile DB — nothing to lint." >&2
+            exit 1
+          fi
+          echo "Linting:"
+          echo "$FILES"
+          # -p points clang-tidy at the compile DB so it uses the real flags.
+          # No -warnings-as-errors here: this step reports tidy findings and
+          # gates only on clang-tidy's own non-zero (config/usage) errors. Flip
+          # to gating once the codebase is clean (mirrors the -Werror note).
+          echo "$FILES" | xargs clang-tidy -p .pio/build/native

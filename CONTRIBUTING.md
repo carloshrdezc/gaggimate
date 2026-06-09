@@ -80,6 +80,45 @@ When building the firmware, the scripts/build_spiffs.sh script installs the web 
 - For web code, use `npm run format` to apply Prettier.
 - Run static analysis with `platformio check -e display` and `platformio check -e controller`.
 
+## Continuous Integration & Local Checks
+
+Pull requests targeting `dev-master` run a unified CI gate (`.github/workflows/ci.yml`).
+You can reproduce every gate locally before pushing — run these from the repo root:
+
+```sh
+# 1. Web build
+cd web && npm ci && npm run build && cd ..
+
+# 2. Firmware build (now compiled with -Wall -Wextra; warnings are allowed,
+#    but the build must succeed — there is intentionally no -Werror yet).
+pio run -e display
+
+# 3. Host unit tests, plain and under AddressSanitizer + UndefinedBehaviorSanitizer.
+#    Sanitizer findings fail the suite (CI sets ASAN_OPTIONS/UBSAN_OPTIONS to
+#    halt/abort on the first report).
+pio test -e native
+pio test -e native-sanitize
+
+# 4a. cppcheck static analysis (GATING in CI — these must pass).
+pio check -e display     --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"
+pio check -e controller  --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"
+
+# 4b. clang-tidy over the platform-independent logic (bugprone-* + cppcoreguidelines-*,
+#     config in .clang-tidy). It runs against the native env's compile database,
+#     which is the only one buildable without the xtensa ESP32 toolchain.
+pio run -e native -t compiledb
+clang-tidy -p .pio/build/native \
+  $(python scripts/select_tidy_sources.py .pio/build/native/compile_commands.json)
+```
+
+Notes:
+- `clang-tidy` is scoped to hand-written firmware logic; generated LVGL UI
+  (`src/display/ui/**`) and vendored drivers (`src/display/drivers/**`) are excluded.
+- The sanitizer build lives in the `[env:native-sanitize]` environment, which
+  mirrors `[env:native]` and adds `-fsanitize=address,undefined`.
+- A working host C/C++ toolchain is required for `pio test -e native*` and the
+  clang-tidy compile DB (e.g. `build-essential` + `clang-tidy` on Linux).
+
 ## Pull Requests
 
 - Keep PRs focused and describe the motivation behind your change.
