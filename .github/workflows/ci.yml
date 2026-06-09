@@ -125,11 +125,12 @@ jobs:
       # (src/display/core/**). Generated UI (src/display/ui) and vendored drivers
       # (src/display/drivers) are excluded by construction (not in the native
       # build) and by .clang-tidy's HeaderFilterRegex.
+      # `pio run -t compiledb` writes compile_commands.json to the PROJECT ROOT.
       - name: Generate native compile database
         run: pio run -e native -t compiledb
       - name: Run clang-tidy over in-scope logic
         run: |
-          DB=.pio/build/native/compile_commands.json
+          DB=compile_commands.json
           if [ ! -f "$DB" ]; then
             echo "compile_commands.json not found at $DB" >&2
             exit 1
@@ -141,8 +142,9 @@ jobs:
           fi
           echo "Linting:"
           echo "$FILES"
-          # -p points clang-tidy at the compile DB so it uses the real flags.
-          # No -warnings-as-errors here: this step reports tidy findings and
-          # gates only on clang-tidy's own non-zero (config/usage) errors. Flip
-          # to gating once the codebase is clean (mirrors the -Werror note).
-          echo "$FILES" | xargs clang-tidy -p .pio/build/native
+          # -p points clang-tidy at the directory holding the compile DB (repo
+          # root) so it uses the real flags. No -warnings-as-errors here: this
+          # step reports tidy findings and gates only on clang-tidy's own
+          # non-zero (config/usage) errors. Flip to gating once the codebase is
+          # clean (mirrors the -Werror note).
+          echo "$FILES" | xargs clang-tidy -p .

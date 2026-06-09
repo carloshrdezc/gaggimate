@@ -1,4 +1,5 @@
 .pio
+compile_commands.json
 env/
 pcb/**/Gaggimate-backups
 pcb/**/*.kicad_sch_old

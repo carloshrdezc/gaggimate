@@ -79,7 +79,7 @@ pio test -e native-sanitize                         # host tests under ASan + UB
 pio check -e display    --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"   # GATING cppcheck
 pio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"                       # GATING cppcheck
 pio run -e native -t compiledb                       # compile DB for clang-tidy
-clang-tidy -p .pio/build/native $(python scripts/select_tidy_sources.py .pio/build/native/compile_commands.json)
+clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 ```
 
 - cppcheck is GATING (the display step lost its old `continue-on-error`).

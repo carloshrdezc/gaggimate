@@ -107,8 +107,8 @@ pio check -e controller  --fail-on-defect=medium -f "-<*>" -f "+<src/controller/
 #     config in .clang-tidy). It runs against the native env's compile database,
 #     which is the only one buildable without the xtensa ESP32 toolchain.
 pio run -e native -t compiledb
-clang-tidy -p .pio/build/native \
-  $(python scripts/select_tidy_sources.py .pio/build/native/compile_commands.json)
+clang-tidy -p . \
+  $(python scripts/select_tidy_sources.py compile_commands.json)
 ```
 
 Notes:
