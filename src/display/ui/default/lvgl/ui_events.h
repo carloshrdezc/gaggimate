@@ -43,6 +43,14 @@ void onProfileSaveAsNew(lv_event_t *e);
 void onStatusScreenTap(lv_event_t *e);
 void onSteamTempLower(lv_event_t *e);
 void onSteamTempRaise(lv_event_t *e);
+// CAR-358: Quick-settings water/steam temp steppers (act on Settings directly).
+void onMenuWaterTempLower(lv_event_t *e);
+void onMenuWaterTempRaise(lv_event_t *e);
+void onMenuSteamTempLower(lv_event_t *e);
+void onMenuSteamTempRaise(lv_event_t *e);
+// CAR-358: C-callable getters for immediate Quick-settings label refresh.
+int gmGetWaterTempSetting(void);
+int gmGetSteamTempSetting(void);
 void onStatusScreenLoad(lv_event_t *e);
 void onBrewCancel(lv_event_t *e);
 void onGrindScreenLoad(lv_event_t *e);
