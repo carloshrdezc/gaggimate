@@ -48,6 +48,12 @@ static lv_obj_t *qs_row_icons[QS_MAX_ROWS] = {NULL};
 static lv_obj_t *qs_row_labels[QS_MAX_ROWS] = {NULL};
 static lv_obj_t *qs_stepper_minus_labels[QS_MAX_STEPPERS] = {NULL};
 static lv_obj_t *qs_stepper_plus_labels[QS_MAX_STEPPERS] = {NULL};
+// CAR-358 review (Codex P2): each stepper's "+" carries a per-mode accent
+// (brew=red, water=blue, steam=gold). Track the "+" button object AND its
+// intended accent so the palette pass restores the mode color per-row instead
+// of overwriting all three with one shared accent.
+static lv_obj_t *qs_stepper_plus_btns[QS_MAX_STEPPERS] = {NULL};
+static lv_color_t qs_stepper_plus_accents[QS_MAX_STEPPERS];
 static lv_obj_t *qs_done_label = NULL; // CAR-358: DONE button text
 static int qs_row_count = 0;
 static int qs_stepper_count = 0;
@@ -193,6 +199,8 @@ static void qs_stepper_row(lv_obj_t *parent, const lv_img_dsc_t *icon, const cha
     if (qs_stepper_count < QS_MAX_STEPPERS) {
         qs_stepper_minus_labels[qs_stepper_count] = minusLab;
         qs_stepper_plus_labels[qs_stepper_count] = plusLab;
+        qs_stepper_plus_btns[qs_stepper_count] = plus;
+        qs_stepper_plus_accents[qs_stepper_count] = accent;
         qs_stepper_count++;
     }
 
@@ -333,6 +341,7 @@ void ui_MenuScreen_screen_destroy(void) {
     for (int i = 0; i < QS_MAX_STEPPERS; i++) {
         qs_stepper_minus_labels[i] = NULL;
         qs_stepper_plus_labels[i] = NULL;
+        qs_stepper_plus_btns[i] = NULL;
     }
     qs_row_count = 0;
     qs_stepper_count = 0;
@@ -350,6 +359,10 @@ void ui_MenuScreen_screen_destroy(void) {
 // every temp value label, and the DONE button — each is a NEW themable widget
 // that would otherwise vanish on the light theme.
 void ui_MenuScreen_apply_palette(lv_color_t text, lv_color_t muted, lv_color_t buttonSurface, lv_color_t accent) {
+    // `accent` no longer used: stepper "+" buttons keep their per-mode accent
+    // (brew=red/water=blue/steam=gold) via qs_stepper_plus_accents. Kept in the
+    // shared signature for the other screens' palette passes. CAR-358.
+    (void)accent;
     if (qs_kicker != NULL && lv_obj_is_valid(qs_kicker)) {
         lv_obj_set_style_text_color(qs_kicker, muted, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
@@ -378,11 +391,14 @@ void ui_MenuScreen_apply_palette(lv_color_t text, lv_color_t muted, lv_color_t b
             lv_obj_set_style_bg_color(minus_btns[i], buttonSurface, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
     }
-    // Stepper "+" button surfaces (accent).
-    lv_obj_t *plus_btns[] = {ui_MenuScreen_brewTempPlus, ui_MenuScreen_waterTempPlus, ui_MenuScreen_steamTempPlus};
-    for (int i = 0; i < (int)(sizeof(plus_btns) / sizeof(plus_btns[0])); i++) {
-        if (plus_btns[i] != NULL && lv_obj_is_valid(plus_btns[i])) {
-            lv_obj_set_style_bg_color(plus_btns[i], accent, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // Stepper "+" button surfaces — restore each row's PER-MODE accent
+    // (brew=red, water=blue, steam=gold), NOT the single shared `accent`.
+    // CAR-358 review (Codex P2): a shared accent here wiped the blue/gold
+    // water/steam cues on every render.
+    for (int i = 0; i < qs_stepper_count; i++) {
+        if (qs_stepper_plus_btns[i] != NULL && lv_obj_is_valid(qs_stepper_plus_btns[i])) {
+            lv_obj_set_style_bg_color(qs_stepper_plus_btns[i], qs_stepper_plus_accents[i],
+                                      LV_PART_MAIN | LV_STATE_DEFAULT);
         }
     }
     // Stepper +/- glyph labels (all rows).
