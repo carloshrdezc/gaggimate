@@ -191,7 +191,7 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_add_event_cb(gm_h.steam_minus, onSteamTempLower, LV_EVENT_CLICKED, NULL);
     lv_obj_t *steam_minus_lbl = lv_label_create(gm_h.steam_minus);
     lv_label_set_text(steam_minus_lbl, "-");
-    lv_obj_set_style_text_font(steam_minus_lbl, &ndot_28, 0);
+    lv_obj_set_style_text_font(steam_minus_lbl, &grotesk_28, 0);
     lv_obj_set_style_text_color(steam_minus_lbl, GM_CONTENT, 0);
     lv_obj_center(steam_minus_lbl);
 
@@ -208,7 +208,7 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_add_event_cb(gm_h.steam_plus, onSteamTempRaise, LV_EVENT_CLICKED, NULL);
     lv_obj_t *steam_plus_lbl = lv_label_create(gm_h.steam_plus);
     lv_label_set_text(steam_plus_lbl, "+");
-    lv_obj_set_style_text_font(steam_plus_lbl, &ndot_28, 0);
+    lv_obj_set_style_text_font(steam_plus_lbl, &grotesk_28, 0);
     lv_obj_set_style_text_color(steam_plus_lbl, GM_CONTENT, 0);
     lv_obj_center(steam_plus_lbl);
 

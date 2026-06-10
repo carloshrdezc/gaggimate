@@ -170,7 +170,7 @@ static void qs_stepper_row(lv_obj_t *parent, const lv_img_dsc_t *icon, const cha
     lv_obj_set_ext_click_area(minus, 12);
     lv_obj_t *minusLab = lv_label_create(minus);
     lv_label_set_text(minusLab, "-");
-    lv_obj_set_style_text_font(minusLab, &ndot_28, 0);
+    lv_obj_set_style_text_font(minusLab, &grotesk_28, 0);
     lv_obj_set_style_text_color(minusLab, GM_CONTENT, 0);
     lv_obj_center(minusLab);
     lv_obj_add_event_cb(minus, minus_cb, LV_EVENT_ALL, NULL);
@@ -191,7 +191,7 @@ static void qs_stepper_row(lv_obj_t *parent, const lv_img_dsc_t *icon, const cha
     lv_obj_set_ext_click_area(plus, 12);
     lv_obj_t *plusLab = lv_label_create(plus);
     lv_label_set_text(plusLab, "+");
-    lv_obj_set_style_text_font(plusLab, &ndot_28, 0);
+    lv_obj_set_style_text_font(plusLab, &grotesk_28, 0);
     lv_obj_set_style_text_color(plusLab, GM_CONTENT, 0);
     lv_obj_center(plusLab);
     lv_obj_add_event_cb(plus, plus_cb, LV_EVENT_ALL, NULL);
