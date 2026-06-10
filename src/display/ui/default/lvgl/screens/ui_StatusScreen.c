@@ -150,6 +150,84 @@ void ui_StatusScreen_screen_init(void) {
     lv_obj_set_style_text_letter_space(pill_label, GM_TRACK_KICKER, 0);
     lv_obj_center(pill_label);
 
+    // ── CAR-358: steam-mode live temp steppers ( [-]  [+] ) ──
+    //
+    // The shared status screen had no on-screen way to change the steam target
+    // temp. These two round buttons call onSteamTempRaise()/onSteamTempLower()
+    // (controller.raiseTemp()/lowerTemp(), which act on the steam setpoint in
+    // MODE_STEAM and persist via Settings::setTargetSteamTemp). The live target
+    // value itself is shown in the metric row's "TARGET" column (driven by
+    // updateStatusScreen) — the steppers flank that readout.
+    //
+    // Visibility is mode-gated in gm_status_apply_mode(): shown only in steam
+    // (mode 2), hidden in brew/water. Positioned at CENTER y=100 — in the band
+    // the linear progress bar occupies in brew/water (the bar is hidden in
+    // steam), clear of the bottom chip bar (which starts ~y=390 on the 480px
+    // round screen). GM_GOLD accent matches the steam mode tint. In steam mode
+    // the READY pill is suppressed (see gm_status_apply_mode) so it never
+    // collides with this row; at-target is conveyed by the filled arc + the
+    // success-green thermo icon instead.
+    gm_h.steam_steppers = lv_obj_create(ui_StatusScreen);
+    lv_obj_remove_style_all(gm_h.steam_steppers);
+    lv_obj_set_size(gm_h.steam_steppers, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(gm_h.steam_steppers, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(gm_h.steam_steppers, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(gm_h.steam_steppers, 28, 0);
+    lv_obj_align(gm_h.steam_steppers, LV_ALIGN_CENTER, 0, 100);
+    lv_obj_clear_flag(gm_h.steam_steppers, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(gm_h.steam_steppers, LV_OBJ_FLAG_HIDDEN); // brew is the init mode
+
+    gm_h.steam_minus = lv_btn_create(gm_h.steam_steppers);
+    lv_obj_remove_style_all(gm_h.steam_minus);
+    lv_obj_set_size(gm_h.steam_minus, 52, 52);
+    lv_obj_set_style_radius(gm_h.steam_minus, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(gm_h.steam_minus, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(gm_h.steam_minus, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(gm_h.steam_minus, 1, 0);
+    lv_obj_set_style_border_color(gm_h.steam_minus, GM_GOLD, 0);
+    lv_obj_set_style_border_opa(gm_h.steam_minus, LV_OPA_COVER, 0);
+    lv_obj_set_ext_click_area(gm_h.steam_minus, 12);
+    lv_obj_add_event_cb(gm_h.steam_minus, onSteamTempLower, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *steam_minus_lbl = lv_label_create(gm_h.steam_minus);
+    lv_label_set_text(steam_minus_lbl, "-");
+    lv_obj_set_style_text_font(steam_minus_lbl, &grotesk_28, 0);
+    lv_obj_set_style_text_color(steam_minus_lbl, GM_CONTENT, 0);
+    lv_obj_center(steam_minus_lbl);
+
+    gm_h.steam_plus = lv_btn_create(gm_h.steam_steppers);
+    lv_obj_remove_style_all(gm_h.steam_plus);
+    lv_obj_set_size(gm_h.steam_plus, 52, 52);
+    lv_obj_set_style_radius(gm_h.steam_plus, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(gm_h.steam_plus, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(gm_h.steam_plus, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(gm_h.steam_plus, 1, 0);
+    lv_obj_set_style_border_color(gm_h.steam_plus, GM_GOLD, 0);
+    lv_obj_set_style_border_opa(gm_h.steam_plus, LV_OPA_COVER, 0);
+    lv_obj_set_ext_click_area(gm_h.steam_plus, 12);
+    lv_obj_add_event_cb(gm_h.steam_plus, onSteamTempRaise, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *steam_plus_lbl = lv_label_create(gm_h.steam_plus);
+    lv_label_set_text(steam_plus_lbl, "+");
+    lv_obj_set_style_text_font(steam_plus_lbl, &grotesk_28, 0);
+    lv_obj_set_style_text_color(steam_plus_lbl, GM_CONTENT, 0);
+    lv_obj_center(steam_plus_lbl);
+
+    // ── CAR-358: water-mode "TAP TO DISPENSE" affordance hint ──
+    //
+    // Water dispense is tap-anywhere-to-toggle by design (CAR-292,
+    // onStatusScreenTap). This label just makes that discoverable — it is NOT a
+    // button (the screen body remains the control). Mode-gated to MODE_WATER in
+    // gm_status_apply_mode(). Sits at CENTER y=134 — just below the dispense
+    // progress bar (y=100) and clear of the bottom chip bar (~y=390). GM_BLUE
+    // matches the water mode tint.
+    gm_h.water_hint = lv_label_create(ui_StatusScreen);
+    lv_label_set_text(gm_h.water_hint, "TAP TO DISPENSE");
+    lv_obj_set_style_text_font(gm_h.water_hint, &spacemono_14, 0);
+    lv_obj_set_style_text_color(gm_h.water_hint, GM_BLUE, 0);
+    lv_obj_set_style_text_letter_space(gm_h.water_hint, GM_TRACK_KICKER, 0);
+    lv_obj_align(gm_h.water_hint, LV_ALIGN_CENTER, 0, 134);
+    lv_obj_add_flag(gm_h.water_hint, LV_OBJ_FLAG_HIDDEN); // brew is the init mode
+
     // ── Bottom mode chip bar ──
     gm_chip_bar(ui_StatusScreen, 1, GM_RED); // brew chip lit by default
     // Wire tap navigation. chip0=Menu, chip1=Brew, chip2=Steam, chip3=Water.
@@ -186,6 +264,11 @@ void ui_StatusScreen_screen_destroy(void) {
     gm_h.w_target = gm_h.w_temp = gm_h.w_flow = NULL;
     gm_h.pill = NULL;
     gm_h.bar = NULL;
+    // CAR-358: steam steppers + water hint owned by this screen.
+    gm_h.steam_steppers = NULL;
+    gm_h.steam_minus = NULL;
+    gm_h.steam_plus = NULL;
+    gm_h.water_hint = NULL;
     // Status bar handle (owned by this screen while active).
     //
     // History: a plain unguarded `gm_h.status_time = NULL;` was added here

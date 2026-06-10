@@ -332,7 +332,10 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_text_color(uic_BrewScreen_hero_value, GM_CONTENT, 0);
     // Shift left by ~half the unit-suffix width so hero+unit read as a
     // visually-centered group (mirrors StatusScreen hero pattern).
-    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -10);
+    // CAR-358: lifted from y=-10 to y=-44 so the ndot_150 numeral's descender
+    // band clears the status pill / ratio line below and, crucially, the
+    // full-width START SHOT pill that appears at-target (was overlapping).
+    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -16, -44);
     bs_track_text(uic_BrewScreen_hero_value);
 
     uic_BrewScreen_hero_unit = lv_label_create(ui_BrewScreen_contentPanel4);
@@ -365,7 +368,10 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_pad_right(uic_BrewScreen_status_pill, 24, 0);
     lv_obj_set_style_pad_top(uic_BrewScreen_status_pill, 8, 0);
     lv_obj_set_style_pad_bottom(uic_BrewScreen_status_pill, 8, 0);
-    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_CENTER, 0, 90);
+    // CAR-358: nudged up (90 -> 64) with the hero lift so the stack
+    // hero / pill / ratio compresses upward and leaves room for the START SHOT
+    // pill near the bottom edge without collision.
+    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_CENTER, 0, 64);
     lv_obj_clear_flag(uic_BrewScreen_status_pill, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(uic_BrewScreen_status_pill, LV_OBJ_FLAG_CLICKABLE);
     bs_track_button_surface(uic_BrewScreen_status_pill);
@@ -390,7 +396,9 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_text_font(uic_BrewScreen_ratio_sub, &spacemono_14, 0);
     lv_obj_set_style_text_color(uic_BrewScreen_ratio_sub, GM_MUTED, 0);
     lv_obj_set_style_text_letter_space(uic_BrewScreen_ratio_sub, 1, 0);
-    lv_obj_align(uic_BrewScreen_ratio_sub, LV_ALIGN_CENTER, 0, 130);
+    // CAR-358: ratio sub nudged up (130 -> 100) with the hero/pill lift so it
+    // sits clear above the START SHOT pill.
+    lv_obj_align(uic_BrewScreen_ratio_sub, LV_ALIGN_CENTER, 0, 100);
     bs_track_text(uic_BrewScreen_ratio_sub);
 
     // controlContainer: column flex hosting profileInfo + adjustments + start area.
@@ -678,7 +686,12 @@ void ui_BrewScreen_screen_init(void) {
     lv_obj_set_style_radius(ui_BrewScreen_startButton, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui_BrewScreen_startButton, GM_RED, 0);
     lv_obj_set_style_bg_opa(ui_BrewScreen_startButton, LV_OPA_COVER, 0);
-    lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -54);
+    // CAR-358: dropped from -54 to -14 (near the bottom safe-zone edge) so the
+    // pill no longer overlaps the hero numeral / ratio line above it. Paired
+    // with the hero/pill/ratio upward lift. Only shown in the Brew sub-state
+    // (DefaultUI toggles HIDDEN per BrewScreenState); the Settings sub-state
+    // save/accept trio uses its own BOTTOM_MID offsets and is unaffected.
+    lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -14);
     lv_obj_set_ext_click_area(ui_BrewScreen_startButton, 16);
     lv_obj_add_event_cb(ui_BrewScreen_startButton, ui_event_BrewScreen_startButton,
                         LV_EVENT_ALL, NULL);

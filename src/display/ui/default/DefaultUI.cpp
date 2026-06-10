@@ -905,6 +905,19 @@ void DefaultUI::setupReactive() {
                               if (lv_obj_is_valid(ui_MenuScreen_brewTempValue)) {
                                   lv_label_set_text_fmt(ui_MenuScreen_brewTempValue, "%d", targetTemp);
                               }
+                              // CAR-358: seed/refresh the WATER + STEAM temp readouts from the
+                              // persisted Settings values. These are not reactive signals, so this
+                              // effect re-seeds them on every screen (re)activation (and on the
+                              // targetTemp dep below); the stepper handlers themselves persist the
+                              // change and the next render re-reads here.
+                              if (lv_obj_is_valid(ui_MenuScreen_waterTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_waterTempValue, "%d",
+                                                        controller->getSettings().getTargetWaterTemp());
+                              }
+                              if (lv_obj_is_valid(ui_MenuScreen_steamTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_steamTempValue, "%d",
+                                                        controller->getSettings().getTargetSteamTemp());
+                              }
                           },
                           &targetTemp);
     // CAR-278: target temp surfaces on the status screen via the steam-mode
@@ -1275,7 +1288,14 @@ void DefaultUI::setupReactive() {
                     // -26 so its bottom sits at ~+55, and drop START SHOT to -70 (top
                     // ~+60) so the two never share the band. This also widens the
                     // heating-state gap to the HEATING pill (top ~+94).
-                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -26);
+                    // CAR-358: at -26 the ndot_180 hero bottom (~+55 in the 372
+                    // panel) sat only ~5px above the at-target START SHOT button
+                    // (BOTTOM_MID -70 => top ~+60) — close enough that the dot-
+                    // matrix descenders visually touched the pill. Raise the hero
+                    // center to -40 (bottom ~+41) to open a clean ~19px gap above
+                    // START SHOT, and keep clearance to the heating HEATING pill
+                    // (BOTTOM_MID -52 => top ~+92).
+                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -40);
                     if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit)) {
                         lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
                                         LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -16);
