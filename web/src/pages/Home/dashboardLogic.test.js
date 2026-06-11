@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   MODE_GRIND,
   MODE_MANUAL,
+  MODE_STANDBY,
   MODE_STEAM,
   clampManualFlow,
   clampManualPressure,
@@ -223,5 +224,13 @@ test('stop steam changes mode to standby and clears process tracking', () => {
   assert.equal(state.label, 'STOP STEAM');
   assert.equal(state.action, 'change-mode');
   assert.equal(state.mode, 0);
+  assert.equal(state.processKind, null);
+});
+
+test('standby primary action wakes the machine into brew', () => {
+  const state = getPrimaryActionState({ active: false, finished: false, mode: MODE_STANDBY });
+  assert.equal(state.label, 'WAKE');
+  assert.equal(state.action, 'start-process');
+  assert.equal(state.accent, 'var(--dm-accent)');
   assert.equal(state.processKind, null);
 });
