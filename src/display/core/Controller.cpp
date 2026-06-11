@@ -915,6 +915,13 @@ void Controller::updateControl() {
 void Controller::activate() {
     if (isActiveSafe())
         return;
+    // Web/remote activate() while asleep mirrors the physical brew button's
+    // first press: wake into BREW (boiler starts heating). A second activate()
+    // then starts the shot. See handleBrewButton() MODE_STANDBY case.
+    if (mode == MODE_STANDBY) {
+        deactivateStandby();
+        return;
+    }
     clear();
     // Tare + settle is only meaningful for modes that consume scale/volumetric
     // data. Steam and water modes have no scale and no volumetric phase, so
