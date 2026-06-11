@@ -98,6 +98,9 @@ class Controller {
     bool isAutotuning() const;
     bool isReady() const;
     bool isVolumetricAvailable() const;
+    // True when the active shot's volumetric source is still delivering usable
+    // measurements (CAR-367 duration-cap suppression gate). See definition.
+    bool isActiveVolumetricSourceLive() const;
     bool isSDCard() const { return sdcard; }
     virtual float getTargetPressure() const;
     virtual float getTargetFlow() const;
