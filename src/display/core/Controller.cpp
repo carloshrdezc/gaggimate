@@ -327,7 +327,7 @@ void Controller::loop() {
                     auto brewProcess = static_cast<BrewProcess *>(currentProcess);
                     brewProcess->updatePressure(pressure);
                     brewProcess->updateFlow(currentPumpFlow);
-                    brewProcess->setVolumetricAvailable(isVolumetricAvailable());
+                    brewProcess->setVolumetricAvailable(isActiveVolumetricSourceLive());
                 }
                 currentProcess->progress();
                 bool stillActive = currentProcess->isActive();
@@ -395,6 +395,29 @@ bool Controller::isVolumetricAvailable() const {
 #else
     return isBluetoothScaleHealthy();
 #endif
+}
+
+// True when the volumetric source that the *active* shot is actually consuming
+// is still delivering usable measurements. This is the correct signal for the
+// CAR-367 duration-cap suppression gate, NOT isVolumetricAvailable():
+// onVolumetricMeasurement() rejects any measurement whose source != the latched
+// currentVolumetricSource (Controller.cpp), so once a shot starts on BLUETOOTH
+// it only consumes BLE weights for its lifetime. Under NIGHTLY_BUILD on a
+// dimming-capable controller, isVolumetricAvailable() returns true even with a
+// dead scale (flow-estimation capability), but the BLE-sourced shot's currentVolume
+// would go stale — leaving suppression on and running to BREW_SAFETY_DURATION_MS.
+// Gate on the health of the active source instead: BLUETOOTH needs a healthy
+// scale; FLOW_ESTIMATION is always live; INACTIVE is not volumetric.
+bool Controller::isActiveVolumetricSourceLive() const {
+    switch (currentVolumetricSource) {
+    case VolumetricMeasurementSource::BLUETOOTH:
+        return isBluetoothScaleHealthy();
+    case VolumetricMeasurementSource::FLOW_ESTIMATION:
+        return true;
+    case VolumetricMeasurementSource::INACTIVE:
+    default:
+        return false;
+    }
 }
 
 void Controller::autotune(int testTime, int samples) {
