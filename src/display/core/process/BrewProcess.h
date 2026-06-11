@@ -70,8 +70,15 @@ class BrewProcess : public Process {
             volume = currentVolume + predictedAddedVolume;
         }
         float timeInPhase = static_cast<float>(millis() - currentPhaseStarted) / 1000.0f;
+        // CAR-367: only the profile's terminal volumetric phase may treat its
+        // volumetric target as the authoritative stop and ignore its duration
+        // cap. Intermediate volumetric phases keep their duration cap so they
+        // still advance on time (see Phase::isFinished + PR #172 review).
+        bool suppressDurationForVolumetric =
+            target == ProcessTarget::VOLUMETRIC &&
+            static_cast<int>(phaseIndex) == profile.indexOfFinalVolumetricPhase();
         return currentPhase.isFinished(target == ProcessTarget::VOLUMETRIC, volume, timeInPhase, currentFlow, currentPressure,
-                                       waterPumped, profile.type);
+                                       waterPumped, suppressDurationForVolumetric);
     }
 
     bool isUtility() const { return profile.utility; }
