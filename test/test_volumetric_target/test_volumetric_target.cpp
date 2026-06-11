@@ -294,6 +294,26 @@ void test_zero_value_volumetric_target_ignored(void) {
     TEST_ASSERT_TRUE(p.isFinished(true, 0.0f, 6.0f, 0.0f, 0.0f, 0.0f, true));
 }
 
+// REGRESSION (PR #172 review, Codex P1): scale lost MID-SHOT must restore the
+// duration cap on the terminal volumetric phase. BrewProcess::target is latched
+// to ProcessTarget::VOLUMETRIC at construction and never updated, so before the
+// fix suppressDurationForVolumetric stayed true after the scale went unhealthy
+// and the pump ran to the 300 s BREW_SAFETY_DURATION_MS ceiling instead of the
+// configured phase duration. The fix threads Controller::isVolumetricAvailable()
+// into BrewProcess each tick and ANDs it into suppressDurationForVolumetric, so
+// when live volumetric availability is lost the Controller now computes
+// suppressDurationForVolumetric=FALSE. We model that post-scale-loss path here
+// by passing suppress=false on the terminal volumetric phase: it must fall back
+// to its duration cap (still bounded by BREW_SAFETY_DURATION_MS as before).
+void test_scale_lost_restores_duration_cap(void) {
+    Phase p = makeProDeclinePhase(42.0f, 20.0f); // terminal volumetric phase, 20 s cap
+    // Scale lost -> Controller passes volumetricAvailable=false -> suppress=false.
+    // Past the 20 s duration with weight (30 g) below the 42 g target: STOP on time.
+    TEST_ASSERT_TRUE(p.isFinished(true, 30.0f, 25.0f, 0.0f, 0.0f, 0.0f, /*suppress=*/false));
+    // Within the duration cap it keeps running (no stale weight has reached target).
+    TEST_ASSERT_FALSE(p.isFinished(true, 30.0f, 19.0f, 0.0f, 0.0f, 0.0f, false));
+}
+
 static int runVolumetricTargetTests() {
     UNITY_BEGIN();
     RUN_TEST(test_set_volumetric_target_single_brew_phase);
@@ -311,6 +331,7 @@ static int runVolumetricTargetTests() {
     RUN_TEST(test_pro_multi_target_phase_other_targets_still_fire);
     RUN_TEST(test_non_volumetric_phase_honours_duration_when_volumetric_enabled);
     RUN_TEST(test_zero_value_volumetric_target_ignored);
+    RUN_TEST(test_scale_lost_restores_duration_cap);
     return UNITY_END();
 }
 

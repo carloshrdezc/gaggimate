@@ -327,6 +327,7 @@ void Controller::loop() {
                     auto brewProcess = static_cast<BrewProcess *>(currentProcess);
                     brewProcess->updatePressure(pressure);
                     brewProcess->updateFlow(currentPumpFlow);
+                    brewProcess->setVolumetricAvailable(isVolumetricAvailable());
                 }
                 currentProcess->progress();
                 bool stillActive = currentProcess->isActive();
