@@ -100,7 +100,8 @@ struct Phase {
                 if (target.value <= 0.0f) {
                     break;
                 }
-                volumetricTested = enableVolumetric;
+                // OR-accumulate: a phase may carry >1 volumetric target; don't let a later case clobber a positive result.
+                volumetricTested = volumetricTested || enableVolumetric;
                 if (enableVolumetric && target.isReached(volume)) {
                     return true;
                 }
@@ -204,6 +205,9 @@ struct Profile {
 
     float getTotalVolume() const {
         float volume = 0.0;
+        // Last-wins: deliberately returns the LAST volumetric phase's value (overwrite per
+        // iteration). indexOfFinalVolumetricPhase() depends on this contract — the two must
+        // stay in lockstep if phase-ordering assumptions change.
         for (const auto &phase : phases) {
             if (phase.hasVolumetricTarget()) {
                 volume = phase.getVolumetricTarget().value;

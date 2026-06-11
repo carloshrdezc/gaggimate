@@ -408,6 +408,8 @@ bool Controller::isVolumetricAvailable() const {
 // would go stale — leaving suppression on and running to BREW_SAFETY_DURATION_MS.
 // Gate on the health of the active source instead: BLUETOOTH needs a healthy
 // scale; FLOW_ESTIMATION is always live; INACTIVE is not volumetric.
+// Depends on the cross-shot invariant that currentVolumetricSource is reset to
+// INACTIVE in clear() between shots, so a stale BLUETOOTH source can't leak in.
 bool Controller::isActiveVolumetricSourceLive() const {
     switch (currentVolumetricSource) {
     case VolumetricMeasurementSource::BLUETOOTH:
