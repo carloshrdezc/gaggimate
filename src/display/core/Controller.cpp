@@ -915,6 +915,20 @@ void Controller::updateControl() {
 void Controller::activate() {
     if (isActiveSafe())
         return;
+    // Any activate() call while in standby (web/remote req:process:activate,
+    // or the LVGL onBrewStart path) mirrors the physical brew button's first
+    // press: wake into BREW (boiler starts heating). A second activate() then
+    // starts the shot. See handleBrewButton() MODE_STANDBY case.
+    //
+    // Not covered by a native unit test: the host test env (build_src_filter)
+    // compiles only test/native/* + PluginManager.cpp, and a real Controller
+    // pulls in SD_MMC/SPIFFS/BLE/LVGL/FreeRTOS + ~10 plugins, which the harness
+    // does not shim. This guard is exercised by the firmware compile in CI and
+    // is symmetric with the handleBrewButton() standby case above.
+    if (mode == MODE_STANDBY) {
+        deactivateStandby();
+        return;
+    }
     clear();
     // Tare + settle is only meaningful for modes that consume scale/volumetric
     // data. Steam and water modes have no scale and no volumetric phase, so
