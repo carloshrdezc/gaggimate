@@ -40,8 +40,11 @@ class GrinderManager {
     std::vector<String> listGrinders();
 
     // Records `name` as the most-recently-used grinder, deduplicating
-    // case-insensitively and capping the list. Returns false if the name is
-    // empty/blank or too long (in which case nothing is written).
+    // case-insensitively and capping the list. Returns false only on a write
+    // failure; an empty/blank or oversized name is skipped and still returns
+    // true (it delegates to recordGrinders, whose all-skipped input is a no-op,
+    // not an error). Callers must not branch on the return value to detect a
+    // rejected name.
     bool recordGrinder(const String &name);
 
     // Records multiple names in one locked read-modify-write. Names are

@@ -33,9 +33,21 @@ function makeDevice({ initial = [], cap = 50 } = {}) {
   const saves = [];
 
   const merge = names => {
+    // Pre-dedup the batch case-insensitively keeping the FIRST occurrence's
+    // casing/position — matching the firmware's recordGrinders() (which dedups
+    // the batch before prepending). Then apply per-name "remove existing match,
+    // prepend" so the last surviving element ends up front-most.
+    const seen = new Set();
+    const deduped = [];
     for (const raw of names) {
       const name = String(raw || '').trim();
       if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(name);
+    }
+    for (const name of deduped) {
       list = [name, ...list.filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, cap);
     }
     return list.slice();
