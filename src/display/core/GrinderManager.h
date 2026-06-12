@@ -4,6 +4,8 @@
 
 #include <ArduinoJson.h>
 #include <FS.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <vector>
 
 // Maximum number of grinder names retained on the device. Grinder names are
@@ -46,8 +48,22 @@ class GrinderManager {
     fs::FS *_fs;
     String _path;
 
+    // Serializes the read-modify-write of the grinder file. recordGrinder() is
+    // reachable from two concurrent FreeRTOS contexts (the AsyncWebServer/local
+    // WebSocket callback and the cloud-relay task `relayLoopTask`, pinned to a
+    // different core), so an unguarded read-modify-write could last-write-wins
+    // drop a name or let a read observe a torn/truncated file mid-write.
+    SemaphoreHandle_t _mutex = nullptr;
+
     bool ensureDirectory() const;
     bool writeGrinders(const std::vector<String> &grinders);
+
+    // Reads and parses the grinder file WITHOUT taking _mutex. Callers must hold
+    // _mutex (or accept being lock-free when creation failed). recordGrinder()
+    // calls this directly so it can take _mutex exactly once and avoid the
+    // self-deadlock that nesting locks through the public listGrinders() would
+    // cause with a non-recursive mutex.
+    std::vector<String> listGrindersUnlocked();
 };
 
 #endif // GRINDERMANAGER_H

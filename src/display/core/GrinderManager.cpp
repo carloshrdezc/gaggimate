@@ -1,10 +1,22 @@
 #include "GrinderManager.h"
 
+#include <esp_log.h>
 #include <utility>
 
 GrinderManager::GrinderManager(fs::FS *fs, String path) : _fs(fs), _path(std::move(path)) {}
 
-void GrinderManager::setup() { ensureDirectory(); }
+void GrinderManager::setup() {
+    ensureDirectory();
+    if (_mutex == nullptr) {
+        _mutex = xSemaphoreCreateMutex();
+        if (_mutex == nullptr) {
+            // Out of memory creating the mutex: degrade gracefully. Public
+            // methods proceed without locking rather than crashing; the only
+            // downside is the original (pre-fix) last-write-wins race.
+            ESP_LOGE("GrinderManager", "Failed to create grinder mutex; proceeding without locking");
+        }
+    }
+}
 
 bool GrinderManager::ensureDirectory() const {
     // The grinder list lives at e.g. "/g/grinders.json"; make sure the parent
@@ -21,6 +33,17 @@ bool GrinderManager::ensureDirectory() const {
 }
 
 std::vector<String> GrinderManager::listGrinders() {
+    if (_mutex == nullptr) {
+        // Mutex creation failed (logged once in setup()): operate lock-free.
+        return listGrindersUnlocked();
+    }
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    std::vector<String> grinders = listGrindersUnlocked();
+    xSemaphoreGive(_mutex);
+    return grinders;
+}
+
+std::vector<String> GrinderManager::listGrindersUnlocked() {
     std::vector<String> grinders;
     File file = _fs->open(_path, "r");
     if (!file) {
@@ -60,7 +83,16 @@ bool GrinderManager::recordGrinder(const String &name) {
         return false;
     }
 
-    std::vector<String> grinders = listGrinders();
+    // Hold the lock across the ENTIRE read-modify-write so a concurrent caller
+    // (local WebSocket callback vs. relay task on the other core) can't drop a
+    // name via last-write-wins, and so no listGrinders() can observe the file
+    // mid-truncate. Use the unlocked read helper to avoid re-taking _mutex.
+    const bool locked = (_mutex != nullptr);
+    if (locked) {
+        xSemaphoreTake(_mutex, portMAX_DELAY);
+    }
+
+    std::vector<String> grinders = listGrindersUnlocked();
 
     // Remove any existing entry matching case-insensitively so the freshly
     // recorded name (with its current casing) moves to the front.
@@ -82,7 +114,12 @@ bool GrinderManager::recordGrinder(const String &name) {
         grinders.resize(GRINDER_LIST_MAX);
     }
 
-    return writeGrinders(grinders);
+    bool ok = writeGrinders(grinders);
+
+    if (locked) {
+        xSemaphoreGive(_mutex);
+    }
+    return ok;
 }
 
 bool GrinderManager::writeGrinders(const std::vector<String> &grinders) {
