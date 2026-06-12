@@ -2,6 +2,7 @@
 #include <DNSServer.h>
 #include <SPIFFS.h>
 #include <display/core/Controller.h>
+#include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -80,6 +81,7 @@ static String normalizeChannel(const String &channel);
 void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) {
     this->controller = _controller;
     this->beanManager = _controller->getBeanManager();
+    this->grinderManager = _controller->getGrinderManager();
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
@@ -565,6 +567,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         handleProfileRequest(clientId, doc);
     } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
         handleBeanRequest(clientId, doc);
+    } else if (msgType.startsWith("req:grinders:")) {
+        handleGrinderRequest(clientId, doc);
     } else if (msgType == "req:ota-settings") {
         handleOTASettings(clientId, doc);
     } else if (msgType == "req:ota-start") {
@@ -892,6 +896,32 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
         }
         if (!beanManager->deleteBean(id)) {
             response["error"] = F("Delete failed");
+        }
+    }
+
+    sendResponse(clientId, response);
+}
+
+void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request) {
+    JsonDocument response;
+    auto type = request["tp"].as<String>();
+    response["tp"] = String("res:") + type.substring(4);
+    response["rid"] = request["rid"].as<String>();
+
+    if (type == "req:grinders:list") {
+        auto arr = response["grinders"].to<JsonArray>();
+        for (const auto &name : grinderManager->listGrinders()) {
+            arr.add(name);
+        }
+    } else if (type == "req:grinders:save") {
+        auto name = request["name"].as<String>();
+        if (!grinderManager->recordGrinder(name)) {
+            response["error"] = F("Save failed");
+        } else {
+            auto arr = response["grinders"].to<JsonArray>();
+            for (const auto &grinder : grinderManager->listGrinders()) {
+                arr.add(grinder);
+            }
         }
     }
 

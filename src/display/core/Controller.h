@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
+#include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
 
@@ -137,6 +138,7 @@ class Controller {
     ProcessSnapshot getProcessSnapshot() const;
     Settings &getSettings() { return settings; }
     BeanManager *getBeanManager() { return beanManager; }
+    GrinderManager *getGrinderManager() { return grinderManager; }
     ProfileManager *getProfileManager() { return profileManager; }
 #ifndef GAGGIMATE_HEADLESS
     DefaultUI *getUI() const { return ui; }
@@ -220,6 +222,7 @@ class Controller {
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
+    GrinderManager *grinderManager{};
     ProfileManager *profileManager{};
 
     int mode = MODE_BREW;
