@@ -97,9 +97,21 @@ async function listDeviceGrinders(apiService) {
   return sanitizeList(response?.grinders);
 }
 
+// Push a single name to the device and return the resulting device list.
+async function saveDeviceGrinder(apiService, name) {
+  const response = await requestGrinders(apiService, { tp: 'req:grinders:save', name });
+  return sanitizeList(response?.grinders);
+}
+
 /**
  * Returns the saved grinder names, most-recently-used first. Prefers the
  * device list when connected, otherwise falls back to localStorage.
+ *
+ * On the first connected call, any names that were recorded offline (and so
+ * live only in localStorage) are migrated to the device before the local cache
+ * is overwritten — otherwise reconnecting against an empty/partial device list
+ * would permanently discard those offline suggestions. This mirrors the bean
+ * migration flow in beanManager.js.
  */
 export async function listGrinders(apiService) {
   const legacyGrinders = listLegacyGrinders();
@@ -108,7 +120,25 @@ export async function listGrinders(apiService) {
   }
 
   try {
-    const deviceGrinders = await listDeviceGrinders(apiService);
+    let deviceGrinders = await listDeviceGrinders(apiService);
+
+    // Migrate any local-only entries (recorded while offline) to the device so
+    // they aren't lost when the cache is refreshed below. Idempotent: once
+    // synced, local names are a subset of the device list and nothing is sent.
+    const deviceKeys = new Set(deviceGrinders.map(normalize));
+    const localOnly = legacyGrinders.filter(name => !deviceKeys.has(normalize(name)));
+    if (localOnly.length) {
+      // Push oldest-first so the most-recently-used local entry ends up nearest
+      // the front of the device list after each save promotes it.
+      for (const name of [...localOnly].reverse()) {
+        try {
+          deviceGrinders = await saveDeviceGrinder(apiService, name);
+        } catch {
+          // Best-effort migration; keep whatever the device last returned.
+        }
+      }
+    }
+
     // Keep the local cache fresh so suggestions appear instantly next load.
     saveLegacyGrinders(deviceGrinders);
     return deviceGrinders;

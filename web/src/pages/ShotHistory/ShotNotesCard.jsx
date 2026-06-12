@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext, useCallback } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { ApiServiceContext } from '../../services/ApiService.js';
+import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
@@ -39,6 +39,10 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const [availableGrinders, setAvailableGrinders] = useState([]);
   const beanFieldListId = `bean-options-${notesKey}`;
   const grinderFieldListId = `grinder-options-${notesKey}`;
+  // Reactive WebSocket connection flag; flips true once the device sends its
+  // first status frame. Used to re-pull device-persisted grinders for cards
+  // that mounted before the socket opened.
+  const isConnected = machine.value.connected;
 
   // Calculate ratio function
   const calculateRatio = useCallback((doseIn, doseOut) => {
@@ -182,7 +186,11 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
       cancelled = true;
       window.removeEventListener('grinders-library-changed', handleGrindersChanged);
     };
-  }, [apiService]);
+    // Re-run when the socket connects: apiService is a stable singleton, so
+    // without the reactive `connected` flag a card mounted before the
+    // WebSocket opened would only ever show the local cache and never pull the
+    // device-persisted grinders until remounted.
+  }, [apiService, isConnected]);
 
   useEffect(() => {
     if (!availableBeans.length || notes.beanId || !notes.beanType) return;
