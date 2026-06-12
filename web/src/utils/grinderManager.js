@@ -36,6 +36,14 @@ function writeJson(key, value) {
   }
 }
 
+// Notify any other mounted ShotNotesCards so their datalist refreshes when a
+// grinder is recorded elsewhere (mirrors beanManager's beans-library-changed).
+function dispatchGrindersChanged(grinders) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('grinders-library-changed', { detail: grinders }));
+  }
+}
+
 // Sanitize an arbitrary array into a clean, deduped, capped grinder list.
 function sanitizeList(input) {
   const seen = new Set();
@@ -123,6 +131,7 @@ export async function recordGrinder(apiService, name) {
   saveLegacyGrinders(nextLegacy);
 
   if (!hasConnectedApi(apiService)) {
+    dispatchGrindersChanged(nextLegacy);
     return nextLegacy;
   }
 
@@ -133,8 +142,10 @@ export async function recordGrinder(apiService, name) {
     });
     const deviceGrinders = sanitizeList(response?.grinders);
     saveLegacyGrinders(deviceGrinders);
+    dispatchGrindersChanged(deviceGrinders);
     return deviceGrinders;
   } catch {
+    dispatchGrindersChanged(nextLegacy);
     return nextLegacy;
   }
 }

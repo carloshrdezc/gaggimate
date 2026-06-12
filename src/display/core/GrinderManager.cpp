@@ -44,6 +44,11 @@ std::vector<String> GrinderManager::listGrinders() {
         if (!name.isEmpty()) {
             grinders.push_back(name);
         }
+        // Cap defensively on read in case the file was hand-edited beyond the
+        // write-time limit; recordGrinder() always caps on write.
+        if (grinders.size() >= GRINDER_LIST_MAX) {
+            break;
+        }
     }
     return grinders;
 }

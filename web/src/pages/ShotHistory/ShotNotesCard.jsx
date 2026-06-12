@@ -172,8 +172,15 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     };
 
     loadGrinders();
+
+    const handleGrindersChanged = () => {
+      loadGrinders();
+    };
+
+    window.addEventListener('grinders-library-changed', handleGrindersChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener('grinders-library-changed', handleGrindersChanged);
     };
   }, [apiService]);
 
