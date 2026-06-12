@@ -139,6 +139,12 @@ function clearPendingGrinder(name) {
   savePendingGrinders(next);
 }
 
+// Clear the entire pending set. Used after a successful batch migration, where
+// the device's returned list is authoritative for everything we could sync.
+function clearAllPendingGrinders() {
+  savePendingGrinders([]);
+}
+
 // Move `name` to the front of the list, deduplicating case-insensitively.
 function promote(grinders, name) {
   const trimmed = String(name || '').trim();
@@ -168,9 +174,12 @@ async function listDeviceGrinders(apiService) {
   return sanitizeList(response?.grinders);
 }
 
-// Push a single name to the device and return the resulting device list.
-async function saveDeviceGrinder(apiService, name) {
-  const response = await requestGrinders(apiService, { tp: 'req:grinders:save', name });
+// Push one or more names to the device in a single request and return the
+// canonical list the device produces. The device owns the merge/dedup/cap, so
+// the client never has to model eviction. `names` is sent oldest-first so the
+// most-recently-used entry ends up nearest the front of the device list.
+async function saveDeviceGrinders(apiService, names) {
+  const response = await requestGrinders(apiService, { tp: 'req:grinders:save', names });
   return sanitizeList(response?.grinders);
 }
 
@@ -178,17 +187,14 @@ async function saveDeviceGrinder(apiService, name) {
  * Returns the saved grinder names, most-recently-used first. Prefers the
  * device list when connected, otherwise falls back to localStorage.
  *
- * On a connected call, only names recorded *offline* (tracked in the pending
- * set) are migrated to the device before the local cache is refreshed —
- * otherwise reconnecting against an empty/partial device list would discard
- * those offline-only suggestions. Crucially, stale cache entries that the
- * device has simply evicted are NOT treated as offline writes, so opening Shot
- * Notes from two browsers can no longer churn the shared list back and forth.
- *
- * Each pending name is cleared only once its device save succeeds. A save that
- * fails (socket drop / device write error) leaves the name pending and keeps it
- * in the local cache so it can be retried on a later connected call instead of
- * being permanently lost. This mirrors the offline/sync intent of beanManager.
+ * On a connected call, any names recorded *offline* (tracked in the pending
+ * set) are migrated to the device in ONE batch save. The device performs the
+ * merge/dedup/cap and returns the canonical list — the client does not model
+ * which entry the cap evicts, which removes the whole class of eviction bugs.
+ * On success the entire pending set is cleared and the cache is replaced with
+ * the device's list. If the batch fails (socket drop / device error) the
+ * pending names are kept (and merged on top of the cache) so they survive and
+ * are retried on the next connected call.
  */
 export async function listGrinders(apiService) {
   const legacyGrinders = listLegacyGrinders();
@@ -197,57 +203,34 @@ export async function listGrinders(apiService) {
   }
 
   try {
-    let deviceGrinders = await listDeviceGrinders(apiService);
-
-    // Migrate genuinely-unsynced offline additions to the device. We only
-    // touch names in the pending set (populated by recordGrinder's offline
-    // branch); a name already present on the device needs no save. Idempotent
-    // and churn-free.
     const pending = listPendingGrinders();
-    if (pending.length) {
-      let deviceKeys = new Set(deviceGrinders.map(normalize));
-      // Push oldest-first so the most-recently-used pending entry ends up
-      // nearest the front of the device list after each save promotes it.
-      for (const name of [...pending].reverse()) {
-        // Skip a save only if the name is already on the device; do NOT clear
-        // it from pending yet. The device list is capped (most-recent-first),
-        // so a *later* save in this same loop can evict an entry that looked
-        // present here. We defer all pending bookkeeping until after the loop
-        // and reconcile against the final device list, so an entry that ends
-        // up evicted stays pending (and cached) instead of being dropped.
-        if (deviceKeys.has(normalize(name))) continue;
-        try {
-          deviceGrinders = await saveDeviceGrinder(apiService, name);
-          // Rebuild deviceKeys from the actual save result rather than just
-          // adding this name: a save can EVICT the tail entry, and an
-          // incrementally-add-ed key would leave the evicted name stale.
-          deviceKeys = new Set(deviceGrinders.map(normalize));
-        } catch {
-          // Save failed: leave the name pending (handled by the reconcile
-          // below) so it can be retried on a later connected call.
-        }
-      }
 
-      // Reconcile the pending set against the FINAL device list: clear only
-      // names that actually made it onto the device. A name that was present
-      // earlier but then evicted by a later save — or whose save failed —
-      // remains pending so it survives the cache refresh and is retried later.
-      const finalKeys = new Set(deviceGrinders.map(normalize));
-      for (const name of pending) {
-        if (finalKeys.has(normalize(name))) {
-          clearPendingGrinder(name);
-        }
-      }
+    if (!pending.length) {
+      // Nothing to migrate — just refresh from the authoritative device list.
+      const deviceGrinders = await listDeviceGrinders(apiService);
+      saveLegacyGrinders(deviceGrinders);
+      return deviceGrinders;
     }
 
-    // Keep the local cache fresh so suggestions appear instantly next load.
-    // Any name still pending (a failed migration) is retained on top of the
-    // device list so its only local copy is not destroyed.
-    const stillPending = listPendingGrinders();
-    saveLegacyGrinders([...stillPending, ...deviceGrinders]);
-    // Return the same merged view the cache now holds so callers don't lose
-    // sight of a name whose migration is still pending.
-    return sanitizeList([...stillPending, ...deviceGrinders]);
+    // Migrate all pending names in a single batch. Send oldest-first so the
+    // most-recently-used pending entry ends up nearest the front.
+    let deviceGrinders;
+    try {
+      deviceGrinders = await saveDeviceGrinders(apiService, [...pending].reverse());
+    } catch {
+      // Batch failed: keep pending intact and merge it on top of the last
+      // known device list so the offline names are not lost and are retried.
+      const fallbackDevice = await listDeviceGrinders(apiService).catch(() => []);
+      const merged = sanitizeList([...pending, ...fallbackDevice]);
+      saveLegacyGrinders(merged);
+      return merged;
+    }
+
+    // Batch succeeded: the device list is now authoritative and includes
+    // everything we could migrate, so the pending set is fully resolved.
+    clearAllPendingGrinders();
+    saveLegacyGrinders(deviceGrinders);
+    return deviceGrinders;
   } catch {
     return legacyGrinders;
   }

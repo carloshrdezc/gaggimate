@@ -77,10 +77,42 @@ std::vector<String> GrinderManager::listGrindersUnlocked() {
 }
 
 bool GrinderManager::recordGrinder(const String &name) {
-    String trimmed = name;
-    trimmed.trim();
-    if (trimmed.isEmpty() || trimmed.length() > GRINDER_NAME_MAX_LEN) {
-        return false;
+    // A single record is just a one-element batch; share the merge/cap path.
+    return recordGrinders({name});
+}
+
+bool GrinderManager::recordGrinders(const std::vector<String> &names) {
+    // Normalize the incoming names up front: trim, drop empty/oversized, and
+    // dedup the batch case-insensitively while preserving the caller's order
+    // (so the LAST accepted element ends up nearest the front after we prepend
+    // most-recently-first below). If nothing survives, there is nothing to do.
+    std::vector<String> accepted;
+    {
+        std::vector<String> seenLower;
+        for (const auto &raw : names) {
+            String trimmed = raw;
+            trimmed.trim();
+            if (trimmed.isEmpty() || trimmed.length() > GRINDER_NAME_MAX_LEN) {
+                continue;
+            }
+            String lowered = trimmed;
+            lowered.toLowerCase();
+            bool dup = false;
+            for (const auto &s : seenLower) {
+                if (s == lowered) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+            seenLower.push_back(lowered);
+            accepted.push_back(trimmed);
+        }
+    }
+    if (accepted.empty()) {
+        return true; // nothing valid to record; not an error
     }
 
     // Hold the lock across the ENTIRE read-modify-write so a concurrent caller
@@ -94,21 +126,25 @@ bool GrinderManager::recordGrinder(const String &name) {
 
     std::vector<String> grinders = listGrindersUnlocked();
 
-    // Remove any existing entry matching case-insensitively so the freshly
-    // recorded name (with its current casing) moves to the front.
-    String lowered = trimmed;
-    lowered.toLowerCase();
-    for (auto it = grinders.begin(); it != grinders.end();) {
-        String existing = *it;
-        existing.toLowerCase();
-        if (existing == lowered) {
-            it = grinders.erase(it);
-        } else {
-            ++it;
+    // Prepend each accepted name most-recently-first. Iterating the batch in
+    // reverse means the caller's last element is inserted last and therefore
+    // ends up at the very front — matching the "most-recently-used first"
+    // contract for both single records and the client's oldest-first batch.
+    for (auto it = accepted.rbegin(); it != accepted.rend(); ++it) {
+        const String &trimmed = *it;
+        String lowered = trimmed;
+        lowered.toLowerCase();
+        for (auto g = grinders.begin(); g != grinders.end();) {
+            String existing = *g;
+            existing.toLowerCase();
+            if (existing == lowered) {
+                g = grinders.erase(g);
+            } else {
+                ++g;
+            }
         }
+        grinders.insert(grinders.begin(), trimmed);
     }
-
-    grinders.insert(grinders.begin(), trimmed);
 
     if (grinders.size() > GRINDER_LIST_MAX) {
         grinders.resize(GRINDER_LIST_MAX);

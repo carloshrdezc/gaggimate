@@ -23,6 +23,37 @@ function makeOfflineApi() {
   return { socket: { readyState: WebSocket.CLOSED }, request: vi.fn() };
 }
 
+// A device simulator that mirrors the firmware's authoritative merge/dedup/cap:
+// prepend incoming names most-recently-first (the LAST element of `names` ends
+// up at the very front), dedup case-insensitively, cap to `cap`. Tracks each
+// save's payload so tests can assert what was sent. Handles both the single
+// `name` (back-compat) and batch `names` shapes.
+function makeDevice({ initial = [], cap = 50 } = {}) {
+  let list = [...initial];
+  const saves = [];
+
+  const merge = names => {
+    for (const raw of names) {
+      const name = String(raw || '').trim();
+      if (!name) continue;
+      list = [name, ...list.filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, cap);
+    }
+    return list.slice();
+  };
+
+  const handler = async ({ tp, name, names }) => {
+    if (tp === 'req:grinders:list') return { grinders: list.slice() };
+    if (tp === 'req:grinders:save') {
+      const batch = Array.isArray(names) ? names : [name];
+      saves.push(batch);
+      return { grinders: merge(batch) };
+    }
+    return { grinders: [] };
+  };
+
+  return { api: makeApi(handler), saves, current: () => list.slice() };
+}
+
 describe('grinderManager', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -39,11 +70,11 @@ describe('grinderManager', () => {
     });
 
     it('rejects a name over 64 UTF-8 bytes even when under 64 UTF-16 units', async () => {
-      // Regression for Codex review 4489123853 (P2 #2): the firmware caps names
-      // at 64 *bytes* (Arduino String::length()), but JS String.length counts
-      // UTF-16 code units. 40 accented chars = 40 UTF-16 units (would pass a
-      // naive .length check) but 80 UTF-8 bytes — the firmware would reject it
-      // on every save, so it must never enter pending/cache in the first place.
+      // The firmware caps names at 64 *bytes* (Arduino String::length()), but
+      // JS String.length counts UTF-16 code units. 40 accented chars = 40
+      // UTF-16 units (would pass a naive .length check) but 80 UTF-8 bytes — the
+      // firmware would reject it on every save, so it must never enter
+      // pending/cache in the first place.
       const name = 'é'.repeat(40); // 40 UTF-16 units, 80 UTF-8 bytes
       expect(name.length).toBe(40);
       expect(new TextEncoder().encode(name).length).toBe(80);
@@ -51,7 +82,6 @@ describe('grinderManager', () => {
       const api = makeOfflineApi();
       await recordGrinder(api, name);
 
-      // Over the byte budget -> not stored anywhere, so it can't be retried forever.
       expect(readKey(GRINDERS_STORAGE_KEY) || []).toEqual([]);
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
     });
@@ -68,10 +98,7 @@ describe('grinderManager', () => {
     });
 
     it('does not mark a successfully-synced grinder as pending', async () => {
-      const api = makeApi(async ({ tp, name }) => {
-        if (tp === 'req:grinders:save') return { grinders: [name] };
-        return { grinders: [] };
-      });
+      const { api } = makeDevice();
       await recordGrinder(api, 'DF64');
 
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
@@ -90,129 +117,72 @@ describe('grinderManager', () => {
     });
   });
 
-  describe('listGrinders migration (Finding 1)', () => {
+  describe('listGrinders batch migration (device-authoritative)', () => {
     it('migrates only pending offline names, not stale evicted cache entries', async () => {
       // Cache holds a name the device has evicted ("Old") plus a genuine
-      // offline addition ("Offline"). Only the pending one should be pushed.
+      // offline addition ("Offline"). Only the pending one is sent; the device
+      // returns the authoritative list.
       localStorage.setItem(GRINDERS_STORAGE_KEY, JSON.stringify(['Offline', 'Old']));
       localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['Offline']));
 
-      const saved = [];
-      const api = makeApi(async ({ tp, name }) => {
-        if (tp === 'req:grinders:list') return { grinders: ['DeviceA', 'DeviceB'] };
-        if (tp === 'req:grinders:save') {
-          saved.push(name);
-          return { grinders: [name, 'DeviceA', 'DeviceB'] };
-        }
-        return { grinders: [] };
-      });
+      const { api, saves } = makeDevice({ initial: ['DeviceA', 'DeviceB'] });
 
       const result = await listGrinders(api);
 
-      // "Old" (stale/evicted) must NOT be re-pushed; only "Offline" migrates.
-      expect(saved).toEqual(['Offline']);
-      // Pending set is cleared once synced.
+      // Only the pending "Offline" is sent (one batch); "Old" is never pushed.
+      expect(saves).toEqual([['Offline']]);
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
       expect(result).toEqual(['Offline', 'DeviceA', 'DeviceB']);
     });
 
-    it('does not re-push a pending name the device already has', async () => {
+    it('still clears pending for a name the device already has', async () => {
       localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['DeviceA']));
-      const saved = [];
-      const api = makeApi(async ({ tp, name }) => {
-        if (tp === 'req:grinders:list') return { grinders: ['DeviceA'] };
-        if (tp === 'req:grinders:save') {
-          saved.push(name);
-          return { grinders: ['DeviceA'] };
-        }
-        return { grinders: [] };
-      });
-
-      await listGrinders(api);
-
-      expect(saved).toEqual([]); // already present -> no redundant save
-      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
-    });
-
-    it('does not drop a pending name evicted from a capped device list during migration', async () => {
-      // Regression for the Codex P2 (review 4488989741): when the device list
-      // is at its cap, saving one pending name evicts the tail. If deviceKeys
-      // is only incrementally add-ed (never rebuilt from the save result), the
-      // evicted name stays stale in deviceKeys, so a later pending entry that
-      // matches it is wrongly treated as "already present", cleared from
-      // pending, and never pushed — dropping it from both device and cache.
-      //
-      // Simulate a device with a cap of 2 (most-recent-first, dedup). Two
-      // pending names ['B','A'] (most-recent-first) migrate oldest-first: 'A'
-      // then 'B'. Pushing 'A' evicts 'B' from the device; pushing 'B' must then
-      // still happen.
-      const CAP = 2;
-      let device = ['X', 'B']; // 'B' is at the tail and will be evicted by 'A'
-      const push = name => {
-        device = [name, ...device.filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, CAP);
-        return device.slice();
-      };
-      localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['B', 'A']));
-
-      const saved = [];
-      const api = makeApi(async ({ tp, name }) => {
-        if (tp === 'req:grinders:list') return { grinders: device.slice() };
-        if (tp === 'req:grinders:save') {
-          saved.push(name);
-          return { grinders: push(name) };
-        }
-        return { grinders: [] };
-      });
-
-      await listGrinders(api);
-
-      // Both pending names must be pushed — 'B' was evicted by 'A' and must be
-      // re-saved rather than silently treated as still-present.
-      expect(saved).toEqual(['A', 'B']);
-      // Both are synced, so nothing remains pending.
-      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
-    });
-
-    it('keeps an already-present pending name that a later save evicts', async () => {
-      // Regression for Codex review 4489123853 (P2 #1): pending is
-      // [New, Tail] (most-recent-first). 'Tail' is already at the device-list
-      // tail, so the loop would historically clear it from pending immediately;
-      // then saving 'New' evicts 'Tail' from the capped list, and the cache
-      // refresh drops it from device, pending AND cache. Clearing must be
-      // deferred and reconciled against the FINAL device list so 'Tail' (now
-      // evicted) stays pending and cached for a later retry.
-      const CAP = 2;
-      let device = ['X', 'Tail']; // 'Tail' at the tail, evicted when 'New' lands
-      const push = name => {
-        device = [name, ...device.filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, CAP);
-        return device.slice();
-      };
-      localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['New', 'Tail']));
-
-      const saved = [];
-      const api = makeApi(async ({ tp, name }) => {
-        if (tp === 'req:grinders:list') return { grinders: device.slice() };
-        if (tp === 'req:grinders:save') {
-          saved.push(name);
-          return { grinders: push(name) };
-        }
-        return { grinders: [] };
-      });
+      const { api } = makeDevice({ initial: ['DeviceA'] });
 
       const result = await listGrinders(api);
 
-      // Only 'New' needed a save ('Tail' was already present at loop start).
-      expect(saved).toEqual(['New']);
-      // 'Tail' got evicted by 'New', so it must remain pending (for retry) and
-      // stay visible in the merged result rather than being silently lost.
-      expect(readKey(GRINDERS_PENDING_STORAGE_KEY)).toEqual(['Tail']);
-      expect(result).toContain('Tail');
-      expect(result).toContain('New');
+      // Pending resolved; device list is authoritative and unchanged.
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
+      expect(result).toEqual(['DeviceA']);
+    });
+
+    it('sends all pending names in a SINGLE batch (oldest-first)', async () => {
+      // pending is most-recent-first ['B','A']; the client sends them
+      // oldest-first so the device ends with the most-recent ('B') at front.
+      localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['B', 'A']));
+      const { api, saves } = makeDevice({ initial: ['X'] });
+
+      const result = await listGrinders(api);
+
+      // Exactly one save call carrying both names oldest-first.
+      expect(saves).toEqual([['A', 'B']]);
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
+      // Device prepended A then B -> B is front-most; X retained.
+      expect(result).toEqual(['B', 'A', 'X']);
+    });
+
+    it('does not lose pending names when the device list is at its cap', async () => {
+      // The whole point of the refactor: the client no longer models eviction.
+      // Device cap=2 starting full; two pending names must both reach the device
+      // (the device decides what the final two are), and pending is cleared.
+      localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['New2', 'New1']));
+      const { api, saves } = makeDevice({ initial: ['Old1', 'Old2'], cap: 2 });
+
+      const result = await listGrinders(api);
+
+      // One batch, both names sent oldest-first.
+      expect(saves).toEqual([['New1', 'New2']]);
+      // Pending fully resolved — the device's returned list is authoritative.
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
+      // Device merged + capped to 2, most-recent-first.
+      expect(result).toEqual(['New2', 'New1']);
+      // Cache mirrors the device list exactly.
+      expect(readKey(GRINDERS_STORAGE_KEY)).toEqual(['New2', 'New1']);
     });
   });
 
-  describe('listGrinders retains failed migrations (Finding 2)', () => {
-    it('keeps a name pending and in the cache when its save fails', async () => {
+  describe('listGrinders retains failed migrations', () => {
+    it('keeps names pending and in the cache when the batch save fails', async () => {
       localStorage.setItem(GRINDERS_STORAGE_KEY, JSON.stringify(['Offline']));
       localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['Offline']));
 
@@ -224,36 +194,42 @@ describe('grinderManager', () => {
 
       const result = await listGrinders(api);
 
-      // The unsynced name survives in both the cache and the pending set.
+      // The unsynced name survives in both the cache and the pending set, and
+      // is merged on top of the last-known device list for the UI.
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY)).toEqual(['Offline']);
       expect(readKey(GRINDERS_STORAGE_KEY)).toContain('Offline');
       expect(result).toContain('Offline');
       expect(result).toContain('DeviceA');
     });
 
-    it('eventually syncs a previously-failed name on a later connected call', async () => {
+    it('eventually syncs a previously-failed batch on a later connected call', async () => {
       localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['Offline']));
 
       let failNext = true;
-      const saved = [];
-      const api = makeApi(async ({ tp, name }) => {
-        if (tp === 'req:grinders:list') return { grinders: ['DeviceA'] };
+      const saves = [];
+      let device = ['DeviceA'];
+      const api = makeApi(async ({ tp, name, names }) => {
+        if (tp === 'req:grinders:list') return { grinders: device.slice() };
         if (tp === 'req:grinders:save') {
           if (failNext) {
             failNext = false;
             throw new Error('transient');
           }
-          saved.push(name);
-          return { grinders: [name, 'DeviceA'] };
+          const batch = Array.isArray(names) ? names : [name];
+          saves.push(batch);
+          for (const n of batch) {
+            device = [n, ...device.filter(x => x.toLowerCase() !== n.toLowerCase())];
+          }
+          return { grinders: device.slice() };
         }
         return { grinders: [] };
       });
 
-      await listGrinders(api); // first attempt fails, stays pending
+      await listGrinders(api); // first batch fails, stays pending
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY)).toEqual(['Offline']);
 
       const result = await listGrinders(api); // retry succeeds
-      expect(saved).toEqual(['Offline']);
+      expect(saves).toEqual([['Offline']]);
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
       expect(result).toEqual(['Offline', 'DeviceA']);
     });

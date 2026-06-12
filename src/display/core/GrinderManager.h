@@ -44,6 +44,16 @@ class GrinderManager {
     // empty/blank or too long (in which case nothing is written).
     bool recordGrinder(const String &name);
 
+    // Records multiple names in one locked read-modify-write. Names are
+    // prepended most-recently-first (so the LAST element of `names` ends up
+    // nearest the front), deduplicated case-insensitively against each other
+    // and the existing list, and the result is capped. Empty/oversized names
+    // are skipped. This is the authoritative merge used by the web client's
+    // batch sync, so the client never has to model the device's eviction
+    // policy. Returns false only on a write failure; an all-skipped input that
+    // changes nothing still returns true.
+    bool recordGrinders(const std::vector<String> &names);
+
   private:
     fs::FS *_fs;
     String _path;

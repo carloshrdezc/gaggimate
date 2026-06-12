@@ -914,8 +914,21 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
             arr.add(name);
         }
     } else if (type == "req:grinders:save") {
-        auto name = request["name"].as<String>();
-        if (!grinderManager->recordGrinder(name)) {
+        // Accept either a single `name` (back-compat) or a `names` array
+        // (batch sync from the web client). The device performs the
+        // merge/dedup/cap authoritatively and returns the canonical list, so
+        // the client never has to model eviction.
+        bool ok = false;
+        if (request["names"].is<JsonArray>()) {
+            std::vector<String> names;
+            for (JsonVariant v : request["names"].as<JsonArray>()) {
+                names.push_back(v.as<String>());
+            }
+            ok = grinderManager->recordGrinders(names);
+        } else {
+            ok = grinderManager->recordGrinder(request["name"].as<String>());
+        }
+        if (!ok) {
             response["error"] = F("Save failed");
         } else {
             auto arr = response["grinders"].to<JsonArray>();
