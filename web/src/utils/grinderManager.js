@@ -177,7 +177,7 @@ export async function listGrinders(apiService) {
     // without a redundant save. Idempotent and churn-free.
     const pending = listPendingGrinders();
     if (pending.length) {
-      const deviceKeys = new Set(deviceGrinders.map(normalize));
+      let deviceKeys = new Set(deviceGrinders.map(normalize));
       // Push oldest-first so the most-recently-used pending entry ends up
       // nearest the front of the device list after each save promotes it.
       for (const name of [...pending].reverse()) {
@@ -189,7 +189,13 @@ export async function listGrinders(apiService) {
         }
         try {
           deviceGrinders = await saveDeviceGrinder(apiService, name);
-          deviceKeys.add(normalize(name));
+          // Rebuild deviceKeys from the actual save result rather than just
+          // adding this name: the device list is capped (most-recent-first),
+          // so a save can EVICT the tail entry. Incrementally add-ing would
+          // leave the evicted name stale in deviceKeys, causing a later
+          // pending entry that matches it to be wrongly treated as present and
+          // cleared — silently dropping it from both device and pending set.
+          deviceKeys = new Set(deviceGrinders.map(normalize));
           // Synced successfully — it is no longer a pending offline write.
           clearPendingGrinder(name);
         } catch {

@@ -104,6 +104,45 @@ describe('grinderManager', () => {
       expect(saved).toEqual([]); // already present -> no redundant save
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
     });
+
+    it('does not drop a pending name evicted from a capped device list during migration', async () => {
+      // Regression for the Codex P2 (review 4488989741): when the device list
+      // is at its cap, saving one pending name evicts the tail. If deviceKeys
+      // is only incrementally add-ed (never rebuilt from the save result), the
+      // evicted name stays stale in deviceKeys, so a later pending entry that
+      // matches it is wrongly treated as "already present", cleared from
+      // pending, and never pushed — dropping it from both device and cache.
+      //
+      // Simulate a device with a cap of 2 (most-recent-first, dedup). Two
+      // pending names ['B','A'] (most-recent-first) migrate oldest-first: 'A'
+      // then 'B'. Pushing 'A' evicts 'B' from the device; pushing 'B' must then
+      // still happen.
+      const CAP = 2;
+      let device = ['X', 'B']; // 'B' is at the tail and will be evicted by 'A'
+      const push = name => {
+        device = [name, ...device.filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, CAP);
+        return device.slice();
+      };
+      localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['B', 'A']));
+
+      const saved = [];
+      const api = makeApi(async ({ tp, name }) => {
+        if (tp === 'req:grinders:list') return { grinders: device.slice() };
+        if (tp === 'req:grinders:save') {
+          saved.push(name);
+          return { grinders: push(name) };
+        }
+        return { grinders: [] };
+      });
+
+      await listGrinders(api);
+
+      // Both pending names must be pushed — 'B' was evicted by 'A' and must be
+      // re-saved rather than silently treated as still-present.
+      expect(saved).toEqual(['A', 'B']);
+      // Both are synced, so nothing remains pending.
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
+    });
   });
 
   describe('listGrinders retains failed migrations (Finding 2)', () => {
