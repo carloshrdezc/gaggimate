@@ -63,6 +63,8 @@ void Controller::setup() {
     }
     beanManager = new BeanManager(fs, "/b");
     beanManager->setup();
+    grinderManager = new GrinderManager(fs, "/g/grinders.json");
+    grinderManager->setup();
     profileManager = new ProfileManager(fs, "/p", settings, pluginManager);
     profileManager->setup();
     if (settings.isHomekit())
