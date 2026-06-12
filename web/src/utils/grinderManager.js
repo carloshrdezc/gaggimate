@@ -22,7 +22,35 @@
 const GRINDERS_STORAGE_KEY = 'gaggimate-grinders';
 const GRINDERS_PENDING_STORAGE_KEY = 'gaggimate-grinders-pending';
 const GRINDER_LIST_MAX = 50;
+// Maximum accepted grinder-name length, in UTF-8 BYTES, to match the firmware
+// (Arduino `String::length()` counts bytes, not characters). We must measure
+// bytes here too: JavaScript's `String.length` counts UTF-16 code units, so a
+// name of accented/multibyte characters could pass a code-unit check yet exceed
+// the firmware's 64-byte limit — it would be accepted into pending storage,
+// rejected on every device save, and retried forever without ever syncing.
 const GRINDER_NAME_MAX_LEN = 64;
+
+// UTF-8 byte length of a string, mirroring the firmware's byte-based limit.
+// Uses TextEncoder when available (browsers/jsdom); falls back to a manual
+// code-point byte count (incl. surrogate-pair handling) otherwise.
+function utf8ByteLength(text) {
+  const str = String(text || '');
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(str).length;
+  }
+  let bytes = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      // High surrogate: a full code point (4 UTF-8 bytes); skip the low half.
+      bytes += 4;
+      i++;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 function normalize(text) {
   return String(text || '')
@@ -61,7 +89,7 @@ function sanitizeList(input) {
   const result = [];
   for (const entry of Array.isArray(input) ? input : []) {
     const name = String(entry || '').trim();
-    if (!name || name.length > GRINDER_NAME_MAX_LEN) continue;
+    if (!name || utf8ByteLength(name) > GRINDER_NAME_MAX_LEN) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -97,7 +125,7 @@ function savePendingGrinders(names) {
 // Mark `name` as a pending offline addition (most-recent-first).
 function addPendingGrinder(name) {
   const trimmed = String(name || '').trim();
-  if (!trimmed || trimmed.length > GRINDER_NAME_MAX_LEN) return;
+  if (!trimmed || utf8ByteLength(trimmed) > GRINDER_NAME_MAX_LEN) return;
   const key = trimmed.toLowerCase();
   const rest = listPendingGrinders().filter(existing => normalize(existing) !== key);
   savePendingGrinders([trimmed, ...rest]);
@@ -114,7 +142,7 @@ function clearPendingGrinder(name) {
 // Move `name` to the front of the list, deduplicating case-insensitively.
 function promote(grinders, name) {
   const trimmed = String(name || '').trim();
-  if (!trimmed || trimmed.length > GRINDER_NAME_MAX_LEN) return sanitizeList(grinders);
+  if (!trimmed || utf8ByteLength(trimmed) > GRINDER_NAME_MAX_LEN) return sanitizeList(grinders);
   const key = trimmed.toLowerCase();
   const rest = (Array.isArray(grinders) ? grinders : []).filter(
     existing => normalize(existing) !== key,
@@ -173,34 +201,41 @@ export async function listGrinders(apiService) {
 
     // Migrate genuinely-unsynced offline additions to the device. We only
     // touch names in the pending set (populated by recordGrinder's offline
-    // branch); a name already present on the device is cleared from pending
-    // without a redundant save. Idempotent and churn-free.
+    // branch); a name already present on the device needs no save. Idempotent
+    // and churn-free.
     const pending = listPendingGrinders();
     if (pending.length) {
       let deviceKeys = new Set(deviceGrinders.map(normalize));
       // Push oldest-first so the most-recently-used pending entry ends up
       // nearest the front of the device list after each save promotes it.
       for (const name of [...pending].reverse()) {
-        if (deviceKeys.has(normalize(name))) {
-          // Already on the device (e.g. another browser synced it) — just drop
-          // it from our pending set, nothing to push.
-          clearPendingGrinder(name);
-          continue;
-        }
+        // Skip a save only if the name is already on the device; do NOT clear
+        // it from pending yet. The device list is capped (most-recent-first),
+        // so a *later* save in this same loop can evict an entry that looked
+        // present here. We defer all pending bookkeeping until after the loop
+        // and reconcile against the final device list, so an entry that ends
+        // up evicted stays pending (and cached) instead of being dropped.
+        if (deviceKeys.has(normalize(name))) continue;
         try {
           deviceGrinders = await saveDeviceGrinder(apiService, name);
           // Rebuild deviceKeys from the actual save result rather than just
-          // adding this name: the device list is capped (most-recent-first),
-          // so a save can EVICT the tail entry. Incrementally add-ing would
-          // leave the evicted name stale in deviceKeys, causing a later
-          // pending entry that matches it to be wrongly treated as present and
-          // cleared — silently dropping it from both device and pending set.
+          // adding this name: a save can EVICT the tail entry, and an
+          // incrementally-add-ed key would leave the evicted name stale.
           deviceKeys = new Set(deviceGrinders.map(normalize));
-          // Synced successfully — it is no longer a pending offline write.
-          clearPendingGrinder(name);
         } catch {
-          // Save failed: keep the name pending so it can be retried, and make
-          // sure it survives the cache refresh below instead of being dropped.
+          // Save failed: leave the name pending (handled by the reconcile
+          // below) so it can be retried on a later connected call.
+        }
+      }
+
+      // Reconcile the pending set against the FINAL device list: clear only
+      // names that actually made it onto the device. A name that was present
+      // earlier but then evicted by a later save — or whose save failed —
+      // remains pending so it survives the cache refresh and is retried later.
+      const finalKeys = new Set(deviceGrinders.map(normalize));
+      for (const name of pending) {
+        if (finalKeys.has(normalize(name))) {
+          clearPendingGrinder(name);
         }
       }
     }

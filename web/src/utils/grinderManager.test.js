@@ -38,6 +38,35 @@ describe('grinderManager', () => {
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY)).toEqual(['Niche Zero']);
     });
 
+    it('rejects a name over 64 UTF-8 bytes even when under 64 UTF-16 units', async () => {
+      // Regression for Codex review 4489123853 (P2 #2): the firmware caps names
+      // at 64 *bytes* (Arduino String::length()), but JS String.length counts
+      // UTF-16 code units. 40 accented chars = 40 UTF-16 units (would pass a
+      // naive .length check) but 80 UTF-8 bytes — the firmware would reject it
+      // on every save, so it must never enter pending/cache in the first place.
+      const name = 'é'.repeat(40); // 40 UTF-16 units, 80 UTF-8 bytes
+      expect(name.length).toBe(40);
+      expect(new TextEncoder().encode(name).length).toBe(80);
+
+      const api = makeOfflineApi();
+      await recordGrinder(api, name);
+
+      // Over the byte budget -> not stored anywhere, so it can't be retried forever.
+      expect(readKey(GRINDERS_STORAGE_KEY) || []).toEqual([]);
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
+    });
+
+    it('accepts a multibyte name that fits within 64 UTF-8 bytes', async () => {
+      const name = 'é'.repeat(30); // 30 UTF-16 units, 60 UTF-8 bytes -> OK
+      expect(new TextEncoder().encode(name).length).toBe(60);
+
+      const api = makeOfflineApi();
+      await recordGrinder(api, name);
+
+      expect(readKey(GRINDERS_STORAGE_KEY)).toEqual([name]);
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY)).toEqual([name]);
+    });
+
     it('does not mark a successfully-synced grinder as pending', async () => {
       const api = makeApi(async ({ tp, name }) => {
         if (tp === 'req:grinders:save') return { grinders: [name] };
@@ -142,6 +171,43 @@ describe('grinderManager', () => {
       expect(saved).toEqual(['A', 'B']);
       // Both are synced, so nothing remains pending.
       expect(readKey(GRINDERS_PENDING_STORAGE_KEY) || []).toEqual([]);
+    });
+
+    it('keeps an already-present pending name that a later save evicts', async () => {
+      // Regression for Codex review 4489123853 (P2 #1): pending is
+      // [New, Tail] (most-recent-first). 'Tail' is already at the device-list
+      // tail, so the loop would historically clear it from pending immediately;
+      // then saving 'New' evicts 'Tail' from the capped list, and the cache
+      // refresh drops it from device, pending AND cache. Clearing must be
+      // deferred and reconciled against the FINAL device list so 'Tail' (now
+      // evicted) stays pending and cached for a later retry.
+      const CAP = 2;
+      let device = ['X', 'Tail']; // 'Tail' at the tail, evicted when 'New' lands
+      const push = name => {
+        device = [name, ...device.filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, CAP);
+        return device.slice();
+      };
+      localStorage.setItem(GRINDERS_PENDING_STORAGE_KEY, JSON.stringify(['New', 'Tail']));
+
+      const saved = [];
+      const api = makeApi(async ({ tp, name }) => {
+        if (tp === 'req:grinders:list') return { grinders: device.slice() };
+        if (tp === 'req:grinders:save') {
+          saved.push(name);
+          return { grinders: push(name) };
+        }
+        return { grinders: [] };
+      });
+
+      const result = await listGrinders(api);
+
+      // Only 'New' needed a save ('Tail' was already present at loop start).
+      expect(saved).toEqual(['New']);
+      // 'Tail' got evicted by 'New', so it must remain pending (for retry) and
+      // stay visible in the merged result rather than being silently lost.
+      expect(readKey(GRINDERS_PENDING_STORAGE_KEY)).toEqual(['Tail']);
+      expect(result).toContain('Tail');
+      expect(result).toContain('New');
     });
   });
 
