@@ -8,6 +8,16 @@ const ACTIVE_BEAN_SELECTION_KEY = 'gaggimate-active-bean-selection';
 // `gaggimate-beans-migrated` flag + empty-device migration gate (CAR-373),
 // which permanently stranded localStorage-only beans on a populated device.
 const BEANS_PENDING_STORAGE_KEY = 'gaggimate-beans-pending';
+// Durable one-shot flag (CAR-373 P2): the FIRST time we successfully read the
+// device's authoritative list we rescue any cache-only beans that predate the
+// pending-set mechanism by seeding them into the pending set. Once set, we
+// NEVER re-seed from the cache again — the explicit pending set is the only
+// record of genuine unsynced writes. This prevents a stale cached copy of a
+// bean DELETED on another client from being resurrected on every later load,
+// while still performing the full legacy rescue once regardless of whether the
+// device already has beans (unlike the old gate that skipped a populated
+// device entirely and stranded legacy beans — CAR-373 Bug 1).
+const BEANS_LEGACY_MIGRATED_KEY = 'gaggimate-beans-legacy-migrated';
 
 function normalize(text) {
   return String(text || '')
@@ -104,8 +114,19 @@ function listLegacyBeans() {
   return Array.isArray(beans) ? sortBeans(beans.map(normalizeBeanPayload)) : [];
 }
 
-function saveLegacyBeans(beans) {
+function writeLegacyBeansCache(beans) {
+  // Local-mirror write WITHOUT firing the public change event. Used by the
+  // read paths (drainPendingBeans' no-mutation branches) so that simply
+  // refreshing the cache from the authoritative device list does NOT dispatch
+  // `beans-library-changed` — otherwise listeners (ShotHistory, Beans pages)
+  // re-trigger listBeans() on the event, which writes the cache again, which
+  // dispatches again: a self-feeding event loop on every connected, no-pending
+  // read (CAR-373 P1).
   writeJson(BEANS_STORAGE_KEY, sortBeans((beans || []).map(normalizeBeanPayload)));
+}
+
+function saveLegacyBeans(beans) {
+  writeLegacyBeansCache(beans);
   dispatchBeansChanged(listLegacyBeans());
 }
 
@@ -199,9 +220,11 @@ async function drainPendingBeans(apiService) {
   const pendingIds = listPendingBeanIds();
 
   if (!pendingIds.length) {
-    // Nothing to migrate — just return the authoritative device list.
+    // Nothing to migrate — just return the authoritative device list. This is a
+    // pure READ: refresh the local mirror but do NOT dispatch the change event
+    // (would re-trigger listeners' listBeans() -> infinite loop, CAR-373 P1).
     const deviceBeans = await listDeviceBeans(apiService);
-    saveLegacyBeans(deviceBeans);
+    writeLegacyBeansCache(deviceBeans);
     return deviceBeans;
   }
 
@@ -217,8 +240,10 @@ async function drainPendingBeans(apiService) {
   }
 
   if (!beansToPush.length) {
+    // All pending ids were stale (no stored payload) — nothing to push. Pure
+    // READ: refresh the mirror silently (no change event), CAR-373 P1.
     const deviceBeans = await listDeviceBeans(apiService);
-    saveLegacyBeans(deviceBeans);
+    writeLegacyBeansCache(deviceBeans);
     return deviceBeans;
   }
 
@@ -303,23 +328,50 @@ async function drainPendingBeans(apiService) {
   const merged = survivingPending.length
     ? sortBeans([...survivingPending, ...deviceBeans])
     : deviceBeans;
-  saveLegacyBeans(merged);
+  // An ACTUAL mutation happened only if at least one pushed bean was confirmed
+  // synced to the device (its pending id cleared / stale payload dropped). In
+  // that case fire the public change event so listeners refresh. If nothing was
+  // confirmed (every push failed and merely stays pending), this is effectively
+  // a no-op read of the device list — write the cache SILENTLY so we do not
+  // self-trigger the listener loop (CAR-373 P1).
+  if (confirmedOriginalIds.size) {
+    saveLegacyBeans(merged);
+  } else {
+    writeLegacyBeansCache(merged);
+  }
   return merged;
 }
 
-// Seed the pending set from localStorage-only beans: any locally-stored bean
-// whose id is not (yet) known to the device is a genuine unsynced write and
-// must be migrated. This replaces the old empty-device + one-shot-flag gate so
-// a populated device no longer blocks legacy/offline beans. Idempotent: a bean
-// already on the device is never added; a bean already pending is not
-// duplicated.
+// One-time legacy rescue: on the FIRST connected load only, seed the pending
+// set from cache-only beans (ids absent from the device). The single
+// `gaggimate-beans` key serves double duty — it is BOTH the legacy store AND
+// the offline cache of the device-authoritative list — so "absent from device"
+// alone cannot distinguish a never-synced legacy bean (must migrate) from a
+// cached copy of a bean DELETED on another client (must NOT be resurrected).
+// We therefore only trust the cache for this rescue ONCE, then set a durable
+// flag so subsequent loads rely solely on the explicit pending set (the only
+// reliable record of genuine unsynced writes). After the flag is set, a bean
+// deleted elsewhere but still in this browser's cache is simply overwritten by
+// the authoritative device list and not re-pushed (CAR-373 P2).
+//
+// Unlike the OLD gate (which skipped migration entirely when the device was
+// non-empty and stranded legacy beans — CAR-373 Bug 1), this performs the full
+// legacy seed-and-drain ONCE regardless of device population; it only prevents
+// RE-seeding cache-only ids on every later load. Idempotent: a bean already on
+// the device is never seeded; an id already pending is not duplicated.
 function seedPendingFromLegacy(deviceBeans) {
+  if (readJson(BEANS_LEGACY_MIGRATED_KEY, false) === true) {
+    // Legacy rescue already performed once — never re-seed from the cache.
+    return;
+  }
   const deviceIds = new Set((deviceBeans || []).map(bean => bean.id));
   for (const bean of listLegacyBeans()) {
     if (!bean.id) continue;
     if (deviceIds.has(bean.id)) continue;
     addPendingBeanId(bean.id);
   }
+  // Mark the durable one-shot flag so this cache-based rescue never runs again.
+  writeJson(BEANS_LEGACY_MIGRATED_KEY, true);
 }
 
 /**

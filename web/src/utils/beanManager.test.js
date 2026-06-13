@@ -8,6 +8,7 @@ import {
 
 const BEANS_STORAGE_KEY = 'gaggimate-beans';
 const BEANS_PENDING_STORAGE_KEY = 'gaggimate-beans-pending';
+const BEANS_LEGACY_MIGRATED_KEY = 'gaggimate-beans-legacy-migrated';
 
 function readKey(key) {
   const raw = localStorage.getItem(key);
@@ -346,6 +347,103 @@ describe('beanManager', () => {
       const { api, saves } = makeDevice();
       await listBeans(api);
       expect(saves.length).toBe(0);
+    });
+  });
+
+  describe('CAR-373 P1: read path does not self-trigger the change event', () => {
+    it('connected listBeans with empty pending + populated device dispatches ZERO beans-library-changed events and issues exactly ONE req:beans:list', async () => {
+      // Simulate a normal connected page load / popover read: device has beans,
+      // the local cache mirrors them, and there is NOTHING pending.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([makeBean({ id: 'device-1', name: 'Cached Mirror' })]),
+      );
+      // No pending set at all (pure read).
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toBeNull();
+
+      const { api } = makeDevice({ initial: [makeBean({ id: 'device-1', name: 'Cached Mirror' })] });
+
+      // Spy on the public change event. A listener on this event (ShotHistory /
+      // Beans pages) re-calls listBeans(); if even one event fires here the loop
+      // would re-enter. We assert ZERO dispatches of beans-library-changed.
+      const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+      const result = await listBeans(api);
+
+      const beansChangedDispatches = dispatchSpy.mock.calls.filter(
+        ([event]) => event && event.type === 'beans-library-changed',
+      );
+      expect(beansChangedDispatches.length).toBe(0);
+
+      // Exactly ONE req:beans:list — no re-entrant second read, no save.
+      const listCalls = api.request.mock.calls.filter(([msg]) => msg?.tp === 'req:beans:list');
+      const saveCalls = api.request.mock.calls.filter(([msg]) => msg?.tp === 'req:beans:save');
+      expect(listCalls.length).toBe(1);
+      expect(saveCalls.length).toBe(0);
+
+      // Returned list is still the authoritative device list.
+      expect(result.map(b => b.id)).toEqual(['device-1']);
+
+      dispatchSpy.mockRestore();
+    });
+  });
+
+  describe('CAR-373 P2: stale cache does not resurrect a bean deleted elsewhere', () => {
+    it('after the legacy-migrated flag is set, a cache-only bean absent from the device is NOT re-pushed nor returned', async () => {
+      // Durable flag already set: the one-time legacy rescue has run before.
+      localStorage.setItem(BEANS_LEGACY_MIGRATED_KEY, JSON.stringify(true));
+      // Local cache still holds a copy of a bean that was DELETED on another
+      // client/display; it is absent from the device's authoritative list.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([
+          makeBean({ id: 'deleted-elsewhere', name: 'Stale Copy' }),
+          makeBean({ id: 'device-1', name: 'Live Bean' }),
+        ]),
+      );
+      // No explicit pending writes — the deletion is genuine, not an unsynced write.
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toBeNull();
+
+      const { api, saves } = makeDevice({ initial: [makeBean({ id: 'device-1', name: 'Live Bean' })] });
+
+      const result = await migrateLegacyBeansToDevice(api);
+
+      // The deleted bean must NOT be seeded into pending...
+      expect(readKey(BEANS_PENDING_STORAGE_KEY) || []).not.toContain('deleted-elsewhere');
+      // ...nor re-pushed to the device.
+      expect(saves.map(b => b.id)).not.toContain('deleted-elsewhere');
+      // The returned + cached list matches the device (deleted bean is gone).
+      expect(result.map(b => b.id)).toEqual(['device-1']);
+      expect(readKey(BEANS_STORAGE_KEY).map(b => b.id)).toEqual(['device-1']);
+    });
+  });
+
+  describe('CAR-373 P2: legacy beans still migrate once (guards against re-introducing Bug 1)', () => {
+    it('on the FIRST connected load (flag unset) with a populated device, a legacy cache-only bean IS seeded + pushed', async () => {
+      // Fresh browser: no legacy-migrated flag yet.
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBeNull();
+      // A genuine legacy/offline bean that predates the pending-set mechanism
+      // (in the cache, not in the explicit pending set), on a POPULATED device.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([makeBean({ id: 'legacy-only', name: 'Predates Pending' })]),
+      );
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toBeNull();
+
+      const { api, saves, ids } = makeDevice({
+        initial: [makeBean({ id: 'device-1', name: 'Already Here' })],
+      });
+
+      const result = await migrateLegacyBeansToDevice(api);
+
+      // The legacy bean was rescued: seeded, pushed, and now on the device
+      // alongside the pre-existing one (no Bug-1 strand on a populated device).
+      expect(saves.map(b => b.id)).toContain('legacy-only');
+      expect(ids().sort()).toEqual(['device-1', 'legacy-only']);
+      expect(result.map(b => b.id).sort()).toEqual(['device-1', 'legacy-only']);
+      // Pending cleared (confirmed) and the durable flag is now set.
+      expect(readKey(BEANS_PENDING_STORAGE_KEY) || []).toEqual([]);
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBe(true);
     });
   });
 });
