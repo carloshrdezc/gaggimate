@@ -760,6 +760,13 @@ void Controller::setBrewTarget(float value) {
     // the in-memory mutation pattern of raise/lowerBrewTarget — the change
     // applies to the next shot but is NOT persisted to disk; reloading the
     // profile restores the saved target.
+    //
+    // CAR-375: when the per-shot yield override is disabled, the yield is
+    // locked to the profile. Ignore any incoming brew-target so the display
+    // and any stale web client honor the lock.
+    if (!settings.isAllowYieldOverride()) {
+        return;
+    }
     if (!profileManager->getSelectedProfile().isVolumetric()) {
         return;
     }
