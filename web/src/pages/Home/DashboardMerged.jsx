@@ -39,7 +39,6 @@ import {
 } from './dashboardLogic.js';
 
 const DOSE_KEY = 'gaggimate-dose-grams';
-const YIELD_KEY = 'gaggimate-target-weight';
 const DEFAULT_DOSE = 18.0;
 const DEFAULT_YIELD = 36.0;
 
@@ -655,7 +654,7 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit }) {
+function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, disabled = false, lockedHint }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
 
@@ -692,10 +691,31 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
           marginBottom: 3,
         }}
       >
-        {label}
+        {disabled && lockedHint ? lockedHint : label}
       </div>
 
-      {editing ? (
+      {disabled ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            aria-disabled='true'
+            title="Turn on 'Allow yield override' in Settings to edit per shot"
+            style={{
+              fontFamily: 'var(--dm-font-display)',
+              fontSize: 28,
+              color: 'var(--dm-fg-faint)',
+              fontWeight: 700,
+              fontVariantNumeric: 'tabular-nums',
+              lineHeight: 1,
+              cursor: 'default',
+            }}
+          >
+            {typeof value === 'number' ? value.toFixed(1) : value}
+          </span>
+          <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 10, color: 'var(--dm-fg-faint)' }}>
+            {unit}
+          </span>
+        </div>
+      ) : editing ? (
         <input
           ref={inputRef}
           type='text'
@@ -802,6 +822,8 @@ EditableNumBlock.propTypes = {
   min: PropTypes.number,
   max: PropTypes.number,
   onCommit: PropTypes.func,
+  disabled: PropTypes.bool,
+  lockedHint: PropTypes.string,
 };
 
 // Inline dropdown for profile / bean selection
@@ -1183,16 +1205,34 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // Auto-attach dose and bean to shot notes as soon as the shot becomes active
   useShotDoseRecorder(api, dose);
 
-  // Target yield — localStorage-backed + API
-  const [yieldTarget, setYieldTargetState] = useState(() => {
-    try { return parseQuantity(localStorage.getItem(YIELD_KEY)) ?? (s.brewTargetVolume || DEFAULT_YIELD); } catch { return DEFAULT_YIELD; }
-  });
+  // Target yield — profile-authoritative (CAR-375). The displayed yield always
+  // tracks the active profile's volumetric target (s.brewTargetVolume),
+  // reseeding whenever the profile changes. localStorage is intentionally NOT
+  // used as the seed source to avoid stale-value bugs. When override is allowed
+  // AND the active profile is volumetric the field is editable and commits send
+  // req:change-brew-target; otherwise it is read-only. Non-volumetric profiles
+  // keep the disabled/locked treatment regardless of the override setting,
+  // because Controller::setBrewTarget() ignores a brew target for them.
+  const yieldEditable = !!s.allowYieldOverride && !!s.brewTarget;
+  const [yieldTarget, setYieldTargetState] = useState(() => s.brewTargetVolume || DEFAULT_YIELD);
+
+  // Reseed to the active profile's target on profile change (and whenever the
+  // device's broadcast target changes). Applies in both editable and locked
+  // states so a custom value never silently carries across a profile switch.
+  // When the active profile has no volumetric target (brewTargetVolume <= 0,
+  // e.g. a time/pressure profile), fall back to DEFAULT_YIELD rather than
+  // holding the previous profile's number — the device ignores yield there
+  // anyway, so a stale "locked" value would be misleading.
+  useEffect(() => {
+    setYieldTargetState(s.brewTargetVolume > 0 ? s.brewTargetVolume : DEFAULT_YIELD);
+  }, [s.selectedProfileId, s.brewTargetVolume]);
+
   const setYield = useCallback(val => {
+    if (!yieldEditable) return;
     const v = Math.max(5, Math.min(120, val));
     setYieldTargetState(v);
-    try { localStorage.setItem(YIELD_KEY, String(v)); } catch {}
     try { api.send({ tp: 'req:change-brew-target', target: v }); } catch {}
-  }, [api]);
+  }, [api, yieldEditable]);
   // Profile dropdown
   const [activeDropdown, setActiveDropdown] = useState(null); // 'profile' | 'bean' | null
   const [profileOptions, setProfileOptions] = useState([]);
@@ -1880,6 +1920,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               min={5}
               max={120}
               onCommit={setYield}
+              disabled={!yieldEditable}
+              lockedHint='YIELD · LOCKED'
             />
             <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <div>
