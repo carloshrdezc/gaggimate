@@ -9,6 +9,7 @@ import {
 const BEANS_STORAGE_KEY = 'gaggimate-beans';
 const BEANS_PENDING_STORAGE_KEY = 'gaggimate-beans-pending';
 const BEANS_LEGACY_MIGRATED_KEY = 'gaggimate-beans-legacy-migrated';
+const LEGACY_BEAN_MIGRATION_KEY = 'gaggimate-beans-migrated';
 
 function readKey(key) {
   const raw = localStorage.getItem(key);
@@ -438,6 +439,69 @@ describe('beanManager', () => {
 
       // The legacy bean was rescued: seeded, pushed, and now on the device
       // alongside the pre-existing one (no Bug-1 strand on a populated device).
+      expect(saves.map(b => b.id)).toContain('legacy-only');
+      expect(ids().sort()).toEqual(['device-1', 'legacy-only']);
+      expect(result.map(b => b.id).sort()).toEqual(['device-1', 'legacy-only']);
+      // Pending cleared (confirmed) and the durable flag is now set.
+      expect(readKey(BEANS_PENDING_STORAGE_KEY) || []).toEqual([]);
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBe(true);
+    });
+  });
+
+  describe('CAR-373 P2 upgrade path: pre-existing old migration flag is honored (no resurrect)', () => {
+    it('with gaggimate-beans-migrated=true and the new key UNSET, a cache-only bean deleted elsewhere is NOT seeded nor re-saved, and the deletion stays gone', async () => {
+      // Upgrade scenario: this browser ran the OLD migration (old flag true)
+      // and still holds a `gaggimate-beans` cache that mirrored the device list
+      // at that time. The NEW durable key has never been set on this browser.
+      localStorage.setItem(LEGACY_BEAN_MIGRATION_KEY, JSON.stringify(true));
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBeNull();
+      // The cache still holds a bean that was DELETED on another client — it is
+      // absent from the device's authoritative list now.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([
+          makeBean({ id: 'deleted-elsewhere', name: 'Stale Upgrade Copy' }),
+          makeBean({ id: 'device-1', name: 'Live Bean' }),
+        ]),
+      );
+      // No explicit pending writes — the deletion is genuine, not an unsynced write.
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toBeNull();
+
+      const { api, saves } = makeDevice({ initial: [makeBean({ id: 'device-1', name: 'Live Bean' })] });
+
+      const result = await migrateLegacyBeansToDevice(api);
+
+      // The deleted bean must NOT be seeded into pending...
+      expect(readKey(BEANS_PENDING_STORAGE_KEY) || []).not.toContain('deleted-elsewhere');
+      // ...nor re-saved to the device (req:beans:save not called for it).
+      expect(saves.map(b => b.id)).not.toContain('deleted-elsewhere');
+      // Returned + cached list matches the device (deleted bean stays gone).
+      expect(result.map(b => b.id)).toEqual(['device-1']);
+      expect(readKey(BEANS_STORAGE_KEY).map(b => b.id)).toEqual(['device-1']);
+      // The new durable flag is now set (the old flag was promoted to it).
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBe(true);
+    });
+  });
+
+  describe('CAR-373 P2 fresh browser still rescues (neither flag set)', () => {
+    it('with NEITHER migration flag set, a genuine legacy cache-only bean on a populated device IS seeded + pushed', async () => {
+      // Genuinely-fresh browser: neither the old nor the new flag is set.
+      expect(readKey(LEGACY_BEAN_MIGRATION_KEY)).toBeNull();
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBeNull();
+      // A genuine legacy/offline bean that predates the pending-set mechanism.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([makeBean({ id: 'legacy-only', name: 'Predates Pending' })]),
+      );
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toBeNull();
+
+      const { api, saves, ids } = makeDevice({
+        initial: [makeBean({ id: 'device-1', name: 'Already Here' })],
+      });
+
+      const result = await migrateLegacyBeansToDevice(api);
+
+      // The legacy bean was rescued: seeded, pushed, and now on the device.
       expect(saves.map(b => b.id)).toContain('legacy-only');
       expect(ids().sort()).toEqual(['device-1', 'legacy-only']);
       expect(result.map(b => b.id).sort()).toEqual(['device-1', 'legacy-only']);

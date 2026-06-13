@@ -18,6 +18,15 @@ const BEANS_PENDING_STORAGE_KEY = 'gaggimate-beans-pending';
 // device already has beans (unlike the old gate that skipped a populated
 // device entirely and stranded legacy beans — CAR-373 Bug 1).
 const BEANS_LEGACY_MIGRATED_KEY = 'gaggimate-beans-legacy-migrated';
+// PRE-EXISTING flag set by the OLD (pre-pending-set) migration. Browsers that
+// upgraded from a version running the old migration already have this set to
+// `true` AND a populated `gaggimate-beans` cache that mirrors the device list
+// at the time of that migration. seedPendingFromLegacy MUST honor this as
+// "already reconciled with a device" — otherwise an upgraded browser whose
+// new BEANS_LEGACY_MIGRATED_KEY is unset would re-seed every cache-only id into
+// pending and RESURRECT a bean deleted on another client (CAR-373 P2, upgrade
+// path). See seedPendingFromLegacy for the deliberate trade-off vs. Bug 1.
+const LEGACY_BEAN_MIGRATION_KEY = 'gaggimate-beans-migrated';
 
 function normalize(text) {
   return String(text || '')
@@ -360,8 +369,36 @@ async function drainPendingBeans(apiService) {
 // RE-seeding cache-only ids on every later load. Idempotent: a bean already on
 // the device is never seeded; an id already pending is not duplicated.
 function seedPendingFromLegacy(deviceBeans) {
-  if (readJson(BEANS_LEGACY_MIGRATED_KEY, false) === true) {
-    // Legacy rescue already performed once — never re-seed from the cache.
+  // Treat EITHER migration flag as "this browser has already reconciled with a
+  // device" and skip the cache-based rescue:
+  //   - BEANS_LEGACY_MIGRATED_KEY: the new durable one-shot flag (set below).
+  //   - LEGACY_BEAN_MIGRATION_KEY ('gaggimate-beans-migrated'): the PRE-EXISTING
+  //     flag from the OLD migration. An upgraded browser that ran the old
+  //     migration already has this true plus a `gaggimate-beans` cache that
+  //     mirrored the device list at migration time. Without consulting it,
+  //     the new flag (unset on first load after upgrade) would let us re-seed
+  //     every cache-only id into pending and RESURRECT a bean DELETED on
+  //     another client — the same CAR-373 P2 class, via the upgrade path.
+  //
+  // Deliberate trade-off (do NOT re-introduce CAR-373 Bug 1): the old flag can
+  // mean either (a) migration genuinely completed against an empty device
+  // (cache == device mirror; resurrecting would corrupt shared device state for
+  // all clients on the COMMON deletion path) OR (b) the old Bug-1 race fired and
+  // stranded legacy beans (narrow first-connect-to-a-populated-device race).
+  // localStorage cannot distinguish them, so we prefer NOT resurrecting:
+  // resurrection is unrecoverable corruption on the common path; a rare stranded
+  // Bug-1 bean is recoverable (the user re-adds it, and any bean they
+  // create/edit on this version goes through saveBean -> the explicit pending
+  // set and syncs correctly). We never trust a stale cache to push writes once
+  // ANY migration flag indicates this browser already reconciled with a device.
+  // Only a genuinely-fresh browser (NEITHER flag set) gets the one-time rescue.
+  if (
+    readJson(BEANS_LEGACY_MIGRATED_KEY, false) === true ||
+    readJson(LEGACY_BEAN_MIGRATION_KEY, false) === true
+  ) {
+    // Already reconciled (old or new flag) — never (re-)seed from the cache.
+    // Set the new flag so subsequent loads short-circuit on it directly.
+    writeJson(BEANS_LEGACY_MIGRATED_KEY, true);
     return;
   }
   const deviceIds = new Set((deviceBeans || []).map(bean => bean.id));
