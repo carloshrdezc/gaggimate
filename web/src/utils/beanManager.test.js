@@ -251,6 +251,87 @@ describe('beanManager', () => {
     });
   });
 
+  describe('drainPendingBeans reconciles device-regenerated ids (CAR-373 P1)', () => {
+    // A device simulator that mirrors the firmware's parseBean + saveBean
+    // behavior for UNSAFE legacy/imported ids: req:beans:save clears the unsafe
+    // id and regenerates a new SAFE id via generateShortID(), echoes the bean
+    // back under the regenerated id, and req:beans:list returns the regenerated
+    // bean — the original (unsafe) id never appears in the list.
+    function makeRegeneratingDevice({ initial = [], isUnsafe, regenerate } = {}) {
+      const byId = new Map();
+      for (const bean of initial) byId.set(bean.id, { ...bean });
+      const saves = [];
+      let counter = 0;
+      const handler = async ({ tp, bean, id }) => {
+        if (tp === 'req:beans:list') {
+          const beans = [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          return { beans };
+        }
+        if (tp === 'req:beans:save') {
+          saves.push(bean);
+          const safeId = isUnsafe(bean.id)
+            ? (regenerate ? regenerate(bean, counter++) : `safe-${counter++}`)
+            : bean.id;
+          const stored = { ...bean, id: safeId };
+          byId.set(stored.id, stored);
+          return { bean: stored };
+        }
+        if (tp === 'req:beans:delete') {
+          byId.delete(id);
+          return {};
+        }
+        return {};
+      };
+      return {
+        api: makeApi(handler),
+        saves,
+        current: () => [...byId.values()],
+        ids: () => [...byId.keys()],
+      };
+    }
+
+    it('clears the original pending id, stores the regenerated bean (no stale dup), and is idempotent', async () => {
+      // Offline-created bean with an UNSAFE legacy/imported id.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([makeBean({ id: 'legacy/unsafe id', name: 'Imported Bean' })]),
+      );
+      localStorage.setItem(BEANS_PENDING_STORAGE_KEY, JSON.stringify(['legacy/unsafe id']));
+
+      const { api, saves, ids } = makeRegeneratingDevice({
+        isUnsafe: id => /[^A-Za-z0-9-]/.test(id), // unsafe if it has chars firmware would strip
+        regenerate: () => 'regen-abc123',
+      });
+
+      // --- First drain ---
+      const result = await listBeans(api);
+
+      // The bean was pushed once; the device regenerated a safe id.
+      expect(saves.map(b => b.id)).toEqual(['legacy/unsafe id']);
+      expect(ids()).toEqual(['regen-abc123']);
+
+      // Pending set is EMPTY — the original (unsafe) id was cleared even though
+      // it never appeared in req:beans:list (it was confirmed via the echo).
+      expect(readKey(BEANS_PENDING_STORAGE_KEY) || []).toEqual([]);
+
+      // Local mirror holds ONLY the regenerated bean — the stale original-id
+      // payload is gone (not shadowing or duplicating the device record).
+      const mirrorIds = readKey(BEANS_STORAGE_KEY).map(b => b.id);
+      expect(mirrorIds).toEqual(['regen-abc123']);
+      expect(mirrorIds).not.toContain('legacy/unsafe id');
+      expect(result.map(b => b.id)).toEqual(['regen-abc123']);
+
+      // --- Second drain (idempotency): must push NOTHING new ---
+      const savesAfterFirst = saves.length;
+      const result2 = await listBeans(api);
+
+      expect(saves.length).toBe(savesAfterFirst); // no additional req:beans:save
+      expect(ids()).toEqual(['regen-abc123']); // no duplicate created on device
+      expect(readKey(BEANS_PENDING_STORAGE_KEY) || []).toEqual([]);
+      expect(result2.map(b => b.id)).toEqual(['regen-abc123']);
+    });
+  });
+
   describe('removeBean clears pending', () => {
     it('does not resurrect a bean removed while offline', async () => {
       localStorage.setItem(BEANS_STORAGE_KEY, JSON.stringify([makeBean({ id: 'offline-1' })]));

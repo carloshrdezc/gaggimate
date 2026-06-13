@@ -222,13 +222,22 @@ async function drainPendingBeans(apiService) {
     return deviceBeans;
   }
 
-  // Push each pending bean. The device echoes the canonical bean and owns the
-  // id/timestamp, so we don't try to interpret the per-save response here —
-  // confirmation comes from the refreshed list below. A push that throws is
-  // swallowed so one bad bean doesn't block the rest; its id stays pending.
+  // Push each pending bean and CAPTURE the device's echoed canonical bean.
+  // The firmware clears unsafe legacy/imported ids on parse and regenerates a
+  // new safe id via generateShortID(), so req:beans:save's response carries a
+  // DIFFERENT id than the one we pushed (and the original id will never appear
+  // in req:beans:list). We therefore record an original-id -> canonical-bean
+  // mapping so the original pending id can be cleared and the stale original
+  // payload replaced even when the device regenerated the id. A push that
+  // throws (or echoes no canonical bean) leaves its id pending for retry.
+  // Mirrors the interactive saveBean() reconciliation (response.bean capture).
+  const canonicalByOriginalId = new Map();
   for (const bean of beansToPush) {
     try {
-      await requestBeans(apiService, { tp: 'req:beans:save', bean });
+      const response = await requestBeans(apiService, { tp: 'req:beans:save', bean });
+      if (response?.bean) {
+        canonicalByOriginalId.set(bean.id, normalizeBeanPayload(response.bean));
+      }
     } catch {
       // Leave this id pending; it is retried on the next connected call.
     }
@@ -240,29 +249,60 @@ async function drainPendingBeans(apiService) {
   } catch {
     // Could not confirm — keep all pending ids and surface a best-effort merge
     // (pending local beans on top of whatever we can still read) so the UI does
-    // not lose the offline-created beans.
+    // not lose the offline-created beans. Where the device DID echo a canonical
+    // bean (id possibly regenerated), prefer that canonical payload over the
+    // stale original so a successfully-regenerated bean is not stranded.
     const fallbackDevice = await listDeviceBeans(apiService).catch(() => []);
-    const deviceById = new Set(fallbackDevice.map(bean => bean.id));
-    const merged = sortBeans([
-      ...beansToPush.filter(bean => !deviceById.has(bean.id)),
-      ...fallbackDevice,
-    ]);
+    const fallbackIds = new Set(fallbackDevice.map(bean => bean.id));
+    const fallbackPending = beansToPush
+      .map(bean => canonicalByOriginalId.get(bean.id) || bean)
+      .filter(bean => !fallbackIds.has(bean.id));
+    const merged = sortBeans([...fallbackPending, ...fallbackDevice]);
     saveLegacyBeans(merged);
     return merged;
   }
 
-  // Clear pending ids the device confirmed (echoed back in the refreshed list);
-  // keep the rest pending for a later retry. Dedup is by id — the device list
-  // is authoritative on any field conflict.
+  // Reconcile each pushed bean against the authoritative device list. A pushed
+  // bean is CONFIRMED synced if either:
+  //   (a) its original id appears in the refreshed device list, OR
+  //   (b) the device echoed a canonical bean for it (id regenerated) — in which
+  //       case the original id will NOT appear in the list, so we clear the
+  //       ORIGINAL pending id and drop the stale original-id payload from the
+  //       local mirror so the regenerated bean (already in the device list) is
+  //       neither shadowed nor re-pushed on a later drain (idempotency).
+  // Only genuinely-failed pushes (threw -> no canonical echo AND original id not
+  // in the device list) stay pending with their original payload for retry.
   const deviceIds = new Set(deviceBeans.map(bean => bean.id));
-  savePendingBeanIds(listPendingBeanIds().filter(id => !deviceIds.has(id)));
+  const confirmedOriginalIds = new Set();
+  const staleOriginalIds = new Set();
+  const stillPending = [];
+  for (const bean of beansToPush) {
+    if (deviceIds.has(bean.id)) {
+      // Confirmed under its original id (device kept it).
+      confirmedOriginalIds.add(bean.id);
+      continue;
+    }
+    if (canonicalByOriginalId.has(bean.id)) {
+      // Confirmed under a regenerated id — the original payload is now stale.
+      confirmedOriginalIds.add(bean.id);
+      staleOriginalIds.add(bean.id);
+      continue;
+    }
+    // Save failed and not present on device — keep pending for retry.
+    stillPending.push(bean);
+  }
 
-  // Any pending bean the device did NOT confirm (its save threw) must be kept
-  // in the local mirror so its payload survives for the next retry — otherwise
-  // overwriting the cache with the device-only list would strand it. The device
-  // list stays authoritative for everything it does know about.
-  const stillPending = beansToPush.filter(bean => !deviceIds.has(bean.id));
-  const merged = stillPending.length ? sortBeans([...stillPending, ...deviceBeans]) : deviceBeans;
+  // Clear pending ids for every confirmed bean (original ids), keeping only the
+  // genuinely-failed ones for a later retry.
+  savePendingBeanIds(listPendingBeanIds().filter(id => !confirmedOriginalIds.has(id)));
+
+  // Rebuild the local mirror: device list is authoritative; drop any stale
+  // original-id payloads (their regenerated bean already lives in deviceBeans),
+  // and keep only the genuinely-still-pending originals on top for retry.
+  const survivingPending = stillPending.filter(bean => !staleOriginalIds.has(bean.id));
+  const merged = survivingPending.length
+    ? sortBeans([...survivingPending, ...deviceBeans])
+    : deviceBeans;
   saveLegacyBeans(merged);
   return merged;
 }
