@@ -1,7 +1,13 @@
 const BEANS_STORAGE_KEY = 'gaggimate-beans';
 const BEAN_SELECTION_EVENTS_KEY = 'gaggimate-bean-selection-events';
 const ACTIVE_BEAN_SELECTION_KEY = 'gaggimate-active-bean-selection';
-const LEGACY_BEAN_MIGRATION_KEY = 'gaggimate-beans-migrated';
+// CAR-371-style pending set of bean *ids* that were saved while offline (or
+// whose online save failed). The device has never received these, so they are
+// pushed on the next connected listBeans()/page load and cleared once the
+// device echoes them back. This replaces the old one-shot
+// `gaggimate-beans-migrated` flag + empty-device migration gate (CAR-373),
+// which permanently stranded localStorage-only beans on a populated device.
+const BEANS_PENDING_STORAGE_KEY = 'gaggimate-beans-pending';
 
 function normalize(text) {
   return String(text || '')
@@ -119,6 +125,48 @@ function removeLegacyBean(beanId) {
   return nextBeans;
 }
 
+// --- Pending offline beans ----------------------------------------------------
+//
+// A set of bean *ids* that were created/updated while no device connection was
+// available (or whose online save threw). Unlike grinders (a capped, eviction-
+// prone string list), beans are uncapped and id-keyed, so dedup/merge is a
+// clean by-id operation and there is no eviction to model. A pending id is
+// cleared only once the device echoes that bean back from req:beans:list,
+// guaranteeing the write actually landed; a failed push leaves the id pending
+// so it is retried on the next connected call. The matching bean payload lives
+// in the localStorage mirror (BEANS_STORAGE_KEY), so the pending set only needs
+// to track ids.
+
+function listPendingBeanIds() {
+  const ids = readJson(BEANS_PENDING_STORAGE_KEY, []);
+  if (!Array.isArray(ids)) return [];
+  // De-dup defensively and drop blanks.
+  return [...new Set(ids.map(id => String(id || '').trim()).filter(Boolean))];
+}
+
+function savePendingBeanIds(ids) {
+  writeJson(
+    BEANS_PENDING_STORAGE_KEY,
+    [...new Set((Array.isArray(ids) ? ids : []).map(id => String(id || '').trim()).filter(Boolean))],
+  );
+}
+
+// Mark a bean id as a pending offline write.
+function addPendingBeanId(beanId) {
+  const id = String(beanId || '').trim();
+  if (!id) return;
+  const ids = listPendingBeanIds();
+  if (ids.includes(id)) return;
+  savePendingBeanIds([...ids, id]);
+}
+
+// Drop a single bean id from the pending set once it is confirmed on device.
+function clearPendingBeanId(beanId) {
+  const id = String(beanId || '').trim();
+  if (!id) return;
+  savePendingBeanIds(listPendingBeanIds().filter(existing => existing !== id));
+}
+
 function hasConnectedApi(apiService) {
   return !!(apiService?.socket && apiService.socket.readyState === WebSocket.OPEN);
 }
@@ -138,6 +186,112 @@ async function listDeviceBeans(apiService) {
   return sortBeans(beans);
 }
 
+// Push every pending bean to the device, then refresh from the authoritative
+// device list. The device (BeanManager) owns id/timestamp echo, sort and dedup,
+// so the client never models the merge: any pending id that comes back in the
+// refreshed list is confirmed synced and cleared; ids that did not land (push
+// threw, or device omitted them) stay pending for the next attempt.
+//
+// Returns the authoritative device bean list. On a transient error mid-drain it
+// falls back to merging the still-pending local beans on top of the last known
+// device list so nothing is lost from the UI and the ids remain pending.
+async function drainPendingBeans(apiService) {
+  const pendingIds = listPendingBeanIds();
+
+  if (!pendingIds.length) {
+    // Nothing to migrate — just return the authoritative device list.
+    const deviceBeans = await listDeviceBeans(apiService);
+    saveLegacyBeans(deviceBeans);
+    return deviceBeans;
+  }
+
+  // Resolve the pending ids to their stored bean payloads (the localStorage
+  // mirror is the source of truth for the bean body). Ids without a stored
+  // bean are stale — drop them so they cannot be retried forever.
+  const localBeans = listLegacyBeans();
+  const localById = new Map(localBeans.map(bean => [bean.id, bean]));
+  const beansToPush = pendingIds.map(id => localById.get(id)).filter(Boolean);
+  const unresolved = pendingIds.filter(id => !localById.has(id));
+  if (unresolved.length) {
+    savePendingBeanIds(pendingIds.filter(id => localById.has(id)));
+  }
+
+  if (!beansToPush.length) {
+    const deviceBeans = await listDeviceBeans(apiService);
+    saveLegacyBeans(deviceBeans);
+    return deviceBeans;
+  }
+
+  // Push each pending bean. The device echoes the canonical bean and owns the
+  // id/timestamp, so we don't try to interpret the per-save response here —
+  // confirmation comes from the refreshed list below. A push that throws is
+  // swallowed so one bad bean doesn't block the rest; its id stays pending.
+  for (const bean of beansToPush) {
+    try {
+      await requestBeans(apiService, { tp: 'req:beans:save', bean });
+    } catch {
+      // Leave this id pending; it is retried on the next connected call.
+    }
+  }
+
+  let deviceBeans;
+  try {
+    deviceBeans = await listDeviceBeans(apiService);
+  } catch {
+    // Could not confirm — keep all pending ids and surface a best-effort merge
+    // (pending local beans on top of whatever we can still read) so the UI does
+    // not lose the offline-created beans.
+    const fallbackDevice = await listDeviceBeans(apiService).catch(() => []);
+    const deviceById = new Set(fallbackDevice.map(bean => bean.id));
+    const merged = sortBeans([
+      ...beansToPush.filter(bean => !deviceById.has(bean.id)),
+      ...fallbackDevice,
+    ]);
+    saveLegacyBeans(merged);
+    return merged;
+  }
+
+  // Clear pending ids the device confirmed (echoed back in the refreshed list);
+  // keep the rest pending for a later retry. Dedup is by id — the device list
+  // is authoritative on any field conflict.
+  const deviceIds = new Set(deviceBeans.map(bean => bean.id));
+  savePendingBeanIds(listPendingBeanIds().filter(id => !deviceIds.has(id)));
+
+  // Any pending bean the device did NOT confirm (its save threw) must be kept
+  // in the local mirror so its payload survives for the next retry — otherwise
+  // overwriting the cache with the device-only list would strand it. The device
+  // list stays authoritative for everything it does know about.
+  const stillPending = beansToPush.filter(bean => !deviceIds.has(bean.id));
+  const merged = stillPending.length ? sortBeans([...stillPending, ...deviceBeans]) : deviceBeans;
+  saveLegacyBeans(merged);
+  return merged;
+}
+
+// Seed the pending set from localStorage-only beans: any locally-stored bean
+// whose id is not (yet) known to the device is a genuine unsynced write and
+// must be migrated. This replaces the old empty-device + one-shot-flag gate so
+// a populated device no longer blocks legacy/offline beans. Idempotent: a bean
+// already on the device is never added; a bean already pending is not
+// duplicated.
+function seedPendingFromLegacy(deviceBeans) {
+  const deviceIds = new Set((deviceBeans || []).map(bean => bean.id));
+  for (const bean of listLegacyBeans()) {
+    if (!bean.id) continue;
+    if (deviceIds.has(bean.id)) continue;
+    addPendingBeanId(bean.id);
+  }
+}
+
+/**
+ * Loads the bean library, migrating any localStorage-only beans to the device.
+ * Kept as the page-load entry point (Beans/index.jsx) for backward
+ * compatibility; it now defers entirely to the pending-set drain instead of the
+ * old empty-device + one-shot-flag migration gate (CAR-373).
+ *
+ * Idempotent across repeated calls: beans already on the device are never
+ * re-pushed (id-keyed dedup, device authoritative), and confirmed beans are
+ * removed from the pending set.
+ */
 export async function migrateLegacyBeansToDevice(apiService) {
   const legacyBeans = listLegacyBeans();
   if (!hasConnectedApi(apiService)) {
@@ -151,25 +305,14 @@ export async function migrateLegacyBeansToDevice(apiService) {
     return legacyBeans;
   }
 
-  const migrationComplete = readJson(LEGACY_BEAN_MIGRATION_KEY, false);
-  const shouldHydrateDevice = legacyBeans.length > 0 && !migrationComplete && deviceBeans.length === 0;
-
-  if (!shouldHydrateDevice) {
-    if (!migrationComplete) {
-      writeJson(LEGACY_BEAN_MIGRATION_KEY, true);
-    }
-    return deviceBeans;
-  }
-
-  for (const bean of legacyBeans) {
-    await saveBean(apiService, bean, { suppressEvent: true, deviceOnly: true });
-  }
-
-  writeJson(LEGACY_BEAN_MIGRATION_KEY, true);
-  dispatchBeansChanged();
+  // Mark any local-only beans as pending, then drain the pending set to the
+  // device and refresh from the authoritative list.
+  seedPendingFromLegacy(deviceBeans);
 
   try {
-    return await listDeviceBeans(apiService);
+    const result = await drainPendingBeans(apiService);
+    dispatchBeansChanged();
+    return result;
   } catch {
     return legacyBeans;
   }
@@ -182,7 +325,10 @@ export async function listBeans(apiService) {
   }
 
   try {
-    return await listDeviceBeans(apiService);
+    // Drain any pending offline/failed beans to the device, then return the
+    // authoritative device list. This is what lets a bean created while
+    // disconnected reach the device on the next connected list/page load.
+    return await drainPendingBeans(apiService);
   } catch {
     return legacyBeans;
   }
@@ -231,12 +377,21 @@ export async function saveBean(apiService, beanInput, options = {}) {
   if (!bean.name) return null;
 
   if (!hasConnectedApi(apiService)) {
-    return upsertLegacyBean(bean);
+    // No device to sync to — persist locally and remember the id as a pending
+    // offline write so listBeans()/migrateLegacyBeansToDevice() pushes it on
+    // the next connected call (CAR-373 Bug 2).
+    const saved = upsertLegacyBean(bean);
+    addPendingBeanId(saved.id);
+    return saved;
   }
 
   try {
     const response = await requestBeans(apiService, { tp: 'req:beans:save', bean });
     const savedBean = normalizeBeanPayload(response?.bean || bean);
+    // Persisted on the device — this id is synced, so it is not (or no longer)
+    // a pending offline write.
+    clearPendingBeanId(savedBean.id);
+    clearPendingBeanId(bean.id);
     if (!options.deviceOnly) {
       upsertLegacyBean(savedBean);
     }
@@ -248,13 +403,21 @@ export async function saveBean(apiService, beanInput, options = {}) {
     if (options.deviceOnly) {
       throw error;
     }
-    return upsertLegacyBean(bean);
+    // Online save failed despite an open socket — persist locally and mark the
+    // id pending so it is retried, instead of being silently dropped
+    // (CAR-373 Bug 3).
+    const saved = upsertLegacyBean(bean);
+    addPendingBeanId(saved.id);
+    return saved;
   }
 }
 
 export async function removeBean(apiService, beanId, options = {}) {
   if (!hasConnectedApi(apiService)) {
     const nextBeans = removeLegacyBean(beanId);
+    // A bean removed while offline must not be resurrected by a stale pending
+    // entry on the next connected drain.
+    clearPendingBeanId(beanId);
     const activeBean = getCurrentBeanSelection();
     if (activeBean?.beanId === beanId) {
       clearCurrentBeanSelection();
@@ -265,11 +428,13 @@ export async function removeBean(apiService, beanId, options = {}) {
   try {
     await requestBeans(apiService, { tp: 'req:beans:delete', id: beanId });
     removeLegacyBean(beanId);
+    clearPendingBeanId(beanId);
   } catch (error) {
     if (options.deviceOnly) {
       throw error;
     }
     const nextBeans = removeLegacyBean(beanId);
+    clearPendingBeanId(beanId);
     const activeBean = getCurrentBeanSelection();
     if (activeBean?.beanId === beanId) {
       clearCurrentBeanSelection();
