@@ -139,13 +139,23 @@ function saveLegacyBeans(beans) {
   dispatchBeansChanged(listLegacyBeans());
 }
 
-function upsertLegacyBean(bean) {
+function upsertLegacyBean(bean, { silent = false } = {}) {
   const normalizedBean = normalizeBeanPayload(bean);
   const beans = listLegacyBeans();
   const nextBeans = beans.some(existing => existing.id === normalizedBean.id)
     ? beans.map(existing => (existing.id === normalizedBean.id ? { ...existing, ...normalizedBean } : existing))
     : [normalizedBean, ...beans];
-  saveLegacyBeans(nextBeans);
+  // M2 (CAR-373 review): `silent` writes the local mirror WITHOUT dispatching
+  // `beans-library-changed`. Callers that batch many writes and dispatch once
+  // themselves (e.g. restoreBeanData via saveBean(..., { suppressEvent: true }))
+  // need the per-bean local persist to stay quiet so a restore of N beans does
+  // not fire N redundant refreshes. Default (silent=false) keeps the original
+  // dispatch-on-write behavior.
+  if (silent) {
+    writeLegacyBeansCache(nextBeans);
+  } else {
+    saveLegacyBeans(nextBeans);
+  }
   return normalizedBean;
 }
 
@@ -439,9 +449,18 @@ export async function migrateLegacyBeansToDevice(apiService) {
   seedPendingFromLegacy(deviceBeans);
 
   try {
-    const result = await drainPendingBeans(apiService);
-    dispatchBeansChanged();
-    return result;
+    // M1 (CAR-373 review): drainPendingBeans is the SINGLE owner of the
+    // `beans-library-changed` dispatch. It already fires exactly once when it
+    // confirms a real sync (its `confirmedOriginalIds.size` branch calls
+    // saveLegacyBeans -> dispatch) and stays SILENT on a pure no-op read (it
+    // calls writeLegacyBeansCache, no dispatch — preserving CAR-373 P1). We
+    // therefore do NOT dispatch again here: the previous unconditional
+    // dispatchBeansChanged() double-fired on every migration that synced >=1
+    // bean (one from drain, one from here), making listeners run two redundant
+    // req:beans:list round-trips. Letting drain own the single dispatch yields:
+    // migration that synced beans -> exactly one event; migration/read that
+    // synced nothing -> zero events.
+    return await drainPendingBeans(apiService);
   } catch {
     return legacyBeans;
   }
@@ -508,8 +527,10 @@ export async function saveBean(apiService, beanInput, options = {}) {
   if (!hasConnectedApi(apiService)) {
     // No device to sync to — persist locally and remember the id as a pending
     // offline write so listBeans()/migrateLegacyBeansToDevice() pushes it on
-    // the next connected call (CAR-373 Bug 2).
-    const saved = upsertLegacyBean(bean);
+    // the next connected call (CAR-373 Bug 2). M2 (CAR-373 review): honor
+    // options.suppressEvent — when a batch caller (restoreBeanData) sets it,
+    // the local persist must NOT dispatch per bean; the caller dispatches once.
+    const saved = upsertLegacyBean(bean, { silent: !!options.suppressEvent });
     addPendingBeanId(saved.id);
     return saved;
   }
@@ -534,8 +555,10 @@ export async function saveBean(apiService, beanInput, options = {}) {
     }
     // Online save failed despite an open socket — persist locally and mark the
     // id pending so it is retried, instead of being silently dropped
-    // (CAR-373 Bug 3).
-    const saved = upsertLegacyBean(bean);
+    // (CAR-373 Bug 3). M2 (CAR-373 review): honor options.suppressEvent so a
+    // batch caller (restoreBeanData) does not fire a per-bean event when its
+    // online save fails mid-restore; the caller dispatches once afterward.
+    const saved = upsertLegacyBean(bean, { silent: !!options.suppressEvent });
     addPendingBeanId(saved.id);
     return saved;
   }

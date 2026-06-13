@@ -510,4 +510,86 @@ describe('beanManager', () => {
       expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBe(true);
     });
   });
+
+  // Counts `beans-library-changed` events fired during `fn()`. Uses a real
+  // addEventListener so it observes exactly what app listeners (ShotHistory /
+  // Beans pages) would receive.
+  async function countBeansChanged(fn) {
+    let count = 0;
+    const listener = () => {
+      count += 1;
+    };
+    window.addEventListener('beans-library-changed', listener);
+    try {
+      await fn();
+    } finally {
+      window.removeEventListener('beans-library-changed', listener);
+    }
+    return count;
+  }
+
+  describe('CAR-373 M1: migration dispatches beans-library-changed exactly once', () => {
+    it('a connected migration that seeds + confirms >=1 pending bean dispatches EXACTLY ONCE (was twice)', async () => {
+      // Legacy cache-only bean on a populated device, fresh browser (no flag),
+      // so seedPendingFromLegacy seeds it and the drain confirms the sync.
+      expect(readKey(BEANS_LEGACY_MIGRATED_KEY)).toBeNull();
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([makeBean({ id: 'legacy-only', name: 'Predates Pending' })]),
+      );
+      const { api, ids } = makeDevice({ initial: [makeBean({ id: 'device-1', name: 'Already Here' })] });
+
+      const count = await countBeansChanged(() => migrateLegacyBeansToDevice(api));
+
+      // The bean reached the device (sync confirmed), and the event fired ONCE.
+      expect(ids().sort()).toEqual(['device-1', 'legacy-only']);
+      expect(count).toBe(1);
+    });
+  });
+
+  describe('CAR-373 M1 non-regression: no-op connected read stays silent (P1)', () => {
+    it('a connected listBeans() with empty pending + a device list dispatches ZERO events', async () => {
+      // Pure read: device has beans, cache mirrors them, nothing pending. The
+      // M1 change must NOT have made reads noisy.
+      localStorage.setItem(
+        BEANS_STORAGE_KEY,
+        JSON.stringify([makeBean({ id: 'device-1', name: 'Cached Mirror' })]),
+      );
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toBeNull();
+      const { api } = makeDevice({ initial: [makeBean({ id: 'device-1', name: 'Cached Mirror' })] });
+
+      const count = await countBeansChanged(() => listBeans(api));
+
+      expect(count).toBe(0);
+    });
+  });
+
+  describe('CAR-373 M2: offline saveBean honors suppressEvent', () => {
+    it('offline saveBean with suppressEvent persists the bean (stored + pending) but dispatches ZERO events', async () => {
+      const api = makeOfflineApi();
+
+      const count = await countBeansChanged(() =>
+        saveBean(api, makeBean({ id: 'bean-offline' }), { suppressEvent: true }),
+      );
+
+      // No device call, no event...
+      expect(api.request).not.toHaveBeenCalled();
+      expect(count).toBe(0);
+      // ...but the bean was persisted locally and marked pending.
+      expect(readKey(BEANS_STORAGE_KEY).map(b => b.id)).toEqual(['bean-offline']);
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toEqual(['bean-offline']);
+    });
+
+    it('offline saveBean WITHOUT suppressEvent DOES dispatch once (proves the option is honored, not always-silent)', async () => {
+      const api = makeOfflineApi();
+
+      const count = await countBeansChanged(() =>
+        saveBean(api, makeBean({ id: 'bean-offline-2' })),
+      );
+
+      expect(count).toBe(1);
+      expect(readKey(BEANS_STORAGE_KEY).map(b => b.id)).toEqual(['bean-offline-2']);
+      expect(readKey(BEANS_PENDING_STORAGE_KEY)).toEqual(['bean-offline-2']);
+    });
+  });
 });
