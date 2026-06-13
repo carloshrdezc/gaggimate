@@ -1209,9 +1209,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // tracks the active profile's volumetric target (s.brewTargetVolume),
   // reseeding whenever the profile changes. localStorage is intentionally NOT
   // used as the seed source to avoid stale-value bugs. When override is allowed
-  // the field is editable and commits send req:change-brew-target; when not, it
-  // is read-only.
-  const yieldEditable = !!s.allowYieldOverride;
+  // AND the active profile is volumetric the field is editable and commits send
+  // req:change-brew-target; otherwise it is read-only. Non-volumetric profiles
+  // keep the disabled/locked treatment regardless of the override setting,
+  // because Controller::setBrewTarget() ignores a brew target for them.
+  const yieldEditable = !!s.allowYieldOverride && !!s.brewTarget;
   const [yieldTarget, setYieldTargetState] = useState(() => s.brewTargetVolume || DEFAULT_YIELD);
 
   // Reseed to the active profile's target on profile change (and whenever the
