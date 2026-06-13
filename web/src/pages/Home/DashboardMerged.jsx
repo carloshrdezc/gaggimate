@@ -39,7 +39,6 @@ import {
 } from './dashboardLogic.js';
 
 const DOSE_KEY = 'gaggimate-dose-grams';
-const YIELD_KEY = 'gaggimate-target-weight';
 const DEFAULT_DOSE = 18.0;
 const DEFAULT_YIELD = 36.0;
 
@@ -823,6 +822,8 @@ EditableNumBlock.propTypes = {
   min: PropTypes.number,
   max: PropTypes.number,
   onCommit: PropTypes.func,
+  disabled: PropTypes.bool,
+  lockedHint: PropTypes.string,
 };
 
 // Inline dropdown for profile / bean selection
@@ -1216,10 +1217,12 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // Reseed to the active profile's target on profile change (and whenever the
   // device's broadcast target changes). Applies in both editable and locked
   // states so a custom value never silently carries across a profile switch.
+  // When the active profile has no volumetric target (brewTargetVolume <= 0,
+  // e.g. a time/pressure profile), fall back to DEFAULT_YIELD rather than
+  // holding the previous profile's number — the device ignores yield there
+  // anyway, so a stale "locked" value would be misleading.
   useEffect(() => {
-    if (s.brewTargetVolume > 0) {
-      setYieldTargetState(s.brewTargetVolume);
-    }
+    setYieldTargetState(s.brewTargetVolume > 0 ? s.brewTargetVolume : DEFAULT_YIELD);
   }, [s.selectedProfileId, s.brewTargetVolume]);
 
   const setYield = useCallback(val => {

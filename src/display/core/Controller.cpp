@@ -735,6 +735,12 @@ void Controller::lowerTemp() {
 }
 
 void Controller::raiseBrewTarget() {
+    // CAR-375: when the per-shot yield override is disabled, the yield is locked
+    // to the profile. Ignore the on-device +/- yield buttons too so the lock is
+    // honored device-wide, not just on the web dashboard.
+    if (!settings.isAllowYieldOverride()) {
+        return;
+    }
     if (isVolumetricAvailable() && profileManager->getSelectedProfile().isVolumetric()) {
         profileManager->getSelectedProfile().adjustVolumetricTarget(1);
     } else {
@@ -744,6 +750,10 @@ void Controller::raiseBrewTarget() {
 }
 
 void Controller::lowerBrewTarget() {
+    // CAR-375: see raiseBrewTarget — honor the yield lock for the on-device buttons.
+    if (!settings.isAllowYieldOverride()) {
+        return;
+    }
     if (isVolumetricAvailable() && profileManager->getSelectedProfile().isVolumetric()) {
         profileManager->getSelectedProfile().adjustVolumetricTarget(-1);
     } else {
