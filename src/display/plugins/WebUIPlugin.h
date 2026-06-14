@@ -35,6 +35,7 @@ const String RELEASE_URL = "https://github.com/carloshrdezc/gaggimate/releases/"
 
 class ProfileManager;
 class BeanManager;
+class GrinderManager;
 
 class WebUIPlugin : public Plugin {
   public:
@@ -64,6 +65,7 @@ class WebUIPlugin : public Plugin {
     void handleOTAStart(uint32_t clientId, JsonDocument &request);
     void handleAutotuneStart(uint32_t clientId, JsonDocument &request);
     void handleBeanRequest(uint32_t clientId, JsonDocument &request);
+    void handleGrinderRequest(uint32_t clientId, JsonDocument &request);
     void handleProfileRequest(uint32_t clientId, JsonDocument &request);
     void handleFlushStart(uint32_t clientId, JsonDocument &request);
 
@@ -88,6 +90,7 @@ class WebUIPlugin : public Plugin {
     PluginManager *pluginManager = nullptr;
     DNSServer *dnsServer = nullptr;
     BeanManager *beanManager = nullptr;
+    GrinderManager *grinderManager = nullptr;
     ProfileManager *profileManager = nullptr;
 
     // Relay state

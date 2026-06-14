@@ -37,6 +37,19 @@ typedef struct {
     lv_obj_t *pill;         // steam READY pill
     lv_obj_t *bar;          // linear progress
     lv_obj_t *chips[4];     // mode chip fills
+
+    // CAR-358: steam-mode live temp steppers (shown only in MODE_STEAM, hidden
+    // in brew/water on this shared screen). steam_steppers is the row container;
+    // steam_minus/steam_plus are the -/+ buttons. gm_status_apply_mode() toggles
+    // the row's visibility per mode.
+    lv_obj_t *steam_steppers;
+    lv_obj_t *steam_minus;
+    lv_obj_t *steam_plus;
+
+    // CAR-358: water-mode "TAP TO DISPENSE" affordance hint (shown only in
+    // MODE_WATER). The whole screen is tap-to-toggle by design (CAR-292); this
+    // label just makes that discoverable.
+    lv_obj_t *water_hint;
 } gm_handles_t;
 
 extern gm_handles_t gm_h;

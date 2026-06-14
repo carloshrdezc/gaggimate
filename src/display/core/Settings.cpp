@@ -57,6 +57,7 @@ Settings::Settings() {
     mdnsName = preferences.getString("mn", DEFAULT_MDNS_NAME);
     homekit = preferences.getBool("hk", false);
     volumetricTarget = preferences.getBool("vt", false);
+    allowYieldOverride = preferences.getBool("ayo", false);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
     savedScale = preferences.getString("ssc", "");
     momentaryButtons = preferences.getBool("mb", false);
@@ -266,6 +267,11 @@ void Settings::setHomekit(const bool homekit) {
 
 void Settings::setVolumetricTarget(bool volumetric_target) {
     this->volumetricTarget = volumetric_target;
+    save();
+}
+
+void Settings::setAllowYieldOverride(bool allow_yield_override) {
+    this->allowYieldOverride = allow_yield_override;
     save();
 }
 
@@ -584,6 +590,7 @@ void Settings::doSave() {
     preferences.putString("mn", mdnsName);
     preferences.putBool("hk", homekit);
     preferences.putBool("vt", volumetricTarget);
+    preferences.putBool("ayo", allowYieldOverride);
     preferences.putString("oc", otaChannel);
     preferences.putString("ssc", savedScale);
     preferences.putBool("bf_a", boilerFillActive);

@@ -1,11 +1,12 @@
 import { useState, useEffect, useContext, useCallback } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { ApiServiceContext } from '../../services/ApiService.js';
+import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans } from '../../utils/beanManager.js';
+import { listGrinders, recordGrinder } from '../../utils/grinderManager.js';
 import {
   formatTenPointRating,
   getRatingFillPercent,
@@ -35,7 +36,13 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const [isEditing, setIsEditing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [availableBeans, setAvailableBeans] = useState([]);
+  const [availableGrinders, setAvailableGrinders] = useState([]);
   const beanFieldListId = `bean-options-${notesKey}`;
+  const grinderFieldListId = `grinder-options-${notesKey}`;
+  // Reactive WebSocket connection flag; flips true once the device sends its
+  // first status frame. Used to re-pull device-persisted grinders for cards
+  // that mounted before the socket opened.
+  const isConnected = machine.value.connected;
 
   // Calculate ratio function
   const calculateRatio = useCallback((doseIn, doseOut) => {
@@ -152,6 +159,40 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   }, [apiService]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadGrinders = async () => {
+      try {
+        const grinders = await listGrinders(apiService);
+        if (!cancelled) {
+          setAvailableGrinders(grinders);
+        }
+      } catch (error) {
+        console.error('Failed to load grinders for shot notes:', error);
+        if (!cancelled) {
+          setAvailableGrinders([]);
+        }
+      }
+    };
+
+    loadGrinders();
+
+    const handleGrindersChanged = () => {
+      loadGrinders();
+    };
+
+    window.addEventListener('grinders-library-changed', handleGrindersChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('grinders-library-changed', handleGrindersChanged);
+    };
+    // Re-run when the socket connects: apiService is a stable singleton, so
+    // without the reactive `connected` flag a card mounted before the
+    // WebSocket opened would only ever show the local cache and never pull the
+    // device-persisted grinders until remounted.
+  }, [apiService, isConnected]);
+
+  useEffect(() => {
     if (!availableBeans.length || notes.beanId || !notes.beanType) return;
     const matchedBean = availableBeans.find(
       bean =>
@@ -171,6 +212,15 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     setLoading(true);
     try {
       await notesService.saveNotes(notesKey, shot.source || 'gaggimate', notes);
+      // Remember the grinder name so it's offered as a suggestion next time.
+      if (notes.grinder && notes.grinder.trim()) {
+        try {
+          const grinders = await recordGrinder(apiService, notes.grinder);
+          setAvailableGrinders(grinders);
+        } catch (error) {
+          console.error('Failed to record grinder name:', error);
+        }
+      }
       setIsEditing(false);
       if (onNotesUpdate) {
         onNotesUpdate(notes);
@@ -397,13 +447,21 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             Grinder
           </label>
           {isEditing ? (
-            <input
-              type='text'
-              className='nd-input'
-              value={notes.grinder}
-              onChange={e => handleInputChange('grinder', e.target.value)}
-              placeholder='e.g., Niche Zero'
-            />
+            <>
+              <input
+                type='text'
+                list={grinderFieldListId}
+                className='nd-input'
+                value={notes.grinder}
+                onChange={e => handleInputChange('grinder', e.target.value)}
+                placeholder='e.g., Niche Zero'
+              />
+              <datalist id={grinderFieldListId}>
+                {availableGrinders.map(grinder => (
+                  <option key={grinder} value={grinder} />
+                ))}
+              </datalist>
+            </>
           ) : (
             <div className='nd-input bg-[var(--home-surface-muted,rgba(5,5,5,0.95))] cursor-default'>
               {notes.grinder || '\u2014'}

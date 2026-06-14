@@ -108,6 +108,8 @@ export function Settings() {
         setFormData(prev => ({ ...prev, homeAssistant: !prev.homeAssistant }));
       } else if (key === 'momentaryButtons') {
         setFormData(prev => ({ ...prev, momentaryButtons: !prev.momentaryButtons }));
+      } else if (key === 'allowYieldOverride') {
+        setFormData(prev => ({ ...prev, allowYieldOverride: !prev.allowYieldOverride }));
       } else if (key === 'delayAdjust') {
         setFormData(prev => ({ ...prev, delayAdjust: !prev.delayAdjust }));
       } else if (key === 'clock24hFormat') {
@@ -192,6 +194,8 @@ export function Settings() {
         else formDataToSubmit.delete('delayAdjust');
         if (formData.momentaryButtons) formDataToSubmit.set('momentaryButtons', '1');
         else formDataToSubmit.delete('momentaryButtons');
+        if (formData.allowYieldOverride) formDataToSubmit.set('allowYieldOverride', '1');
+        else formDataToSubmit.delete('allowYieldOverride');
         if (formData.clock24hFormat) formDataToSubmit.set('clock24hFormat', '1');
         else formDataToSubmit.delete('clock24hFormat');
 
@@ -535,6 +539,23 @@ export function Settings() {
                   <span className='nd-toggle-thumb' />
                 </button>
               </div>
+              <div className='flex items-center justify-between'>
+                <span className='font-nd-mono text-[14px] text-[var(--text-primary,#e8e8e8)]'>
+                  Allow yield override
+                </span>
+                <button
+                  type='button'
+                  className={`nd-toggle ${formData.allowYieldOverride ? 'nd-toggle--active' : ''}`}
+                  onClick={onChange('allowYieldOverride')}
+                  role='switch'
+                  aria-checked={!!formData.allowYieldOverride}
+                >
+                  <span className='nd-toggle-thumb' />
+                </button>
+              </div>
+              <p className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)] -mt-2'>
+                When off, the dashboard yield follows the active profile and can't be edited per shot.
+              </p>
             </div>
           </Card>
 

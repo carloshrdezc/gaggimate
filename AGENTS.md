@@ -118,6 +118,36 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 
 **Extended profiles use adaptive transitions**: Phase transitions can be `"instant"`, `"linear"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"` with optional `adaptive` flag (0 or 1).
 
+**When to make persistence firmware-authoritative (CAR-371 / CAR-372)**: Several
+web stores (`beanManager.js`, `grinderManager.js`) persist to the device over the
+WebSocket *and* mirror into `localStorage` for instant offline availability. The
+recurring bug class is the **client trying to predict the device's merge** (dedup,
+sort, cap/eviction) and trying to decide what is/isn't already synced with a
+one-shot global flag. Rule of thumb for any device-shared store:
+
+- **Make the firmware authoritative** when the data is **shared across clients**
+  (and the device's own display), the device is the **natural source of truth**,
+  and/or the merge is **non-trivial** (capped list, dedup, server-assigned
+  ids/timestamps). The client should *send writes and trust the canonical list the
+  device returns* — never model eviction/sort/dedup itself. This is what
+  `grinderManager.js` does post-CAR-371: a `*-pending` set of genuinely-unsynced
+  offline writes, drained in one batch on the next connected call; the device
+  returns the canonical list and the pending set is cleared on success, retried on
+  failure. `req:beans:save` / `req:grinders:save` already echo the saved record and
+  the device owns the sort (`BeanManager::listBeans` sort, `GrinderManager` cap).
+- **Keep it client-local** when the data is **per-browser UX history** with no
+  cross-client meaning: theme (`themeManager.js`), dashboard layout
+  (`dashboardManager.js`), the IndexedDB shot archive, and the bean
+  **selection-event log** (`gaggimate-bean-selection-events` /
+  `gaggimate-active-bean-selection`). These intentionally never sync to the device.
+- **Anti-pattern to avoid**: a one-shot migration flag gated on
+  `deviceList.length === 0` (the bean migration's original shape). It strands
+  localStorage records when the device already has *some* data and never retries
+  offline writes. Prefer a per-record pending set drained every connected call.
+
+See `grinderManager.js` for the reference implementation; CAR-373 tracks bringing
+beans onto the same model.
+
 ## Testing
 
 **No test framework configured**: `test/` directory exists but contains only PlatformIO boilerplate. No unit tests currently implemented.

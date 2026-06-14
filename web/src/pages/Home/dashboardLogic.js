@@ -172,6 +172,18 @@ export function getPrimaryActionState({ active, finished, mode, isGrindAvailable
     };
   }
 
+  if (mode === MODE_STANDBY) {
+    // Wakes the machine into BREW (mirrors the physical brew button's first
+    // press). Firmware maps req:process:activate in MODE_STANDBY to
+    // deactivateStandby(). A second tap then starts the shot.
+    return {
+      label: 'WAKE',
+      accent: 'var(--dm-accent)',
+      action: 'start-process',
+      processKind: null,
+    };
+  }
+
   return {
     label: isManualMode ? 'START MANUAL' : isSteamMode ? 'START STEAM' : 'START SHOT',
     accent: isSteamMode ? 'var(--dm-warn)' : 'var(--dm-accent)',

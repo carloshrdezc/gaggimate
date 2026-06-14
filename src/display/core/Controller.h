@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
+#include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
 
@@ -98,6 +99,9 @@ class Controller {
     bool isAutotuning() const;
     bool isReady() const;
     bool isVolumetricAvailable() const;
+    // True when the active shot's volumetric source is still delivering usable
+    // measurements (CAR-367 duration-cap suppression gate). See definition.
+    bool isActiveVolumetricSourceLive() const;
     bool isSDCard() const { return sdcard; }
     virtual float getTargetPressure() const;
     virtual float getTargetFlow() const;
@@ -137,6 +141,7 @@ class Controller {
     ProcessSnapshot getProcessSnapshot() const;
     Settings &getSettings() { return settings; }
     BeanManager *getBeanManager() { return beanManager; }
+    GrinderManager *getGrinderManager() { return grinderManager; }
     ProfileManager *getProfileManager() { return profileManager; }
 #ifndef GAGGIMATE_HEADLESS
     DefaultUI *getUI() const { return ui; }
@@ -220,6 +225,7 @@ class Controller {
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
+    GrinderManager *grinderManager{};
     ProfileManager *profileManager{};
 
     int mode = MODE_BREW;

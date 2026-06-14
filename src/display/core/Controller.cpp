@@ -63,6 +63,8 @@ void Controller::setup() {
     }
     beanManager = new BeanManager(fs, "/b");
     beanManager->setup();
+    grinderManager = new GrinderManager(fs, "/g/grinders.json");
+    grinderManager->setup();
     profileManager = new ProfileManager(fs, "/p", settings, pluginManager);
     profileManager->setup();
     if (settings.isHomekit())
@@ -327,6 +329,7 @@ void Controller::loop() {
                     auto brewProcess = static_cast<BrewProcess *>(currentProcess);
                     brewProcess->updatePressure(pressure);
                     brewProcess->updateFlow(currentPumpFlow);
+                    brewProcess->setVolumetricAvailable(isActiveVolumetricSourceLive());
                 }
                 currentProcess->progress();
                 bool stillActive = currentProcess->isActive();
@@ -394,6 +397,31 @@ bool Controller::isVolumetricAvailable() const {
 #else
     return isBluetoothScaleHealthy();
 #endif
+}
+
+// True when the volumetric source that the *active* shot is actually consuming
+// is still delivering usable measurements. This is the correct signal for the
+// CAR-367 duration-cap suppression gate, NOT isVolumetricAvailable():
+// onVolumetricMeasurement() rejects any measurement whose source != the latched
+// currentVolumetricSource (Controller.cpp), so once a shot starts on BLUETOOTH
+// it only consumes BLE weights for its lifetime. Under NIGHTLY_BUILD on a
+// dimming-capable controller, isVolumetricAvailable() returns true even with a
+// dead scale (flow-estimation capability), but the BLE-sourced shot's currentVolume
+// would go stale — leaving suppression on and running to BREW_SAFETY_DURATION_MS.
+// Gate on the health of the active source instead: BLUETOOTH needs a healthy
+// scale; FLOW_ESTIMATION is always live; INACTIVE is not volumetric.
+// Depends on the cross-shot invariant that currentVolumetricSource is reset to
+// INACTIVE in clear() between shots, so a stale BLUETOOTH source can't leak in.
+bool Controller::isActiveVolumetricSourceLive() const {
+    switch (currentVolumetricSource) {
+    case VolumetricMeasurementSource::BLUETOOTH:
+        return isBluetoothScaleHealthy();
+    case VolumetricMeasurementSource::FLOW_ESTIMATION:
+        return true;
+    case VolumetricMeasurementSource::INACTIVE:
+    default:
+        return false;
+    }
 }
 
 void Controller::autotune(int testTime, int samples) {
@@ -708,6 +736,12 @@ void Controller::lowerTemp() {
 
 void Controller::raiseBrewTarget() {
     if (isVolumetricAvailable() && profileManager->getSelectedProfile().isVolumetric()) {
+        // CAR-375: for volumetric profiles these buttons edit per-shot YIELD,
+        // which is locked to the profile when the override is disabled. The
+        // duration path below is not yield, so it stays reachable.
+        if (!settings.isAllowYieldOverride()) {
+            return;
+        }
         profileManager->getSelectedProfile().adjustVolumetricTarget(1);
     } else {
         profileManager->getSelectedProfile().adjustDuration(1);
@@ -717,6 +751,11 @@ void Controller::raiseBrewTarget() {
 
 void Controller::lowerBrewTarget() {
     if (isVolumetricAvailable() && profileManager->getSelectedProfile().isVolumetric()) {
+        // CAR-375: see raiseBrewTarget — only the volumetric YIELD path honors
+        // the yield lock; duration adjustment remains available.
+        if (!settings.isAllowYieldOverride()) {
+            return;
+        }
         profileManager->getSelectedProfile().adjustVolumetricTarget(-1);
     } else {
         profileManager->getSelectedProfile().adjustDuration(-1);
@@ -732,6 +771,13 @@ void Controller::setBrewTarget(float value) {
     // the in-memory mutation pattern of raise/lowerBrewTarget — the change
     // applies to the next shot but is NOT persisted to disk; reloading the
     // profile restores the saved target.
+    //
+    // CAR-375: when the per-shot yield override is disabled, the yield is
+    // locked to the profile. Ignore any incoming brew-target so the display
+    // and any stale web client honor the lock.
+    if (!settings.isAllowYieldOverride()) {
+        return;
+    }
     if (!profileManager->getSelectedProfile().isVolumetric()) {
         return;
     }
@@ -889,6 +935,20 @@ void Controller::updateControl() {
 void Controller::activate() {
     if (isActiveSafe())
         return;
+    // Any activate() call while in standby (web/remote req:process:activate,
+    // or the LVGL onBrewStart path) mirrors the physical brew button's first
+    // press: wake into BREW (boiler starts heating). A second activate() then
+    // starts the shot. See handleBrewButton() MODE_STANDBY case.
+    //
+    // Not covered by a native unit test: the host test env (build_src_filter)
+    // compiles only test/native/* + PluginManager.cpp, and a real Controller
+    // pulls in SD_MMC/SPIFFS/BLE/LVGL/FreeRTOS + ~10 plugins, which the harness
+    // does not shim. This guard is exercised by the firmware compile in CI and
+    // is symmetric with the handleBrewButton() standby case above.
+    if (mode == MODE_STANDBY) {
+        deactivateStandby();
+        return;
+    }
     clear();
     // Tare + settle is only meaningful for modes that consume scale/volumetric
     // data. Steam and water modes have no scale and no volumetric phase, so

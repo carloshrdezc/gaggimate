@@ -371,7 +371,12 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
             gm_metric_show(gm_h.w_target, false);
             gm_metric_show(gm_h.w_temp, false);
             gm_metric_show(gm_h.w_flow, false);
-            gm_show(gm_h.pill, bar_pct >= 100);
+            // CAR-358: suppress the READY pill in steam — the steppers occupy
+            // the y=100 band; at-target is shown by the filled arc + green icon.
+            gm_show(gm_h.pill, false);
+            // CAR-358: steam temp steppers shown only here; water hint hidden.
+            gm_show(gm_h.steam_steppers, true);
+            gm_show(gm_h.water_hint, false);
             break;
         }
         case 3: { // water — w_target/w_temp/w_flow, arc hidden, bar visible.
@@ -385,6 +390,9 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
             gm_metric_show(gm_h.w_temp, true);
             gm_metric_show(gm_h.w_flow, true);
             gm_show(gm_h.pill, false);
+            // CAR-358: water tap hint shown only here; steam steppers hidden.
+            gm_show(gm_h.steam_steppers, false);
+            gm_show(gm_h.water_hint, true);
             break;
         }
         case 1:
@@ -409,6 +417,10 @@ void gm_status_apply_mode(int mode, int arc_pct, int bar_pct) {
             gm_metric_show(gm_h.w_temp, false);
             gm_metric_show(gm_h.w_flow, false);
             gm_show(gm_h.pill, false);
+            // CAR-358: steam steppers + water hint are steam/water-only; hide
+            // both in brew (and the standby/grind fallback).
+            gm_show(gm_h.steam_steppers, false);
+            gm_show(gm_h.water_hint, false);
             break;
         }
     }

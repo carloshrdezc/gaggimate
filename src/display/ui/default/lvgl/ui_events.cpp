@@ -49,6 +49,42 @@ void onSteamTempLower(lv_event_t *e) { controller.lowerTemp(); }
 
 void onSteamTempRaise(lv_event_t *e) { controller.raiseTemp(); }
 
+// CAR-358: Quick-settings (MenuScreen) water/steam temp steppers.
+//
+// These adjust the persisted Settings target temps directly, independent of
+// the controller's current mode. The shared controller.raiseTemp()/lowerTemp()
+// (and onSteamTempRaise above) route through getTargetTemp()/setTargetTemp(),
+// which act on whatever mode is active — wrong for a settings list reached from
+// the mode hub, where the user may be in MODE_BREW. So mirror the ±1°C
+// constrain (MIN_TEMP..MAX_TEMP) against the specific setter/getter. The
+// setters persist via Settings::save().
+void onMenuWaterTempLower(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetWaterTemp((int)constrain(s.getTargetWaterTemp() - 1, MIN_TEMP, MAX_TEMP));
+}
+
+void onMenuWaterTempRaise(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetWaterTemp((int)constrain(s.getTargetWaterTemp() + 1, MIN_TEMP, MAX_TEMP));
+}
+
+void onMenuSteamTempLower(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetSteamTemp((int)constrain(s.getTargetSteamTemp() - 1, MIN_TEMP, MAX_TEMP));
+}
+
+void onMenuSteamTempRaise(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetSteamTemp((int)constrain(s.getTargetSteamTemp() + 1, MIN_TEMP, MAX_TEMP));
+}
+
+// CAR-358: C-callable accessors so the (C) ui_MenuScreen stepper callbacks can
+// refresh their value labels immediately after a +/- press. The persisted
+// water/steam targets are not reactive signals, so without this the label would
+// only update on the next screen (re)activation.
+int gmGetWaterTempSetting(void) { return controller.getSettings().getTargetWaterTemp(); }
+int gmGetSteamTempSetting(void) { return controller.getSettings().getTargetSteamTemp(); }
+
 void onBrewScreen(lv_event_t *e) {
     controller.getUI()->changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
     controller.deactivate();

@@ -2,6 +2,7 @@
 #include <DNSServer.h>
 #include <SPIFFS.h>
 #include <display/core/Controller.h>
+#include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -80,6 +81,7 @@ static String normalizeChannel(const String &channel);
 void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) {
     this->controller = _controller;
     this->beanManager = _controller->getBeanManager();
+    this->grinderManager = _controller->getGrinderManager();
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
@@ -237,6 +239,7 @@ void WebUIPlugin::loop() {
             controller->isVolumetricAvailable() && controller->getProfileManager()->getSelectedProfile().isVolumetric() ? 1 : 0;
         doc["btd"] = profileManager->getSelectedProfile().getTotalDuration();
         doc["btv"] = profileManager->getSelectedProfile().getTotalVolume(); // raw volumetric target for frontend Weight card
+        doc["ayo"] = controller->getSettings().isAllowYieldOverride() ? 1 : 0;
         doc["led"] = controller->getSystemInfo().capabilities.ledControl;
         doc["gtd"] = controller->getTargetGrindDuration();
         doc["gtv"] = controller->getSettings().getTargetGrindVolume();
@@ -565,6 +568,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         handleProfileRequest(clientId, doc);
     } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
         handleBeanRequest(clientId, doc);
+    } else if (msgType.startsWith("req:grinders:")) {
+        handleGrinderRequest(clientId, doc);
     } else if (msgType == "req:ota-settings") {
         handleOTASettings(clientId, doc);
     } else if (msgType == "req:ota-start") {
@@ -898,6 +903,45 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
     sendResponse(clientId, response);
 }
 
+void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request) {
+    JsonDocument response;
+    auto type = request["tp"].as<String>();
+    response["tp"] = String("res:") + type.substring(4);
+    response["rid"] = request["rid"].as<String>();
+
+    if (type == "req:grinders:list") {
+        auto arr = response["grinders"].to<JsonArray>();
+        for (const auto &name : grinderManager->listGrinders()) {
+            arr.add(name);
+        }
+    } else if (type == "req:grinders:save") {
+        // Accept either a single `name` (back-compat) or a `names` array
+        // (batch sync from the web client). The device performs the
+        // merge/dedup/cap authoritatively and returns the canonical list, so
+        // the client never has to model eviction.
+        bool ok = false;
+        if (request["names"].is<JsonArray>()) {
+            std::vector<String> names;
+            for (JsonVariant v : request["names"].as<JsonArray>()) {
+                names.push_back(v.as<String>());
+            }
+            ok = grinderManager->recordGrinders(names);
+        } else {
+            ok = grinderManager->recordGrinder(request["name"].as<String>());
+        }
+        if (!ok) {
+            response["error"] = F("Save failed");
+        } else {
+            auto arr = response["grinders"].to<JsonArray>();
+            for (const auto &grinder : grinderManager->listGrinders()) {
+                arr.add(grinder);
+            }
+        }
+    }
+
+    sendResponse(clientId, response);
+}
+
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     if (request->method() == HTTP_POST) {
         controller->getSettings().batchUpdate([request](Settings *settings) {
@@ -944,6 +988,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             if (request->hasArg("haTopic"))
                 settings->setHomeAssistantTopic(request->arg("haTopic"));
             settings->setMomentaryButtons(request->hasArg("momentaryButtons"));
+            settings->setAllowYieldOverride(request->hasArg("allowYieldOverride"));
             settings->setDelayAdjust(request->hasArg("delayAdjust"));
             if (request->hasArg("brewDelay"))
                 settings->setBrewDelay(request->arg("brewDelay").toDouble());
@@ -1075,6 +1120,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["smartGrindIp"] = settings.getSmartGrindIp();
     doc["smartGrindMode"] = settings.getSmartGrindMode();
     doc["momentaryButtons"] = settings.isMomentaryButtons();
+    doc["allowYieldOverride"] = settings.isAllowYieldOverride();
     doc["brewDelay"] = settings.getBrewDelay();
     doc["grindDelay"] = settings.getGrindDelay();
     doc["delayAdjust"] = settings.isDelayAdjust();
