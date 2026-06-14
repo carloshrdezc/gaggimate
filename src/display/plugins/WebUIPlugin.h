@@ -103,7 +103,11 @@ class WebUIPlugin : public Plugin {
     // WebSocket state and self-delete (nulling relayTaskHandle), rather than
     // calling vTaskDelete on a remote handle mid-relayWs.loop() (CAR-259).
     volatile bool relayTaskExitRequested = false;
-    TaskHandle_t relayTaskHandle = nullptr;
+    // volatile: this handle is the variable stopRelay()'s bounded spin-wait
+    // polls while the relay task (other core) writes it to nullptr just before
+    // vTaskDelete(NULL). Without volatile the compiler may hoist/cache the load
+    // and never observe the null, spuriously timing out a clean shutdown (CAR-259).
+    volatile TaskHandle_t relayTaskHandle = nullptr;
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;

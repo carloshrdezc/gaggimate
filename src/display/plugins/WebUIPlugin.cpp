@@ -454,6 +454,12 @@ void WebUIPlugin::stop() {
 }
 
 void WebUIPlugin::startRelay() {
+    // Caller-context invariant: startRelay()/stopRelay() must only be called
+    // from the single web-server/event task (start()/stop() on WiFi events and
+    // handleSettings() on /api/settings). They are NOT mutually synchronized by
+    // a mutex; the volatile-flag handoff with relayLoopTask is safe only because
+    // these two are never invoked concurrently with each other. Do not call
+    // either from the relay task or a second task without adding a guard (CAR-259).
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
     if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
@@ -470,18 +476,27 @@ void WebUIPlugin::startRelay() {
         relayMutex = xSemaphoreCreateMutex();
     }
 
-    // If a prior stopRelay() timed out, the old relay task is still alive and
-    // may be inside relayWs.loop() right now. Reconfiguring relayWs (onEvent /
-    // begin*) from this caller task while that task touches it concurrently is
-    // a data race on the WebSocketsClient (CAR-259 reuse path). In that rare
-    // case, leave the live task serving with its existing connection rather
-    // than racing it — just re-arm it and return. It will reconnect on its own
-    // 5 s interval; the next clean stop/start cycle picks up new settings.
+    // If a prior stopRelay() timed out, the old relay task is still alive,
+    // draining its in-flight relayWs.loop() with relayTaskExitRequested set; it
+    // will run its own relayWs.disconnect() and vTaskDelete(NULL) imminently.
+    // We must NOT reconfigure relayWs (onEvent / begin*) from this caller task
+    // while that task may still touch it — that is a data race on the
+    // WebSocketsClient (CAR-259). Wait briefly for the handle to clear, then
+    // fall through to create a fresh task. If it has not cleared in time, skip
+    // this start; the pending exit will complete and the next disconnect/
+    // reconnect or settings change re-triggers startRelay() cleanly.
     if (relayTaskHandle != nullptr) {
-        relayTaskExitRequested = false;
-        relayEnabled = true;
-        ESP_LOGW("WebUIPlugin", "Reusing live relay task (prior stop timed out); skipping relayWs reconfig");
-        return;
+        constexpr TickType_t drainInterval = pdMS_TO_TICKS(10);
+        constexpr int maxDrainPolls = 50; // ~500 ms
+        int drainPolls = 0;
+        while (relayTaskHandle != nullptr && drainPolls < maxDrainPolls) {
+            vTaskDelay(drainInterval);
+            ++drainPolls;
+        }
+        if (relayTaskHandle != nullptr) {
+            ESP_LOGW("WebUIPlugin", "Prior relay task still exiting; deferring start until it self-deletes");
+            return;
+        }
     }
 
     String path = (basePath.isEmpty() || basePath == "/")
@@ -523,12 +538,16 @@ void WebUIPlugin::startRelay() {
 
     // relayTaskHandle is guaranteed null here (the live-task case returned above).
     relayTaskExitRequested = false; // fresh task must not see a stale exit request
-    BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &relayTaskHandle, 0);
+    // xTaskCreatePinnedToCore wants a non-volatile TaskHandle_t*; create into a
+    // local, then publish to the volatile member.
+    TaskHandle_t createdHandle = nullptr;
+    BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &createdHandle, 0);
     if (created != pdPASS) {
         ESP_LOGE("WebUIPlugin", "Failed to create relay task (OOM)");
         relayWs.disconnect();
         return;
     }
+    relayTaskHandle = createdHandle;
 
     relayEnabled = true;
     ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %lu B)", host.c_str(), port, path.c_str(), esp_get_free_heap_size());
@@ -557,13 +576,18 @@ void WebUIPlugin::stopRelay() {
             ++polls;
         }
         if (relayTaskHandle != nullptr) {
-            // Task did not exit in time. Do NOT vTaskDelete it from here — that
-            // is exactly the unsafe primitive we are avoiding. Leave it running;
-            // it will observe relayTaskExitRequested and self-delete eventually,
-            // and a subsequent startRelay() reuses the still-live handle.
-            ESP_LOGW("WebUIPlugin", "Relay task did not exit within %d ms; leaving it to self-delete",
+            // Task did not exit in time (likely wedged in a long relayWs.loop()).
+            // Do NOT vTaskDelete it from here — that is exactly the unsafe
+            // primitive we are avoiding. Leave relayTaskExitRequested = true so
+            // the task self-deletes the moment its in-flight relayWs.loop()
+            // returns: relayLoopTask checks the flag UNCONDITIONALLY at the top
+            // of every iteration (before the relayEnabled guard), so even with
+            // relayEnabled now false it will run its own relayWs.disconnect()
+            // and vTaskDelete(NULL) rather than idling forever with its socket /
+            // mbedTLS allocations un-freed. A later startRelay() waits for the
+            // handle to clear before creating a fresh task (CAR-259).
+            ESP_LOGW("WebUIPlugin", "Relay task did not exit within %d ms; it will self-delete when its loop returns",
                      maxPolls * 10);
-            relayTaskExitRequested = false; // task may still be looping; let it keep serving
             return;
         }
     }
