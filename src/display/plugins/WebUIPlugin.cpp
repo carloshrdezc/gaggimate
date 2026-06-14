@@ -470,6 +470,20 @@ void WebUIPlugin::startRelay() {
         relayMutex = xSemaphoreCreateMutex();
     }
 
+    // If a prior stopRelay() timed out, the old relay task is still alive and
+    // may be inside relayWs.loop() right now. Reconfiguring relayWs (onEvent /
+    // begin*) from this caller task while that task touches it concurrently is
+    // a data race on the WebSocketsClient (CAR-259 reuse path). In that rare
+    // case, leave the live task serving with its existing connection rather
+    // than racing it — just re-arm it and return. It will reconnect on its own
+    // 5 s interval; the next clean stop/start cycle picks up new settings.
+    if (relayTaskHandle != nullptr) {
+        relayTaskExitRequested = false;
+        relayEnabled = true;
+        ESP_LOGW("WebUIPlugin", "Reusing live relay task (prior stop timed out); skipping relayWs reconfig");
+        return;
+    }
+
     String path = (basePath.isEmpty() || basePath == "/")
         ? "/connect?token=" + relayToken + "&role=device"
         : basePath + "/connect?token=" + relayToken + "&role=device";
@@ -507,18 +521,13 @@ void WebUIPlugin::startRelay() {
         relayWs.begin(host.c_str(), port, path.c_str());
     }
 
-    if (relayTaskHandle == nullptr) {
-        relayTaskExitRequested = false; // fresh task must not see a stale exit request
-        BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &relayTaskHandle, 0);
-        if (created != pdPASS) {
-            ESP_LOGE("WebUIPlugin", "Failed to create relay task (OOM)");
-            relayWs.disconnect();
-            return;
-        }
-    } else {
-        // Reusing a still-live task (a prior stopRelay() timed out). Make sure
-        // it keeps serving rather than tearing itself down.
-        relayTaskExitRequested = false;
+    // relayTaskHandle is guaranteed null here (the live-task case returned above).
+    relayTaskExitRequested = false; // fresh task must not see a stale exit request
+    BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &relayTaskHandle, 0);
+    if (created != pdPASS) {
+        ESP_LOGE("WebUIPlugin", "Failed to create relay task (OOM)");
+        relayWs.disconnect();
+        return;
     }
 
     relayEnabled = true;
