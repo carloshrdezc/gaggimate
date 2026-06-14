@@ -127,6 +127,19 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
 void WebUIPlugin::relayLoopTask(void *arg) {
     auto *plugin = static_cast<WebUIPlugin *>(arg);
     while (true) {
+        // Cooperative shutdown: stopRelay() requests exit, and the teardown
+        // runs here on the task that owns the WebSocket allocations / mbedTLS
+        // state, never via vTaskDelete on a remote handle mid-loop (CAR-259).
+        if (plugin->relayTaskExitRequested) {
+            plugin->relayWs.disconnect();
+            plugin->relayConnected = false;
+            // Publish NULL before self-deleting so stopRelay()'s wait observes
+            // the task is gone. After vTaskDelete(NULL) this task never runs
+            // again, so no further access to plugin state occurs.
+            plugin->relayTaskHandle = nullptr;
+            vTaskDelete(nullptr);
+            return; // unreachable; keeps the compiler happy
+        }
         if (plugin->relayEnabled && plugin->relayMutex != nullptr) {
             if (plugin->relayConnected) {
                 std::vector<String> toSend;
@@ -495,12 +508,17 @@ void WebUIPlugin::startRelay() {
     }
 
     if (relayTaskHandle == nullptr) {
+        relayTaskExitRequested = false; // fresh task must not see a stale exit request
         BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &relayTaskHandle, 0);
         if (created != pdPASS) {
             ESP_LOGE("WebUIPlugin", "Failed to create relay task (OOM)");
             relayWs.disconnect();
             return;
         }
+    } else {
+        // Reusing a still-live task (a prior stopRelay() timed out). Make sure
+        // it keeps serving rather than tearing itself down.
+        relayTaskExitRequested = false;
     }
 
     relayEnabled = true;
@@ -509,17 +527,39 @@ void WebUIPlugin::startRelay() {
 
 void WebUIPlugin::stopRelay() {
     if (!relayEnabled) return;
-    // Signal the task to exit its loop body before tearing down the socket.
-    // vTaskDelete on a remote handle is non-blocking, so we must ensure the
-    // task is not mid-execution in relayWs.loop() when we call disconnect().
     relayEnabled = false;
     relayConnected = false;
     if (relayTaskHandle != nullptr) {
-        vTaskDelay(pdMS_TO_TICKS(20)); // one task loop cycle is 10 ms; 20 ms is a safe margin
-        vTaskDelete(relayTaskHandle);
-        relayTaskHandle = nullptr;
+        // Cooperative shutdown (CAR-259): ask the task to tear down its own
+        // WebSocket state and self-delete. We must NOT vTaskDelete a remote
+        // handle while it may be inside relayWs.loop() (WebSocketsClient /
+        // AsyncTCP / mbedTLS allocations), which leaks heap or corrupts the
+        // allocator. The task nulls relayTaskHandle just before vTaskDelete(NULL).
+        relayTaskExitRequested = true;
+        // Bound the wait so a wedged task can never hang the caller (this runs
+        // on the WiFi-event / AsyncTCP web-server task). Loop cadence is 10 ms;
+        // a single relayWs.loop() with an SSL handshake or large frame in flight
+        // can exceed that, so allow generous slack before giving up.
+        constexpr TickType_t pollInterval = pdMS_TO_TICKS(10);
+        constexpr int maxPolls = 50; // ~500 ms
+        int polls = 0;
+        while (relayTaskHandle != nullptr && polls < maxPolls) {
+            vTaskDelay(pollInterval);
+            ++polls;
+        }
+        if (relayTaskHandle != nullptr) {
+            // Task did not exit in time. Do NOT vTaskDelete it from here — that
+            // is exactly the unsafe primitive we are avoiding. Leave it running;
+            // it will observe relayTaskExitRequested and self-delete eventually,
+            // and a subsequent startRelay() reuses the still-live handle.
+            ESP_LOGW("WebUIPlugin", "Relay task did not exit within %d ms; leaving it to self-delete",
+                     maxPolls * 10);
+            relayTaskExitRequested = false; // task may still be looping; let it keep serving
+            return;
+        }
     }
-    relayWs.disconnect();
+    // Task is gone (or never existed). Clear the request flag for the next start.
+    relayTaskExitRequested = false;
 }
 
 void WebUIPlugin::broadcastAll(const String &msg) {

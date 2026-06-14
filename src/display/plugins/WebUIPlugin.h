@@ -98,6 +98,11 @@ class WebUIPlugin : public Plugin {
     std::vector<String> relayOutBuffer;
     volatile bool relayEnabled = false;
     volatile bool relayConnected = false;
+    // Cooperative-shutdown channel for relayLoopTask. stopRelay() sets
+    // relayTaskExitRequested and waits for the task to tear down its own
+    // WebSocket state and self-delete (nulling relayTaskHandle), rather than
+    // calling vTaskDelete on a remote handle mid-relayWs.loop() (CAR-259).
+    volatile bool relayTaskExitRequested = false;
     TaskHandle_t relayTaskHandle = nullptr;
     static void relayLoopTask(void *arg);
 
