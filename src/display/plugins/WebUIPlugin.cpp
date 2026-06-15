@@ -233,15 +233,26 @@ void WebUIPlugin::loop() {
     // "applied after completion" behavior rather than switching URLs mid-stream.
     if (pendingReleaseUrlChange) {
         String url;
+        bool emptyHandoff = false;
         bool have = false;
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             url = pendingReleaseUrl;
+            emptyHandoff = url.isEmpty();
             pendingReleaseUrl = ""; // release the copy; the flag is the source of truth
             pendingReleaseUrlChange = false;
             have = true;
             xSemaphoreGive(otaIntentMutex);
         }
         if (have) {
+            // emptyHandoff means the handler couldn't take the mutex to store the
+            // resolved URL (the contended drop path) and only raised the flag, OR
+            // a channel was persisted without an explicit URL. Re-resolve from the
+            // persisted channel here on the loop task — checkForUpdates() reads
+            // _release_url to derive _latest_url but never re-derives _release_url
+            // itself, so without this the new channel would never reach `ota`.
+            if (emptyHandoff) {
+                url = resolveReleaseUrl(controller->getSettings().getOTAChannel());
+            }
             ota->setReleaseUrl(url);
         }
     }
@@ -907,11 +918,12 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
             } else {
                 // Should be effectively impossible — the lock is only ever held
                 // for three trivial assignments on the loop-task drain side — but
-                // never drop a channel change silently. The persisted Settings
-                // channel was already updated, so the next periodic
-                // checkForUpdates() still reconciles; we just couldn't hand the
-                // resolved URL to the loop task this round.
-                ESP_LOGW("WebUIPlugin", "Dropped OTA release-URL handoff (otaIntentMutex contended); channel persisted, will reconcile on next check");
+                // never drop a channel change silently. Raise the flag anyway: the
+                // loop-task drain re-resolves the URL from the persisted channel
+                // when no explicit URL was handed off (emptyHandoff), so the new
+                // channel still reaches `ota` on the next loop iteration.
+                pendingReleaseUrlChange = true;
+                ESP_LOGW("WebUIPlugin", "OTA release-URL handoff contended; channel persisted, loop will re-resolve");
             }
         }
     }
