@@ -108,6 +108,14 @@ class WebUIPlugin : public Plugin {
     String pendingReleaseUrl = "";        // guarded by otaIntentMutex
     volatile bool pendingReleaseUrlChange = false;
     volatile bool pendingOtaStatusPush = false;
+    // Deferred OTA-start intent (CAR-377). handleOTAStart runs on the AsyncTCP /
+    // relay task; it must not write the loop-task-owned `updating` / `updateComponent`
+    // directly (a torn read of the non-atomic `updateComponent` String would feed a
+    // wrong component selection into ota->update()). Instead it posts the requested
+    // component under otaIntentMutex and raises pendingOtaStart; loop() latches both
+    // onto the loop task before the update runs, exactly like the release-URL handoff.
+    String pendingUpdateComponent = ""; // guarded by otaIntentMutex
+    volatile bool pendingOtaStart = false;
     AsyncWebServer server;
     AsyncWebSocket ws;
     WebSocketsClient relayWs;
@@ -151,10 +159,10 @@ class WebUIPlugin : public Plugin {
     unsigned long lastStatus = 0;
     unsigned long lastCleanup = 0;
     unsigned long lastDns = 0;
-    bool updating = false;
+    bool updating = false; // loop-task-owned; set via pendingOtaStart drain (CAR-377)
     bool apMode = false;
     bool serverRunning = false;
-    String updateComponent = "";
+    String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
 };
 
