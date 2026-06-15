@@ -175,7 +175,12 @@ void WebUIPlugin::loop() {
     // Latch deferred OTA-start intent posted by handleOTAStart on the WS/relay
     // task (CAR-377). Runs on the loop task, so `updating` and `updateComponent`
     // are written and read only here. If contended, leave pendingOtaStart set so
-    // the next iteration retries — no start request is lost.
+    // the next iteration retries — no queued start is lost.
+    //
+    // ORDERING (do not reorder): this latch MUST stay above the `if (updating)`
+    // block (so a freshly-latched start runs in the same iteration) and above the
+    // `if (!serverRunning) return;` guard below (so a queued start is not stranded
+    // while in AP mode / before the server is up).
     if (pendingOtaStart) {
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             updateComponent = pendingUpdateComponent;
@@ -911,6 +916,11 @@ static String normalizeChannel(const String &channel) {
 }
 
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
+    // `lastUpdateCheck` is intentionally exempt from the loop-task-ownership model
+    // the rest of this handler follows (CAR-178/CAR-377): it is a single
+    // word-aligned `unsigned long` whose write is atomic on ESP32, and 0 is a
+    // force-recheck sentinel where a stale read merely delays the next check by one
+    // interval. So it is safe to set directly here rather than via a deferred flag.
     lastUpdateCheck = 0;
     // This handler runs on the AsyncTCP web-server task (local WS clients) or the
     // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
@@ -950,6 +960,11 @@ void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
     // non-atomic `updateComponent` String are loop-task-owned (CAR-377), so post
     // the intent here and let loop() latch it on the loop task. The handler returns
     // immediately; the update starts on the next loop iteration.
+    //
+    // Single-in-flight semantics: there is one intent slot. Two ota-start requests
+    // arriving before loop() latches coalesce last-writer-wins (the later component
+    // overwrites the earlier) — exactly one update still runs. That is intended;
+    // concurrent ota-start requests are not a supported workflow.
     const String component = request["cp"].is<String>() ? request["cp"].as<String>() : String("");
     if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         pendingUpdateComponent = component;
