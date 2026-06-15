@@ -1,7 +1,17 @@
 #include "PluginManager.h"
 
 #if defined(ESP_PLATFORM)
-PluginManager::PluginManager() { listenersMutex = xSemaphoreCreateRecursiveMutex(); }
+PluginManager::PluginManager() {
+    listenersMutex = xSemaphoreCreateRecursiveMutex();
+    // A null handle would make lock/unlock no-ops and silently run the event
+    // bus unsynchronized — reintroducing the exact CAR-110 race. Fail loudly
+    // instead: this ctor runs once early in boot when heap is plentiful, so a
+    // failure here is a genuine fault, not a condition to tolerate.
+    if (listenersMutex == nullptr) {
+        ESP_LOGE("PluginManager", "Failed to create listeners mutex");
+        configASSERT(listenersMutex != nullptr);
+    }
+}
 
 PluginManager::~PluginManager() {
     if (listenersMutex != nullptr) {

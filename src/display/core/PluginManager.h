@@ -49,8 +49,15 @@ class PluginManager {
     PluginManager();
     ~PluginManager();
 
+    // Non-copyable and non-movable: it owns a raw SemaphoreHandle_t whose
+    // ownership must not be duplicated or transferred. The deleted copy ops
+    // already suppress the implicit move ops via the user-declared dtor; the
+    // explicit move deletes make that intent self-documenting and survive a
+    // future dtor removal.
     PluginManager(const PluginManager &) = delete;
     PluginManager &operator=(const PluginManager &) = delete;
+    PluginManager(PluginManager &&) = delete;
+    PluginManager &operator=(PluginManager &&) = delete;
 
     void registerPlugin(Plugin *plugin);
 
