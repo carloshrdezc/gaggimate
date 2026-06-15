@@ -172,6 +172,19 @@ void WebUIPlugin::relayLoopTask(void *arg) {
 }
 
 void WebUIPlugin::loop() {
+    // Latch deferred OTA-start intent posted by handleOTAStart on the WS/relay
+    // task (CAR-377). Runs on the loop task, so `updating` and `updateComponent`
+    // are written and read only here. If contended, leave pendingOtaStart set so
+    // the next iteration retries — no start request is lost.
+    if (pendingOtaStart) {
+        if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            updateComponent = pendingUpdateComponent;
+            pendingUpdateComponent = "";
+            pendingOtaStart = false;
+            updating = true;
+            xSemaphoreGive(otaIntentMutex);
+        }
+    }
     if (updating) {
         pluginManager->trigger("ota:update:start");
         // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
@@ -933,11 +946,22 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
 }
 
 void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
-    updating = true;
-    if (request["cp"].is<String>()) {
-        updateComponent = request["cp"].as<String>();
+    // Runs on the AsyncTCP / relay task, NOT the loop task. `updating` and the
+    // non-atomic `updateComponent` String are loop-task-owned (CAR-377), so post
+    // the intent here and let loop() latch it on the loop task. The handler returns
+    // immediately; the update starts on the next loop iteration.
+    const String component = request["cp"].is<String>() ? request["cp"].as<String>() : String("");
+    if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        pendingUpdateComponent = component;
+        pendingOtaStart = true;
+        xSemaphoreGive(otaIntentMutex);
     } else {
-        updateComponent = "";
+        // Effectively impossible (the lock only ever wraps a few trivial
+        // assignments), but never drop a start request silently. Raise the flag
+        // anyway; loop() finds an empty pendingUpdateComponent and defaults to a
+        // full update (both display and controller) — the safe superset.
+        pendingOtaStart = true;
+        ESP_LOGW("WebUIPlugin", "OTA-start handoff contended; defaulting to full update");
     }
 }
 
