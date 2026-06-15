@@ -82,7 +82,32 @@ class WebUIPlugin : public Plugin {
     // Core dump download
     void handleCoreDumpDownload(AsyncWebServerRequest *request);
 
+    // Thread-safety contract for `ota` (CAR-178):
+    //
+    // `GitHubOTA` is NOT thread-safe — it carries mutable internal state
+    // (`_release_url`, `_latest_url`, `_latest_version`, `phase`, the HTTPUpdate
+    // and WiFiClientSecure members) with no internal locking. Concurrent calls
+    // from different FreeRTOS tasks would tear those reads/writes.
+    //
+    // The contract that makes it safe: **every method call on `ota` happens on
+    // the Arduino main loop task only** (`WebUIPlugin::loop()`, and the
+    // `controller:ready` handler which Controller::loop() dispatches on that same
+    // task). WebSocket / relay handlers (AsyncTCP task, relay task) NEVER touch
+    // `ota` directly — instead they post intent via the `pendingReleaseUrl*` /
+    // `pendingOtaStatusPush` flags below, which `loop()` drains on the loop task
+    // before its own OTA work. This eliminates the concurrency entirely rather
+    // than serializing it, so WS handlers never block on a multi-minute
+    // `ota->update()` (approach (b) from CAR-178).
     GitHubOTA *ota = nullptr;
+    // Deferred-OTA-intent channel (CAR-178). Written by WS/relay-task handlers,
+    // drained by loop() on the Arduino main loop task. `otaIntentMutex` guards
+    // the non-atomic `pendingReleaseUrl` String; the two bool flags are simple
+    // volatile handoffs (a missed-by-one-tick drain is harmless — loop() runs
+    // every ~2 ms and re-checks every iteration).
+    SemaphoreHandle_t otaIntentMutex = nullptr;
+    String pendingReleaseUrl = "";        // guarded by otaIntentMutex
+    volatile bool pendingReleaseUrlChange = false;
+    volatile bool pendingOtaStatusPush = false;
     AsyncWebServer server;
     AsyncWebSocket ws;
     WebSocketsClient relayWs;

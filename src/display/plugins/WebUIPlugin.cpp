@@ -128,6 +128,13 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         relayLifecycleMutex = xSemaphoreCreateMutex();
     }
 
+    // Guards the pendingReleaseUrl String handoff between WS/relay-task handlers
+    // and the loop task (CAR-178). Created here, before any WiFi/server events
+    // can fire a WS handler that posts OTA intent.
+    if (otaIntentMutex == nullptr) {
+        otaIntentMutex = xSemaphoreCreateMutex();
+    }
+
     setupServer();
 }
 
@@ -218,6 +225,28 @@ void WebUIPlugin::loop() {
 
     if (!serverRunning) {
         return;
+    }
+    // Drain deferred OTA intent posted by WS/relay-task handlers (CAR-178).
+    // Runs on the loop task, so these are the only task touching `ota` here. If
+    // a release-URL change arrived while an update() was in flight above, it
+    // applies now — after the in-flight update completed — which is the intended
+    // "applied after completion" behavior rather than switching URLs mid-stream.
+    if (pendingReleaseUrlChange) {
+        String url;
+        bool have = false;
+        if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            url = pendingReleaseUrl;
+            pendingReleaseUrlChange = false;
+            have = true;
+            xSemaphoreGive(otaIntentMutex);
+        }
+        if (have) {
+            ota->setReleaseUrl(url);
+        }
+    }
+    if (pendingOtaStatusPush) {
+        pendingOtaStatusPush = false;
+        updateOTAStatus("Checking...");
     }
     const unsigned long now = millis();
     if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
@@ -855,14 +884,28 @@ static String normalizeChannel(const String &channel) {
 
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     lastUpdateCheck = 0;
+    // This handler runs on the AsyncTCP web-server task (local WS clients) or the
+    // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
+    // and owned by the loop task (CAR-178), so we must not call into it here.
+    // Instead, post the release-URL change and a status-refresh request as
+    // deferred intent; loop() drains both on the loop task. This also means the
+    // handler returns immediately and never blocks a WS client behind a
+    // multi-minute ota->update() in progress.
     if (request["update"].as<bool>()) {
         if (!request["channel"].isNull()) {
             const String normalized = normalizeChannel(request["channel"].as<String>());
             controller->getSettings().setOTAChannel(normalized);
-            ota->setReleaseUrl(resolveReleaseUrl(normalized));
+            const String url = resolveReleaseUrl(normalized);
+            if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                pendingReleaseUrl = url;
+                pendingReleaseUrlChange = true;
+                xSemaphoreGive(otaIntentMutex);
+            }
         }
     }
-    updateOTAStatus("Checking...");
+    // Defer the status broadcast (which reads ota->getCurrentVersion() /
+    // isUpdateAvailable()) onto the loop task as well.
+    pendingOtaStatusPush = true;
 }
 
 void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
