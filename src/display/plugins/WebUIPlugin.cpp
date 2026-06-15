@@ -128,6 +128,13 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         relayLifecycleMutex = xSemaphoreCreateMutex();
     }
 
+    // Guards the pendingReleaseUrl String handoff between WS/relay-task handlers
+    // and the loop task (CAR-178). Created here, before any WiFi/server events
+    // can fire a WS handler that posts OTA intent.
+    if (otaIntentMutex == nullptr) {
+        otaIntentMutex = xSemaphoreCreateMutex();
+    }
+
     setupServer();
 }
 
@@ -218,6 +225,43 @@ void WebUIPlugin::loop() {
 
     if (!serverRunning) {
         return;
+    }
+    // Drain deferred OTA intent posted by WS/relay-task handlers (CAR-178).
+    // Runs on the loop task, so these are the only task touching `ota` here. If
+    // a release-URL change arrived while an update() was in flight above, it
+    // applies now — after the in-flight update completed — which is the intended
+    // "applied after completion" behavior rather than switching URLs mid-stream.
+    if (pendingReleaseUrlChange) {
+        String url;
+        bool emptyHandoff = false;
+        bool have = false;
+        if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            url = pendingReleaseUrl;
+            emptyHandoff = url.isEmpty();
+            pendingReleaseUrl = ""; // release the copy; the flag is the source of truth
+            pendingReleaseUrlChange = false;
+            have = true;
+            xSemaphoreGive(otaIntentMutex);
+        }
+        if (have) {
+            // emptyHandoff means the handler couldn't take the mutex to store the
+            // resolved URL (the contended drop path) and only raised the flag, OR
+            // a channel was persisted without an explicit URL. Re-resolve from the
+            // persisted channel here on the loop task — checkForUpdates() reads
+            // _release_url to derive _latest_url but never re-derives _release_url
+            // itself, so without this the new channel would never reach `ota`.
+            if (emptyHandoff) {
+                url = resolveReleaseUrl(controller->getSettings().getOTAChannel());
+            }
+            ota->setReleaseUrl(url);
+        }
+    }
+    // NOTE: the status-push drain MUST stay after the release-URL drain above, so
+    // the "Checking..." broadcast reflects the just-applied channel rather than
+    // the previous one (CAR-178). Do not reorder these two blocks.
+    if (pendingOtaStatusPush) {
+        pendingOtaStatusPush = false;
+        updateOTAStatus("Checking...");
     }
     const unsigned long now = millis();
     if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
@@ -855,14 +899,37 @@ static String normalizeChannel(const String &channel) {
 
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     lastUpdateCheck = 0;
+    // This handler runs on the AsyncTCP web-server task (local WS clients) or the
+    // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
+    // and owned by the loop task (CAR-178), so we must not call into it here.
+    // Instead, post the release-URL change and a status-refresh request as
+    // deferred intent; loop() drains both on the loop task. This also means the
+    // handler returns immediately and never blocks a WS client behind a
+    // multi-minute ota->update() in progress.
     if (request["update"].as<bool>()) {
         if (!request["channel"].isNull()) {
             const String normalized = normalizeChannel(request["channel"].as<String>());
             controller->getSettings().setOTAChannel(normalized);
-            ota->setReleaseUrl(resolveReleaseUrl(normalized));
+            const String url = resolveReleaseUrl(normalized);
+            if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                pendingReleaseUrl = url;
+                pendingReleaseUrlChange = true;
+                xSemaphoreGive(otaIntentMutex);
+            } else {
+                // Should be effectively impossible — the lock is only ever held
+                // for three trivial assignments on the loop-task drain side — but
+                // never drop a channel change silently. Raise the flag anyway: the
+                // loop-task drain re-resolves the URL from the persisted channel
+                // when no explicit URL was handed off (emptyHandoff), so the new
+                // channel still reaches `ota` on the next loop iteration.
+                pendingReleaseUrlChange = true;
+                ESP_LOGW("WebUIPlugin", "OTA release-URL handoff contended; channel persisted, loop will re-resolve");
+            }
         }
     }
-    updateOTAStatus("Checking...");
+    // Defer the status broadcast (which reads ota->getCurrentVersion() /
+    // isUpdateAvailable()) onto the loop task as well.
+    pendingOtaStatusPush = true;
 }
 
 void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
