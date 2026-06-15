@@ -121,6 +121,13 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     pluginManager->on("controller:volumetric-measurement:bluetooth:change",
                       [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
 
+    // Create the relay lifecycle mutex once here, before any WiFi/server events
+    // can fire, so startRelay()/stopRelay() are serialized across the
+    // arduino_events and AsyncTCP tasks (CAR-259).
+    if (relayLifecycleMutex == nullptr) {
+        relayLifecycleMutex = xSemaphoreCreateMutex();
+    }
+
     setupServer();
 }
 
@@ -453,13 +460,43 @@ void WebUIPlugin::stop() {
     serverRunning = false;
 }
 
+// RAII guard for the relay lifecycle mutex. Takes the mutex on construction
+// (if it exists) and gives it back on destruction, so every return path out of
+// startRelay()/stopRelay() — early guards, the deferred-start/timeout returns,
+// the SSL heap-guard, the OOM path, and the normal returns — releases the lock
+// without a hand-audited give at each site (CAR-259).
+namespace {
+struct RelayLifecycleLock {
+    SemaphoreHandle_t handle;
+    explicit RelayLifecycleLock(SemaphoreHandle_t h) : handle(h) {
+        if (handle != nullptr) {
+            xSemaphoreTake(handle, portMAX_DELAY);
+        }
+    }
+    ~RelayLifecycleLock() {
+        if (handle != nullptr) {
+            xSemaphoreGive(handle);
+        }
+    }
+    RelayLifecycleLock(const RelayLifecycleLock &) = delete;
+    RelayLifecycleLock &operator=(const RelayLifecycleLock &) = delete;
+};
+} // namespace
+
 void WebUIPlugin::startRelay() {
-    // Caller-context invariant: startRelay()/stopRelay() must only be called
-    // from the single web-server/event task (start()/stop() on WiFi events and
-    // handleSettings() on /api/settings). They are NOT mutually synchronized by
-    // a mutex; the volatile-flag handoff with relayLoopTask is safe only because
-    // these two are never invoked concurrently with each other. Do not call
-    // either from the relay task or a second task without adding a guard (CAR-259).
+    // Caller-context: startRelay()/stopRelay() are invoked from two different
+    // FreeRTOS tasks — start()/stop() run inline on the arduino_events WiFi-event
+    // task (controller:wifi:connect/disconnect), while handleSettings() runs on the
+    // AsyncTCP /api/settings task and calls stopRelay()+startRelay() back-to-back.
+    // A WiFi (dis)connect can therefore genuinely interleave with a cloud-relay
+    // settings toggle. They are now serialized by relayLifecycleMutex (taken at the
+    // top of both functions, released on every return path) so the volatile-flag
+    // handoff with relayLoopTask stays coherent and two starts can never both
+    // observe relayTaskHandle==nullptr and orphan a live task (CAR-259). A plain
+    // (non-recursive) mutex is correct: start() calls stop() then startRelay()
+    // sequentially (not nested), and handleSettings() calls them sequentially too —
+    // neither function calls the other while holding the lock.
+    RelayLifecycleLock lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
     if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
@@ -563,6 +600,11 @@ void WebUIPlugin::startRelay() {
 }
 
 void WebUIPlugin::stopRelay() {
+    // Serialized with startRelay() via relayLifecycleMutex (see startRelay()
+    // for the cross-task rationale, CAR-259). The lock is held across the bounded
+    // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
+    // (yields the CPU) and is strictly bounded.
+    RelayLifecycleLock lock(relayLifecycleMutex);
     if (!relayEnabled) return;
     relayEnabled = false;
     relayConnected = false;
