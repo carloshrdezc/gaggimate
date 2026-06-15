@@ -236,6 +236,7 @@ void WebUIPlugin::loop() {
         bool have = false;
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             url = pendingReleaseUrl;
+            pendingReleaseUrl = ""; // release the copy; the flag is the source of truth
             pendingReleaseUrlChange = false;
             have = true;
             xSemaphoreGive(otaIntentMutex);
@@ -244,6 +245,9 @@ void WebUIPlugin::loop() {
             ota->setReleaseUrl(url);
         }
     }
+    // NOTE: the status-push drain MUST stay after the release-URL drain above, so
+    // the "Checking..." broadcast reflects the just-applied channel rather than
+    // the previous one (CAR-178). Do not reorder these two blocks.
     if (pendingOtaStatusPush) {
         pendingOtaStatusPush = false;
         updateOTAStatus("Checking...");
@@ -900,6 +904,14 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
                 pendingReleaseUrl = url;
                 pendingReleaseUrlChange = true;
                 xSemaphoreGive(otaIntentMutex);
+            } else {
+                // Should be effectively impossible — the lock is only ever held
+                // for three trivial assignments on the loop-task drain side — but
+                // never drop a channel change silently. The persisted Settings
+                // channel was already updated, so the next periodic
+                // checkForUpdates() still reconciles; we just couldn't hand the
+                // resolved URL to the loop task this round.
+                ESP_LOGW("WebUIPlugin", "Dropped OTA release-URL handoff (otaIntentMutex contended); channel persisted, will reconcile on next check");
             }
         }
     }
