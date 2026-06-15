@@ -494,6 +494,15 @@ void WebUIPlugin::startRelay() {
             ++drainPolls;
         }
         if (relayTaskHandle != nullptr) {
+            // NOTE(CAR-259): no internal retry timer here. This deferred start
+            // relies on the next external re-trigger — a WiFi reconnect
+            // (start()), a stop()/start() cycle, or another /api/settings toggle
+            // (handleSettings()) — to call startRelay() again. The only path
+            // that leaves the relay silently down is the double-timeout tail
+            // (this drain AND the prior stopRelay() both exceeding ~500 ms) with
+            // no subsequent WiFi/settings event, which is not expected in the
+            // field (a wedged relayWs.loop() resolves well under 500 ms). Treat
+            // the silent return as intentional, not a missing-retry bug.
             ESP_LOGW("WebUIPlugin", "Prior relay task still exiting; deferring start until it self-deletes");
             return;
         }
