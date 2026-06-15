@@ -95,10 +95,31 @@ class WebUIPlugin : public Plugin {
 
     // Relay state
     SemaphoreHandle_t relayMutex = nullptr;
+    // Serializes the relay lifecycle (startRelay()/stopRelay()). Those two run on
+    // different FreeRTOS tasks (the arduino_events WiFi-event task via start()/stop()
+    // and the AsyncTCP /api/settings task via handleSettings()) and can genuinely
+    // interleave, so the volatile-flag handoff with relayLoopTask is only coherent
+    // when the lifecycle itself is mutually excluded by this mutex (CAR-259).
+    SemaphoreHandle_t relayLifecycleMutex = nullptr;
     std::vector<String> relayOutBuffer;
     volatile bool relayEnabled = false;
     volatile bool relayConnected = false;
-    TaskHandle_t relayTaskHandle = nullptr;
+    // Cooperative-shutdown channel for relayLoopTask. stopRelay() sets
+    // relayTaskExitRequested and waits for the task to tear down its own
+    // WebSocket state and self-delete (nulling relayTaskHandle), rather than
+    // calling vTaskDelete on a remote handle mid-relayWs.loop() (CAR-259).
+    volatile bool relayTaskExitRequested = false;
+    // volatile: this handle is the variable stopRelay()'s bounded spin-wait
+    // polls while the relay task (other core) writes it to nullptr just before
+    // vTaskDelete(NULL). Without volatile the compiler may hoist/cache the load
+    // and never observe the null, spuriously timing out a clean shutdown (CAR-259).
+    // NOTE: volatile only prevents a cached/hoisted load of this handle — it does
+    // NOT establish cross-core ordering. In particular it does not guarantee the
+    // relay task's relayWs.disconnect() is visible before its relayTaskHandle =
+    // nullptr store on the observing core. Hardening that ordering (migrating the
+    // handle/flags to std::atomic with acquire/release semantics) is tracked as a
+    // separate follow-up and is intentionally NOT done here (CAR-259).
+    volatile TaskHandle_t relayTaskHandle = nullptr;
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;

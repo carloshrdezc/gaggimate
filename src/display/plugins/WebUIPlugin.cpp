@@ -121,12 +121,32 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     pluginManager->on("controller:volumetric-measurement:bluetooth:change",
                       [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
 
+    // Create the relay lifecycle mutex once here, before any WiFi/server events
+    // can fire, so startRelay()/stopRelay() are serialized across the
+    // arduino_events and AsyncTCP tasks (CAR-259).
+    if (relayLifecycleMutex == nullptr) {
+        relayLifecycleMutex = xSemaphoreCreateMutex();
+    }
+
     setupServer();
 }
 
 void WebUIPlugin::relayLoopTask(void *arg) {
     auto *plugin = static_cast<WebUIPlugin *>(arg);
     while (true) {
+        // Cooperative shutdown: stopRelay() requests exit, and the teardown
+        // runs here on the task that owns the WebSocket allocations / mbedTLS
+        // state, never via vTaskDelete on a remote handle mid-loop (CAR-259).
+        if (plugin->relayTaskExitRequested) {
+            plugin->relayWs.disconnect();
+            plugin->relayConnected = false;
+            // Publish NULL before self-deleting so stopRelay()'s wait observes
+            // the task is gone. After vTaskDelete(NULL) this task never runs
+            // again, so no further access to plugin state occurs.
+            plugin->relayTaskHandle = nullptr;
+            vTaskDelete(nullptr);
+            return; // unreachable; keeps the compiler happy
+        }
         if (plugin->relayEnabled && plugin->relayMutex != nullptr) {
             if (plugin->relayConnected) {
                 std::vector<String> toSend;
@@ -440,7 +460,43 @@ void WebUIPlugin::stop() {
     serverRunning = false;
 }
 
+// RAII guard for the relay lifecycle mutex. Takes the mutex on construction
+// (if it exists) and gives it back on destruction, so every return path out of
+// startRelay()/stopRelay() — early guards, the deferred-start/timeout returns,
+// the SSL heap-guard, the OOM path, and the normal returns — releases the lock
+// without a hand-audited give at each site (CAR-259).
+namespace {
+struct RelayLifecycleLock {
+    SemaphoreHandle_t handle;
+    explicit RelayLifecycleLock(SemaphoreHandle_t h) : handle(h) {
+        if (handle != nullptr) {
+            xSemaphoreTake(handle, portMAX_DELAY);
+        }
+    }
+    ~RelayLifecycleLock() {
+        if (handle != nullptr) {
+            xSemaphoreGive(handle);
+        }
+    }
+    RelayLifecycleLock(const RelayLifecycleLock &) = delete;
+    RelayLifecycleLock &operator=(const RelayLifecycleLock &) = delete;
+};
+} // namespace
+
 void WebUIPlugin::startRelay() {
+    // Caller-context: startRelay()/stopRelay() are invoked from two different
+    // FreeRTOS tasks — start()/stop() run inline on the arduino_events WiFi-event
+    // task (controller:wifi:connect/disconnect), while handleSettings() runs on the
+    // AsyncTCP /api/settings task and calls stopRelay()+startRelay() back-to-back.
+    // A WiFi (dis)connect can therefore genuinely interleave with a cloud-relay
+    // settings toggle. They are now serialized by relayLifecycleMutex (taken at the
+    // top of both functions, released on every return path) so the volatile-flag
+    // handoff with relayLoopTask stays coherent and two starts can never both
+    // observe relayTaskHandle==nullptr and orphan a live task (CAR-259). A plain
+    // (non-recursive) mutex is correct: start() calls stop() then startRelay()
+    // sequentially (not nested), and handleSettings() calls them sequentially too —
+    // neither function calls the other while holding the lock.
+    RelayLifecycleLock lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
     if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
@@ -455,6 +511,38 @@ void WebUIPlugin::startRelay() {
 
     if (relayMutex == nullptr) {
         relayMutex = xSemaphoreCreateMutex();
+    }
+
+    // If a prior stopRelay() timed out, the old relay task is still alive,
+    // draining its in-flight relayWs.loop() with relayTaskExitRequested set; it
+    // will run its own relayWs.disconnect() and vTaskDelete(NULL) imminently.
+    // We must NOT reconfigure relayWs (onEvent / begin*) from this caller task
+    // while that task may still touch it — that is a data race on the
+    // WebSocketsClient (CAR-259). Wait briefly for the handle to clear, then
+    // fall through to create a fresh task. If it has not cleared in time, skip
+    // this start; the pending exit will complete and the next disconnect/
+    // reconnect or settings change re-triggers startRelay() cleanly.
+    if (relayTaskHandle != nullptr) {
+        constexpr TickType_t drainInterval = pdMS_TO_TICKS(10);
+        constexpr int maxDrainPolls = 50; // ~500 ms
+        int drainPolls = 0;
+        while (relayTaskHandle != nullptr && drainPolls < maxDrainPolls) {
+            vTaskDelay(drainInterval);
+            ++drainPolls;
+        }
+        if (relayTaskHandle != nullptr) {
+            // NOTE(CAR-259): no internal retry timer here. This deferred start
+            // relies on the next external re-trigger — a WiFi reconnect
+            // (start()), a stop()/start() cycle, or another /api/settings toggle
+            // (handleSettings()) — to call startRelay() again. The only path
+            // that leaves the relay silently down is the double-timeout tail
+            // (this drain AND the prior stopRelay() both exceeding ~500 ms) with
+            // no subsequent WiFi/settings event, which is not expected in the
+            // field (a wedged relayWs.loop() resolves well under 500 ms). Treat
+            // the silent return as intentional, not a missing-retry bug.
+            ESP_LOGW("WebUIPlugin", "Prior relay task still exiting; deferring start until it self-deletes");
+            return;
+        }
     }
 
     String path = (basePath.isEmpty() || basePath == "/")
@@ -494,32 +582,68 @@ void WebUIPlugin::startRelay() {
         relayWs.begin(host.c_str(), port, path.c_str());
     }
 
-    if (relayTaskHandle == nullptr) {
-        BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &relayTaskHandle, 0);
-        if (created != pdPASS) {
-            ESP_LOGE("WebUIPlugin", "Failed to create relay task (OOM)");
-            relayWs.disconnect();
-            return;
-        }
+    // relayTaskHandle is guaranteed null here (the live-task case returned above).
+    relayTaskExitRequested = false; // fresh task must not see a stale exit request
+    // xTaskCreatePinnedToCore wants a non-volatile TaskHandle_t*; create into a
+    // local, then publish to the volatile member.
+    TaskHandle_t createdHandle = nullptr;
+    BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &createdHandle, 0);
+    if (created != pdPASS) {
+        ESP_LOGE("WebUIPlugin", "Failed to create relay task (OOM)");
+        relayWs.disconnect();
+        return;
     }
+    relayTaskHandle = createdHandle;
 
     relayEnabled = true;
     ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %lu B)", host.c_str(), port, path.c_str(), esp_get_free_heap_size());
 }
 
 void WebUIPlugin::stopRelay() {
+    // Serialized with startRelay() via relayLifecycleMutex (see startRelay()
+    // for the cross-task rationale, CAR-259). The lock is held across the bounded
+    // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
+    // (yields the CPU) and is strictly bounded.
+    RelayLifecycleLock lock(relayLifecycleMutex);
     if (!relayEnabled) return;
-    // Signal the task to exit its loop body before tearing down the socket.
-    // vTaskDelete on a remote handle is non-blocking, so we must ensure the
-    // task is not mid-execution in relayWs.loop() when we call disconnect().
     relayEnabled = false;
     relayConnected = false;
     if (relayTaskHandle != nullptr) {
-        vTaskDelay(pdMS_TO_TICKS(20)); // one task loop cycle is 10 ms; 20 ms is a safe margin
-        vTaskDelete(relayTaskHandle);
-        relayTaskHandle = nullptr;
+        // Cooperative shutdown (CAR-259): ask the task to tear down its own
+        // WebSocket state and self-delete. We must NOT vTaskDelete a remote
+        // handle while it may be inside relayWs.loop() (WebSocketsClient /
+        // AsyncTCP / mbedTLS allocations), which leaks heap or corrupts the
+        // allocator. The task nulls relayTaskHandle just before vTaskDelete(NULL).
+        relayTaskExitRequested = true;
+        // Bound the wait so a wedged task can never hang the caller (this runs
+        // on the WiFi-event / AsyncTCP web-server task). Loop cadence is 10 ms;
+        // a single relayWs.loop() with an SSL handshake or large frame in flight
+        // can exceed that, so allow generous slack before giving up.
+        constexpr TickType_t pollInterval = pdMS_TO_TICKS(10);
+        constexpr int maxPolls = 50; // ~500 ms
+        int polls = 0;
+        while (relayTaskHandle != nullptr && polls < maxPolls) {
+            vTaskDelay(pollInterval);
+            ++polls;
+        }
+        if (relayTaskHandle != nullptr) {
+            // Task did not exit in time (likely wedged in a long relayWs.loop()).
+            // Do NOT vTaskDelete it from here — that is exactly the unsafe
+            // primitive we are avoiding. Leave relayTaskExitRequested = true so
+            // the task self-deletes the moment its in-flight relayWs.loop()
+            // returns: relayLoopTask checks the flag UNCONDITIONALLY at the top
+            // of every iteration (before the relayEnabled guard), so even with
+            // relayEnabled now false it will run its own relayWs.disconnect()
+            // and vTaskDelete(NULL) rather than idling forever with its socket /
+            // mbedTLS allocations un-freed. A later startRelay() waits for the
+            // handle to clear before creating a fresh task (CAR-259).
+            ESP_LOGW("WebUIPlugin", "Relay task did not exit within %d ms; it will self-delete when its loop returns",
+                     maxPolls * 10);
+            return;
+        }
     }
-    relayWs.disconnect();
+    // Task is gone (or never existed). Clear the request flag for the next start.
+    relayTaskExitRequested = false;
 }
 
 void WebUIPlugin::broadcastAll(const String &msg) {
