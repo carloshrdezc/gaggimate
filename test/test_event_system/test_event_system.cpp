@@ -94,6 +94,87 @@ void test_trigger_unregistered_event_is_noop(void) {
     TEST_ASSERT_EQUAL_INT(42, result.getInt("k"));
 }
 
+// CAR-110: triggering a missing key must NOT default-insert into the listeners
+// map. We cannot read the private map directly, but the regression that the old
+// count()+operator[] code allowed is observable: firing an unregistered id, then
+// registering a real listener for that exact id and firing again, must invoke the
+// listener exactly once. (A spurious default-inserted empty vector would not be
+// detectable here, but the find()-based path guarantees no write happens at all.)
+void test_trigger_missing_key_then_register_fires_exactly_once(void) {
+    PluginManager manager;
+    // Fire many times with no listener — under the old code each of these would
+    // have written an empty vector into the map; under find() they are no-ops.
+    for (int i = 0; i < 5; i++) {
+        manager.trigger("evt:lazy");
+    }
+    int seen = 0;
+    manager.on("evt:lazy", [&](Event &) { seen++; });
+    manager.trigger("evt:lazy");
+    manager.trigger("evt:lazy");
+    TEST_ASSERT_EQUAL_INT(2, seen);
+}
+
+// CAR-110: a callback may re-enter trigger() for another event id while the
+// outer trigger() is still on the stack. With a recursive lock and
+// copy-then-invoke-outside-the-lock, this must not deadlock and both listeners
+// must run.
+void test_reentrant_trigger_from_callback(void) {
+    PluginManager manager;
+    int outer = 0, inner = 0;
+    manager.on("evt:inner", [&](Event &) { inner++; });
+    manager.on("evt:outer", [&](Event &) {
+        outer++;
+        manager.trigger("evt:inner"); // re-enter while outer dispatch is active
+    });
+
+    manager.trigger("evt:outer");
+
+    TEST_ASSERT_EQUAL_INT(1, outer);
+    TEST_ASSERT_EQUAL_INT(1, inner);
+}
+
+// CAR-110: a callback may re-enter trigger() for the SAME event id. The dispatch
+// loop iterates a snapshot taken under the lock, so recursion terminates as long
+// as the application's own logic does — here a depth counter caps it. This proves
+// the same-key recursive case neither deadlocks nor iterates a mutating vector.
+void test_reentrant_same_key_trigger_terminates(void) {
+    PluginManager manager;
+    int depth = 0;
+    manager.on("evt:recurse", [&](Event &) {
+        if (++depth < 3) {
+            manager.trigger("evt:recurse");
+        }
+    });
+
+    manager.trigger("evt:recurse");
+
+    TEST_ASSERT_EQUAL_INT(3, depth);
+}
+
+// CAR-110: registering a new listener from inside a callback must not affect the
+// in-flight dispatch (the loop runs over a snapshot copied under the lock). The
+// newly added listener only fires on the NEXT trigger.
+void test_register_during_dispatch_uses_snapshot(void) {
+    PluginManager manager;
+    int original = 0, added = 0;
+    manager.on("evt:grow", [&](Event &) {
+        original++;
+        if (original == 1) {
+            manager.on("evt:grow", [&](Event &) { added++; });
+        }
+    });
+
+    manager.trigger("evt:grow");
+    // First dispatch ran the snapshot: only the original listener fired.
+    TEST_ASSERT_EQUAL_INT(1, original);
+    TEST_ASSERT_EQUAL_INT(0, added);
+
+    manager.trigger("evt:grow");
+    // Second dispatch sees both listeners.
+    TEST_ASSERT_EQUAL_INT(2, original);
+    TEST_ASSERT_EQUAL_INT(1, added);
+}
+
 static int runEventSystemTests() {
     UNITY_BEGIN();
     RUN_TEST(test_typed_event_data_round_trips);
@@ -102,6 +183,10 @@ static int runEventSystemTests() {
     RUN_TEST(test_multiple_listeners_run_in_registration_order);
     RUN_TEST(test_stop_propagation_halts_remaining_listeners);
     RUN_TEST(test_trigger_unregistered_event_is_noop);
+    RUN_TEST(test_trigger_missing_key_then_register_fires_exactly_once);
+    RUN_TEST(test_reentrant_trigger_from_callback);
+    RUN_TEST(test_reentrant_same_key_trigger_terminates);
+    RUN_TEST(test_register_during_dispatch_uses_snapshot);
     return UNITY_END();
 }
 
