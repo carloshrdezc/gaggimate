@@ -21,7 +21,9 @@
 #include <display/plugins/HomekitPlugin.h>
 #endif
 #include <display/plugins/LedControlPlugin.h>
+#if GAGGIMATE_ENABLE_MQTT
 #include <display/plugins/MQTTPlugin.h>
+#endif
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/SmartGrindPlugin.h>
 #include <display/plugins/WebUIPlugin.h>
@@ -86,9 +88,11 @@ void Controller::setup() {
     if (settings.isSmartGrindActive()) {
         pluginManager->registerPlugin(new SmartGrindPlugin());
     }
+#if GAGGIMATE_ENABLE_MQTT
     if (settings.isHomeAssistant()) {
         pluginManager->registerPlugin(new MQTTPlugin());
     }
+#endif
     pluginManager->registerPlugin(new WebUIPlugin());
     pluginManager->registerPlugin(&ShotHistory);
     pluginManager->registerPlugin(&BLEScales);
