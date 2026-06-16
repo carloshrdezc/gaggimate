@@ -56,6 +56,14 @@ jobs:
       - name: Build ${{ matrix.target }}
         run: |
           mkdir -p out
+          # Delete the moving `nightly` tag locally before building. The display
+          # pre-script (generate_stable_versions.py) runs `git describe --tags
+          # --exact-match HEAD`; on a stable-tag release where `nightly` still
+          # points at the same commit, that can resolve to `nightly` and get
+          # dropped, leaving the just-pushed stable tag out of STABLE_VERSIONS.
+          # The old single-job pipeline deleted nightly before any pio run for
+          # this reason; each parallel firmware leg must now do the same. (CAR-385)
+          git tag -d nightly 2>/dev/null || true
           pio run -e ${{ matrix.env }}
           mv .pio/build/${{ matrix.env }}/firmware.bin out/${{ matrix.prefix }}-firmware.bin
           mv .pio/build/${{ matrix.env }}/partitions.bin out/${{ matrix.prefix }}-partitions.bin
