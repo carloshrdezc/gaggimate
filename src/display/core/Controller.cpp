@@ -95,7 +95,9 @@ void Controller::setup() {
 #endif
     pluginManager->registerPlugin(new WebUIPlugin());
     pluginManager->registerPlugin(&ShotHistory);
+#if GAGGIMATE_ENABLE_BLE_SCALE
     pluginManager->registerPlugin(&BLEScales);
+#endif
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
     pluginManager->setup(this);
