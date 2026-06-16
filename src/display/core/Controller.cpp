@@ -5,6 +5,7 @@
 #include <SPIFFS.h>
 #include <ctime>
 #include <display/config.h>
+#include <display/config/features.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -16,7 +17,9 @@
 #include <display/plugins/AutoWakeupPlugin.h>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/BoilerFillPlugin.h>
+#if GAGGIMATE_ENABLE_HOMEKIT
 #include <display/plugins/HomekitPlugin.h>
+#endif
 #include <display/plugins/LedControlPlugin.h>
 #include <display/plugins/MQTTPlugin.h>
 #include <display/plugins/ShotHistoryPlugin.h>
@@ -67,10 +70,16 @@ void Controller::setup() {
     grinderManager->setup();
     profileManager = new ProfileManager(fs, "/p", settings, pluginManager);
     profileManager->setup();
+#if GAGGIMATE_ENABLE_HOMEKIT
     if (settings.isHomekit())
         pluginManager->registerPlugin(new HomekitPlugin(settings.getWifiSsid(), settings.getWifiPassword()));
     else
         pluginManager->registerPlugin(new mDNSPlugin());
+#else
+    // HomeKit compiled out: register mDNS unconditionally so the device stays
+    // discoverable on the network (HomeKit otherwise provides its own mDNS).
+    pluginManager->registerPlugin(new mDNSPlugin());
+#endif
     if (settings.isBoilerFillActive()) {
         pluginManager->registerPlugin(new BoilerFillPlugin());
     }
