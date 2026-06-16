@@ -55,7 +55,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       # -Wall -Wextra are on (display_common.build_flags). Warnings are allowed
       # to surface — the build must still succeed (no -Werror, see platformio.ini).
       - name: Build display firmware
@@ -79,7 +79,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       # Sanitizer findings must fail the suite. halt_on_error / abort_on_error
       # turn the first ASan/UBSan report into a non-zero exit.
       - name: Run sanitized host tests
@@ -106,7 +106,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       - name: Install clang-tidy
         run: |
           sudo apt-get update
