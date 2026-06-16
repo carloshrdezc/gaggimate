@@ -26,7 +26,9 @@
 #endif
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/SmartGrindPlugin.h>
+#if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
+#endif
 #include <display/plugins/mDNSPlugin.h>
 #ifndef GAGGIMATE_HEADLESS
 #include <display/drivers/AmoledDisplayDriver.h>
@@ -93,7 +95,9 @@ void Controller::setup() {
         pluginManager->registerPlugin(new MQTTPlugin());
     }
 #endif
+#if GAGGIMATE_ENABLE_WEBUI
     pluginManager->registerPlugin(new WebUIPlugin());
+#endif
     pluginManager->registerPlugin(&ShotHistory);
 #if GAGGIMATE_ENABLE_BLE_SCALE
     pluginManager->registerPlugin(&BLEScales);

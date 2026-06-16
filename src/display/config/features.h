@@ -31,4 +31,16 @@
 #define GAGGIMATE_ENABLE_BLE_SCALE 1
 #endif
 
+// WebUI / relay-websocket integration. When disabled, the device builds as a
+// headless/no-web configuration: there is no ESPAsyncWebServer, no `/api/*`
+// HTTP routes, no `/ws` WebSocket, no captive portal, no cloud relay, and no
+// OTA-over-web. WebUIPlugin owns ALL of that surface internally, so no other
+// code holds a server pointer to dangle — gating its registration removes the
+// feature cleanly (see CAR-383). This is independent of GAGGIMATE_HEADLESS,
+// which only drops the physical display panel/UI: the four combinations
+// (screen+web, screen-only, headless+web, headless+no-web) are all valid.
+#ifndef GAGGIMATE_ENABLE_WEBUI
+#define GAGGIMATE_ENABLE_WEBUI 1
+#endif
+
 #endif // GAGGIMATE_FEATURES_H
