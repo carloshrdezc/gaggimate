@@ -53,6 +53,151 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
     return migrations;
 }
 
+// Self-heal profiles whose addressable id is neither safe in-file nor safe as a
+// filename stem (e.g. legacy/imported entries keyed on a 36-char UUID). Such a
+// profile is visible in listProfiles() but unaddressable: every WebUI action
+// (delete/select/favorite) gates on isSafeId() and parseProfile() blanks the
+// unsafe in-file id, so the entry can never be deleted, selected, or favorited.
+//
+// For each affected file we mint a fresh safe generateShortID(), rewrite the
+// file's "id" field, and rename the file to <newId>.json so filename stem and
+// in-file id agree. The returned (oldKey -> newId) mappings are fed to
+// Settings::migrateProfileIds so any persisted selected/favorite/order
+// reference that pointed at the old (unsafe) key follows the rename. We emit a
+// mapping for the raw in-file id when present and for the filename stem when it
+// differs, since either could be the value a prior build persisted.
+//
+// A file is only reminted when BOTH the in-file id and the filename stem are
+// unsafe (the safe-fallback path is already handled by
+// collectProfileIdMigrations()). Files that parse cleanly with a usable safe id
+// are left untouched.
+std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const String &dir) {
+    std::vector<std::pair<String, String>> migrations;
+    File root = fs->open(dir);
+    if (!root || !root.isDirectory()) {
+        return migrations;
+    }
+
+    // Collect candidate filenames first; rewriting/renaming while iterating the
+    // directory handle is unsafe on the SD/FS backends.
+    std::vector<String> names;
+    {
+        File file = root.openNextFile();
+        while (file) {
+            String name = file.name();
+            if (name.endsWith(".json")) {
+                names.push_back(name);
+            }
+            file = root.openNextFile();
+        }
+    }
+
+    for (const String &name : names) {
+        const String stem = filenameStem(name);
+        // Canonical full path for this entry. File::name() on the ESP32 Arduino
+        // FS backends (LittleFS/SD) returns the BARE BASENAME (e.g. "abc.json"),
+        // not the directory-qualified path, so re-opening or removing `name`
+        // directly would resolve against the FS root and miss the file in `dir`.
+        // Rebuild the path the same way profilePath() does so open/remove hit
+        // the real file. (The directory-listing scanners read from the live
+        // openNextFile() handle and never re-open by name, which is why only
+        // this rewrite-and-rename pass needs the canonical form.)
+        const String oldPath = dir + "/" + stem + ".json";
+        String rawId;
+        Profile profile{};
+        bool parsed = false;
+        {
+            File file = fs->open(oldPath, "r");
+            if (!file) {
+                continue;
+            }
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, file);
+            file.close();
+            if (err) {
+                continue;
+            }
+            JsonObject obj = doc.as<JsonObject>();
+            rawId = obj["id"] | "";
+            parsed = parseProfile(obj, profile);
+        }
+        if (!parsed) {
+            continue;
+        }
+
+        // If the entry already resolves to a safe addressable id, it is
+        // reachable from the WebUI -- skip it. An empty result means the entry
+        // is unaddressable and must be reminted. Pass the POST-parse id
+        // (parseProfile blanks an unsafe in-file id) so this mirrors exactly how
+        // loadProfile() resolves the addressable id: a safe in-file id wins,
+        // otherwise a safe filename stem is adopted. Using the raw pre-parse id
+        // here would wrongly remint an entry whose in-file id is unsafe but whose
+        // filename stem IS safe -- that entry is already addressable via the stem.
+        if (!resolveAddressableProfileId(profile.id, stem).isEmpty()) {
+            continue;
+        }
+
+        // Unaddressable: mint a fresh safe id and rewrite + rename the file.
+        // Guard against clobbering an existing profile: generateShortID() is
+        // random, so on the (vanishingly unlikely) chance the minted id collides
+        // with a file already on disk, draw again rather than truncate it open.
+        // Mirrors saveProfile()'s collision guard.
+        String newId = generateShortID();
+        String newPath = dir + "/" + newId + ".json";
+        for (int attempt = 0; attempt < 8 && fs->exists(newPath); ++attempt) {
+            newId = generateShortID();
+            newPath = dir + "/" + newId + ".json";
+        }
+        if (fs->exists(newPath)) {
+            // Still colliding after retries -- skip rather than risk a clobber.
+            continue;
+        }
+        profile.id = newId;
+
+        File out = fs->open(newPath, "w");
+        if (!out) {
+            continue;
+        }
+        JsonDocument outDoc;
+        JsonObject outObj = outDoc.to<JsonObject>();
+        writeProfile(outObj, profile);
+        // Treat the write as successful only when the full document was written.
+        // serializeJson() can return a positive-but-short count on a full
+        // filesystem; comparing against measureJson() avoids deleting the only
+        // good copy (below) after a truncated write left newPath corrupt.
+        const size_t expected = measureJson(outDoc);
+        const size_t written = serializeJson(outDoc, out);
+        out.close();
+        if (written != expected || expected == 0) {
+            fs->remove(newPath);
+            continue;
+        }
+
+        // Remove the stale original file unless the rename was a no-op (the new
+        // id happened to match the old stem, which generateShortID makes
+        // vanishingly unlikely but is harmless to guard).
+        if (oldPath != newPath) {
+            fs->remove(oldPath);
+        }
+
+        ESP_LOGW("ProfileManager", "Reminted unaddressable profile id (stem=%s, rawId=%s) -> %s", stem.c_str(), rawId.c_str(),
+                 newId.c_str());
+
+        auto alreadyMapped = [&](const String &from) {
+            return std::find_if(migrations.begin(), migrations.end(), [&](const auto &m) { return m.first == from; }) !=
+                   migrations.end();
+        };
+        if (!rawId.isEmpty() && rawId != newId && !alreadyMapped(rawId)) {
+            migrations.emplace_back(rawId, newId);
+        }
+        if (stem != newId && stem != rawId && !alreadyMapped(stem)) {
+            migrations.emplace_back(stem, newId);
+        }
+    }
+
+    return migrations;
+}
+
 // Find the on-disk filename stem whose loaded in-file profile id matches the
 // requested id. Returns an empty String when no matching file is found.
 //
@@ -78,10 +223,11 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
                 Profile profile{};
                 if (parseProfile(obj, profile)) {
                     String stem = filenameStem(name);
-                    // Mirror loadProfile()'s id resolution: in-file id wins,
-                    // falling back to the filename stem only when it is safe.
-                    if (profile.id.isEmpty() && isSafeId(stem)) {
-                        profile.id = stem;
+                    // Resolve the addressable id the same way loadProfile() and
+                    // remintUnsafeProfileIds() do: in-file id wins, else a safe
+                    // filename stem. Shared helper keeps the rule in one place.
+                    if (profile.id.isEmpty()) {
+                        profile.id = resolveAddressableProfileId(profile.id, stem);
                     }
                     if (profile.id == id) {
                         return stem;
@@ -101,7 +247,13 @@ ProfileManager::ProfileManager(fs::FS *fs, String dir, Settings &settings, Plugi
 
 void ProfileManager::setup() {
     ensureDirectory();
-    _settings.migrateProfileIds(collectProfileIdMigrations(_fs, _dir));
+    // First self-heal profiles with no usable safe id (UUID-keyed legacy/imported
+    // entries) by reminting them; this renames files on disk, so it must run
+    // before the safe-fallback migration scan below reads the directory.
+    auto migrations = remintUnsafeProfileIds(_fs, _dir);
+    auto fallbackMigrations = collectProfileIdMigrations(_fs, _dir);
+    migrations.insert(migrations.end(), fallbackMigrations.begin(), fallbackMigrations.end());
+    _settings.migrateProfileIds(migrations);
     auto profiles = listProfiles();
     if (getFavoritedProfiles().empty() || profiles.empty() || _settings.getSelectedProfile() == "" ||
         !loadSelectedProfile(selectedProfile)) {
@@ -199,8 +351,9 @@ bool ProfileManager::loadProfile(const String &uuid, Profile &outProfile) {
     // the profile visible in the list but inoperable via the WebUI (all profile
     // actions reject non-safe ids). Keep the id empty in that case so the UI
     // treats it as a broken entry rather than silently creating a duplicate.
-    if (outProfile.id.isEmpty() && isSafeId(uuid)) {
-        outProfile.id = uuid;
+    // (ProfileManager::setup self-heals such entries on boot via reminting.)
+    if (outProfile.id.isEmpty()) {
+        outProfile.id = resolveAddressableProfileId(outProfile.id, uuid);
     }
     outProfile.selected = outProfile.id == _settings.getSelectedProfile();
     std::vector<String> favoritedProfiles = _settings.getFavoritedProfiles();

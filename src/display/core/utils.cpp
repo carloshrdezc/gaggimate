@@ -57,3 +57,13 @@ bool isSafeId(const String &id) {
     }
     return true;
 }
+
+String resolveAddressableProfileId(const String &inFileId, const String &filenameStem) {
+    if (!inFileId.isEmpty() && isSafeId(inFileId)) {
+        return inFileId;
+    }
+    if (inFileId.isEmpty() && isSafeId(filenameStem)) {
+        return filenameStem;
+    }
+    return String();
+}

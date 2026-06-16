@@ -5,8 +5,9 @@
 //
 // We re-implement ONLY the pure, hardware-independent helpers that the code
 // under test actually needs. Logic must match the production source in
-// src/display/core/utils.cpp; keep them in sync. Today that is just
-// isSafeId(), used by parseProfile().
+// src/display/core/utils.cpp; keep them in sync. Today that is isSafeId() (used
+// by parseProfile()) and resolveAddressableProfileId() (used by ProfileManager
+// to decide whether a profile entry is reachable or must be reminted).
 //
 // Note: <stdexcept> is included before utils.h because utils.h defines a
 // string_format() template that throws std::runtime_error without including
@@ -30,4 +31,14 @@ bool isSafeId(const String &id) {
         }
     }
     return true;
+}
+
+String resolveAddressableProfileId(const String &inFileId, const String &filenameStem) {
+    if (!inFileId.isEmpty() && isSafeId(inFileId)) {
+        return inFileId;
+    }
+    if (inFileId.isEmpty() && isSafeId(filenameStem)) {
+        return filenameStem;
+    }
+    return String();
 }
