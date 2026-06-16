@@ -259,10 +259,18 @@ void WebUIPlugin::loop() {
             doc["rssi"] = controller->getClientController()->getClient()->getRssi();
         }
 
+#if GAGGIMATE_ENABLE_BLE_SCALE
         bool bleConnected = BLEScales.isConnected();
         // Add Bluetooth scale weight information
         doc["cw"] = bleConnected ? this->currentBluetoothWeight : 0; // current bluetooth weight
         doc["bc"] = bleConnected;                                    // bluetooth scale connected status
+#else
+        // BLE scale compiled out (CAR-382): always report disconnected / zero
+        // weight. Volumetric still works via flow estimation; that value flows
+        // through the process snapshot, not these BLE-specific status fields.
+        doc["cw"] = 0; // current bluetooth weight
+        doc["bc"] = false; // bluetooth scale connected status
+#endif
 
         // Use thread-safe snapshot to avoid use-after-free race conditions
         ProcessSnapshot proc = controller->getProcessSnapshot();
@@ -359,10 +367,12 @@ void WebUIPlugin::setupServer() {
         serializeJson(doc, *response);
         request->send(response);
     });
+#if GAGGIMATE_ENABLE_BLE_SCALE
     server.on("/api/scales/list", [this](AsyncWebServerRequest *request) { handleBLEScaleList(request); });
     server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) { handleBLEScaleConnect(request); });
     server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
     server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
+#endif
     FS *fs = &SPIFFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
@@ -1209,6 +1219,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
         ESP.restart();
 }
 
+#if GAGGIMATE_ENABLE_BLE_SCALE
 void WebUIPlugin::handleBLEScaleList(AsyncWebServerRequest *request) {
     JsonDocument doc;
     JsonArray scalesArray = doc.to<JsonArray>();
@@ -1264,6 +1275,7 @@ void WebUIPlugin::handleBLEScaleInfo(AsyncWebServerRequest *request) {
     serializeJson(doc, *response);
     request->send(response);
 }
+#endif // GAGGIMATE_ENABLE_BLE_SCALE
 
 void WebUIPlugin::updateOTAStatus(const String &version) {
     Settings const &settings = controller->getSettings();
