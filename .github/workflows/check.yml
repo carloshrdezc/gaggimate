@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       - name: Run static code analysis for display
         # CAR-341: this step now GATES (no continue-on-error). It analyses the
         # hand-written display sources (src/display/) and excludes the generated
