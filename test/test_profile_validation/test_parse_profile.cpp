@@ -144,6 +144,74 @@ void test_resolve_id_unaddressable_when_both_unsafe(void) {
     TEST_ASSERT_TRUE(resolveAddressableProfileId("", longStem).isEmpty());
 }
 
+void test_remint_decision_safe_stem_unsafe_infile_id_is_addressable(void) {
+    // CAR-335 regression guard (review finding): a profile whose in-file id is
+    // an unsafe 36-char UUID but whose FILENAME STEM is safe (e.g.
+    // "imported.json") is ALREADY addressable today -- listProfiles enumerates
+    // it by the stem and loadProfile adopts the stem after parseProfile blanks
+    // the unsafe id. The remint scan must therefore NOT remint it.
+    //
+    // This models the exact decision remintUnsafeProfileIds() makes: parse the
+    // file (which blanks the unsafe id), then resolve against the stem. The bug
+    // was passing the RAW pre-parse id to the resolver, which returned empty and
+    // triggered a needless remint. Passing the POST-parse id must keep the
+    // entry addressable (non-empty -> skip remint).
+    Profile profile;
+    TEST_ASSERT_TRUE(parseProfileJson(R"({"id":"387ff201-e3de-4102-a071-0a663b08066a","label":"Imported","type":"standard",)"
+                                      R"("phases":[{"name":"Brew","phase":"brew","valve":1,"duration":25,"pump":100}]})",
+                                      profile));
+    // parseProfile blanked the unsafe in-file id.
+    TEST_ASSERT_TRUE(profile.id.isEmpty());
+    // With the safe filename stem, the entry resolves -> addressable -> NOT reminted.
+    TEST_ASSERT_EQUAL_STRING("imported", resolveAddressableProfileId(profile.id, "imported").c_str());
+}
+
+void test_remint_decision_uuid_stem_and_uuid_id_is_unaddressable(void) {
+    // CAR-335 core case: file named <uuid>.json whose in-file id is the same
+    // UUID. parseProfile blanks the id; the stem is also unsafe (>32 chars), so
+    // there is NO safe address -> the resolver returns empty -> remint fires.
+    const char *uuid = "387ff201-e3de-4102-a071-0a663b08066a";
+    Profile profile;
+    TEST_ASSERT_TRUE(parseProfileJson(R"({"id":"387ff201-e3de-4102-a071-0a663b08066a","label":"Legacy","type":"standard",)"
+                                      R"("phases":[{"name":"Brew","phase":"brew","valve":1,"duration":25,"pump":100}]})",
+                                      profile));
+    TEST_ASSERT_TRUE(profile.id.isEmpty());
+    TEST_ASSERT_TRUE(resolveAddressableProfileId(profile.id, uuid).isEmpty());
+}
+
+void test_resolve_id_length_boundary(void) {
+    // isSafeId accepts 1..32 chars. The remint decision hinges on this cliff:
+    // a 32-char id/stem is addressable (NOT reminted); 33 chars is unaddressable
+    // (reminted). A test using only a far-over-length value (e.g. 40) would not
+    // catch an off-by-one in the length comparison, so pin both sides.
+    String len32, len33;
+    for (int i = 0; i < 32; ++i) {
+        len32 += 'a';
+    }
+    len33 = len32 + 'a';
+    // 32-char safe in-file id wins.
+    TEST_ASSERT_EQUAL_STRING(len32.c_str(), resolveAddressableProfileId(len32, "").c_str());
+    // 32-char safe stem (empty in-file id) is adopted.
+    TEST_ASSERT_EQUAL_STRING(len32.c_str(), resolveAddressableProfileId("", len32).c_str());
+    // 33 chars is unsafe on both axes -> unaddressable.
+    TEST_ASSERT_TRUE(resolveAddressableProfileId(len33, len33).isEmpty());
+    TEST_ASSERT_TRUE(resolveAddressableProfileId("", len33).isEmpty());
+}
+
+void test_resolve_id_both_empty_is_unaddressable(void) {
+    // Empty in-file id AND empty stem -> no safe address (isSafeId rejects len 0).
+    TEST_ASSERT_TRUE(resolveAddressableProfileId("", "").isEmpty());
+}
+
+void test_resolve_id_raw_unsafe_id_does_not_adopt_safe_stem(void) {
+    // Pins the round-1 regression at the resolver contract: a NON-EMPTY but
+    // unsafe in-file id does NOT fall through to the safe stem (the stem branch
+    // is gated on inFileId.isEmpty()). This is exactly why the remint scan must
+    // pass the POST-parse (blanked) id, not the raw on-disk id -- with the raw
+    // UUID here the resolver returns empty even though the stem is safe.
+    TEST_ASSERT_TRUE(resolveAddressableProfileId("387ff201-e3de-4102-a071-0a663b08066a", "imported").isEmpty());
+}
+
 static int runProfileValidationTests() {
     UNITY_BEGIN();
     RUN_TEST(test_rejects_missing_label);
@@ -159,6 +227,11 @@ static int runProfileValidationTests() {
     RUN_TEST(test_resolve_id_falls_back_to_safe_stem_when_infile_empty);
     RUN_TEST(test_resolve_id_unaddressable_for_uuid);
     RUN_TEST(test_resolve_id_unaddressable_when_both_unsafe);
+    RUN_TEST(test_resolve_id_length_boundary);
+    RUN_TEST(test_resolve_id_both_empty_is_unaddressable);
+    RUN_TEST(test_resolve_id_raw_unsafe_id_does_not_adopt_safe_stem);
+    RUN_TEST(test_remint_decision_safe_stem_unsafe_infile_id_is_addressable);
+    RUN_TEST(test_remint_decision_uuid_stem_and_uuid_id_is_unaddressable);
     return UNITY_END();
 }
 

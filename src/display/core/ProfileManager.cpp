@@ -94,11 +94,20 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
 
     for (const String &name : names) {
         const String stem = filenameStem(name);
+        // Canonical full path for this entry. File::name() on the ESP32 Arduino
+        // FS backends (LittleFS/SD) returns the BARE BASENAME (e.g. "abc.json"),
+        // not the directory-qualified path, so re-opening or removing `name`
+        // directly would resolve against the FS root and miss the file in `dir`.
+        // Rebuild the path the same way profilePath() does so open/remove hit
+        // the real file. (The directory-listing scanners read from the live
+        // openNextFile() handle and never re-open by name, which is why only
+        // this rewrite-and-rename pass needs the canonical form.)
+        const String oldPath = dir + "/" + stem + ".json";
         String rawId;
         Profile profile{};
         bool parsed = false;
         {
-            File file = fs->open(name, "r");
+            File file = fs->open(oldPath, "r");
             if (!file) {
                 continue;
             }
@@ -116,21 +125,35 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
             continue;
         }
 
-        // If the entry already resolves to a safe addressable id (either the
-        // in-file id is safe, or it is absent and the filename stem is safe),
-        // it is reachable from the WebUI -- skip it. An empty result means the
-        // entry is unaddressable and must be reminted. parseProfile() has
-        // already blanked an unsafe in-file id, so pass the raw id to mirror the
-        // pre-parse on-disk state.
-        if (!resolveAddressableProfileId(rawId, stem).isEmpty()) {
+        // If the entry already resolves to a safe addressable id, it is
+        // reachable from the WebUI -- skip it. An empty result means the entry
+        // is unaddressable and must be reminted. Pass the POST-parse id
+        // (parseProfile blanks an unsafe in-file id) so this mirrors exactly how
+        // loadProfile() resolves the addressable id: a safe in-file id wins,
+        // otherwise a safe filename stem is adopted. Using the raw pre-parse id
+        // here would wrongly remint an entry whose in-file id is unsafe but whose
+        // filename stem IS safe -- that entry is already addressable via the stem.
+        if (!resolveAddressableProfileId(profile.id, stem).isEmpty()) {
             continue;
         }
 
         // Unaddressable: mint a fresh safe id and rewrite + rename the file.
-        const String newId = generateShortID();
+        // Guard against clobbering an existing profile: generateShortID() is
+        // random, so on the (vanishingly unlikely) chance the minted id collides
+        // with a file already on disk, draw again rather than truncate it open.
+        // Mirrors saveProfile()'s collision guard.
+        String newId = generateShortID();
+        String newPath = dir + "/" + newId + ".json";
+        for (int attempt = 0; attempt < 8 && fs->exists(newPath); ++attempt) {
+            newId = generateShortID();
+            newPath = dir + "/" + newId + ".json";
+        }
+        if (fs->exists(newPath)) {
+            // Still colliding after retries -- skip rather than risk a clobber.
+            continue;
+        }
         profile.id = newId;
 
-        const String newPath = dir + "/" + newId + ".json";
         File out = fs->open(newPath, "w");
         if (!out) {
             continue;
@@ -138,9 +161,14 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         JsonDocument outDoc;
         JsonObject outObj = outDoc.to<JsonObject>();
         writeProfile(outObj, profile);
-        const bool wrote = serializeJson(outDoc, out) > 0;
+        // Treat the write as successful only when the full document was written.
+        // serializeJson() can return a positive-but-short count on a full
+        // filesystem; comparing against measureJson() avoids deleting the only
+        // good copy (below) after a truncated write left newPath corrupt.
+        const size_t expected = measureJson(outDoc);
+        const size_t written = serializeJson(outDoc, out);
         out.close();
-        if (!wrote) {
+        if (written != expected || expected == 0) {
             fs->remove(newPath);
             continue;
         }
@@ -148,8 +176,8 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         // Remove the stale original file unless the rename was a no-op (the new
         // id happened to match the old stem, which generateShortID makes
         // vanishingly unlikely but is harmless to guard).
-        if (name != newPath) {
-            fs->remove(name);
+        if (oldPath != newPath) {
+            fs->remove(oldPath);
         }
 
         ESP_LOGW("ProfileManager", "Reminted unaddressable profile id (stem=%s, rawId=%s) -> %s", stem.c_str(), rawId.c_str(),
@@ -195,10 +223,11 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
                 Profile profile{};
                 if (parseProfile(obj, profile)) {
                     String stem = filenameStem(name);
-                    // Mirror loadProfile()'s id resolution: in-file id wins,
-                    // falling back to the filename stem only when it is safe.
-                    if (profile.id.isEmpty() && isSafeId(stem)) {
-                        profile.id = stem;
+                    // Resolve the addressable id the same way loadProfile() and
+                    // remintUnsafeProfileIds() do: in-file id wins, else a safe
+                    // filename stem. Shared helper keeps the rule in one place.
+                    if (profile.id.isEmpty()) {
+                        profile.id = resolveAddressableProfileId(profile.id, stem);
                     }
                     if (profile.id == id) {
                         return stem;
