@@ -151,6 +151,49 @@ void test_reentrant_same_key_trigger_terminates(void) {
     TEST_ASSERT_EQUAL_INT(3, depth);
 }
 
+// CAR-110 review follow-up: a callback that ALWAYS re-triggers its own id (no
+// application-side cap) must not recurse without bound — PluginManager caps
+// dispatch at MAX_DISPATCH_DEPTH and bails, so the firmware can't overflow a
+// task stack on a runaway event cycle. The callback runs once per nesting level
+// up to the cap, then the deepest re-trigger is refused.
+void test_reentrant_same_key_trigger_depth_capped(void) {
+    PluginManager manager;
+    int calls = 0;
+    manager.on("evt:runaway", [&](Event &) {
+        calls++;
+        manager.trigger("evt:runaway"); // unconditional self-trigger
+    });
+
+    manager.trigger("evt:runaway");
+
+    // Bounded, not unbounded: the callback fires at each level until the cap
+    // refuses the next dispatch. The exact count is the cap (16); the assertion
+    // that matters is that it terminated at a small bound rather than recursing
+    // until the stack overflowed.
+    TEST_ASSERT_EQUAL_INT(16, calls);
+}
+
+// CAR-110 review follow-up: stopPropagation set from within a callback that also
+// re-enters trigger() must halt only the OUTER dispatch chain; the inner
+// dispatch carries its own Event, so the two stopPropagation flags are
+// independent. Verifies the snapshot loop's early-out interacts correctly with
+// re-entrancy.
+void test_stop_propagation_with_reentrant_trigger(void) {
+    PluginManager manager;
+    int innerSeen = 0, outerSecond = 0;
+    manager.on("evt:i", [&](Event &) { innerSeen++; });
+    manager.on("evt:o", [&](Event &e) {
+        manager.trigger("evt:i"); // inner dispatch, separate Event
+        e.stopPropagation = true; // halt the outer chain after this listener
+    });
+    manager.on("evt:o", [&](Event &) { outerSecond++; }); // must NOT run
+
+    manager.trigger("evt:o");
+
+    TEST_ASSERT_EQUAL_INT(1, innerSeen);   // inner fired, unaffected by outer stop
+    TEST_ASSERT_EQUAL_INT(0, outerSecond); // outer halted by stopPropagation
+}
+
 // CAR-110: registering a new listener from inside a callback must not affect the
 // in-flight dispatch (the loop runs over a snapshot copied under the lock). The
 // newly added listener only fires on the NEXT trigger.
@@ -186,6 +229,8 @@ static int runEventSystemTests() {
     RUN_TEST(test_trigger_missing_key_then_register_fires_exactly_once);
     RUN_TEST(test_reentrant_trigger_from_callback);
     RUN_TEST(test_reentrant_same_key_trigger_terminates);
+    RUN_TEST(test_reentrant_same_key_trigger_depth_capped);
+    RUN_TEST(test_stop_propagation_with_reentrant_trigger);
     RUN_TEST(test_register_during_dispatch_uses_snapshot);
     return UNITY_END();
 }

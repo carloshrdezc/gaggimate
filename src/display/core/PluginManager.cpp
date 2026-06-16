@@ -56,9 +56,15 @@ void PluginManager::loop() {
 
 void PluginManager::on(const String &eventId, const EventCallback &callback) {
     ESP_LOGV("PluginManager", "Registering listener: %s", eventId.c_str());
-    lockListeners();
-    listeners[std::string(eventId.c_str())].push_back(callback);
-    unlockListeners();
+    const std::string key(eventId.c_str());
+    ListenersLock lock(this);
+    // Copy-on-write: build a fresh list from the existing one (if any) and swap
+    // in a new handle. A concurrent trigger() holding the old shared_ptr keeps
+    // iterating an immutable snapshot — its vector is never mutated underneath it.
+    auto it = listeners.find(key);
+    auto next = std::make_shared<CallbackList>(it != listeners.end() ? *it->second : CallbackList{});
+    next->push_back(callback);
+    listeners[key] = std::move(next);
 }
 
 Event PluginManager::trigger(const String &eventId) {
@@ -95,24 +101,44 @@ Event PluginManager::trigger(const String &eventId, const String &key, const flo
 void PluginManager::trigger(Event &event) {
     ESP_LOGV("PluginManager", "Triggering event: %s", event.id.c_str());
 
-    // Copy the matching callbacks under the lock, then invoke them after
-    // releasing it. This keeps the critical section short (no user code runs
-    // while the map is locked), avoids iterating a vector another task could be
-    // mutating via on(), and lets a callback re-enter on()/trigger() without
-    // contending on a held lock. Use find() — never operator[] — so a trigger
-    // with no registered listener stays a read-only no-op (CAR-110).
-    std::vector<EventCallback> callbacks;
-    lockListeners();
-    auto it = listeners.find(std::string(event.id.c_str()));
-    if (it != listeners.end()) {
-        callbacks = it->second;
-    }
-    unlockListeners();
-
-    for (auto const &callback : callbacks) {
-        callback(event);
-        if (event.stopPropagation) {
-            break;
+    // Grab the matching listener-list handle under the lock, then invoke the
+    // callbacks after releasing it. Copying the shared_ptr (not the vector)
+    // keeps the critical section short and allocation-free, runs no user code
+    // while the map is locked, and lets a callback re-enter on()/trigger()
+    // without contending on a held lock. Use find() — never operator[] — so a
+    // trigger with no registered listener stays a read-only no-op (CAR-110).
+    std::shared_ptr<const CallbackList> callbacks;
+    {
+        ListenersLock lock(this);
+        auto it = listeners.find(std::string(event.id.c_str()));
+        if (it != listeners.end()) {
+            callbacks = it->second;
         }
+        // Guard against an unbounded self-triggering cycle overflowing the task
+        // stack. The counter is shared across tasks (mutated only under the
+        // lock, so it is race-free) rather than per-call-stack, so it bounds the
+        // SUM of in-flight dispatch nesting; MAX_DISPATCH_DEPTH is set well above
+        // the handful of tasks that legitimately dispatch concurrently so normal
+        // fan-out never trips it, while a runaway recursion still aborts.
+        if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
+            ESP_LOGE("PluginManager", "Dispatch depth %d exceeded for event %s; aborting to avoid stack overflow", dispatchDepth,
+                     event.id.c_str());
+            return;
+        }
+        ++dispatchDepth;
+    }
+
+    if (callbacks) {
+        for (auto const &callback : *callbacks) {
+            callback(event);
+            if (event.stopPropagation) {
+                break;
+            }
+        }
+    }
+
+    {
+        ListenersLock lock(this);
+        --dispatchDepth;
     }
 }
