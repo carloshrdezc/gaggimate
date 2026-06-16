@@ -61,7 +61,12 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     NimBLERemoteCharacteristic *volumetricTareChar = nullptr;
     NimBLERemoteCharacteristic *ledControlChar = nullptr;
     NimBLERemoteCharacteristic *tofMeasurementChar = nullptr;
-    NimBLEAdvertisedDevice *serverDevice = nullptr;
+    // Cache the address by value (not the NimBLE-owned NimBLEAdvertisedDevice*).
+    // The scan-result cache that backs the advertised-device pointer can be freed
+    // after scanner->stop(), which would leave a dangling pointer for the display
+    // task's connectToServer() to dereference. NimBLEAddress is a value type and
+    // safe to copy across the scan-callback / display-task boundary.
+    NimBLEAddress serverAddress{};
     bool readyForConnection = false;
     xTaskHandle taskHandle;
 

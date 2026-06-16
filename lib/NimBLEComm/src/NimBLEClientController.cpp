@@ -69,6 +69,10 @@ std::string NimBLEClientController::readInfo() const {
 bool NimBLEClientController::connectToServer() {
     ESP_LOGI(LOG_TAG, "Connecting to advertised device");
 
+    // Clear the ready flag the moment a connect attempt starts so the scan
+    // callback / loop() cannot re-enter this path while we are still connecting.
+    readyForConnection = false;
+
     unsigned int tries = 0;
     do {
         if (tries >= MAX_CONNECT_RETRIES) {
@@ -77,7 +81,7 @@ bool NimBLEClientController::connectToServer() {
             return false; // Exit the connection attempt if timed out
         }
 
-        if (!client->connect(NimBLEAddress(serverDevice->getAddress()))) {
+        if (!client->connect(serverAddress)) {
             ESP_LOGE(LOG_TAG, "Failed connecting to BLE server. Retrying...");
             delay(500); // Add a small delay to avoid busy-waiting
         }
@@ -155,7 +159,6 @@ bool NimBLEClientController::connectToServer() {
 
     delay(500);
 
-    readyForConnection = false;
     return true;
 }
 
@@ -242,7 +245,9 @@ void NimBLEClientController::onResult(NimBLEAdvertisedDevice *advertisedDevice) 
         if (advertisedDevice->isAdvertisingService(NimBLEUUID(SERVICE_UUID))) {
             ESP_LOGI(LOG_TAG, "Found target BLE device. Connecting...");
             scanner->stop();
-            serverDevice = advertisedDevice;
+            // Copy the address by value; the advertised-device pointer may be
+            // freed once the scan-result cache is cleared after stop().
+            serverAddress = advertisedDevice->getAddress();
             readyForConnection = true;
         }
     }
