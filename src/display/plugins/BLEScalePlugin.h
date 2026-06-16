@@ -1,6 +1,10 @@
 #ifndef BLESCALEPLUGIN_H
 #define BLESCALEPLUGIN_H
+#include "../config/features.h"
 #include "../core/Plugin.h"
+
+#if GAGGIMATE_ENABLE_BLE_SCALE
+
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 
@@ -69,6 +73,45 @@ class BLEScalePlugin : public Plugin {
     RemoteScalesScanner *scanner = nullptr;
     std::unique_ptr<RemoteScales> scale = nullptr;
 };
+
+#else // GAGGIMATE_ENABLE_BLE_SCALE
+
+#include <string>
+
+// BLE scale compiled out (CAR-382). We deliberately avoid including the
+// `esp-arduino-ble-scales` headers (remote_scales.h, scale drivers) so the
+// PlatformIO Library Dependency Finder drops that whole library from the build
+// — that is where the flash savings come from.
+//
+// A lightweight stub `BLEScalePlugin` keeps the public symbols that code OUTSIDE
+// this plugin references (e.g. `BLEScales.tare()` in the SquareLine-generated
+// `ui_events.cpp`, which must not be edited) linkable as no-ops. Methods whose
+// signatures depend on RemoteScales types (`getDiscoveredScales()`,
+// `connect()`, `scan()`) are intentionally omitted here; their only callers
+// live in WebUIPlugin.cpp and are guarded with the same flag.
+//
+// Volumetric measurement is unaffected: it is fed through
+// Controller::onVolumetricMeasurement() and its flow-estimation source
+// (VolumetricMeasurementSource::FLOW_ESTIMATION, wired in Controller.cpp), which
+// never reference this plugin. With the BLE scale gated out, the scale simply
+// never pushes a BLUETOOTH-source measurement and the existing flow-estimation
+// fallback / BLUETOOTH_GRACE_PERIOD_MS source-switching keeps working.
+
+class BLEScalePlugin : public Plugin {
+  public:
+    void setup(Controller * /*controller*/, PluginManager * /*pluginManager*/) override {}
+    void loop() override {}
+
+    void disconnect() {}
+    bool isConnected() { return false; }
+    std::string getName() { return ""; }
+    std::string getUUID() { return ""; }
+    int getRSSI() { return 0; }
+    void tare() const {}
+    float getLastWeight() const { return 0.0f; }
+};
+
+#endif // GAGGIMATE_ENABLE_BLE_SCALE
 
 extern BLEScalePlugin BLEScales;
 

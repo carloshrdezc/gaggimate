@@ -1,4 +1,7 @@
 #include "BLEScalePlugin.h"
+
+#if GAGGIMATE_ENABLE_BLE_SCALE
+
 #include "BLEScaleScanPolicy.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
@@ -324,3 +327,14 @@ std::vector<DiscoveredDevice> BLEScalePlugin::getDiscoveredScales() const {
     }
     return scanner->getDiscoveredScales();
 }
+
+#else // GAGGIMATE_ENABLE_BLE_SCALE
+
+// BLE scale compiled out (CAR-382): the heavy implementation above (and the
+// entire esp-arduino-ble-scales library it pulls in) is excluded from the
+// build. Only the global instance — referenced by address in Controller.cpp
+// and by name in the SquareLine-generated ui_events.cpp — is defined here, as
+// the lightweight no-op stub declared in the header.
+BLEScalePlugin BLEScales;
+
+#endif // GAGGIMATE_ENABLE_BLE_SCALE
