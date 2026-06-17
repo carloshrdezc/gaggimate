@@ -2,7 +2,7 @@
 #include "ArduinoJson.h"
 #include "esp_sntp.h"
 #include <SD_MMC.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
@@ -55,8 +55,14 @@ void Controller::setup() {
         ESP_LOGE(LOG_TAG, "Failed to create process mutex");
     }
 
-    if (!SPIFFS.begin(true)) {
-        Serial.println(F("An Error has occurred while mounting SPIFFS"));
+    // Web assets are served from this partition. LittleFS (not SPIFFS): SPIFFS
+    // has no directory tree, so stat()/exists() is O(whole filesystem) and a
+    // miss scans every page -- the web handler does that synchronously in the
+    // async_tcp task for every request, which under a multi-tab load burst
+    // pegged CPU0 for >5s and tripped the task watchdog (reboot). LittleFS
+    // lookups are O(path). maxOpenFiles 16 for concurrent asset serving. [GM-90]
+    if (!LittleFS.begin(true, "/littlefs", 16)) {
+        Serial.println(F("An Error has occurred while mounting LittleFS"));
     }
 
 #ifndef GAGGIMATE_HEADLESS
@@ -72,7 +78,7 @@ void Controller::setup() {
         ESP_LOGI(LOG_TAG, "Used: %lluMB, Capacity: %lluMB", SD_MMC.usedBytes() / 1024 / 1024, SD_MMC.cardSize() / 1024 / 1024);
     }
 #endif
-    FS *fs = &SPIFFS;
+    FS *fs = &LittleFS;
     if (sdcard) {
         fs = &SD_MMC;
     }
