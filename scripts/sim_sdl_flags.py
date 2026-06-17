@@ -2,7 +2,10 @@
 # cross-platform. [CAR-399]
 #
 # macOS / Linux: use `sdl2-config` (installed by `brew install sdl2` /
-#   `apt install libsdl2-dev`), exactly as upstream did.
+#   `apt install libsdl2-dev`), exactly as upstream did. Its `--libs` output is
+#   split into LIBPATH/LIBS (not LINKFLAGS) so SCons emits the libraries AFTER
+#   the object files; GNU ld resolves left-to-right, so -lSDL2 ahead of the .o
+#   files would drop the symbols ("undefined reference to SDL_*"). [PRO-206]
 # Windows (MinGW): there is no `sdl2-config`. Point the build at an SDL2 MinGW
 #   development package via the SDL2_DIR environment variable (the directory that
 #   contains include/ and lib/, e.g. the extracted
@@ -70,5 +73,17 @@ else:
             "[display-sim] sdl2-config not found (install SDL2: brew install sdl2 / "
             "apt install libsdl2-dev). %s" % exc
         )
-    env.Append(CCFLAGS=cflags, LINKFLAGS=libs)
-    print("[display-sim] SDL2 via sdl2-config")
+    # Split sdl2-config --libs into LIBPATH / LIBS / leftover LINKFLAGS so the
+    # libraries are emitted AFTER the object files. GNU ld resolves left-to-right;
+    # -lSDL2 in LINKFLAGS lands before the .o files and its symbols get dropped
+    # ("undefined reference to SDL_*"). Mirrors the Windows branch's LIBS comment.
+    libpath, libnames, link_leftover = [], [], []
+    for tok in libs:
+        if tok.startswith("-L"):
+            libpath.append(tok[2:])
+        elif tok.startswith("-l"):
+            libnames.append(tok[2:])
+        else:
+            link_leftover.append(tok)
+    env.Append(CCFLAGS=cflags, LIBPATH=libpath, LIBS=libnames, LINKFLAGS=link_leftover)
+    print("[display-sim] SDL2 via sdl2-config (libs -> LIBS for correct link order)")
