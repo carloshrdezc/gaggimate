@@ -15,7 +15,9 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
+#endif
 #include <display/plugins/BoilerFillPlugin.h>
 #if GAGGIMATE_ENABLE_HOMEKIT
 #include <display/plugins/HomekitPlugin.h>
@@ -29,11 +31,17 @@
 #if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
 #endif
+#ifndef GAGGIMATE_SIM // mDNS is device-only (the sim WiFi shim has no real mDNS)
 #include <display/plugins/mDNSPlugin.h>
+#endif
 #ifndef GAGGIMATE_HEADLESS
+#ifdef GAGGIMATE_SIM
+#include <SdlDriver.h> // desktop SDL panel stands in for the hardware drivers
+#else
 #include <display/drivers/AmoledDisplayDriver.h>
 #include <display/drivers/LilyGoDriver.h>
 #include <display/drivers/WaveshareDriver.h>
+#endif
 #endif
 
 const String LOG_TAG = F("Controller");
@@ -79,7 +87,7 @@ void Controller::setup() {
         pluginManager->registerPlugin(new HomekitPlugin(settings.getWifiSsid(), settings.getWifiPassword()));
     else
         pluginManager->registerPlugin(new mDNSPlugin());
-#else
+#elif !defined(GAGGIMATE_SIM)
     // HomeKit compiled out: register mDNS unconditionally so the device stays
     // discoverable on the network (HomeKit otherwise provides its own mDNS).
     pluginManager->registerPlugin(new mDNSPlugin());
@@ -148,6 +156,9 @@ void Controller::connect() {
 
 #ifndef GAGGIMATE_HEADLESS
 void Controller::setupPanel() {
+#ifdef GAGGIMATE_SIM
+    driver = SdlDriver::getInstance(); // desktop SDL panel
+#else
     if (LilyGoDriver::getInstance()->isCompatible()) {
         driver = LilyGoDriver::getInstance();
     } else if (AmoledDisplayDriver::getInstance()->isCompatible()) {
@@ -159,6 +170,7 @@ void Controller::setupPanel() {
         delay(10000);
         ESP.restart();
     }
+#endif
     driver->init();
 }
 #endif

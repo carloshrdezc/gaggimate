@@ -5,10 +5,12 @@
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/Process.h>
 #include <display/core/zones.h>
+#ifndef GAGGIMATE_SIM // hardware panel drivers are device-only
 #include <display/drivers/AmoledDisplayDriver.h>
 #include <display/drivers/LilyGoDriver.h>
 #include <display/drivers/WaveshareDriver.h>
 #include <display/drivers/common/LV_Helper.h>
+#endif
 #include <display/main.h>
 #include <display/ui/default/lvgl/gm_ui.h>
 #include <display/ui/default/lvgl/ui_theme_manager.h>
@@ -20,6 +22,15 @@
 #include "esp_sntp.h"
 
 static EffectManager effect_mgr;
+
+// True when the active panel is the AMOLED display (drives a few theme/contrast
+// tweaks). In the desktop simulator there is no hardware AMOLED panel and the
+// driver classes are not compiled, so this is always false.
+#ifdef GAGGIMATE_SIM
+#define GM_PANEL_IS_AMOLED(panelDriver) (false)
+#else
+#define GM_PANEL_IS_AMOLED(panelDriver) (AmoledDisplayDriver::getInstance() == (panelDriver))
+#endif
 
 namespace {
 constexpr lv_opa_t OPA_45 = static_cast<lv_opa_t>(45);
@@ -1405,7 +1416,10 @@ void DefaultUI::handleScreenChange() {
 
         _ui_screen_change(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0, targetScreenInit);
         resetCustomScreenHandles();
+#ifndef GAGGIMATE_SIM // outgoing screen is already freed by its SCREEN_UNLOADED cb; second del is a UAF the host allocator
+                      // catches
         lv_obj_del(current);
+#endif
         rerender = true;
     }
 }
@@ -1568,7 +1582,7 @@ void DefaultUI::ensureBrewModeChips() {
 }
 
 void DefaultUI::applyScreenVisualLanguage() {
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     const int resolvedThemeMode = resolveDisplayThemeMode(controller->getSettings().getThemeMode(), amoledPanel);
     const DisplayPalette palette = makeDisplayPalette(resolvedThemeMode, amoledPanel);
     lv_obj_t *activeScreen = lv_scr_act();
@@ -2127,7 +2141,7 @@ void DefaultUI::updateStatusScreen() {
 }
 
 void DefaultUI::adjustDials(lv_obj_t *dials) {
-    const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
+    const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), GM_PANEL_IS_AMOLED(panelDriver));
     const bool roundDisplay = isRoundDisplay();
     const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
                                         isTemperatureStable != 0};
@@ -2199,16 +2213,18 @@ inline void DefaultUI::adjustTempTarget(lv_obj_t *dials) {
 
 void DefaultUI::applyTheme() {
     const Settings &settings = controller->getSettings();
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     int newThemeMode = resolveDisplayThemeMode(settings.getThemeMode(), amoledPanel);
 
     if (newThemeMode != currentThemeMode) {
         currentThemeMode = newThemeMode;
         ui_theme_set(currentThemeMode);
 
+#ifndef GAGGIMATE_SIM // amoledPanel is always false in the sim; the override lives in the device-only LV_Helper
         if (amoledPanel && currentThemeMode == UI_THEME_DEFAULT) {
             enable_amoled_black_theme_override(lv_disp_get_default());
         }
+#endif
     }
 }
 
@@ -2243,7 +2259,7 @@ void DefaultUI::ensureAutoSteamButton() {
     if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen))
         return;
 
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), amoledPanel);
 
     if (autoSteamBtn == nullptr || !lv_obj_is_valid(autoSteamBtn)) {
@@ -2291,7 +2307,7 @@ void DefaultUI::ensureBeanSelectButton() {
     if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen) || beanSelectBtn != nullptr)
         return;
 
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), amoledPanel);
 
     beanSelectBtn = lv_btn_create(ui_BrewScreen);

@@ -27,3 +27,10 @@ output/
 !web/public/**/*.png
 !web/src/**/*.png
 !assets/**/*.png
+
+# Desktop simulator (CAR-399) runtime state and build artifacts
+sim_data/
+*.bmp
+
+# Stray alternate build dir
+.pio-car340/
