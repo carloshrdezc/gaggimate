@@ -60,7 +60,7 @@ jobs:
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
       - name: Upload PR artifacts
         # Always available on the PR's checks page, including for fork PRs
         # where the publish job below is skipped.

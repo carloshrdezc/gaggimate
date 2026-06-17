@@ -1,6 +1,6 @@
 #include "WebUIPlugin.h"
 #include <DNSServer.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <display/core/Controller.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
@@ -450,7 +450,7 @@ void WebUIPlugin::setupServer() {
     server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
     server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
 #endif
-    FS *fs = &SPIFFS;
+    FS *fs = &LittleFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
     }
@@ -471,18 +471,18 @@ void WebUIPlugin::setupServer() {
         request->send(200, "text/plain", "ESP32 server is alive!");
     });
     // Handle missing favicon/icons explicitly before serveStatic
-    server.on("/favicon.ico", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
-    server.on("/apple-touch-icon.png", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
-    server.on("/apple-touch-icon-precomposed.png", [](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/gm.png", "image/png"); });
+    server.on("/favicon.ico", [](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/gm.png", "image/png"); });
+    server.on("/apple-touch-icon.png", [](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/gm.png", "image/png"); });
+    server.on("/apple-touch-icon-precomposed.png", [](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/gm.png", "image/png"); });
     // Vite emits content-hashed asset names. Cache them aggressively so route
     // navigation does not repeatedly hit the ESP32 for immutable chunks/fonts.
-    server.serveStatic("/assets/", SPIFFS, "/w/assets/").setCacheControl("public, max-age=31536000, immutable");
-    server.serveStatic("/fonts/", SPIFFS, "/w/fonts/").setCacheControl("public, max-age=31536000, immutable");
+    server.serveStatic("/assets/", LittleFS, "/w/assets/").setCacheControl("public, max-age=31536000, immutable");
+    server.serveStatic("/fonts/", LittleFS, "/w/fonts/").setCacheControl("public, max-age=31536000, immutable");
     // onNotFound must be registered BEFORE serveStatic so it catches unmatched paths
     server.onNotFound([](AsyncWebServerRequest *request) {
-        request->send(SPIFFS, "/w/index.html");
+        request->send(LittleFS, "/w/index.html");
     });
-    server.serveStatic("/", SPIFFS, "/w").setDefaultFile("index.html").setCacheControl("max-age=0");
+    server.serveStatic("/", LittleFS, "/w").setDefaultFile("index.html").setCacheControl("max-age=0");
     ws.onEvent(
         [this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
             if (type == WS_EVT_CONNECT) {
@@ -1488,10 +1488,10 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
             arr.add(STABLE_VERSIONS[i]);
         }
     }
-    // SPIFFS usage metrics
+    // LittleFS usage metrics
     {
-        size_t total = SPIFFS.totalBytes();
-        size_t used = SPIFFS.usedBytes();
+        size_t total = LittleFS.totalBytes();
+        size_t used = LittleFS.usedBytes();
         size_t freeBytes = total > used ? (total - used) : 0;
         doc["spiffsTotal"] = static_cast<uint32_t>(total);
         doc["spiffsUsed"] = static_cast<uint32_t>(used);

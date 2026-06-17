@@ -113,8 +113,8 @@ jobs:
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-headless-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-headless-filesystem.bin
       - name: Archive filesystem + version
         uses: actions/upload-artifact@v4
         with:
