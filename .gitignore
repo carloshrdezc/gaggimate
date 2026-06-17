@@ -13,6 +13,8 @@ data/w
 src/version.h
 src/stable_versions.h
 src/display/ui/default/lvgl/project.info
+# Generated web UI bundle embedded into firmware flash (scripts/embed_webui.py)
+src/display/webassets/
 bean-whisperer/
 .worktrees/
 .playwright-mcp
