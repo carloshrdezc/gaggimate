@@ -84,12 +84,11 @@ void Controller::setup() {
 
     // Mount the LittleFS data partition, performing the one-time
     // SPIFFS->LittleFS migration (PRO-218) on the first boot of new firmware on
-    // a pre-PRO-212 (SPIFFS) device. Must run AFTER SD detection (above) so the
-    // migration knows whether user /p and /h are on the SD card (safe) or on
-    // the internal partition being reformatted (must be rescued). Replaces the
-    // old `LittleFS.begin(true, ...)` that would silently wipe user data on the
-    // first post-upgrade boot. maxOpenFiles 16 matches the asset-serving need.
-    if (!ensureDataPartitionMounted(16)) {
+    // a pre-PRO-212 (SPIFFS) device. Must run AFTER SD detection (above) so we
+    // can pass the authoritative `sdcard` result into the migration. Replaces
+    // the old `LittleFS.begin(true, ...)` that would silently wipe user data on
+    // the first post-upgrade boot. maxOpenFiles 16 matches the asset-serving need.
+    if (!ensureDataPartitionMounted(16, sdcard)) {
         Serial.println(F("An Error has occurred while mounting LittleFS"));
     }
     FS *fs = &LittleFS;

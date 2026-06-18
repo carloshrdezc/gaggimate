@@ -24,7 +24,9 @@
 // Mount the data partition, performing the one-time SPIFFS->LittleFS migration
 // if this is the first boot of new firmware on an old SPIFFS device.
 // `maxOpenFiles` mirrors the value the caller used for LittleFS asset serving.
+// `sdCardAvailable` is the caller's authoritative SD-detect result (Controller
+// owns it); passing it avoids re-probing SD_MMC.cardType() here (review #3).
 // Returns true if LittleFS is usable on return.
-bool ensureDataPartitionMounted(uint8_t maxOpenFiles);
+bool ensureDataPartitionMounted(uint8_t maxOpenFiles, bool sdCardAvailable);
 
 #endif // FS_MIGRATION_RUNNER_H

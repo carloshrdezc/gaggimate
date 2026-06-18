@@ -26,6 +26,12 @@
 
 #include <cstdint>
 
+// Marker path written into LittleFS once the migration boundary is crossed.
+// Shared by the device orchestration and any tooling that needs to recognize a
+// migrated device. (Review #11: a top-placed inline constexpr instead of a
+// trailing #define — scoped, typed, and avoids cppcoreguidelines-macro-usage.)
+inline constexpr const char *FS_MIGRATION_MARKER_PATH = "/.fs_migrated";
+
 // Observations the device gathers BEFORE deciding. Each field is filled by a
 // real probe in Controller::setup() (or by a test fixture on the host).
 struct FsMigrationInputs {
@@ -51,22 +57,29 @@ struct FsMigrationInputs {
     bool spiffsHasProfiles = false; // /p exists in SPIFFS
     bool spiffsHasHistory = false;  // /h exists in SPIFFS
 
-    // A writable SD card is mounted. CRITICAL: on SD-equipped devices the
-    // ProfileManager (/p) and ShotHistoryPlugin (/h) store user data on the SD
-    // card (Controller routes `fs = &SD_MMC` when sdcard is true;
-    // ShotHistoryPlugin does the same) — a *separate physical device* that the
-    // internal data-partition reformat never touches. So when SD is present,
-    // user data is already safe and the internal partition only needs a clean
-    // LittleFS. The dangerous case is the NO-SD device, where /p and /h live on
-    // the internal partition being reformatted and must be rescued.
+    // A writable SD card is mounted. On SD-equipped devices the ProfileManager
+    // (/p) and ShotHistoryPlugin (/h) route NEW writes to the SD card
+    // (Controller sets `fs = &SD_MMC` when sdcard is true; ShotHistoryPlugin
+    // does the same) — a *separate physical device* the internal reformat never
+    // touches. HOWEVER (review #6): per-boot storage routing is NOT persisted,
+    // so a device that always ran no-SD keeps its only /p,/h on the INTERNAL
+    // partition; inserting an SD card across the upgrade boundary must NOT cause
+    // those internal copies to be reformatted away. Therefore SD presence no
+    // longer suppresses staging: whenever the internal SPIFFS image actually
+    // holds /p or /h, that data is rescued regardless of sdCardAvailable. The
+    // field is retained for logging / future routing decisions.
     bool sdCardAvailable = false;
 
-    // Estimated total bytes of /h in the SPIFFS image. On a no-SD device /h is
-    // rescued to RAM only if it fits ramBudgetBytes; otherwise /h is deferred
-    // (the documented PRO-218 fallback) and only /p is preserved. /p is always
-    // small enough to fit. Ignored on SD devices (data already safe on SD).
+    // Estimated total bytes of /h and /p in the SPIFFS image. /h is rescued to
+    // RAM only if it fits ramHistoryBudgetBytes; otherwise /h is deferred (the
+    // documented PRO-218 fallback) and only /p is preserved. /p must ALWAYS fit
+    // ramProfileBudgetBytes — if it does not, the migration must NOT mark itself
+    // done (review #3/#5: "profiles always preserved" cannot be silently
+    // violated). The runner mirrors these budgets when it stages.
     uint32_t spiffsHistoryBytes = 0;
-    uint32_t ramBudgetBytes = 0;
+    uint32_t spiffsProfileBytes = 0;
+    uint32_t ramHistoryBudgetBytes = 0;
+    uint32_t ramProfileBudgetBytes = 0;
 };
 
 // What the device should do after the decision. Exactly one action.
@@ -104,13 +117,22 @@ struct FsMigrationPlan {
     FsMigrationAction action = FsMigrationAction::FreshFormat;
     FsStagingTarget staging = FsStagingTarget::None;
     // True only on the MigrateFromSpiffs+RamProfiles branch: /h could not be
-    // safely staged (no SD card) and is intentionally NOT preserved. The
-    // caller logs a prominent warning; profiles (/p) are always preserved.
+    // safely staged (too big for the RAM budget) and is intentionally NOT
+    // preserved. The caller logs a prominent warning; profiles (/p) are always
+    // preserved.
     bool historyDeferred = false;
     // True whenever the run must end by writing the once-only marker so the
     // migration never re-runs. (Every terminal action writes it; AlreadyMigrated
     // does not need to rewrite an existing marker.)
     bool writeMarker = true;
+    // Review #3/#5/#6 — abort signal. True when the SPIFFS image holds profiles
+    // (/p) that cannot be staged safely (too large for the profile RAM budget).
+    // The runner MUST NOT reformat the partition in this case: doing so would
+    // erase the only copy of the user's profiles. Instead it leaves SPIFFS
+    // intact and retries on the next boot. "Profiles always preserved" is a hard
+    // guarantee, so an over-budget /p is a refuse-to-format condition, never a
+    // silent drop.
+    bool abortFormatToPreserveProfiles = false;
 };
 
 // Pure decision function. No I/O. Given the probed inputs, return the plan.
@@ -148,24 +170,37 @@ inline FsMigrationPlan decideFsMigration(const FsMigrationInputs &in) {
     }
 
     // (3) Pre-PRO-212 SPIFFS device. Rescue the data.
+    //
+    // Review #6: SD presence does NOT suppress staging. Per-boot storage routing
+    // is never persisted, so a device that always ran no-SD has its only /p,/h
+    // on the internal partition even if an SD card happens to be inserted across
+    // the upgrade. Reformatting over unstaged internal profiles would erase the
+    // only copy. So: whenever the internal SPIFFS image holds /p or /h, rescue
+    // it; the cost on a genuine SD device (whose live data is on SD) is merely
+    // restoring a stale internal copy that runtime routing never reads — strictly
+    // safer than the previous unconditional wipe.
     if (in.spiffsMounted) {
         plan.action = FsMigrationAction::MigrateFromSpiffs;
         plan.writeMarker = true;
-        if (in.sdCardAvailable) {
-            // SD device: /p and /h already live on the SD card, untouched by
-            // the internal-partition reformat. Nothing to stage from the
-            // internal SPIFFS image (it holds at most stale seed data). Format
-            // the internal partition clean as LittleFS.
-            plan.staging = FsStagingTarget::None;
-            plan.historyDeferred = false;
-        } else if (in.spiffsHasHistory && in.spiffsHistoryBytes > in.ramBudgetBytes) {
-            // No SD, /h present but too large to hold safely in RAM: preserve
-            // /p (always small), defer /h (documented PRO-218 fallback).
+
+        // Review #3/#5: "profiles always preserved" is a hard guarantee. If /p
+        // exists but is too large for the profile RAM budget, we must NOT
+        // reformat — that would erase the only copy. Signal an abort so the
+        // runner leaves SPIFFS intact and retries next boot.
+        if (in.spiffsHasProfiles && in.spiffsProfileBytes > in.ramProfileBudgetBytes) {
+            plan.staging = FsStagingTarget::RamProfilesOnly;
+            plan.abortFormatToPreserveProfiles = true;
+            plan.writeMarker = false; // never seal a run that cannot preserve /p
+            return plan;
+        }
+
+        if (in.spiffsHasHistory && in.spiffsHistoryBytes > in.ramHistoryBudgetBytes) {
+            // /h present but too large to hold safely in RAM: preserve /p
+            // (always small), defer /h (documented PRO-218 fallback).
             plan.staging = FsStagingTarget::RamProfilesOnly;
             plan.historyDeferred = true;
         } else {
-            // No SD, /h absent or small enough to fit the RAM budget: preserve
-            // both /p and /h in RAM.
+            // /h absent or small enough to fit the RAM budget: preserve both.
             plan.staging = FsStagingTarget::RamProfilesAndHistory;
             plan.historyDeferred = false;
         }
@@ -180,10 +215,5 @@ inline FsMigrationPlan decideFsMigration(const FsMigrationInputs &in) {
     plan.writeMarker = true;
     return plan;
 }
-
-// Marker path written into LittleFS once the migration boundary is crossed.
-// Shared by the device orchestration and any tooling that needs to recognize a
-// migrated device.
-#define FS_MIGRATION_MARKER_PATH "/.fs_migrated"
 
 #endif // FS_MIGRATION_H
