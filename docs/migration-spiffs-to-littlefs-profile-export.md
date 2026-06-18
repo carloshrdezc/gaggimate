@@ -43,10 +43,16 @@ silent wipe is structurally impossible. (See
 3. On first boot the device clean-formats the partition to LittleFS and shows a
    single **Default** profile. This is expected.
 4. **Re-import your profiles.** Web UI → **Profiles** → **Import Profiles** →
-   select the `profiles.json` you exported. All profiles are restored. Imported
-   profiles whose id collides with an existing one are saved under a fresh id
-   (no overwrite).
-5. **Reboot** and confirm your profiles persist.
+   select the `profiles.json` you exported (you can multi-select if you saved
+   per-profile files). All profiles are restored. Imported profiles whose id
+   collides with an existing one are saved under a fresh id (no overwrite). The
+   UI reports **"Restored X of Y profiles from backup"** when done.
+5. **Verify the restored count matches your backup.** Confirm the
+   "Restored X of Y" message shows X == Y and that the profile list holds every
+   profile you exported. If any failed, the UI names them and offers a retry; a
+   corrupt or wrong-format file is rejected with a distinct error and imports
+   nothing (it will not look like a silent success).
+6. **Reboot** and confirm your profiles persist.
 
 After this one boundary, all future OTAs leave `/p` (and `/h`) untouched — that
 is the headline benefit of the embed-WebUI change.
