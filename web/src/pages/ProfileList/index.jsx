@@ -679,6 +679,14 @@ export function ProfileList() {
     // migrationTransfer.js for the SPIFFS->LittleFS migration round-trip.
     const exportedProfiles = buildExportPayload(profiles);
 
+    // Guard against exporting before the profile list has loaded (or a genuinely
+    // empty list): writing an empty profiles.json silently produces a useless
+    // backup the user may rely on. Warn and skip the download instead (PRO-218 P3).
+    if (exportedProfiles.length === 0) {
+      alert('No profiles to export yet. Wait for the profile list to load and try again.');
+      return;
+    }
+
     const download = prepareDownload('profiles.json');
     try {
       downloadJson(exportedProfiles, 'profiles.json', download);
@@ -726,6 +734,16 @@ export function ProfileList() {
           setLoading(true);
           try {
             const importedProfiles = parseProfile(result);
+            // A malformed/unrecognized file makes parseProfile return [] (see
+            // utils.js). Without feedback the import loop would iterate nothing
+            // and the user would assume success. Surface the empty result and
+            // bail before touching the device (PRO-218 P3).
+            if (importedProfiles.length === 0) {
+              alert('No profiles found in the selected file. Nothing was imported.');
+              setLoading(false);
+              evt.target.value = '';
+              return;
+            }
             // Build the collision set from the freshest device profile list so a
             // re-imported backup never silently overwrites a (possibly newer)
             // profile that already lives on the device (CAR-331). saveProfile
@@ -759,6 +777,10 @@ export function ProfileList() {
                 existingIds.add(savedId);
               }
             }
+            // Confirm how many profiles landed so a successful import isn't silent
+            // (PRO-218 P3).
+            const count = importedProfiles.length;
+            alert(`${count} profile${count === 1 ? '' : 's'} imported.`);
           } catch (err) {
             console.error('Failed to import profiles:', err);
             alert(`Failed to import profiles: ${err.message}`);
