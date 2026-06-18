@@ -177,21 +177,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev
-      # Build the web UI first. It's a normal build dependency of a real local
-      # build; staging into sim_data/spiffs/w/ is NOT required for the build to
-      # pass (it only affects runtime serving), so a plain web build is enough.
+      # Build AND embed the web UI before the sim build. The simulator serves
+      # the WebUI from the firmware-embedded flash blob (gWebUiBlobStart) via the
+      # same serveWebAsset() path as the device — NOT from a filesystem dir — so
+      # build_webui.sh (npm build -> gzip -> embed_webui.py) must run to populate
+      # src/display/webassets/ with the real bundle. A bare `npm run build`
+      # leaves embed_webui_pre.py to drop an empty stub, which links but renders
+      # nothing, defeating the parity check this job exists for. [PRO-216]
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-      - name: Build web UI
-        run: |
-          cd web
-          npm ci
-          npm run build
+      - name: Build and embed web UI
+        run: ./scripts/build_webui.sh
       # Build the desktop simulator. Fails the PR if display-sim doesn't
       # compile/link, so the simulator can't silently bit-rot when src/display
-      # or the sim/ shims change.
+      # or the sim/ shims change. With the real embedded bundle above, a broken
+      # serveWebAsset/blob path also fails the build, not just a link gap.
       - name: Build display-sim simulator
         run: pio run -e display-sim
