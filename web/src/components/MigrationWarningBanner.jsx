@@ -15,8 +15,13 @@ import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
  * Because the data lives off-device across the format boundary, a silent wipe
  * is structurally impossible — provided the user exports first. This banner
  * exists to make that step impossible to miss.
+ *
+ * @param {object} [props]
+ * @param {string} [props.profilesHref='/profiles'] route to the profiles page;
+ *   accept it as a prop (default '/profiles') so a route rename doesn't silently
+ *   break the "Export profiles now" link (PRO-218 P2-4).
  */
-export function MigrationWarningBanner() {
+export function MigrationWarningBanner({ profilesHref = '/profiles' } = {}) {
   return (
     <div
       role='alert'
@@ -38,7 +43,7 @@ export function MigrationWarningBanner() {
             a file first, then re-import them after the update completes.
           </p>
           <a
-            href='/profiles'
+            href={profilesHref}
             className='nd-action-btn nd-action-btn--text inline-flex w-fit items-center gap-2'
           >
             <FontAwesomeIcon icon={faFileExport} />
@@ -49,5 +54,3 @@ export function MigrationWarningBanner() {
     </div>
   );
 }
-
-export default MigrationWarningBanner;
