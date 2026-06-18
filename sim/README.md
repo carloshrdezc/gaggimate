@@ -47,25 +47,32 @@ sudo apt install build-essential libsdl2-dev
 
 PlatformIO's `native` platform auto-installs on the first `pio run -e display-sim`.
 
-## 2. WebUI assets (optional but recommended)
+## 2. WebUI assets
 
-This fork serves the WebUI from the firmware's **SPIFFS** path (`/w/`), not an
-embedded flash blob. The simulator's SPIFFS shim is rooted at `sim_data/spiffs/`,
-so stage the built web bundle into `sim_data/spiffs/w/` before running:
+The WebUI is **embedded into the firmware image** as a gzipped flash blob and
+served from memory via `WebUIPlugin::serveWebAsset()` — the *same* code path the
+device uses (GM-106 / PRO-215). It is **not** read from a filesystem directory,
+so there is nothing to stage under `sim_data/`. To serve the real UI, build and
+embed the bundle before (or after) building the sim:
 
 ```sh
-cd web && npm ci && npm run build && cd ..
-mkdir -p sim_data/spiffs/w
-cp -R web/dist/* sim_data/spiffs/w/
-# gzip assets/html in place (the firmware serves *.gz when present)
-gzip -kf sim_data/spiffs/w/assets/*.js sim_data/spiffs/w/assets/*.css sim_data/spiffs/w/*.html
+./scripts/build_webui.sh    # npm build -> gzip -> embed_webui.py
 ```
 
-> On Windows, if `npm ci` skips devDependencies (e.g. `vite` missing because
-> `NODE_ENV=production`), run `NODE_ENV=development npm ci --include=dev`.
+This populates the git-ignored `src/display/webassets/` (the blob `web_ui.bin`,
+the `web_ui_blob.S` stub that defines `gWebUiBlobStart`, and `web_ui_manifest.h`).
+The sim env compiles `web_ui_blob.S` on the host (its ESP `.rodata` section is
+`#if`-guarded off for native builds), so `gWebUiBlobStart` links and the
+embedded assets are served exactly as on the device.
 
-If you skip this step the sim still runs (SDL UI + mock brew); the WebUI just
-serves 404s until the assets are staged.
+If you skip `build_webui.sh`, the `embed_webui_pre.py` pre-build hook drops an
+empty **stub** bundle so the sim still **builds and links** — it just serves an
+empty UI (every asset 404s) until you run the script. Re-run `build_webui.sh`
+whenever the web sources change to refresh the embedded bundle.
+
+> On Windows, if `npm ci` skips devDependencies (e.g. `vite` missing because
+> `NODE_ENV=production`), run `NODE_ENV=development npm ci --include=dev` before
+> `build_webui.sh` (which calls `npm ci` itself).
 
 ## 3. Build & run
 
