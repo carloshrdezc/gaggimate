@@ -193,18 +193,173 @@ export async function importProfiles({ listProfiles, saveProfile }, importedProf
 /**
  * Format the restore summary shown to the user after `importProfiles` runs.
  *
+ * P2-A (PRO-218): the FINAL alert the user sees must reflect the WHOLE restore
+ * picture in one place — both the per-PROFILE outcome (saved vs failed) AND, when
+ * a multi-file selection had files that could not be read/parsed, the per-FILE
+ * shortfall. The dropped-file warning is shown earlier as a separate `confirm()`,
+ * but the last dialog on screen is this summary; if it read an unqualified
+ * "Restored N of N from backup" the user could close the flow believing the
+ * restore was complete when files/profiles were in fact dropped. So whenever
+ * there is ANY shortfall — failed profiles, a saved<total gap, OR dropped files —
+ * the message names what was lost and tells the user to re-import it.
+ *
+ * `fileContext` is optional so the pure round-trip callers (and the existing
+ * profile-only tests) keep their two-arg-free contract; the onUpload glue passes
+ * the file aggregate so the multi-file story lands in the final alert.
+ *
  * @param {{ total:number, savedCount:number, failed:{label:string}[] }} summary
+ * @param {{ selectedFiles:number, okFiles:number, failedFiles:{name:string}[] }} [fileContext]
+ *   per-FILE outcome from `aggregateImportFiles`; omit for a single-file / pure call.
  * @returns {string}
  */
-export function formatRestoreSummary({ total, savedCount, failed }) {
+export function formatRestoreSummary({ total, savedCount, failed }, fileContext) {
+  const failedProfileLabels = (failed ?? []).map(f => f.label);
+  const droppedFiles = fileContext?.failedFiles ?? [];
+  const hasFileShortfall = droppedFiles.length > 0;
+  const hasProfileShortfall = failedProfileLabels.length > 0 || savedCount < total;
+
   if (total === 0) {
-    return 'No profiles found in this file — it may be corrupt or the wrong format; nothing was imported.';
+    const base =
+      'No profiles found in this file — it may be corrupt or the wrong format; nothing was imported.';
+    // Even with nothing parsed, if this came from a multi-file selection name the
+    // files that were dropped so the picture is complete in one place.
+    return hasFileShortfall ? `${base} Failed files: ${fileLabels(droppedFiles)}.` : base;
   }
-  if (failed.length === 0) {
+
+  // Clean, complete success: no failed profiles, count parity met, and (when a
+  // file context was supplied) every selected file contributed. Only here may the
+  // message read as unqualified success.
+  if (!hasProfileShortfall && !hasFileShortfall) {
+    if (fileContext) {
+      return (
+        `Restored ${savedCount} of ${total} profile${total === 1 ? '' : 's'} ` +
+        `from ${fileContext.okFiles} of ${fileContext.selectedFiles} ` +
+        `file${fileContext.selectedFiles === 1 ? '' : 's'}.`
+      );
+    }
     return `Restored ${savedCount} of ${total} profile${total === 1 ? '' : 's'} from backup.`;
   }
-  const labels = failed.map(f => f.label).join(', ');
-  return `Restored ${savedCount} of ${total} profiles from backup — failed: ${labels}.`;
+
+  // Something fell short. Build a single message that reflects the whole picture:
+  // profiles restored out of total, files read out of selected (when known), and
+  // the names of whatever was dropped — so the last thing on screen is never an
+  // unqualified success.
+  const parts = [];
+  if (fileContext) {
+    parts.push(
+      `Restored ${savedCount} of ${total} profile${total === 1 ? '' : 's'} ` +
+        `from ${fileContext.okFiles} of ${fileContext.selectedFiles} ` +
+        `file${fileContext.selectedFiles === 1 ? '' : 's'}.`,
+    );
+  } else {
+    parts.push(`Restored ${savedCount} of ${total} profile${total === 1 ? '' : 's'} from backup.`);
+  }
+  if (failedProfileLabels.length > 0) {
+    parts.push(`Failed profiles: ${failedProfileLabels.join(', ')}.`);
+  }
+  if (hasFileShortfall) {
+    parts.push(`Failed files: ${fileLabels(droppedFiles)}. Re-import those files.`);
+  }
+  return parts.join(' ');
+}
+
+function fileLabels(failedFiles) {
+  return failedFiles.map(f => f.name).join(', ');
+}
+
+/**
+ * Default cap on user-confirmed restore retries. A hung transport must not be
+ * able to trap the user in an endless confirm() cycle (PRO-218 NEW-6).
+ */
+export const MAX_RESTORE_RETRIES = 5;
+
+/**
+ * Orchestrate the full restore interaction loop: run `importProfiles`, surface a
+ * whole-picture summary that folds in the multi-file `fileContext` (P2-A), and
+ * drive the bounded retry-the-failed-subset loop (NEW-4/NEW-6).
+ *
+ * P2-B (PRO-218): this is the glue that used to live inline in the `restoreProfiles`
+ * useCallback. It is extracted here, with the user-interaction surface injected as
+ * `alert` / `confirm` callbacks and the device as `adapters`, so the abort /
+ * proceed / retry / give-up branch logic is unit-testable WITHOUT rendering the
+ * component. The React wrapper passes `window.alert` / `window.confirm` and an
+ * `onBeforeRetry` that refetches the device list between attempts.
+ *
+ * The summary alert is qualified ONLY on the FIRST attempt: `fileContext`
+ * describes the original multi-file selection, which is meaningless once we are
+ * retrying a failed subset of already-parsed profiles. Subsequent attempts use the
+ * profile-only summary so we don't claim "from 1 of 3 files" against a retry batch.
+ *
+ * @param {object} args
+ * @param {{ listProfiles:Function, saveProfile:Function }} args.adapters device adapters
+ * @param {object[]} args.importedProfiles the parsed batch to restore
+ * @param {{ selectedFiles:number, okFiles:number, failedFiles:{name:string}[] }} [args.fileContext]
+ *   per-FILE outcome from `aggregateImportFiles`, folded into the first summary (P2-A)
+ * @param {(message:string)=>void} args.alert user-facing alert sink
+ * @param {(message:string)=>boolean} args.confirm user-facing confirm (returns retry y/n)
+ * @param {() => (void|Promise<void>)} [args.onBeforeRetry] hook run before each retry attempt (e.g. refetch device list)
+ * @param {number} [args.maxRetries] retry cap (defaults to MAX_RESTORE_RETRIES)
+ * @returns {Promise<{ outcome:string, attempts:number, lastSummary:(object|null) }>}
+ *   `outcome` ∈ 'complete' | 'partial-stopped' | 'gave-up' | 'list-error' | 'error'
+ */
+export async function runRestore({
+  adapters,
+  importedProfiles,
+  fileContext,
+  alert,
+  confirm,
+  onBeforeRetry,
+  maxRetries = MAX_RESTORE_RETRIES,
+}) {
+  let batch = importedProfiles;
+  let lastSummary = null;
+  try {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const summary = await importProfiles(adapters, batch);
+      lastSummary = summary;
+      // Fold the file shortfall into the FINAL summary only on the first pass —
+      // the file context describes the original selection, not a retry subset.
+      alert(formatRestoreSummary(summary, attempt === 0 ? fileContext : undefined));
+      if (summary.failed.length === 0) {
+        return { outcome: 'complete', attempts: attempt + 1, lastSummary };
+      }
+
+      if (attempt === maxRetries) {
+        const labels = summary.failed.map(f => f.label).join(', ');
+        alert(
+          `Giving up after ${maxRetries} retries — still failing: ${labels}. ` +
+            'Check the device connection and re-import the file manually.',
+        );
+        return { outcome: 'gave-up', attempts: attempt + 1, lastSummary };
+      }
+
+      const labels = summary.failed.map(f => f.label).join(', ');
+      const retry = confirm(
+        `${summary.failed.length} profile(s) failed to restore: ${labels}.\n\n` +
+          'Retry the failed profiles now?',
+      );
+      if (!retry) {
+        return { outcome: 'partial-stopped', attempts: attempt + 1, lastSummary };
+      }
+      if (onBeforeRetry) await onBeforeRetry();
+      batch = summary.failed.map(f => f.profile);
+    }
+    // Unreachable: the loop returns on every terminal branch. Defensive only.
+    return { outcome: 'partial-stopped', attempts: maxRetries + 1, lastSummary };
+  } catch (err) {
+    if (err instanceof ListProfilesError) {
+      // The pre-flight device-list read failed BEFORE any save ran, so nothing on
+      // the device was changed. Tell the user it's safe to retry rather than
+      // leaving an opaque "Failed to import" (PRO-218 NEW-3).
+      alert(
+        'Could not read the existing profiles from the device, so the restore ' +
+          'was aborted before changing anything. Check the connection and try again.',
+      );
+      return { outcome: 'list-error', attempts: 0, lastSummary, error: err };
+    }
+    alert(`Failed to import profiles: ${err.message}`);
+    return { outcome: 'error', attempts: 0, lastSummary, error: err };
+  }
 }
 
 /**

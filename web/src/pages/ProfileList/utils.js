@@ -1,13 +1,28 @@
 import { TclConverter } from './TclConverter.js';
 
+// A parsed value only counts as a profile if it carries the universal profile
+// marker: a `phases` array. PRO-218 (P2 parse-leniency): a valid-JSON document
+// that is NOT a profile ({}, a bare primitive, an unrelated JSON object) used to
+// be wrapped as `[value]` and counted as one "ok" profile, so it escaped the
+// file-level corrupt detection (`ok = count > 0`) and was fed to the restore as a
+// bogus entry. Both the standard and pro profile schemas, and every TCL/JSON
+// conversion path, produce a `phases` array — so this is a safe discriminator
+// that turns "valid JSON, wrong shape" into a failed/empty parse instead of a
+// silent bogus profile.
+function isProfileShaped(value) {
+  return value != null && typeof value === 'object' && Array.isArray(value.phases);
+}
+
 export function parseProfile(input) {
   try {
     let profiles = JSON.parse(input);
     if (!Array.isArray(profiles)) {
-      profiles = parseJsonProfile(profiles);
-      profiles = [profiles];
+      profiles = [parseJsonProfile(profiles)];
     }
-    return profiles;
+    // Drop anything that isn't profile-shaped: a valid-JSON-but-non-profile file
+    // must count as an empty/failed parse, not a silent bogus profile (PRO-218).
+    const shaped = profiles.filter(isProfileShaped);
+    return shaped;
   } catch (ignored) {
     const result = TclConverter.toGaggiMate(input);
     if (result.ok) {

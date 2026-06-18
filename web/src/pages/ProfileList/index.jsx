@@ -20,11 +20,10 @@ import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
 import {
   buildExportPayload,
-  importProfiles,
   formatRestoreSummary,
   aggregateImportFiles,
   formatFileAggregateWarning,
-  ListProfilesError,
+  runRestore,
 } from './migrationTransfer.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -772,60 +771,30 @@ export function ProfileList() {
     [apiService],
   );
 
-  // Run the shared restore orchestrator over a parsed batch, surface a count-parity
-  // summary (PRO-218 P2-2), and offer to retry only the failed subset (PRO-218 P1-1).
+  // Run the shared restore orchestrator over a parsed batch, surface a whole-picture
+  // summary (P2-A: profiles AND files dropped, in one final message), and offer to
+  // retry only the failed subset (PRO-218 P1-1).
   //
-  // The retry is an explicit BOUNDED loop rather than self-recursion: the prior
-  // recursive form referenced restoreProfiles inside its own useCallback while
-  // the dep array was [importAdapters], which both trips react-hooks/exhaustive-deps
-  // and could loop forever against a wedged socket (PRO-218 NEW-4/NEW-6). The loop
-  // caps user-confirmed retries at MAX_RESTORE_RETRIES so a hung transport can't
-  // trap the user in an endless confirm() cycle.
-  const MAX_RESTORE_RETRIES = 5;
+  // The interaction loop (abort/confirm/proceed/retry/give-up) lives in the tested
+  // runRestore() seam in migrationTransfer.js (PRO-218 P2-B). This wrapper only wires
+  // the React side: loading state, window.alert/confirm, and a between-retries device
+  // refetch. The retry cap (MAX_RESTORE_RETRIES) is enforced inside runRestore so a
+  // hung transport can't trap the user in an endless confirm() cycle (NEW-4/NEW-6).
   const restoreProfiles = useCallback(
-    async importedProfiles => {
+    async (importedProfiles, fileContext) => {
       setLoading(true);
       try {
-        let batch = importedProfiles;
-        for (let attempt = 0; attempt <= MAX_RESTORE_RETRIES; attempt++) {
-          const summary = await importProfiles(importAdapters, batch);
-          alert(formatRestoreSummary(summary));
-          if (summary.failed.length === 0) break;
-
-          if (attempt === MAX_RESTORE_RETRIES) {
-            const labels = summary.failed.map(f => f.label).join(', ');
-            alert(
-              `Giving up after ${MAX_RESTORE_RETRIES} retries — still failing: ${labels}. ` +
-                'Check the device connection and re-import the file manually.',
-            );
-            break;
-          }
-
-          const labels = summary.failed.map(f => f.label).join(', ');
-          const retry = confirm(
-            `${summary.failed.length} profile(s) failed to restore: ${labels}.\n\n` +
-              'Retry the failed profiles now?',
-          );
-          if (!retry) break;
-          await loadProfiles();
-          batch = summary.failed.map(f => f.profile);
-        }
-      } catch (err) {
-        console.error('Failed to import profiles:', err);
-        if (err instanceof ListProfilesError) {
-          // The pre-flight device-list read failed BEFORE any save ran, so
-          // nothing on the device was changed. Tell the user it's safe to retry
-          // rather than leaving them with an opaque "Failed to import" (PRO-218
-          // NEW-3).
-          alert(
-            'Could not read the existing profiles from the device, so the restore ' +
-              'was aborted before changing anything. Check the connection and try again.',
-          );
-        } else {
-          alert(`Failed to import profiles: ${err.message}`);
-        }
+        await runRestore({
+          adapters: importAdapters,
+          importedProfiles,
+          fileContext,
+          alert: message => alert(message),
+          confirm: message => confirm(message),
+          onBeforeRetry: () => loadProfiles(),
+        });
+      } finally {
+        await loadProfiles();
       }
-      await loadProfiles();
     },
     [importAdapters],
   );
@@ -887,7 +856,15 @@ export function ProfileList() {
         }
       }
 
-      await restoreProfiles(aggregate.profiles);
+      // Pass the per-FILE outcome into the restore so the FINAL summary reflects
+      // the whole picture — profiles restored AND any files that were dropped — in
+      // one message, rather than reading as an unqualified "Restored N of N" over
+      // just the survivors (PRO-218 P2-A).
+      await restoreProfiles(aggregate.profiles, {
+        selectedFiles: aggregate.selectedCount,
+        okFiles: aggregate.okCount,
+        failedFiles: aggregate.failedFiles,
+      });
       // Reset the input so re-selecting the same file fires onChange again.
       evt.target.value = '';
     },

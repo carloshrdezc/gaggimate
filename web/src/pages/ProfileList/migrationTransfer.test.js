@@ -7,8 +7,11 @@ import {
   formatRestoreSummary,
   aggregateImportFiles,
   formatFileAggregateWarning,
+  runRestore,
+  MAX_RESTORE_RETRIES,
   ListProfilesError,
 } from './migrationTransfer.js';
+import { parseProfile } from './utils.js';
 
 function makeProfile(overrides = {}) {
   return {
@@ -250,7 +253,72 @@ describe('formatRestoreSummary', () => {
         savedCount: 1,
         failed: [{ label: 'Two' }, { label: 'Three' }],
       }),
-    ).toBe('Restored 1 of 3 profiles from backup — failed: Two, Three.');
+    ).toBe('Restored 1 of 3 profiles from backup. Failed profiles: Two, Three.');
+  });
+});
+
+// PRO-218 P2-A: the FINAL alert must reflect the WHOLE picture — profiles AND any
+// dropped files — so the last dialog on screen never reads as an unqualified
+// success when files/profiles were dropped.
+describe('formatRestoreSummary — whole-picture summary with file context (PRO-218 P2-A)', () => {
+  it('multi-file clean success: every file contributed, no shortfall, qualified by file counts', () => {
+    expect(
+      formatRestoreSummary(
+        { total: 3, savedCount: 3, failed: [] },
+        { selectedFiles: 2, okFiles: 2, failedFiles: [] },
+      ),
+    ).toBe('Restored 3 of 3 profiles from 2 of 2 files.');
+  });
+
+  it('multi-file with DROPPED files: NOT a clean success — names the failed files and says to re-import', () => {
+    const msg = formatRestoreSummary(
+      { total: 3, savedCount: 3, failed: [] },
+      {
+        selectedFiles: 5,
+        okFiles: 3,
+        failedFiles: [{ name: 'corrupt.json' }, { name: 'gone.json' }],
+      },
+    );
+    // It must read the whole picture: profiles restored AND files dropped.
+    expect(msg).toBe(
+      'Restored 3 of 3 profiles from 3 of 5 files. Failed files: corrupt.json, gone.json. Re-import those files.',
+    );
+    // Guard: the dropped-files case must never collapse to an unqualified success.
+    expect(msg).not.toBe('Restored 3 of 3 profiles from backup.');
+    expect(msg).toContain('Failed files');
+  });
+
+  it('dropped files AND failed profiles: both shortfalls named in one message', () => {
+    const msg = formatRestoreSummary(
+      { total: 3, savedCount: 1, failed: [{ label: 'Two' }, { label: 'Three' }] },
+      { selectedFiles: 4, okFiles: 2, failedFiles: [{ name: 'bad.json' }] },
+    );
+    expect(msg).toBe(
+      'Restored 1 of 3 profiles from 2 of 4 files. ' +
+        'Failed profiles: Two, Three. Failed files: bad.json. Re-import those files.',
+    );
+  });
+
+  it('single dropped file, all profiles saved: still qualified, not clean success', () => {
+    const msg = formatRestoreSummary(
+      { total: 1, savedCount: 1, failed: [] },
+      { selectedFiles: 2, okFiles: 1, failedFiles: [{ name: 'oops.json' }] },
+    );
+    expect(msg).toBe(
+      'Restored 1 of 1 profile from 1 of 2 files. Failed files: oops.json. Re-import those files.',
+    );
+  });
+
+  it('zero parsed across a multi-file selection still names the dropped files', () => {
+    expect(
+      formatRestoreSummary(
+        { total: 0, savedCount: 0, failed: [] },
+        { selectedFiles: 2, okFiles: 0, failedFiles: [{ name: 'a.json' }, { name: 'b.json' }] },
+      ),
+    ).toBe(
+      'No profiles found in this file — it may be corrupt or the wrong format; nothing was imported. ' +
+        'Failed files: a.json, b.json.',
+    );
   });
 });
 
@@ -368,5 +436,222 @@ describe('importProfiles — pre-flight list failure (PRO-218 NEW-3)', () => {
     );
     // Nothing was overwritten on the device: the failure is a clean pre-flight abort.
     expect(saveCalls).toBe(0);
+  });
+});
+
+// PRO-218 P2-B: the onUpload/restore GLUE — the abort/confirm/proceed/retry/give-up
+// orchestration that decides what the user sees and how the retry loop is bounded —
+// is now extracted into the runRestore() seam and exercised here WITHOUT rendering
+// the component. The user-interaction surface (alert/confirm) and the device
+// (adapters) are injected, and we assert on the captured messages + outcomes.
+describe('runRestore — restore orchestration glue (PRO-218 P2-B)', () => {
+  // Capture alert() messages and script confirm() answers so the branch logic is
+  // observable without a DOM.
+  function makeHarness({ confirmAnswers = [] } = {}) {
+    const alerts = [];
+    const confirms = [];
+    let i = 0;
+    return {
+      alerts,
+      confirms,
+      alert: msg => alerts.push(msg),
+      confirm: msg => {
+        confirms.push(msg);
+        // default to "no" once the scripted answers run out (user closes the dialog)
+        return i < confirmAnswers.length ? confirmAnswers[i++] : false;
+      },
+    };
+  }
+
+  it('multi-file with some failed FILES: the final summary names them and is NOT a clean success', async () => {
+    // All parsed profiles save fine, but two selected files were dropped upstream.
+    // The summary the user sees last must fold in the file shortfall (P2-A wired
+    // through the glue), never reading as an unqualified "Restored N of N".
+    const device = makeDeviceSimulator([]);
+    const harness = makeHarness();
+    const result = await runRestore({
+      adapters: device,
+      importedProfiles: [
+        makeProfile({ id: 'a', label: 'One' }),
+        makeProfile({ id: 'b', label: 'Two' }),
+      ],
+      fileContext: {
+        selectedFiles: 4,
+        okFiles: 2,
+        failedFiles: [{ name: 'corrupt.json' }, { name: 'gone.json' }],
+      },
+      alert: harness.alert,
+      confirm: harness.confirm,
+    });
+
+    expect(result.outcome).toBe('complete');
+    expect(result.attempts).toBe(1);
+    // Exactly one alert (the summary); no retry confirm because every profile saved.
+    expect(harness.alerts).toHaveLength(1);
+    expect(harness.alerts[0]).toBe(
+      'Restored 2 of 2 profiles from 2 of 4 files. Failed files: corrupt.json, gone.json. Re-import those files.',
+    );
+    expect(harness.alerts[0]).not.toContain('from backup.');
+    expect(harness.confirms).toHaveLength(0);
+  });
+
+  it('retries the FAILED SUBSET on confirm and completes when it succeeds the second time', async () => {
+    // "Two" fails on the first attempt, succeeds on the retry. The retry batch must
+    // be ONLY the failed subset, and the file context must NOT leak into the retry
+    // summary (it described the original selection, not the retry batch).
+    let pass = 0;
+    const device = makeDeviceSimulator([], {
+      failOn: profile => profile.label === 'Two' && pass === 0,
+    });
+    // Flip pass after the first batch so the retry of "Two" lands.
+    const harness = makeHarness({ confirmAnswers: [true] });
+    const result = await runRestore({
+      adapters: device,
+      importedProfiles: [
+        makeProfile({ id: 'a', label: 'One' }),
+        makeProfile({ id: 'b', label: 'Two' }),
+      ],
+      fileContext: { selectedFiles: 2, okFiles: 2, failedFiles: [] },
+      alert: harness.alert,
+      confirm: harness.confirm,
+      onBeforeRetry: () => {
+        pass = 1; // device recovers before the retry
+      },
+    });
+
+    expect(result.outcome).toBe('complete');
+    expect(result.attempts).toBe(2);
+    // First summary: partial (file context folds in, but there is a profile shortfall).
+    expect(harness.alerts[0]).toContain('Restored 1 of 2 profiles');
+    expect(harness.alerts[0]).toContain('Failed profiles: Two.');
+    // One retry confirm naming the failed subset.
+    expect(harness.confirms).toHaveLength(1);
+    expect(harness.confirms[0]).toContain('Two');
+    // Second (final) summary: clean success, and the file context did NOT leak.
+    expect(harness.alerts[harness.alerts.length - 1]).toBe('Restored 1 of 1 profile from backup.');
+  });
+
+  it('stops without retrying when the user declines the retry confirm (partial-stopped)', async () => {
+    const device = makeDeviceSimulator([], { failOn: p => p.label === 'Two' });
+    const harness = makeHarness({ confirmAnswers: [false] });
+    const result = await runRestore({
+      adapters: device,
+      importedProfiles: [
+        makeProfile({ id: 'a', label: 'One' }),
+        makeProfile({ id: 'b', label: 'Two' }),
+      ],
+      alert: harness.alert,
+      confirm: harness.confirm,
+    });
+    expect(result.outcome).toBe('partial-stopped');
+    expect(result.attempts).toBe(1);
+    expect(harness.confirms).toHaveLength(1);
+  });
+
+  it('caps retries at MAX_RESTORE_RETRIES and gives up naming the still-failing subset (NEW-6)', async () => {
+    // A permanently-wedged save: every attempt fails. The user keeps clicking retry.
+    // The loop must NOT spin forever — it caps at MAX_RESTORE_RETRIES and gives up
+    // with a message naming the failed profiles, never silently dropping them.
+    const device = makeDeviceSimulator([], { failOn: () => true });
+    let beforeRetryCount = 0;
+    // Always say "yes" to retry — more than the cap, to prove the cap binds.
+    const harness = makeHarness({ confirmAnswers: Array(MAX_RESTORE_RETRIES + 5).fill(true) });
+    const result = await runRestore({
+      adapters: device,
+      importedProfiles: [makeProfile({ id: 'x', label: 'Stuck' })],
+      alert: harness.alert,
+      confirm: harness.confirm,
+      onBeforeRetry: () => {
+        beforeRetryCount += 1;
+      },
+    });
+
+    expect(result.outcome).toBe('gave-up');
+    // attempts = the cap + the initial attempt = MAX_RESTORE_RETRIES + 1 import passes.
+    expect(result.attempts).toBe(MAX_RESTORE_RETRIES + 1);
+    // The confirm was shown exactly MAX_RESTORE_RETRIES times (one per non-final attempt).
+    expect(harness.confirms).toHaveLength(MAX_RESTORE_RETRIES);
+    // We retried (refetched) once per accepted confirm, never more.
+    expect(beforeRetryCount).toBe(MAX_RESTORE_RETRIES);
+    // The final alert names the still-failing profile and gives up — not silent.
+    const last = harness.alerts[harness.alerts.length - 1];
+    expect(last).toContain(`Giving up after ${MAX_RESTORE_RETRIES} retries`);
+    expect(last).toContain('Stuck');
+  });
+
+  it('respects a lower maxRetries override', async () => {
+    const device = makeDeviceSimulator([], { failOn: () => true });
+    const harness = makeHarness({ confirmAnswers: Array(10).fill(true) });
+    const result = await runRestore({
+      adapters: device,
+      importedProfiles: [makeProfile({ id: 'x', label: 'Stuck' })],
+      alert: harness.alert,
+      confirm: harness.confirm,
+      maxRetries: 2,
+    });
+    expect(result.outcome).toBe('gave-up');
+    expect(result.attempts).toBe(3); // initial + 2 retries
+    expect(harness.confirms).toHaveLength(2);
+  });
+
+  it('surfaces a clean abort message when the pre-flight device list read fails (NEW-3)', async () => {
+    const adapters = {
+      listProfiles: async () => {
+        throw new Error('socket closed');
+      },
+      saveProfile: async () => {
+        throw new Error('should not be called');
+      },
+    };
+    const harness = makeHarness();
+    const result = await runRestore({
+      adapters,
+      importedProfiles: [makeProfile()],
+      alert: harness.alert,
+      confirm: harness.confirm,
+    });
+    expect(result.outcome).toBe('list-error');
+    expect(harness.alerts).toHaveLength(1);
+    expect(harness.alerts[0]).toContain('aborted before changing anything');
+    expect(harness.confirms).toHaveLength(0);
+  });
+});
+
+// PRO-218 (parse leniency): a valid-JSON document that is NOT a profile must count
+// as an empty/failed parse, so it lands in failedFiles instead of being fed to the
+// restore as a bogus profile.
+describe('parseProfile — rejects valid-JSON-but-non-profile input (PRO-218 P2 leniency)', () => {
+  it('parses a genuine profile array', () => {
+    const text = JSON.stringify(buildExportPayload([makeProfile({ id: 'a', label: 'One' })]));
+    expect(parseProfile(text).map(p => p.label)).toEqual(['One']);
+  });
+
+  it('counts a bare JSON object ({}) as zero profiles', () => {
+    expect(parseProfile('{}')).toEqual([]);
+  });
+
+  it('counts a valid-JSON-but-unrelated object as zero profiles', () => {
+    expect(parseProfile(JSON.stringify({ hello: 'world', count: 3 }))).toEqual([]);
+  });
+
+  it('counts a bare JSON primitive as zero profiles', () => {
+    expect(parseProfile('42')).toEqual([]);
+    expect(parseProfile('"just a string"')).toEqual([]);
+    expect(parseProfile('true')).toEqual([]);
+  });
+
+  it('filters out non-profile-shaped entries inside an array', () => {
+    const mixed = JSON.stringify([makeProfile({ id: 'ok', label: 'Keep' }), { not: 'a profile' }]);
+    const parsed = parseProfile(mixed);
+    expect(parsed.map(p => p.label)).toEqual(['Keep']);
+  });
+
+  it('a non-profile object lands in failedFiles via aggregateImportFiles', () => {
+    const result = aggregateImportFiles([
+      { name: 'real.json', text: JSON.stringify(buildExportPayload([makeProfile()])) },
+      { name: 'random.json', text: JSON.stringify({ unrelated: true }) },
+    ]);
+    expect(result.okCount).toBe(1);
+    expect(result.failedFiles.map(f => f.name)).toEqual(['random.json']);
   });
 });
