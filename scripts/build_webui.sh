@@ -6,8 +6,9 @@ set -euo pipefail
 # The bundle no longer ships in the LittleFS image (/w). It is gzipped and packed
 # into a single blob that scripts/embed_webui.py turns into firmware-embedded,
 # memory-mapped flash. LittleFS now holds only profiles (/p) and shot history
-# (/h), so OTA never touches user data. data/p (seed profiles) is still staged
-# for the fresh-install filesystem image.
+# (/h), so OTA never touches user data. Only seed profiles (data/p) are staged
+# here for the fresh-install filesystem image; /h is created at runtime on-device
+# and is never staged from the build.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
