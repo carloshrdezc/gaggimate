@@ -454,8 +454,10 @@ void WebUIPlugin::serveWebAsset(AsyncWebServerRequest *request, String path) {
     if (asset->gzip) {
         response->addHeader("Content-Encoding", "gzip");
     }
-    // Content-hashed build assets (/assets/<hash>.js, /fonts/<hash>.woff2) never change for a given URL — cache them
-    // forever. index.html and other unhashed files must revalidate so a new build is picked up after an update. [GM-83]
+    // Long-lived immutable cache for build assets. /assets/* are content-hashed (the URL changes per build); /fonts/*
+    // are stable-named .otf files busted by a firmware version bump / fresh install — same policy the prior
+    // serveStatic("/fonts/", ...) used. index.html and other unhashed top-level files must revalidate so a new build
+    // is picked up after an update. [GM-83]
     if (path.startsWith("/assets/") || path.startsWith("/fonts/")) {
         response->addHeader("Cache-Control", "public, max-age=31536000, immutable");
     } else {
