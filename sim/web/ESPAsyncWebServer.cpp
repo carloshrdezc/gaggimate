@@ -684,7 +684,7 @@ void AsyncWebServer::dispatch(Conn &c, AsyncWebServerRequest &req) {
 
             const String contentType = guessContentType(file);
 
-            // Assets are stored gzipped (build_spiffs.sh / sim staging); prefer the
+            // Assets are stored gzipped (build_webui.sh / sim staging); prefer the
             // .gz variant and advertise the encoding, matching the device.
             File gz = s.fs->open((file + ".gz").c_str(), "r");
             if (gz) {

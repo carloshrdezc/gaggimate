@@ -88,11 +88,13 @@ jobs:
           name: firmware-${{ matrix.target }}
           path: "out/*"
 
-  # Build the web UI and the SPIFFS filesystem image. Kept separate from the
-  # firmware matrix because only this step needs the web build (data/w/), and
-  # the filesystem image is shared by both display and headless targets.
+  # Build the fresh-install filesystem image. Since the web UI is embedded into
+  # the app image (PRO-215), this image no longer carries /w; it stages only /p
+  # (seed profiles) for fresh USB installs. build_webui.sh keeps `mkdir -p
+  # data/p` and produces no data/w, so `pio run -t buildfs` packages /p only.
+  # The image is shared by both display and headless targets.
   filesystem:
-    name: Web + filesystem
+    name: Filesystem (seed profiles)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -122,8 +124,8 @@ jobs:
           mkdir -p out
           git tag -d nightly 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
