@@ -28,6 +28,12 @@
 struct StagedFile {
     std::string relPath;
     std::vector<uint8_t> data;
+    // ORIGINAL source size as reported by the directory listing, captured
+    // BEFORE the read. `data.size()` may be smaller after a transient short
+    // read (PRO-218 finding A); verification must compare against this original
+    // size — not the possibly-truncated staged length — so a truncated restore
+    // is actually detected instead of self-verifying against its own short size.
+    uint32_t origSize = 0;
 };
 
 // A single regular-file entry discovered while listing a source directory.
@@ -105,6 +111,7 @@ inline StageResult stageDir(IMigrationFs &fs, const char *srcDir, const char *di
         }
         StagedFile sf;
         sf.relPath = std::string(dirLabel) + "/" + e.name;
+        sf.origSize = e.size; // capture the source size BEFORE the read (finding A)
         size_t got = fs.readFile(srcDir, e.name.c_str(), e.size, sf.data);
         if (got != e.size) {
             r.shortRead = true; // truncated read — treat as failure, not success
@@ -142,9 +149,14 @@ inline uint32_t restoreStaged(IMigrationFs &fs, const std::vector<StagedFile> &s
     return restored;
 }
 
-// Read-back verification (review #3): re-open each expected target, confirm it
-// exists and its size matches the staged byte count. Returns the number of
-// files that verified good. The caller requires verified == staged.size().
+// Read-back verification (review #3, PRO-218 finding A): re-open each expected
+// target, confirm it exists and its size matches the ORIGINAL source byte count
+// (`origSize`), NOT the possibly-truncated staged `data.size()`. Comparing
+// against the staged length would let a transient short read self-verify (the
+// truncated bytes written == the truncated bytes staged) and seal corrupt data.
+// Comparing against `origSize` means a truncated file fails verification, so the
+// caller refuses the marker. Returns the number of files that verified good. The
+// caller requires verified == staged.size().
 inline uint32_t verifyRestored(IMigrationFs &fs, const std::vector<StagedFile> &staged) {
     uint32_t verified = 0;
     for (const auto &sf : staged) {
@@ -153,7 +165,7 @@ inline uint32_t verifyRestored(IMigrationFs &fs, const std::vector<StagedFile> &
             continue;
         }
         int64_t sz = fs.destSize(target.c_str());
-        if (sz < 0 || static_cast<uint64_t>(sz) != sf.data.size()) {
+        if (sz < 0 || static_cast<uint64_t>(sz) != sf.origSize) {
             continue;
         }
         verified++;

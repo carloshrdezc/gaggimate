@@ -210,14 +210,41 @@ uint32_t dirBytes(fs::FS &src, const char *dir) {
     return total;
 }
 
-void writeMarker() {
-    fs::File m = LittleFS.open(FS_MIGRATION_MARKER_PATH, FILE_WRITE);
-    if (m) {
-        m.print("1");
+// Write the once-only migration marker and CONFIRM it actually landed (PRO-218
+// finding B). Returns true only when the marker byte is written AND a read-back
+// re-open confirms a non-empty marker file exists. A silent open/write failure
+// must NOT be reported as success, because the caller clears the durable
+// in-progress sentinel only on a confirmed marker — leaving the sentinel set on
+// a marker-write failure so the next boot can detect the suspect state and warn.
+bool writeMarker() {
+    {
+        fs::File m = LittleFS.open(FS_MIGRATION_MARKER_PATH, FILE_WRITE);
+        if (!m) {
+            ESP_LOGE(LOG, "failed to open migration marker for write %s", FS_MIGRATION_MARKER_PATH);
+            return false;
+        }
+        size_t wrote = m.print("1");
+        m.flush();
         m.close();
-    } else {
-        ESP_LOGE(LOG, "failed to write migration marker %s", FS_MIGRATION_MARKER_PATH);
+        if (wrote == 0) {
+            ESP_LOGE(LOG, "failed to write migration marker %s (0 bytes)", FS_MIGRATION_MARKER_PATH);
+            return false;
+        }
     }
+    // Read-back: confirm the marker is actually present and non-empty before we
+    // treat it as the authoritative "migration done" signal.
+    fs::File r = LittleFS.open(FS_MIGRATION_MARKER_PATH, FILE_READ);
+    if (!r) {
+        ESP_LOGE(LOG, "migration marker read-back FAILED to open %s", FS_MIGRATION_MARKER_PATH);
+        return false;
+    }
+    size_t sz = r.size();
+    r.close();
+    if (sz == 0) {
+        ESP_LOGE(LOG, "migration marker read-back is empty %s", FS_MIGRATION_MARKER_PATH);
+        return false;
+    }
+    return true;
 }
 
 // Largest contiguous 8-bit-capable free block, used to gate RAM staging so we
@@ -408,10 +435,21 @@ bool ensureDataPartitionMounted(uint8_t maxOpenFiles, bool sdCardAvailable) {
     // the now-valid LittleFS will mount clean next boot and the UseLittleFsAsIs
     // path re-stamps the marker WITHOUT reformatting (self-heal preserved). The
     // sentinel we set above also flags the interruption on that next boot.
+    //
+    // Finding B: clear the durable in-progress sentinel ONLY after writeMarker()
+    // is CONFIRMED to have succeeded (it returns false on a silent open/write
+    // failure or a failed read-back). If the marker never lands, we leave the
+    // sentinel SET so the next boot's clean-mount path detects the suspect state
+    // and logs the loud interruption warning — the next boot is non-destructive
+    // (UseLittleFsAsIs re-stamps without reformatting), so a still-set sentinel
+    // is safe and strictly more informative than silently clearing it.
     if (plan.writeMarker && restoreVerified) {
-        writeMarker();
-        if (destructiveRun) {
-            setMigrationInProgress(false); // verified done — clear the sentinel
+        bool markerOk = writeMarker();
+        if (markerOk && destructiveRun) {
+            setMigrationInProgress(false); // verified done AND marker confirmed — clear the sentinel
+        } else if (!markerOk) {
+            ESP_LOGE(LOG, "migration restore verified but marker write FAILED — leaving the in-progress sentinel SET "
+                          "so the next boot detects the interrupted/suspect state");
         }
     }
 

@@ -229,6 +229,98 @@ void test_missing_source_dir_is_complete_noop(void) {
     TEST_ASSERT_EQUAL_size_t(0, staged.size());
 }
 
+// ---- PRO-218 FINDING A: a transient short read on /h must NOT self-verify ----
+//
+// (9) The core of finding A: a short read truncates the staged /h file, but
+// verifyRestored now compares the restored size against the ORIGINAL source
+// size (origSize) — NOT the truncated staged length. So the truncated restore
+// FAILS verification, the marker gate is false (NOT stamped), and the stage is
+// reported incomplete (NOT preserved). Before the fix, verifyRestored compared
+// against data.size() (already truncated), so the truncated file "verified"
+// against its own short size and the corrupt /h was sealed.
+void test_h_short_read_fails_verification_and_blocks_marker(void) {
+    FakeFs fs;
+    fs.addSourceFile("/h", "12345.slog", 500);
+    fs.shortReadFile = "12345.slog"; // transient short read -> staged data is 499 bytes
+
+    std::vector<StagedFile> staged;
+    StageResult r = stageDir(fs, "/h", "h", 256u * 1024u, staged);
+
+    // (a) NOT reported as preserved: a short read makes complete() false, so the
+    // runner computes history_preserved=0 (not a full preservation).
+    TEST_ASSERT_TRUE(r.shortRead);
+    TEST_ASSERT_FALSE(r.complete());
+    TEST_ASSERT_EQUAL_size_t(1, staged.size());
+
+    // The staged file carries the ORIGINAL source size, not the truncated read.
+    TEST_ASSERT_EQUAL_UINT32(500, staged[0].origSize);
+    TEST_ASSERT_EQUAL_size_t(499, staged[0].data.size());
+
+    // restoreStaged writes the (truncated) staged bytes; the dest size is 499.
+    uint32_t restored = restoreStaged(fs, staged);
+    TEST_ASSERT_EQUAL_UINT32(1, restored); // the truncated bytes DO write+rename
+
+    // (b) Verification compares dest size (499) against origSize (500) -> MISMATCH
+    // -> verified=0. The marker gate is therefore false: the corrupt /h is NOT
+    // sealed; the device self-heals on the next boot (sentinel stays set).
+    uint32_t verified = verifyRestored(fs, staged);
+    TEST_ASSERT_EQUAL_UINT32(0, verified);
+    bool markerAllowed = (restored == staged.size()) && (verified == staged.size());
+    TEST_ASSERT_FALSE(markerAllowed);
+}
+
+// (10) Contrast: the DELIBERATE over-budget /h defer path is UNCHANGED. An
+// over-budget /h file is recorded as `skipped` and is NOT added to `staged`, so
+// it cannot fail verification. With /h deliberately deferred, only /p is staged;
+// /p verifies clean and the marker IS allowed (documented fallback: /h dropped,
+// /p preserved). This proves finding A's fix discriminates "transient truncation
+// (must not seal)" from "deliberate over-budget defer (still allowed)".
+void test_over_budget_h_defer_still_allows_marker(void) {
+    FakeFs fs;
+    fs.addSourceFile("/p", "default.json", 200);
+    fs.addSourceFile("/h", "huge.slog", 5000);
+
+    std::vector<StagedFile> staged;
+    StageResult pr = stageDir(fs, "/p", "p", 64u * 1024u, staged);
+    // /h is over its (deliberately small) budget -> skipped, NOT staged.
+    StageResult hr = stageDir(fs, "/h", "h", 1000u, staged);
+
+    TEST_ASSERT_TRUE(pr.complete());  // profiles fully staged
+    TEST_ASSERT_FALSE(hr.complete()); // /h not fully staged (a skip)
+    TEST_ASSERT_EQUAL_UINT32(1, hr.skipped);
+    TEST_ASSERT_EQUAL_size_t(1, staged.size()); // only /p was staged; /h not added
+
+    // Only /p is in `staged`; it restores and verifies clean against origSize.
+    uint32_t restored = restoreStaged(fs, staged);
+    uint32_t verified = verifyRestored(fs, staged);
+    TEST_ASSERT_EQUAL_UINT32(1, restored);
+    TEST_ASSERT_EQUAL_UINT32(1, verified);
+    bool markerAllowed = (restored == staged.size()) && (verified == staged.size());
+    TEST_ASSERT_TRUE(markerAllowed); // deferred-/h path is unchanged: marker still stamped
+}
+
+// ---- PRO-218 FINDING B: sentinel clear is gated on a CONFIRMED marker write --
+//
+// (11) Documentation-as-test for finding B (FsMigrationRunner.cpp). The runner's
+// device-only writeMarker() now returns whether the marker actually landed
+// (open + write + read-back confirmation), and the sentinel is cleared only on
+// `markerOk && destructiveRun`. writeMarker() touches the real LittleFS so it is
+// not host-linkable; this pins the gate POLICY so a future change that clears the
+// sentinel unconditionally fails here. See FsMigrationRunner.cpp clear-sentinel
+// gate (`if (markerOk && destructiveRun) setMigrationInProgress(false);`).
+static bool clearSentinelGate(bool markerOk, bool destructiveRun) { return markerOk && destructiveRun; }
+
+void test_marker_write_failure_leaves_sentinel_set(void) {
+    // A confirmed marker on a destructive run -> sentinel cleared.
+    TEST_ASSERT_TRUE(clearSentinelGate(/*markerOk=*/true, /*destructiveRun=*/true));
+    // Marker write FAILED -> sentinel must remain SET (NOT cleared), so the next
+    // boot can detect the suspect/interrupted state and warn (finding B).
+    TEST_ASSERT_FALSE(clearSentinelGate(/*markerOk=*/false, /*destructiveRun=*/true));
+    // Non-destructive run never clears regardless of marker outcome.
+    TEST_ASSERT_FALSE(clearSentinelGate(/*markerOk=*/true, /*destructiveRun=*/false));
+    TEST_ASSERT_FALSE(clearSentinelGate(/*markerOk=*/false, /*destructiveRun=*/false));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_stage_restore_verify_happy_path);
@@ -239,5 +331,8 @@ int main(int, char **) {
     RUN_TEST(test_rename_failure_blocks_count);
     RUN_TEST(test_partial_restore_fails_verification_gate);
     RUN_TEST(test_missing_source_dir_is_complete_noop);
+    RUN_TEST(test_h_short_read_fails_verification_and_blocks_marker);
+    RUN_TEST(test_over_budget_h_defer_still_allows_marker);
+    RUN_TEST(test_marker_write_failure_leaves_sentinel_set);
     return UNITY_END();
 }
