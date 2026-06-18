@@ -19,7 +19,7 @@ import { computed } from '@preact/signals';
 import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
 import { parseProfile } from './utils.js';
-import { buildExportPayload, remapImportedProfile } from './migrationTransfer.js';
+import { buildExportPayload, importProfiles, formatRestoreSummary } from './migrationTransfer.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp';
@@ -673,15 +673,32 @@ export function ProfileList() {
     [apiService, profiles],
   );
 
-  const onExport = useCallback(() => {
+  const onExport = useCallback(async () => {
+    // Re-fetch the authoritative device list at export time rather than
+    // serializing the component's `profiles` state, which can lag the device
+    // (initial load in flight, a mid-session reconnect, a save that hasn't
+    // round-tripped yet). Exporting stale/partial state would silently
+    // under-capture the backup the user is about to rely on across a reformat
+    // (PRO-218 P2-3). onUpload already fetches req:profiles:list for the same
+    // authoritative-state reason.
+    let deviceProfiles;
+    try {
+      const response = await apiService.request({ tp: 'req:profiles:list' });
+      deviceProfiles = response?.profiles ?? [];
+    } catch (error) {
+      console.error('Failed to fetch profiles for export:', error);
+      alert(`Profile export failed: could not read profiles from the device (${error.message}).`);
+      return;
+    }
+
     // Keep `id` so re-imported profiles stay addressable on the device.
     // Only strip device-local state (`selected`/`favorite`). See
     // migrationTransfer.js for the SPIFFS->LittleFS migration round-trip.
-    const exportedProfiles = buildExportPayload(profiles);
+    const exportedProfiles = buildExportPayload(deviceProfiles);
 
-    // Guard against exporting before the profile list has loaded (or a genuinely
-    // empty list): writing an empty profiles.json silently produces a useless
-    // backup the user may rely on. Warn and skip the download instead (PRO-218 P3).
+    // Guard against exporting an empty list: writing an empty profiles.json
+    // silently produces a useless backup the user may rely on. Warn and skip
+    // the download instead (PRO-218 P3 / P2-3).
     if (exportedProfiles.length === 0) {
       alert('No profiles to export yet. Wait for the profile list to load and try again.');
       return;
@@ -695,7 +712,7 @@ export function ProfileList() {
       console.error('Failed to export profiles:', error);
       alert(`Profile export failed: ${error.message}`);
     }
-  }, [profiles]);
+  }, [apiService]);
 
   const completeProfileSelect = useCallback(
     async profile => {
@@ -724,85 +741,126 @@ export function ProfileList() {
     [profiles, completeProfileSelect],
   );
 
-  const onUpload = function (evt) {
-    if (evt.target.files.length) {
-      const file = evt.target.files[0];
-      const reader = new FileReader();
-      reader.onload = async e => {
-        const result = e.target.result;
-        if (typeof result === 'string') {
-          setLoading(true);
-          try {
-            const importedProfiles = parseProfile(result);
-            // A malformed/unrecognized file makes parseProfile return [] (see
-            // utils.js). Without feedback the import loop would iterate nothing
-            // and the user would assume success. Surface the empty result and
-            // bail before touching the device (PRO-218 P3).
-            if (importedProfiles.length === 0) {
-              alert('No profiles found in the selected file. Nothing was imported.');
-              setLoading(false);
-              evt.target.value = '';
-              return;
-            }
-            // Build the collision set from the freshest device profile list so a
-            // re-imported backup never silently overwrites a (possibly newer)
-            // profile that already lives on the device (CAR-331). saveProfile
-            // opens <id>.json with "w", so a same-id import would clobber the
-            // device copy; the firmware guard only catches the stem !== in-file-id
-            // legacy case (a matching id is treated as a legit in-place edit), so
-            // the safe default here is to remap a colliding import to a fresh id.
-            //
-            // NOTE: req:profiles:list enumerates by FILENAME STEM but reports the
-            // IN-FILE id, so this set covers in-file-id collisions only. On-disk
-            // filename-stem collisions (e.g. a.json holding id "b", then importing
-            // id "a") are NOT visible here and are deliberately NOT guarded in the
-            // web layer. The ProfileManager::saveProfile() firmware guard is the
-            // authoritative collision check for that case: it loadProfile()s the
-            // file <id>.json would clobber and mints a fresh id when its in-file id
-            // differs. Do not assume this web check alone prevents overwrites.
-            const existingResponse = await apiService.request({ tp: 'req:profiles:list' });
-            const existingIds = new Set(
-              (existingResponse?.profiles ?? []).map(entry => entry.id).filter(Boolean),
-            );
-            for (const p of importedProfiles) {
-              const profile = remapImportedProfile(p, existingIds);
-              const saveResponse = await apiService.request({ tp: 'req:profiles:save', profile });
-              // Track the id the device actually persisted (the save response echoes
-              // the stored profile, including any fresh id the firmware minted). This
-              // keeps two profiles that share an id WITHIN the same import file from
-              // overwriting each other: the first save claims the id, and the second
-              // sees it in the set and gets remapped to a fresh id too.
-              const savedId = saveResponse?.profile?.id;
-              if (savedId) {
-                existingIds.add(savedId);
-              }
-            }
-            // Confirm how many profiles landed so a successful import isn't silent
-            // (PRO-218 P3).
-            const count = importedProfiles.length;
-            alert(`${count} profile${count === 1 ? '' : 's'} imported.`);
-          } catch (err) {
-            console.error('Failed to import profiles:', err);
-            alert(`Failed to import profiles: ${err.message}`);
+  // Adapters wiring the shared importProfiles() orchestrator (migrationTransfer.js)
+  // onto the real WebSocket. The SAME importProfiles function is exercised by the
+  // round-trip tests via a device simulator, so green tests prove the shipped
+  // restore algorithm rather than a hand-copied duplicate (PRO-218 P1-2).
+  //
+  // NOTE on the id-collision contract: req:profiles:list enumerates by FILENAME
+  // STEM but reports the IN-FILE id, so the collision set importProfiles builds
+  // covers in-file-id collisions only. On-disk filename-stem collisions are
+  // deliberately NOT guarded in the web layer — the firmware
+  // ProfileManager::saveProfile() guard is the authoritative check (see
+  // migrationTransfer.js for the full rationale). saveProfile must echo the
+  // stored id; importProfiles treats a missing id as a hard error (PRO-218 P2-1).
+  const importAdapters = useMemo(
+    () => ({
+      listProfiles: async () => {
+        const response = await apiService.request({ tp: 'req:profiles:list' });
+        return response?.profiles ?? [];
+      },
+      // request() rejects on a built-in 5s timeout and immediately on socket
+      // close, so a hung restore surfaces as a per-item failure naming the
+      // profile rather than hanging forever (PRO-218 P1-4).
+      saveProfile: async profile => {
+        const response = await apiService.request({ tp: 'req:profiles:save', profile });
+        return response?.profile ?? {};
+      },
+    }),
+    [apiService],
+  );
+
+  // Run the shared restore orchestrator over a parsed batch, surface a count-parity
+  // summary (PRO-218 P2-2), and offer to retry only the failed subset (PRO-218 P1-1).
+  const restoreProfiles = useCallback(
+    async importedProfiles => {
+      setLoading(true);
+      try {
+        const summary = await importProfiles(importAdapters, importedProfiles);
+        alert(formatRestoreSummary(summary));
+        if (summary.failed.length > 0) {
+          const labels = summary.failed.map(f => f.label).join(', ');
+          const retry = confirm(
+            `${summary.failed.length} profile(s) failed to restore: ${labels}.\n\n` +
+              'Retry the failed profiles now?',
+          );
+          if (retry) {
+            await loadProfiles();
+            await restoreProfiles(summary.failed.map(f => f.profile));
+            return;
           }
-          await loadProfiles();
         }
-      };
-      reader.readAsText(file);
-    }
-  };
+      } catch (err) {
+        console.error('Failed to import profiles:', err);
+        alert(`Failed to import profiles: ${err.message}`);
+      }
+      await loadProfiles();
+    },
+    [importAdapters],
+  );
+
+  const onUpload = useCallback(
+    async evt => {
+      const files = Array.from(evt.target.files ?? []);
+      if (files.length === 0) return;
+
+      // A backup may have been saved as several per-profile files; restore ALL of
+      // them, not just files[0] (PRO-218 P1-3). Parse each, then merge into one
+      // batch so intra/inter-file id collisions are deduped together.
+      const texts = await Promise.all(
+        files.map(
+          file =>
+            new Promise(resolve => {
+              const reader = new FileReader();
+              reader.onload = e =>
+                resolve(typeof e.target.result === 'string' ? e.target.result : null);
+              reader.onerror = () => resolve(null);
+              reader.readAsText(file);
+            }),
+        ),
+      );
+
+      const importedProfiles = texts
+        .filter(text => typeof text === 'string')
+        .flatMap(text => parseProfile(text));
+
+      // A malformed/truncated/wrong-format file makes parseProfile return [] (see
+      // utils.js). Importing zero profiles after a reformat looks like a clean
+      // success while the backup never landed — the exact silent data loss the
+      // redesign claims to prevent. Surface a distinct corrupt-file error and
+      // ABORT before loadProfiles() repaints the Default-only list (PRO-218 P0-1).
+      if (importedProfiles.length === 0) {
+        alert(formatRestoreSummary({ total: 0, savedCount: 0, failed: [] }));
+        evt.target.value = '';
+        return;
+      }
+
+      await restoreProfiles(importedProfiles);
+      // Reset the input so re-selecting the same file fires onChange again.
+      evt.target.value = '';
+    },
+    [restoreProfiles],
+  );
 
   const onClear = useCallback(async () => {
     setLoading(true);
-    try {
-      for (const p of profiles) {
-        if (!p.selected) {
-          await apiService.request({ tp: 'req:profiles:delete', id: p.id });
-        }
+    // Per-item try/catch so one failed delete doesn't strand the rest with no
+    // feedback (PRO-218 P2-5, same non-atomic pattern as the restore loop). Each
+    // failure is collected and surfaced by label; the loop continues.
+    const failed = [];
+    let deleted = 0;
+    const toDelete = profiles.filter(p => !p.selected);
+    for (const p of toDelete) {
+      try {
+        await apiService.request({ tp: 'req:profiles:delete', id: p.id });
+        deleted += 1;
+      } catch (err) {
+        console.error('Failed to delete profile:', p.label || p.id, err);
+        failed.push(p.label || p.id || 'unknown');
       }
-    } catch (err) {
-      console.error('Failed to clear profiles:', err);
-      alert(`Failed to clear profiles: ${err.message}`);
+    }
+    if (failed.length > 0) {
+      alert(`Deleted ${deleted} of ${toDelete.length} profiles — failed: ${failed.join(', ')}.`);
     }
     await loadProfiles();
   }, [profiles, apiService]);
@@ -851,6 +909,7 @@ export function ProfileList() {
             className='hidden'
             id='profileImport'
             type='file'
+            multiple
             accept='.json,application/json'
           />
           <ConfirmButton
