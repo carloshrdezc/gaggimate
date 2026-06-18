@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'p
 import { memo } from 'preact/compat';
 import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
+import { MigrationWarningBanner } from '../../components/MigrationWarningBanner.jsx';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -570,6 +571,8 @@ export function OTA() {
           Manage firmware updates, view system information, and rebuild shot history.
         </p>
       </div>
+
+      <MigrationWarningBanner />
 
       <form key='ota' method='post' action='/api/ota' ref={formRef} onSubmit={onSubmit}>
         <div className='flex flex-col gap-4'>

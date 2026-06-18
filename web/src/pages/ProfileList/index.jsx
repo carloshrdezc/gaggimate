@@ -19,6 +19,7 @@ import { computed } from '@preact/signals';
 import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
 import { parseProfile } from './utils.js';
+import { buildExportPayload, remapImportedProfile } from './migrationTransfer.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp';
@@ -673,12 +674,10 @@ export function ProfileList() {
   );
 
   const onExport = useCallback(() => {
-    const exportedProfiles = profiles.map(p => {
-      // Keep `id` so re-imported profiles stay addressable on the device.
-      // Only strip device-local state (`selected`/`favorite`).
-      const { selected, favorite, ...ep } = p;
-      return ep;
-    });
+    // Keep `id` so re-imported profiles stay addressable on the device.
+    // Only strip device-local state (`selected`/`favorite`). See
+    // migrationTransfer.js for the SPIFFS->LittleFS migration round-trip.
+    const exportedProfiles = buildExportPayload(profiles);
 
     const download = prepareDownload('profiles.json');
     try {
@@ -748,13 +747,7 @@ export function ProfileList() {
               (existingResponse?.profiles ?? []).map(entry => entry.id).filter(Boolean),
             );
             for (const p of importedProfiles) {
-              let profile = p;
-              if (p.id && existingIds.has(p.id)) {
-                // Treat the import as a new copy: drop the id so the firmware mints
-                // a fresh safe id via generateShortID() instead of overwriting.
-                const { id: _omitId, ...rest } = p;
-                profile = rest;
-              }
+              const profile = remapImportedProfile(p, existingIds);
               const saveResponse = await apiService.request({ tp: 'req:profiles:save', profile });
               // Track the id the device actually persisted (the save response echoes
               // the stored profile, including any fresh id the firmware minted). This
