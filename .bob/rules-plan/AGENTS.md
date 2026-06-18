@@ -2,7 +2,7 @@
 
 ## System Architecture Constraints
 
-**Dual-platform with build dependency**: ESP32 firmware depends on web UI build output. Web UI must be built first (`cd web && npm ci && npm run build`), then `scripts/build_spiffs.sh` gzips assets into `data/w/` before firmware compilation.
+**Dual-platform with build dependency**: ESP32 firmware depends on web UI build output. Web UI must be built first (`cd web && npm ci && npm run build`), then `scripts/build_webui.sh` gzips + packs the bundle into `src/display/webassets/` for embedding into the firmware app image.
 
 **Plugin-based event system**: Core uses `PluginManager` with string-based event IDs (not enums) and typed event data variants. Events support `stopPropagation` flag. This enables runtime plugin registration without recompilation.
 
