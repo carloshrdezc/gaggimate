@@ -53,6 +53,7 @@ jobs:
           mv .pio/build/controller/bootloader.bin out/board-bootloader.bin
       - name: Build display
         run: |
+          bash scripts/build_webui.sh
           pio run -e display
           mv .pio/build/display/firmware.bin out/display-firmware.bin
           mv .pio/build/display/partitions.bin out/display-partitions.bin

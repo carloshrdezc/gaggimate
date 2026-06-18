@@ -53,6 +53,20 @@ jobs:
           python-version: '3.11'
       - name: Install PlatformIO Core
         run: pip install platformio==6.1.19
+      # The web UI is embedded into the display/headless app image (PRO-215), so
+      # those firmware builds must run build_webui.sh first; otherwise
+      # embed_webui_pre.py stubs an EMPTY bundle and the released firmware serves
+      # 404 for / instead of the UI. The controller target has no web UI, so skip
+      # it there. (Node is only needed for the web build.)
+      - uses: actions/setup-node@v4
+        if: matrix.target != 'controller'
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build embedded web UI
+        if: matrix.target != 'controller'
+        run: bash scripts/build_webui.sh
       - name: Build ${{ matrix.target }}
         run: |
           mkdir -p out
