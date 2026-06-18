@@ -13,29 +13,33 @@
 // onUpload handler (wiring apiService.request adapters) and the tests (wiring a
 // device simulator) call importProfiles. If onUpload re-implemented the loop
 // inline, green tests could no longer prove the product's behaviour (PRO-218
-// P1-2).
+// P1-2). The same reasoning extends to the MULTI-FILE read+parse+aggregate step:
+// aggregateImportFiles() lives here and is unit-tested, so the silent
+// partial-loss path (a corrupt file in a multi-select) is closed behind a tested
+// seam rather than living inline in onUpload (PRO-218 NEW-1/NEW-2).
+
+import { parseProfile } from './utils.js';
+
+// DENYLIST (PRO-218 P3-3): everything is exported EXCEPT the per-device runtime
+// flags listed here. We intentionally use a denylist rather than an allowlist of
+// portable fields: this is a data-preservation BACKUP, so the failure we must
+// avoid is silently dropping a profile field the user cares about. An allowlist
+// would drop any future portable field that isn't added to it; a denylist only
+// ever risks leaking a new device-local flag (cosmetic, and harmlessly stripped
+// again by the firmware on import). `id` is kept so a re-imported profile stays
+// addressable (deletable/selectable/favoritable).
+//
+// KEEP IN SYNC: when the firmware adds a new per-device runtime flag (a field
+// that is meaningful only on the device that set it and must NOT travel in a
+// backup), add it to DEVICE_LOCAL_FIELDS.
+export const DEVICE_LOCAL_FIELDS = ['selected', 'favorite'];
 
 /**
  * Strip device-local state from a profile for export.
  *
- * DENYLIST (PRO-218 P3-3): everything is exported EXCEPT the per-device runtime
- * flags listed in DEVICE_LOCAL_FIELDS. We intentionally use a denylist rather
- * than an allowlist of portable fields: this is a data-preservation BACKUP, so
- * the failure we must avoid is silently dropping a profile field the user cares
- * about. An allowlist would drop any future portable field that isn't added to
- * it; a denylist only ever risks leaking a new device-local flag (cosmetic, and
- * harmlessly stripped again by the firmware on import). `id` is kept so a
- * re-imported profile stays addressable (deletable/selectable/favoritable).
- *
- * KEEP IN SYNC: when the firmware adds a new per-device runtime flag (a field
- * that is meaningful only on the device that set it and must NOT travel in a
- * backup), add it to DEVICE_LOCAL_FIELDS below.
- *
  * @param {object} profile a profile as returned by `req:profiles:list`
  * @returns {object} the profile minus device-local fields
  */
-export const DEVICE_LOCAL_FIELDS = ['selected', 'favorite'];
-
 export function toExportProfile(profile) {
   const rest = { ...(profile ?? {}) };
   for (const field of DEVICE_LOCAL_FIELDS) {
@@ -93,6 +97,20 @@ function importLabel(profile, index) {
 }
 
 /**
+ * Thrown when the pre-flight `req:profiles:list` fetch fails before the restore
+ * loop runs. Distinguished from per-item save failures so the caller can tell
+ * the user nothing was overwritten and the restore is safe to retry wholesale
+ * (PRO-218 NEW-3).
+ */
+export class ListProfilesError extends Error {
+  constructor(cause) {
+    super('Could not read the existing profiles from the device');
+    this.name = 'ListProfilesError';
+    this.cause = cause;
+  }
+}
+
+/**
  * Orchestrate the restore of a parsed backup onto the device. THIS is the
  * shipped import algorithm — `onUpload` and the round-trip tests both call it,
  * so the tests validate the product (PRO-218 P1-2).
@@ -127,7 +145,19 @@ function importLabel(profile, index) {
  */
 export async function importProfiles({ listProfiles, saveProfile }, importedProfiles) {
   const profiles = importedProfiles ?? [];
-  const existing = (await listProfiles()) ?? [];
+
+  // The collision set is built from a FRESH device list BEFORE the per-item
+  // loop, so it is outside the per-item try/catch. A transient drop / 5s timeout
+  // on this one call (e.g. the device is busy right after a reformat) used to
+  // throw an opaque error and strand an otherwise-recoverable restore. Wrap it
+  // so the caller can surface a clear "couldn't read the device list — nothing
+  // was changed, retry" message instead (PRO-218 NEW-3).
+  let existing;
+  try {
+    existing = (await listProfiles()) ?? [];
+  } catch (error) {
+    throw new ListProfilesError(error);
+  }
   const existingIds = new Set(existing.map(entry => entry?.id).filter(Boolean));
 
   const results = [];
@@ -175,4 +205,81 @@ export function formatRestoreSummary({ total, savedCount, failed }) {
   }
   const labels = failed.map(f => f.label).join(', ');
   return `Restored ${savedCount} of ${total} profiles from backup — failed: ${labels}.`;
+}
+
+/**
+ * Read+parse+aggregate a multi-file backup selection into one restore batch
+ * WHILE preserving the per-FILE outcome.
+ *
+ * PRO-218 NEW-1 (silent multi-file partial loss): a backup may have been saved
+ * as several per-profile files; the restore reads ALL of them and merges them
+ * into a single dedup batch (PRO-218 P1-3). The hazard the multi-file fix
+ * introduced is that a file which failed to read (`FileReader` onerror → null)
+ * or parsed to zero profiles (corrupt / truncated / wrong format → parseProfile
+ * returns `[]`) used to be filtered out SILENTLY: select 5 files, 2 corrupt →
+ * 3 imported and reported as "Restored 3 of 3", with no sign 2 files were lost.
+ * After a reformat that is permanent silent partial data loss.
+ *
+ * This function keeps count parity against SELECTED FILES, not just parsed
+ * profiles, so a dropped file can never be invisible. The caller decides what to
+ * do with `failedFiles` (the shipped onUpload reports them prominently and lets
+ * the user abort or proceed with the survivors).
+ *
+ * Pure (no FileReader / DOM): the caller does the async file read and passes the
+ * already-resolved text in, so this whole seam — the exact place NEW-1 lived —
+ * is unit-testable (PRO-218 NEW-2).
+ *
+ * @param {{name:string,text:(string|null)}[]} fileTexts one entry per selected
+ *   file: `name` for reporting, `text` the FileReader result (`null` if the read
+ *   failed or returned a non-string).
+ * @returns {{
+ *   profiles: object[],
+ *   fileResults: {name:string,ok:boolean,count:number}[],
+ *   selectedCount: number,
+ *   okCount: number,
+ *   failedFiles: {name:string}[]
+ * }} `profiles` is the merged batch from every file that parsed to >=1 profile;
+ *   `fileResults` records each file's outcome; `failedFiles` is the subset that
+ *   read-failed or parsed to zero.
+ */
+export function aggregateImportFiles(fileTexts) {
+  const entries = fileTexts ?? [];
+  const fileResults = entries.map(({ name, text }) => {
+    // A read failure (null/non-string) and a parse-to-zero are BOTH failures
+    // from the user's point of view: the file contributed nothing to the
+    // restore. parseProfile returns [] for corrupt/truncated/wrong-format input.
+    const parsed = typeof text === 'string' ? parseProfile(text) : [];
+    const count = parsed.length;
+    return { name, ok: count > 0, count, profiles: parsed };
+  });
+
+  const profiles = fileResults.flatMap(r => r.profiles);
+  const failedFiles = fileResults.filter(r => !r.ok).map(r => ({ name: r.name }));
+
+  return {
+    profiles,
+    fileResults: fileResults.map(({ name, ok, count }) => ({ name, ok, count })),
+    selectedCount: entries.length,
+    okCount: fileResults.filter(r => r.ok).length,
+    failedFiles,
+  };
+}
+
+/**
+ * Build the warning shown when one or more selected files could not be read or
+ * contained no profiles (PRO-218 NEW-1). Names the failed files so the user
+ * knows exactly which backups to re-check, and distinguishes "files selected"
+ * vs "files parsed" so a dropped file is never invisible.
+ *
+ * @param {{ selectedCount:number, failedFiles:{name:string}[] }} aggregate
+ * @returns {string}
+ */
+export function formatFileAggregateWarning({ selectedCount, failedFiles }) {
+  const names = failedFiles.map(f => f.name).join(', ');
+  const failedCount = failedFiles.length;
+  return (
+    `${failedCount} of ${selectedCount} selected file${selectedCount === 1 ? '' : 's'} ` +
+    `could not be read or contained no profiles: ${names}. ` +
+    `Nothing was imported from ${failedCount === 1 ? 'it' : 'them'}.`
+  );
 }

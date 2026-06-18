@@ -18,8 +18,14 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'p
 import { computed } from '@preact/signals';
 import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
-import { parseProfile } from './utils.js';
-import { buildExportPayload, importProfiles, formatRestoreSummary } from './migrationTransfer.js';
+import {
+  buildExportPayload,
+  importProfiles,
+  formatRestoreSummary,
+  aggregateImportFiles,
+  formatFileAggregateWarning,
+  ListProfilesError,
+} from './migrationTransfer.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp';
@@ -746,13 +752,9 @@ export function ProfileList() {
   // round-trip tests via a device simulator, so green tests prove the shipped
   // restore algorithm rather than a hand-copied duplicate (PRO-218 P1-2).
   //
-  // NOTE on the id-collision contract: req:profiles:list enumerates by FILENAME
-  // STEM but reports the IN-FILE id, so the collision set importProfiles builds
-  // covers in-file-id collisions only. On-disk filename-stem collisions are
-  // deliberately NOT guarded in the web layer — the firmware
-  // ProfileManager::saveProfile() guard is the authoritative check (see
-  // migrationTransfer.js for the full rationale). saveProfile must echo the
-  // stored id; importProfiles treats a missing id as a hard error (PRO-218 P2-1).
+  // The id-collision / filename-stem contract and the "saveProfile must echo the
+  // stored id" requirement are documented in migrationTransfer.js (PRO-218 P3-4 —
+  // single pointer, no restatement, to avoid drift).
   const importAdapters = useMemo(
     () => ({
       listProfiles: async () => {
@@ -772,27 +774,56 @@ export function ProfileList() {
 
   // Run the shared restore orchestrator over a parsed batch, surface a count-parity
   // summary (PRO-218 P2-2), and offer to retry only the failed subset (PRO-218 P1-1).
+  //
+  // The retry is an explicit BOUNDED loop rather than self-recursion: the prior
+  // recursive form referenced restoreProfiles inside its own useCallback while
+  // the dep array was [importAdapters], which both trips react-hooks/exhaustive-deps
+  // and could loop forever against a wedged socket (PRO-218 NEW-4/NEW-6). The loop
+  // caps user-confirmed retries at MAX_RESTORE_RETRIES so a hung transport can't
+  // trap the user in an endless confirm() cycle.
+  const MAX_RESTORE_RETRIES = 5;
   const restoreProfiles = useCallback(
     async importedProfiles => {
       setLoading(true);
       try {
-        const summary = await importProfiles(importAdapters, importedProfiles);
-        alert(formatRestoreSummary(summary));
-        if (summary.failed.length > 0) {
+        let batch = importedProfiles;
+        for (let attempt = 0; attempt <= MAX_RESTORE_RETRIES; attempt++) {
+          const summary = await importProfiles(importAdapters, batch);
+          alert(formatRestoreSummary(summary));
+          if (summary.failed.length === 0) break;
+
+          if (attempt === MAX_RESTORE_RETRIES) {
+            const labels = summary.failed.map(f => f.label).join(', ');
+            alert(
+              `Giving up after ${MAX_RESTORE_RETRIES} retries — still failing: ${labels}. ` +
+                'Check the device connection and re-import the file manually.',
+            );
+            break;
+          }
+
           const labels = summary.failed.map(f => f.label).join(', ');
           const retry = confirm(
             `${summary.failed.length} profile(s) failed to restore: ${labels}.\n\n` +
               'Retry the failed profiles now?',
           );
-          if (retry) {
-            await loadProfiles();
-            await restoreProfiles(summary.failed.map(f => f.profile));
-            return;
-          }
+          if (!retry) break;
+          await loadProfiles();
+          batch = summary.failed.map(f => f.profile);
         }
       } catch (err) {
         console.error('Failed to import profiles:', err);
-        alert(`Failed to import profiles: ${err.message}`);
+        if (err instanceof ListProfilesError) {
+          // The pre-flight device-list read failed BEFORE any save ran, so
+          // nothing on the device was changed. Tell the user it's safe to retry
+          // rather than leaving them with an opaque "Failed to import" (PRO-218
+          // NEW-3).
+          alert(
+            'Could not read the existing profiles from the device, so the restore ' +
+              'was aborted before changing anything. Check the connection and try again.',
+          );
+        } else {
+          alert(`Failed to import profiles: ${err.message}`);
+        }
       }
       await loadProfiles();
     },
@@ -805,37 +836,58 @@ export function ProfileList() {
       if (files.length === 0) return;
 
       // A backup may have been saved as several per-profile files; restore ALL of
-      // them, not just files[0] (PRO-218 P1-3). Parse each, then merge into one
-      // batch so intra/inter-file id collisions are deduped together.
-      const texts = await Promise.all(
+      // them, not just files[0] (PRO-218 P1-3). Read each file, then aggregate
+      // through the tested aggregateImportFiles() seam, which preserves the
+      // per-FILE outcome so a corrupt/unreadable file in a multi-select can never
+      // be silently dropped (PRO-218 NEW-1/NEW-2).
+      const fileTexts = await Promise.all(
         files.map(
           file =>
             new Promise(resolve => {
               const reader = new FileReader();
               reader.onload = e =>
-                resolve(typeof e.target.result === 'string' ? e.target.result : null);
-              reader.onerror = () => resolve(null);
+                resolve({
+                  name: file.name,
+                  text: typeof e.target.result === 'string' ? e.target.result : null,
+                });
+              reader.onerror = () => resolve({ name: file.name, text: null });
               reader.readAsText(file);
             }),
         ),
       );
 
-      const importedProfiles = texts
-        .filter(text => typeof text === 'string')
-        .flatMap(text => parseProfile(text));
+      const aggregate = aggregateImportFiles(fileTexts);
 
-      // A malformed/truncated/wrong-format file makes parseProfile return [] (see
-      // utils.js). Importing zero profiles after a reformat looks like a clean
-      // success while the backup never landed — the exact silent data loss the
-      // redesign claims to prevent. Surface a distinct corrupt-file error and
-      // ABORT before loadProfiles() repaints the Default-only list (PRO-218 P0-1).
-      if (importedProfiles.length === 0) {
-        alert(formatRestoreSummary({ total: 0, savedCount: 0, failed: [] }));
-        evt.target.value = '';
-        return;
+      // Every selected file that could not be read or parsed to zero profiles is
+      // reported BY NAME — never silently filtered out (PRO-218 NEW-1). The count
+      // is measured against files SELECTED, not profiles parsed, so a dropped file
+      // is always visible.
+      if (aggregate.failedFiles.length > 0) {
+        if (aggregate.profiles.length === 0) {
+          // Nothing parsed at all: this is the corrupt-file abort. Surface the
+          // distinct corrupt-file error and ABORT before loadProfiles() repaints
+          // the Default-only list (PRO-218 P0-1).
+          alert(
+            `${formatRestoreSummary({ total: 0, savedCount: 0, failed: [] })}\n\n${formatFileAggregateWarning(aggregate)}`,
+          );
+          evt.target.value = '';
+          return;
+        }
+        // Some files were good, some failed. Report the failed ones prominently
+        // and let the user decide whether to import the survivors or abort to
+        // re-check the failed backups first.
+        const proceed = confirm(
+          `${formatFileAggregateWarning(aggregate)}\n\n` +
+            `Import the ${aggregate.profiles.length} profile(s) from the ${aggregate.okCount} ` +
+            `readable file(s) anyway? Cancel to re-check the failed file(s) first.`,
+        );
+        if (!proceed) {
+          evt.target.value = '';
+          return;
+        }
       }
 
-      await restoreProfiles(importedProfiles);
+      await restoreProfiles(aggregate.profiles);
       // Reset the input so re-selecting the same file fires onChange again.
       evt.target.value = '';
     },

@@ -5,6 +5,9 @@ import {
   remapImportedProfile,
   importProfiles,
   formatRestoreSummary,
+  aggregateImportFiles,
+  formatFileAggregateWarning,
+  ListProfilesError,
 } from './migrationTransfer.js';
 
 function makeProfile(overrides = {}) {
@@ -248,5 +251,122 @@ describe('formatRestoreSummary', () => {
         failed: [{ label: 'Two' }, { label: 'Three' }],
       }),
     ).toBe('Restored 1 of 3 profiles from backup — failed: Two, Three.');
+  });
+});
+
+describe('aggregateImportFiles — multi-file read+parse+aggregate (PRO-218 NEW-1/NEW-2)', () => {
+  // A valid backup file is a JSON array of profiles (what buildExportPayload
+  // writes). parseProfile returns the array as-is. A corrupt/unreadable file is
+  // either a null text (FileReader failed) or a string that is neither JSON nor
+  // valid TCL — parseProfile returns [] for it.
+  const goodText = JSON.stringify(buildExportPayload([makeProfile({ id: 'a', label: 'One' })]));
+  const goodText2 = JSON.stringify(
+    buildExportPayload([
+      makeProfile({ id: 'b', label: 'Two' }),
+      makeProfile({ id: 'c', label: 'Three' }),
+    ]),
+  );
+  const corruptText = 'this is not json and not a tcl profile @@@ {{{';
+
+  it('all-good: merges every file, no failures, parity against selected files', () => {
+    const result = aggregateImportFiles([
+      { name: 'one.json', text: goodText },
+      { name: 'two.json', text: goodText2 },
+    ]);
+    expect(result.selectedCount).toBe(2);
+    expect(result.okCount).toBe(2);
+    expect(result.failedFiles).toHaveLength(0);
+    expect(result.profiles.map(p => p.label).sort()).toEqual(['One', 'Three', 'Two']);
+    expect(result.fileResults).toEqual([
+      { name: 'one.json', ok: true, count: 1 },
+      { name: 'two.json', ok: true, count: 2 },
+    ]);
+  });
+
+  it('some-corrupt: keeps the good files BUT reports the failed ones by name (the NEW-1 fix)', () => {
+    const result = aggregateImportFiles([
+      { name: 'good.json', text: goodText },
+      { name: 'corrupt.json', text: corruptText },
+      { name: 'unreadable.json', text: null }, // FileReader onerror -> null
+    ]);
+    // The two bad files are NOT silently dropped: they surface as failedFiles.
+    expect(result.selectedCount).toBe(3);
+    expect(result.okCount).toBe(1);
+    expect(result.failedFiles.map(f => f.name)).toEqual(['corrupt.json', 'unreadable.json']);
+    // The good file's profile still aggregates (survivors are importable).
+    expect(result.profiles.map(p => p.label)).toEqual(['One']);
+    // Per-file outcome is exact: a corrupt file in a multi-select is visible.
+    expect(result.fileResults).toEqual([
+      { name: 'good.json', ok: true, count: 1 },
+      { name: 'corrupt.json', ok: false, count: 0 },
+      { name: 'unreadable.json', ok: false, count: 0 },
+    ]);
+  });
+
+  it('all-corrupt: zero profiles, every file reported as failed', () => {
+    const result = aggregateImportFiles([
+      { name: 'a.json', text: corruptText },
+      { name: 'b.json', text: null },
+    ]);
+    expect(result.profiles).toHaveLength(0);
+    expect(result.okCount).toBe(0);
+    expect(result.failedFiles.map(f => f.name)).toEqual(['a.json', 'b.json']);
+  });
+
+  it('empty selection: no files, no profiles, no failures', () => {
+    const result = aggregateImportFiles([]);
+    expect(result.selectedCount).toBe(0);
+    expect(result.profiles).toHaveLength(0);
+    expect(result.okCount).toBe(0);
+    expect(result.failedFiles).toHaveLength(0);
+    expect(result.fileResults).toEqual([]);
+  });
+
+  it('tolerates null/undefined input', () => {
+    const result = aggregateImportFiles(undefined);
+    expect(result.selectedCount).toBe(0);
+    expect(result.profiles).toHaveLength(0);
+  });
+});
+
+describe('formatFileAggregateWarning (PRO-218 NEW-1)', () => {
+  it('names the failed files and distinguishes selected vs parsed', () => {
+    const aggregate = aggregateImportFiles([
+      { name: 'good.json', text: JSON.stringify(buildExportPayload([makeProfile()])) },
+      { name: 'corrupt.json', text: 'nope @@@' },
+      { name: 'gone.json', text: null },
+    ]);
+    expect(formatFileAggregateWarning(aggregate)).toBe(
+      '2 of 3 selected files could not be read or contained no profiles: ' +
+        'corrupt.json, gone.json. Nothing was imported from them.',
+    );
+  });
+
+  it('uses singular phrasing for a single failed file', () => {
+    const aggregate = aggregateImportFiles([{ name: 'only.json', text: 'bad @@@' }]);
+    expect(formatFileAggregateWarning(aggregate)).toBe(
+      '1 of 1 selected file could not be read or contained no profiles: only.json. ' +
+        'Nothing was imported from it.',
+    );
+  });
+});
+
+describe('importProfiles — pre-flight list failure (PRO-218 NEW-3)', () => {
+  it('throws a distinct ListProfilesError when the device list fetch rejects, before any save', async () => {
+    let saveCalls = 0;
+    const adapters = {
+      listProfiles: async () => {
+        throw new Error('socket closed');
+      },
+      saveProfile: async profile => {
+        saveCalls += 1;
+        return { ...profile, id: profile.id || 'minted' };
+      },
+    };
+    await expect(importProfiles(adapters, [makeProfile()])).rejects.toBeInstanceOf(
+      ListProfilesError,
+    );
+    // Nothing was overwritten on the device: the failure is a clean pre-flight abort.
+    expect(saveCalls).toBe(0);
   });
 });
