@@ -70,6 +70,12 @@ class WebUIPlugin : public Plugin {
     void handleFlushStart(uint32_t clientId, JsonDocument &request);
 
     // HTTP handlers
+    // Serves the web UI from the firmware-embedded, memory-mapped flash blob
+    // (catch-all for any path not claimed by an explicit route). The 2-arg
+    // overload serves a fixed asset path (used by the favicon/touch-icon
+    // handlers to serve the embedded gm.png). [GM-106]
+    void serveWebAsset(AsyncWebServerRequest *request);
+    void serveWebAsset(AsyncWebServerRequest *request, String path);
     void handleSettings(AsyncWebServerRequest *request);
     void handleBLEScaleList(AsyncWebServerRequest *request);
     void handleBLEScaleScan(AsyncWebServerRequest *request);

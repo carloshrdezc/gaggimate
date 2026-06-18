@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ShotHistoryPlugin.h>
+#include <display/webassets/web_ui_manifest.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -416,6 +417,53 @@ void WebUIPlugin::loop() {
     }
 }
 
+// Linear lookup over the embedded asset table (~50 entries) — a couple of
+// strcmps per request, negligible next to the network round-trip.
+static const WebAsset *findWebAsset(const String &path) {
+    for (size_t i = 0; i < WEB_ASSETS_COUNT; i++) {
+        if (path == WEB_ASSETS[i].path) {
+            return &WEB_ASSETS[i];
+        }
+    }
+    return nullptr;
+}
+
+void WebUIPlugin::serveWebAsset(AsyncWebServerRequest *request) { serveWebAsset(request, request->url()); }
+
+void WebUIPlugin::serveWebAsset(AsyncWebServerRequest *request, String path) {
+    if (path.isEmpty() || path == "/") {
+        path = WEB_UI_INDEX_PATH;
+    }
+
+    const WebAsset *asset = findWebAsset(path);
+    if (asset == nullptr && !path.startsWith("/assets/")) {
+        // SPA client-side routes (e.g. /settings, /profiles) aren't real files —
+        // fall back to index.html. A miss under /assets/ is a genuine 404, not a
+        // route, so it is not rewritten.
+        asset = findWebAsset(WEB_UI_INDEX_PATH);
+    }
+    if (asset == nullptr) {
+        request->send(404, "text/plain", "Not found");
+        return;
+    }
+
+    // Serve straight from the memory-mapped flash blob — no copy into RAM, no
+    // filesystem read.
+    AsyncWebServerResponse *response =
+        request->beginResponse(200, asset->contentType, gWebUiBlobStart + asset->offset, asset->length);
+    if (asset->gzip) {
+        response->addHeader("Content-Encoding", "gzip");
+    }
+    // Content-hashed build assets (/assets/<hash>.js) never change for a given URL — cache them forever. index.html and
+    // other unhashed files must revalidate so a new build is picked up after an update. [GM-83]
+    if (path.startsWith("/assets/")) {
+        response->addHeader("Cache-Control", "public, max-age=31536000, immutable");
+    } else {
+        response->addHeader("Cache-Control", "no-cache");
+    }
+    request->send(response);
+}
+
 void WebUIPlugin::setupServer() {
     server.on("^\\/api\\/.*$", HTTP_OPTIONS, [this](AsyncWebServerRequest *request) { handleOptions(request); });
     server.on("/connecttest.txt", [](AsyncWebServerRequest *request) {
@@ -470,19 +518,15 @@ void WebUIPlugin::setupServer() {
         ESP_LOGI("WebUI", "TEST endpoint hit!");
         request->send(200, "text/plain", "ESP32 server is alive!");
     });
-    // Handle missing favicon/icons explicitly before serveStatic
-    server.on("/favicon.ico", [](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/gm.png", "image/png"); });
-    server.on("/apple-touch-icon.png", [](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/gm.png", "image/png"); });
-    server.on("/apple-touch-icon-precomposed.png", [](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/gm.png", "image/png"); });
-    // Vite emits content-hashed asset names. Cache them aggressively so route
-    // navigation does not repeatedly hit the ESP32 for immutable chunks/fonts.
-    server.serveStatic("/assets/", LittleFS, "/w/assets/").setCacheControl("public, max-age=31536000, immutable");
-    server.serveStatic("/fonts/", LittleFS, "/w/fonts/").setCacheControl("public, max-age=31536000, immutable");
-    // onNotFound must be registered BEFORE serveStatic so it catches unmatched paths
-    server.onNotFound([](AsyncWebServerRequest *request) {
-        request->send(LittleFS, "/w/index.html");
-    });
-    server.serveStatic("/", LittleFS, "/w").setDefaultFile("index.html").setCacheControl("max-age=0");
+    // Favicon / touch icons are served from the embedded gm.png blob (kept out of the filesystem). [GM-106]
+    server.on("/favicon.ico", [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
+    server.on("/apple-touch-icon.png", [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
+    server.on("/apple-touch-icon-precomposed.png",
+              [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
+    // The web UI is embedded in firmware flash and served from the memory-mapped blob (see serveWebAsset). It is no
+    // longer in LittleFS, so OTA never touches the partition holding profiles/shots. The catch-all onNotFound handles
+    // every path not claimed by an explicit server.on()/api route above (/, /assets/*, /fonts/*, SPA routes). [GM-106]
+    server.onNotFound([this](AsyncWebServerRequest *request) { serveWebAsset(request); });
     ws.onEvent(
         [this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
             if (type == WS_EVT_CONNECT) {
