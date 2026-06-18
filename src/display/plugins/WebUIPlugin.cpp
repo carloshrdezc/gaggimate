@@ -454,9 +454,9 @@ void WebUIPlugin::serveWebAsset(AsyncWebServerRequest *request, String path) {
     if (asset->gzip) {
         response->addHeader("Content-Encoding", "gzip");
     }
-    // Content-hashed build assets (/assets/<hash>.js) never change for a given URL — cache them forever. index.html and
-    // other unhashed files must revalidate so a new build is picked up after an update. [GM-83]
-    if (path.startsWith("/assets/")) {
+    // Content-hashed build assets (/assets/<hash>.js, /fonts/<hash>.woff2) never change for a given URL — cache them
+    // forever. index.html and other unhashed files must revalidate so a new build is picked up after an update. [GM-83]
+    if (path.startsWith("/assets/") || path.startsWith("/fonts/")) {
         response->addHeader("Cache-Control", "public, max-age=31536000, immutable");
     } else {
         response->addHeader("Cache-Control", "no-cache");
@@ -521,8 +521,7 @@ void WebUIPlugin::setupServer() {
     // Favicon / touch icons are served from the embedded gm.png blob (kept out of the filesystem). [GM-106]
     server.on("/favicon.ico", [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
     server.on("/apple-touch-icon.png", [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
-    server.on("/apple-touch-icon-precomposed.png",
-              [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
+    server.on("/apple-touch-icon-precomposed.png", [this](AsyncWebServerRequest *request) { serveWebAsset(request, "/gm.png"); });
     // The web UI is embedded in firmware flash and served from the memory-mapped blob (see serveWebAsset). It is no
     // longer in LittleFS, so OTA never touches the partition holding profiles/shots. The catch-all onNotFound handles
     // every path not claimed by an explicit server.on()/api route above (/, /assets/*, /fonts/*, SPA routes). [GM-106]
