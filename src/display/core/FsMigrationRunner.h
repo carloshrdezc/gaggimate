@@ -1,6 +1,8 @@
 #ifndef FS_MIGRATION_RUNNER_H
 #define FS_MIGRATION_RUNNER_H
 
+#include <cstdint>
+
 // PRO-218 — device-side execution of the SPIFFS->LittleFS one-time migration.
 //
 // This is the I/O half of the shim. The pure decision logic lives in
