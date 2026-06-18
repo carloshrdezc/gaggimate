@@ -6,6 +6,7 @@
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/FsMigrationRunner.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -61,9 +62,11 @@ void Controller::setup() {
     // async_tcp task for every request, which under a multi-tab load burst
     // pegged CPU0 for >5s and tripped the task watchdog (reboot). LittleFS
     // lookups are O(path). maxOpenFiles 16 for concurrent asset serving. [GM-90]
-    if (!LittleFS.begin(true, "/littlefs", 16)) {
-        Serial.println(F("An Error has occurred while mounting LittleFS"));
-    }
+    //
+    // The actual mount is deferred until AFTER SD-card detection below, because
+    // the one-time SPIFFS->LittleFS migration (PRO-218) needs to know whether
+    // an SD card is present (user /p and /h live on SD when it is). See
+    // ensureDataPartitionMounted() after the SD-install block.
 
 #ifndef GAGGIMATE_HEADLESS
     setupPanel();
@@ -78,6 +81,17 @@ void Controller::setup() {
         ESP_LOGI(LOG_TAG, "Used: %lluMB, Capacity: %lluMB", SD_MMC.usedBytes() / 1024 / 1024, SD_MMC.cardSize() / 1024 / 1024);
     }
 #endif
+
+    // Mount the LittleFS data partition, performing the one-time
+    // SPIFFS->LittleFS migration (PRO-218) on the first boot of new firmware on
+    // a pre-PRO-212 (SPIFFS) device. Must run AFTER SD detection (above) so the
+    // migration knows whether user /p and /h are on the SD card (safe) or on
+    // the internal partition being reformatted (must be rescued). Replaces the
+    // old `LittleFS.begin(true, ...)` that would silently wipe user data on the
+    // first post-upgrade boot. maxOpenFiles 16 matches the asset-serving need.
+    if (!ensureDataPartitionMounted(16)) {
+        Serial.println(F("An Error has occurred while mounting LittleFS"));
+    }
     FS *fs = &LittleFS;
     if (sdcard) {
         fs = &SD_MMC;
