@@ -8,24 +8,24 @@ import { listBeans, recordBeanSelection, parseQuantity } from '../../utils/beanM
 import { MODE_LABELS, formatNumber, StatRow } from '../../utils/homeConstants.jsx';
 
 const DOSE_STORAGE_KEY = 'gaggimate-dose-grams';
+const TARGET_WEIGHT_STORAGE_KEY = 'gaggimate-target-weight';
 const DEFAULT_DOSE = 18.0;
+const DEFAULT_YIELD = 36.0;
 
 const status = computed(() => machine.value.status);
 
 // Temperature stepper popover
 function TempPopover({ currentTemp, targetTemp, onChange, onClose }) {
   return (
-    <div className='nd-card absolute left-0 top-full z-50 mt-2 w-full p-4' onClick={e => e.stopPropagation()}>
+    <div
+      className='nd-card absolute top-full left-0 z-50 mt-2 w-full p-4'
+      onClick={e => e.stopPropagation()}
+    >
       <div className='mb-4 flex items-center justify-between'>
-        <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+        <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
           Adjust Temperature
         </span>
-        <button
-          type='button'
-          className='nd-popover-close'
-          onClick={onClose}
-          aria-label='Close'
-        >
+        <button type='button' className='nd-popover-close' onClick={onClose} aria-label='Close'>
           <FontAwesomeIcon icon={faTimes} />
         </button>
       </div>
@@ -48,7 +48,7 @@ function TempPopover({ currentTemp, targetTemp, onChange, onClose }) {
           +
         </button>
       </div>
-      <div className='mt-3 text-center font-nd-mono text-[11px] text-[var(--text-disabled,#666)]'>
+      <div className='font-nd-mono mt-3 text-center text-[11px] text-[var(--text-disabled,#666)]'>
         Current: {formatNumber(currentTemp)}°C
       </div>
     </div>
@@ -65,26 +65,24 @@ TempPopover.propTypes = {
 // Profile popover
 function ProfilePopover({ profiles, selectedProfileId, onSelect, onClose, loading, error }) {
   return (
-    <div className='nd-card absolute left-0 top-full z-50 mt-2 w-full p-4' onClick={e => e.stopPropagation()}>
+    <div
+      className='nd-card absolute top-full left-0 z-50 mt-2 w-full p-4'
+      onClick={e => e.stopPropagation()}
+    >
       <div className='mb-3 flex items-center justify-between'>
-        <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+        <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
           Select Profile
         </span>
-        <button
-          type='button'
-          className='nd-popover-close'
-          onClick={onClose}
-          aria-label='Close'
-        >
+        <button type='button' className='nd-popover-close' onClick={onClose} aria-label='Close'>
           <FontAwesomeIcon icon={faTimes} />
         </button>
       </div>
       {loading ? (
-        <div className='py-4 text-center font-nd-mono text-[11px] text-[var(--text-disabled,#666)]'>
+        <div className='font-nd-mono py-4 text-center text-[11px] text-[var(--text-disabled,#666)]'>
           [LOADING...]
         </div>
       ) : error ? (
-        <div className='py-4 text-center font-nd-mono text-[11px] text-[var(--color-error,#d71921)]'>
+        <div className='font-nd-mono py-4 text-center text-[11px] text-[var(--color-error,#d71921)]'>
           [{error.toUpperCase()}]
         </div>
       ) : (
@@ -119,26 +117,24 @@ ProfilePopover.propTypes = {
 // Bean popover
 function BeanPopover({ beans, activeBean, onSelect, onClose, loading, error }) {
   return (
-    <div className='nd-card absolute left-0 top-full z-50 mt-2 w-full p-4' onClick={e => e.stopPropagation()}>
+    <div
+      className='nd-card absolute top-full left-0 z-50 mt-2 w-full p-4'
+      onClick={e => e.stopPropagation()}
+    >
       <div className='mb-3 flex items-center justify-between'>
-        <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+        <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
           Select Bean
         </span>
-        <button
-          type='button'
-          className='nd-popover-close'
-          onClick={onClose}
-          aria-label='Close'
-        >
+        <button type='button' className='nd-popover-close' onClick={onClose} aria-label='Close'>
           <FontAwesomeIcon icon={faTimes} />
         </button>
       </div>
       {loading ? (
-        <div className='py-4 text-center font-nd-mono text-[11px] text-[var(--text-disabled,#666)]'>
+        <div className='font-nd-mono py-4 text-center text-[11px] text-[var(--text-disabled,#666)]'>
           [LOADING...]
         </div>
       ) : error ? (
-        <div className='py-4 text-center font-nd-mono text-[11px] text-[var(--color-error,#d71921)]'>
+        <div className='font-nd-mono py-4 text-center text-[11px] text-[var(--color-error,#d71921)]'>
           [{error.toUpperCase()}]
         </div>
       ) : (
@@ -188,7 +184,7 @@ function DoseInput({ value, onAdjust, onInputChange }) {
     setEditing(false);
   };
 
-  const handleInputKeyDown = (e) => {
+  const handleInputKeyDown = e => {
     if (e.key === 'Enter') e.target.blur();
     if (e.key === 'Escape') {
       setInputValue(String(value));
@@ -196,11 +192,14 @@ function DoseInput({ value, onAdjust, onInputChange }) {
     }
   };
 
-  const handleBlurWithDocumentClick = useCallback((e) => {
-    if (editing && inputRef.current && !inputRef.current.contains(e.target)) {
-      handleInputBlur();
-    }
-  }, [editing, inputValue, value, onInputChange]);
+  const handleBlurWithDocumentClick = useCallback(
+    e => {
+      if (editing && inputRef.current && !inputRef.current.contains(e.target)) {
+        handleInputBlur();
+      }
+    },
+    [editing, inputValue, value, onInputChange],
+  );
 
   useEffect(() => {
     document.addEventListener('mousedown', handleBlurWithDocumentClick);
@@ -218,7 +217,10 @@ function DoseInput({ value, onAdjust, onInputChange }) {
           <button
             type='button'
             className='dose-stepper-btn'
-            onClick={(e) => { e.stopPropagation(); onAdjust(-0.1); }}
+            onClick={e => {
+              e.stopPropagation();
+              onAdjust(-0.1);
+            }}
             aria-label='Decrease dose'
           >
             −
@@ -226,7 +228,10 @@ function DoseInput({ value, onAdjust, onInputChange }) {
           <button
             type='button'
             className='dose-stepper-btn'
-            onClick={(e) => { e.stopPropagation(); onAdjust(0.1); }}
+            onClick={e => {
+              e.stopPropagation();
+              onAdjust(0.1);
+            }}
             aria-label='Increase dose'
           >
             +
@@ -263,36 +268,40 @@ DoseInput.propTypes = {
   onInputChange: PropTypes.func.isRequired,
 };
 
-function WeightInput({ value, onAdjust }) {
+function WeightInput({ value, onAdjust, disabled = false }) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef(null);
 
   const handleNumberClick = () => {
+    if (disabled) return;
     setInputValue(String(value));
     setEditing(true);
   };
 
   const handleInputBlur = () => {
     const parsed = parseQuantity(inputValue);
-    if (parsed !== null && parsed > 0) {
+    if (!disabled && parsed !== null && parsed > 0) {
       onAdjust(parsed - value);
     }
     setEditing(false);
   };
 
-  const handleInputKeyDown = (e) => {
+  const handleInputKeyDown = e => {
     if (e.key === 'Enter') e.target.blur();
     if (e.key === 'Escape') {
       setEditing(false);
     }
   };
 
-  const handleBlurWithDocumentClick = useCallback((e) => {
-    if (editing && inputRef.current && !inputRef.current.contains(e.target)) {
-      handleInputBlur();
-    }
-  }, [editing, inputValue, value, onAdjust]);
+  const handleBlurWithDocumentClick = useCallback(
+    e => {
+      if (editing && inputRef.current && !inputRef.current.contains(e.target)) {
+        handleInputBlur();
+      }
+    },
+    [editing, inputValue, value, onAdjust],
+  );
 
   useEffect(() => {
     document.addEventListener('mousedown', handleBlurWithDocumentClick);
@@ -303,29 +312,41 @@ function WeightInput({ value, onAdjust }) {
     <div className='nd-stat flex-1'>
       <div className='nd-stat-label'>Weight</div>
       <div className='flex items-center gap-2'>
-        <span className='nd-stat-value' onClick={handleNumberClick} style={{ cursor: 'text' }}>
-          {value.toFixed(1)}g
+        <span
+          className='nd-stat-value'
+          onClick={handleNumberClick}
+          style={{ cursor: disabled ? 'default' : 'text', opacity: disabled ? 0.5 : 1 }}
+        >
+          {disabled ? '—' : `${value.toFixed(1)}g`}
         </span>
-        <div className='dose-stepper'>
-          <button
-            type='button'
-            className='dose-stepper-btn'
-            onClick={(e) => { e.stopPropagation(); onAdjust(-0.5); }}
-            aria-label='Decrease weight'
-          >
-            −
-          </button>
-          <button
-            type='button'
-            className='dose-stepper-btn'
-            onClick={(e) => { e.stopPropagation(); onAdjust(0.5); }}
-            aria-label='Increase weight'
-          >
-            +
-          </button>
-        </div>
+        {!disabled && (
+          <div className='dose-stepper'>
+            <button
+              type='button'
+              className='dose-stepper-btn'
+              onClick={e => {
+                e.stopPropagation();
+                onAdjust(-0.5);
+              }}
+              aria-label='Decrease weight'
+            >
+              −
+            </button>
+            <button
+              type='button'
+              className='dose-stepper-btn'
+              onClick={e => {
+                e.stopPropagation();
+                onAdjust(0.5);
+              }}
+              aria-label='Increase weight'
+            >
+              +
+            </button>
+          </div>
+        )}
       </div>
-      {editing && (
+      {editing && !disabled && (
         <input
           ref={inputRef}
           type='text'
@@ -352,6 +373,7 @@ function WeightInput({ value, onAdjust }) {
 WeightInput.propTypes = {
   value: PropTypes.number.isRequired,
   onAdjust: PropTypes.func.isRequired,
+  disabled: PropTypes.bool,
 };
 
 export default function HomeModeCard({ mode }) {
@@ -364,6 +386,9 @@ export default function HomeModeCard({ mode }) {
     targetPressure,
     targetTemperature,
     brewTargetVolume,
+    volumetricAvailable,
+    brewTarget,
+    allowYieldOverride,
   } = status.value;
   const connected = machine.value.connected;
 
@@ -382,10 +407,35 @@ export default function HomeModeCard({ mode }) {
     return value;
   });
 
+  // Target weight (yield) is DEVICE-AUTHORITATIVE (PRO-221, same class as
+  // CAR-371/372/373 and the DashboardMerged CAR-375 treatment). The device
+  // owns this value: `tw` in evt:status carries the active profile's total
+  // volumetric target (WebUIPlugin -> ProfileManager::getSelectedProfile().
+  // getTotalVolume()), surfaced here as `brewTargetVolume`. We seed and reseed
+  // from that canonical value so every browser agrees with what the machine
+  // will actually brew. localStorage is kept ONLY as an offline fallback: it
+  // is read for the initial value when no live device value is available, and
+  // it is written on every local change so a disconnected reload has a
+  // sensible last-known number — but it must NEVER override a live device
+  // value (see the reseed effect below).
   const [targetWeight, setTargetWeight] = useState(() => {
-    const stored = localStorage.getItem('gaggimate-target-weight');
-    return parseQuantity(stored) ?? (brewTargetVolume || 36.0);
+    if (brewTargetVolume > 0) return brewTargetVolume;
+    const stored = parseQuantity(localStorage.getItem(TARGET_WEIGHT_STORAGE_KEY));
+    return stored ?? DEFAULT_YIELD;
   });
+
+  // Reseed to the device's broadcast target whenever the active profile or the
+  // device's volumetric target changes. This makes a change made in one browser
+  // appear in another on its next status update, and prevents a stale local
+  // value from carrying across a profile switch. When the active profile has no
+  // volumetric target (brewTargetVolume <= 0, e.g. a time/pressure profile) the
+  // device ignores yield entirely, so we fall back to DEFAULT_YIELD rather than
+  // holding a misleading number. localStorage is intentionally NOT consulted
+  // here so it can never override a live device value.
+  useEffect(() => {
+    if (!connected) return;
+    setTargetWeight(brewTargetVolume > 0 ? brewTargetVolume : DEFAULT_YIELD);
+  }, [connected, selectedProfileId, brewTargetVolume]);
 
   const loadProfileOptions = useCallback(async () => {
     if (profileOptions.length > 0) return;
@@ -436,7 +486,7 @@ export default function HomeModeCard({ mode }) {
         console.error('Failed to select profile:', err);
       }
     },
-    [api]
+    [api],
   );
 
   const handleBeanSelect = useCallback(
@@ -456,7 +506,7 @@ export default function HomeModeCard({ mode }) {
         console.error('Failed to select bean:', err);
       }
     },
-    [api, beanOptions]
+    [api, beanOptions],
   );
 
   const handleTempClick = useCallback(() => {
@@ -471,10 +521,10 @@ export default function HomeModeCard({ mode }) {
         console.error('Failed to change temperature:', error);
       }
     },
-    [api]
+    [api],
   );
 
-  const adjustDose = useCallback((delta) => {
+  const adjustDose = useCallback(delta => {
     setDoseGrams(prev => {
       const next = Math.round((prev + delta + Number.EPSILON) * 100) / 100;
       const clamped = Math.max(0, next);
@@ -483,7 +533,7 @@ export default function HomeModeCard({ mode }) {
     });
   }, []);
 
-  const handleDoseInputChange = useCallback((e) => {
+  const handleDoseInputChange = useCallback(e => {
     const raw = e.target.value.replace(/g$/, '').trim();
     const parsed = parseQuantity(raw);
     if (parsed !== null) {
@@ -492,17 +542,32 @@ export default function HomeModeCard({ mode }) {
     }
   }, []);
 
-  const adjustWeight = useCallback((delta) => {
-    const newWeight = Math.round((targetWeight + delta + Number.EPSILON) * 10) / 10;
-    const clamped = Math.max(0.5, newWeight);
-    localStorage.setItem('gaggimate-target-weight', String(clamped));
-    setTargetWeight(clamped);
-    try {
-      api.send({ tp: 'req:change-brew-target', target: clamped });
-    } catch (error) {
-      console.error('Failed to change weight target:', error);
-    }
-  }, [api, targetWeight]);
+  // Yield is editable only when the device says the active profile is
+  // volumetric AND per-shot override is allowed — matching the firmware guards
+  // in Controller::setBrewTarget()/raiseBrewTarget() (CAR-375). For
+  // non-volumetric profiles the target has no meaning, so we do not let the
+  // user push a misleading value to the device.
+  const yieldEditable = !!volumetricAvailable && !!brewTarget && !!allowYieldOverride;
+
+  const adjustWeight = useCallback(
+    delta => {
+      if (!yieldEditable) return;
+      const newWeight = Math.round((targetWeight + delta + Number.EPSILON) * 10) / 10;
+      const clamped = Math.max(0.5, newWeight);
+      setTargetWeight(clamped);
+      // Offline fallback cache only — the device remains authoritative and will
+      // reseed this value on the next status update once it applies the change.
+      try {
+        localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, String(clamped));
+      } catch {}
+      try {
+        api.send({ tp: 'req:change-brew-target', target: clamped });
+      } catch (error) {
+        console.error('Failed to change weight target:', error);
+      }
+    },
+    [api, targetWeight, yieldEditable],
+  );
 
   const handlePressureChange = useCallback(
     delta => {
@@ -512,7 +577,7 @@ export default function HomeModeCard({ mode }) {
         console.error('Failed to change pressure:', error);
       }
     },
-    [api]
+    [api],
   );
 
   return (
@@ -521,17 +586,16 @@ export default function HomeModeCard({ mode }) {
       <div className='flex gap-3'>
         <div className='nd-stat flex-1'>
           <div className='nd-stat-label'>
-            <span className={`nd-status-dot mr-2 inline-block align-middle ${connected ? 'nd-status-dot--online' : ''}`} />
+            <span
+              className={`nd-status-dot mr-2 inline-block align-middle ${connected ? 'nd-status-dot--online' : ''}`}
+            />
             Connection
           </div>
           <div className={`nd-stat-value ${connected ? '' : 'text-[var(--warning,#d4a843)]'}`}>
             {connected ? 'Online' : 'Offline'}
           </div>
         </div>
-        <div
-          className='nd-stat flex-1 cursor-pointer relative'
-          onClick={handleTempClick}
-        >
+        <div className='nd-stat relative flex-1 cursor-pointer' onClick={handleTempClick}>
           <div className='nd-stat-label'>Temperature</div>
           <div className='nd-stat-value'>
             {formatNumber(currentTemperature)}°C
@@ -553,11 +617,8 @@ export default function HomeModeCard({ mode }) {
       {/* Profile / Bean row */}
       <div className='flex gap-3'>
         {/* Left: Profile stacked above Weight */}
-        <div className='flex flex-col flex-1 flex-shrink-0 gap-0 min-w-0'>
-          <div
-            className='nd-stat flex-1 cursor-pointer relative'
-            onClick={handleProfileClick}
-          >
+        <div className='flex min-w-0 flex-1 flex-shrink-0 flex-col gap-0'>
+          <div className='nd-stat relative flex-1 cursor-pointer' onClick={handleProfileClick}>
             <div className='nd-stat-label'>Profile</div>
             <div className='nd-stat-value'>{selectedProfile || 'Default'}</div>
             {activePopover === 'profile' && (
@@ -572,18 +633,13 @@ export default function HomeModeCard({ mode }) {
             )}
           </div>
           <div className='dose-card'>
-            <WeightInput
-              value={targetWeight}
-              onAdjust={adjustWeight}
-            />
+            <WeightInput value={targetWeight} onAdjust={adjustWeight} disabled={!yieldEditable} />
           </div>
         </div>
 
         {/* Right: Bean stacked above Dose */}
-        <div
-          className='flex flex-col flex-1 flex-shrink-0 gap-0 min-w-0'
-        >
-          <div className='nd-stat flex-1 cursor-pointer relative' onClick={handleBeanClick}>
+        <div className='flex min-w-0 flex-1 flex-shrink-0 flex-col gap-0'>
+          <div className='nd-stat relative flex-1 cursor-pointer' onClick={handleBeanClick}>
             <div className='nd-stat-label'>Bean</div>
             <div className='nd-stat-value'>{selectedBean || 'Not selected'}</div>
             {activePopover === 'bean' && (
@@ -609,30 +665,38 @@ export default function HomeModeCard({ mode }) {
 
       {/* Shortcuts row */}
       <div className='border-b border-[var(--home-border,#222)] px-5 pt-4 pb-3'>
-        <h3 className='font-nd-mono text-[11px] font-400 uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+        <h3 className='font-nd-mono font-400 text-[11px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
           Shortcuts
         </h3>
       </div>
       <div className='flex gap-3'>
-        <div className='nd-stat flex-1 cursor-pointer relative'>
+        <div className='nd-stat relative flex-1 cursor-pointer'>
           <div className='nd-stat-label'>Scales</div>
-          <a href='/scales' className='nd-shortcut'>[Scales]</a>
+          <a href='/scales' className='nd-shortcut'>
+            [Scales]
+          </a>
         </div>
 
-        <div className='nd-stat flex-1 cursor-pointer relative'>
+        <div className='nd-stat relative flex-1 cursor-pointer'>
           <div className='nd-stat-label'>History</div>
-          <a href='/history' className='nd-shortcut'>[History]</a>
+          <a href='/history' className='nd-shortcut'>
+            [History]
+          </a>
         </div>
       </div>
       <div className='flex gap-3'>
-        <div className='nd-stat flex-1 cursor-pointer relative'>
+        <div className='nd-stat relative flex-1 cursor-pointer'>
           <div className='nd-stat-label'>Analyzer</div>
-          <a href='/analyzer' className='nd-shortcut'>[Analyzer]</a>
+          <a href='/analyzer' className='nd-shortcut'>
+            [Analyzer]
+          </a>
         </div>
 
-        <div className='nd-stat flex-1 cursor-pointer relative'>
+        <div className='nd-stat relative flex-1 cursor-pointer'>
           <div className='nd-stat-label'>Settings</div>
-          <a href='/settings' className='nd-shortcut'>[Settings]</a>
+          <a href='/settings' className='nd-shortcut'>
+            [Settings]
+          </a>
         </div>
       </div>
     </div>
