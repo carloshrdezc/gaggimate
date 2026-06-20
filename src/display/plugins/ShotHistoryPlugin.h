@@ -94,8 +94,9 @@ class ShotHistoryPlugin : public Plugin {
     uint8_t ioBuffer[4096];
     size_t ioBufferPos = 0; // bytes used
 
-    bool recording = false;
-    bool extendedRecording = false;
+    // Written on the loopTask (core 0), read cross-task via isRecording()/isExtendedRecording() — hence volatile.
+    volatile bool recording = false;
+    volatile bool extendedRecording = false;
     bool indexEntryCreated = false;     // Track if early index entry was created
     bool shotStartedVolumetric = false; // Track initial volumetric mode
     unsigned long shotStart = 0;
