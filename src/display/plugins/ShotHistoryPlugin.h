@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include <SPIFFS.h>
+#include <atomic>
 #include <display/core/Plugin.h>
 #include <display/core/utils.h>
 #include <display/models/shot_log_format.h>
@@ -39,12 +40,12 @@ class ShotHistoryPlugin : public Plugin {
     // Get current shot ID for WebUIPlugin status updates
     String getCurrentShotId() const { return currentId; }
     // Check if a shot is currently being recorded
-    bool isRecording() const { return recording; }
+    bool isRecording() const { return recording.load(std::memory_order_relaxed); }
     // Check if the post-stop extended-recording / weight-settle window is active.
     // Used by the UI to hold the auto-steam transition until the final shot yield
     // has been captured (PRO-223). Returns false when no settle window is running
     // (e.g. no BLE scale), so callers must not block indefinitely on it.
-    bool isExtendedRecording() const { return extendedRecording; }
+    bool isExtendedRecording() const { return extendedRecording.load(std::memory_order_relaxed); }
 
   private:
     // Index helper functions
@@ -94,9 +95,12 @@ class ShotHistoryPlugin : public Plugin {
     uint8_t ioBuffer[4096];
     size_t ioBufferPos = 0; // bytes used
 
-    // Written on the loopTask (core 0), read cross-task via isRecording()/isExtendedRecording() — hence volatile.
-    volatile bool recording = false;
-    volatile bool extendedRecording = false;
+    // Set from the controller task (core 1, via startRecording()/endRecording() under stateMutex) and
+    // cleared from the ShotHistory loopTask (core 0, in record()). Read lock-free cross-task via
+    // isRecording()/isExtendedRecording(); std::atomic gives a correct, self-documenting cross-core flag
+    // (relaxed ordering — a single independent bool, no dependent data published alongside it).
+    std::atomic<bool> recording{false};
+    std::atomic<bool> extendedRecording{false};
     bool indexEntryCreated = false;     // Track if early index entry was created
     bool shotStartedVolumetric = false; // Track initial volumetric mode
     unsigned long shotStart = 0;

@@ -664,17 +664,21 @@ void DefaultUI::loop() {
         // already false and steam engages immediately on this tick.
         if (ShotHistory.isExtendedRecording()) {
             // Settle still in progress; keep the request pending and re-check next
-            // tick. rerender stays driven by the active/idle interval below.
-            rerender = true;
+            // tick. No rerender needed here — the active/idle interval below keeps
+            // the screen refreshing during the brew, and we render explicitly when
+            // the gate releases (in the else branch).
         } else {
             pendingAutoSteam = false;
             // Controller::deactivate() triggers brew:end without changing mode, so
-            // the mode stays MODE_BREW after a normal shot ends. The guard only
-            // fires false if the user explicitly navigated away (e.g. to standby)
-            // between brew:end and this loop tick, in which case discarding is correct.
+            // the mode stays MODE_BREW after a normal shot ends. The
+            // getMode() == MODE_BREW check is false only if the user explicitly
+            // navigated away (e.g. to standby) between brew:end and this tick, in
+            // which case discarding the auto-steam transition is correct.
             if (controller->getMode() == MODE_BREW) {
                 controller->clear();
                 controller->setMode(MODE_STEAM);
+                // Gate released — guarantee exactly one render for the steam transition.
+                rerender = true;
             }
         }
     }
