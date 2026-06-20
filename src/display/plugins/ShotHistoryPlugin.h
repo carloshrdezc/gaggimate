@@ -40,6 +40,11 @@ class ShotHistoryPlugin : public Plugin {
     String getCurrentShotId() const { return currentId; }
     // Check if a shot is currently being recorded
     bool isRecording() const { return recording; }
+    // Check if the post-stop extended-recording / weight-settle window is active.
+    // Used by the UI to hold the auto-steam transition until the final shot yield
+    // has been captured (PRO-223). Returns false when no settle window is running
+    // (e.g. no BLE scale), so callers must not block indefinitely on it.
+    bool isExtendedRecording() const { return extendedRecording; }
 
   private:
     // Index helper functions

@@ -10,6 +10,7 @@
 #include <display/drivers/WaveshareDriver.h>
 #include <display/drivers/common/LV_Helper.h>
 #include <display/main.h>
+#include <display/plugins/ShotHistoryPlugin.h>
 #include <display/ui/default/lvgl/gm_ui.h>
 #include <display/ui/default/lvgl/ui_theme_manager.h>
 #include <display/ui/default/lvgl/ui_themes.h>
@@ -650,14 +651,31 @@ void DefaultUI::loop() {
     const unsigned long diff = now - lastRender;
 
     if (pendingAutoSteam) {
-        pendingAutoSteam = false;
-        // Controller::deactivate() triggers brew:end without changing mode, so
-        // the mode stays MODE_BREW after a normal shot ends. The guard only
-        // fires false if the user explicitly navigated away (e.g. to standby)
-        // between brew:end and this loop tick, in which case discarding is correct.
-        if (controller->getMode() == MODE_BREW) {
-            controller->clear();
-            controller->setMode(MODE_STEAM);
+        // PRO-223: Do not transition to steam until the shot is fully finalized.
+        // ShotHistory keeps an extended-recording / weight-settle window open for
+        // up to EXTENDED_RECORDING_DURATION after brew:end so the BLE scale can
+        // settle and post-stop drips are captured in the recorded yield. Calling
+        // controller->clear() here fires controller:brew:clear, which aborts that
+        // window (endExtendedRecording), and setMode(MODE_STEAM) stops record()
+        // logging. So we hold pendingAutoSteam until the settle completes.
+        //
+        // When there is no BLE scale (flow-estimation / time-based shots),
+        // endRecording() never opens the window, so isExtendedRecording() is
+        // already false and steam engages immediately on this tick.
+        if (ShotHistory.isExtendedRecording()) {
+            // Settle still in progress; keep the request pending and re-check next
+            // tick. rerender stays driven by the active/idle interval below.
+            rerender = true;
+        } else {
+            pendingAutoSteam = false;
+            // Controller::deactivate() triggers brew:end without changing mode, so
+            // the mode stays MODE_BREW after a normal shot ends. The guard only
+            // fires false if the user explicitly navigated away (e.g. to standby)
+            // between brew:end and this loop tick, in which case discarding is correct.
+            if (controller->getMode() == MODE_BREW) {
+                controller->clear();
+                controller->setMode(MODE_STEAM);
+            }
         }
     }
 
