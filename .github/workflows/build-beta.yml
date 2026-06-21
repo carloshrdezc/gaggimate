@@ -39,7 +39,12 @@ jobs:
           mkdir -p upload/display
           mkdir -p upload/headless
           mkdir -p upload/controller
+          # Delete BOTH moving tags before describe: if master HEAD coincides
+          # with the commit the nightly tag points at (e.g. right after a
+          # dev-master -> master fast-forward), git describe could otherwise
+          # resolve to nightly and write a junk version string (PRO-227 review).
           git tag -d beta 2>/dev/null || true
+          git tag -d nightly 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
       # The web UI is embedded into the display/headless app image (PRO-215), so
       # build_webui.sh must run before the display/headless pio builds; otherwise
@@ -183,7 +188,7 @@ jobs:
           tag_name: beta
           name: 'Beta Release ${{ steps.version.outputs.version }}'
           prerelease: true
-          body: 'Latest beta release, use the beta channel in the UI to download this firmware.'
+          body: 'Latest beta release, built from the master branch (release-candidate). Select the beta channel in the UI to download this firmware.'
           files: |
             release/*
           make_latest: 'false'
