@@ -1,5 +1,6 @@
 #include "ShotHistoryPlugin.h"
 
+#include "ExtendedRecordingPolicy.h"
 #include <SD_MMC.h>
 #include <SPIFFS.h>
 #include <algorithm>
@@ -492,9 +493,15 @@ void ShotHistoryPlugin::record() {
     if (extendedRecording) {
         const unsigned long now = millis();
 
+        // PRO-232: Mirror the window-open guard in endRecording() — keep settling only
+        // while the BLE scale that opened this window is still delivering measurements.
+        // (On non-NIGHTLY builds isBluetoothScaleHealthy() == isVolumetricAvailable();
+        // on NIGHTLY builds isVolumetricAvailable() can stay true via dimming capability
+        // even after the scale dies, which would hold the window open with stale weight
+        // until the EXTENDED_RECORDING_DURATION cap.)
         bool canProcessWeight = (controller != nullptr);
         if (canProcessWeight) {
-            canProcessWeight = controller->isVolumetricAvailable();
+            canProcessWeight = controller->isBluetoothScaleHealthy();
         }
 
         if (!canProcessWeight) {
@@ -581,7 +588,29 @@ void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
         return;
     }
     
-    if (recording && allowExtendedRecording && controller && controller->isVolumetricAvailable() && currentBluetoothWeight > 0) {
+    // PRO-232: Open the post-stop settle window whenever a live BLE scale was the
+    // active volumetric source at brew-end, gating on isBluetoothScaleHealthy()
+    // rather than the instantaneous currentBluetoothWeight sample.
+    //
+    // The old `currentBluetoothWeight > 0` precondition was too brittle: startRecording()
+    // resets currentBluetoothWeight to 0 (line ~549) and it is only refreshed by the
+    // controller:volumetric-measurement:bluetooth:change event. During the 1.5s
+    // BLUETOOTH_GRACE_PERIOD_MS the active source can momentarily switch to
+    // flow-estimation, so the last event delivered to this plugin before brew:end may
+    // have been a 0/stale value even though the scale was healthy and showing weight.
+    // That left the window unopened, isExtendedRecording() immediately false, and the
+    // DefaultUI auto-steam gate releasing on the next tick — cutting the final drips
+    // (PRO-232 repro on 2.0.14).
+    //
+    // isBluetoothScaleHealthy() is true only when a BLE measurement arrived within
+    // BLUETOOTH_GRACE_PERIOD_MS, so this opens the window exactly when there is a genuine
+    // BLE scale to settle. On non-NIGHTLY builds isVolumetricAvailable() == this, so the
+    // flow-estimation / time-based path keeps isBluetoothScaleHealthy() false and steam
+    // still engages immediately (no spurious 3s delay). Opening with weight==0 is safe:
+    // the settle loop in record() self-terminates via weight stabilization and is hard-
+    // capped by EXTENDED_RECORDING_DURATION; it also closes immediately if the scale
+    // goes unhealthy (canProcessWeight check there).
+    if (shouldOpenExtendedRecording(recording, allowExtendedRecording, controller && controller->isBluetoothScaleHealthy())) {
         // Brew keeps recording briefly so Bluetooth-scale weight can settle.
         extendedRecording = true;
         extendedRecordingStart = millis();
