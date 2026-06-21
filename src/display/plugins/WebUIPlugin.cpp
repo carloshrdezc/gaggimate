@@ -969,10 +969,14 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
 
 // Resolve a stored OTA channel string to the GitHub release URL fragment.
 // "latest"      -> "latest" (resolves to most recent non-prerelease)
+// "beta"        -> "tag/beta" (moving tag tracking the master branch)
 // "nightly"     -> "tag/nightly"
 // "tag:<semver>" (validated against STABLE_VERSIONS allow-list) -> "tag/<semver>"
 // anything else -> "latest"
 static String resolveReleaseUrl(const String &channel) {
+    if (channel == "beta") {
+        return RELEASE_URL + "tag/beta";
+    }
     if (channel == "nightly") {
         return RELEASE_URL + "tag/nightly";
     }
@@ -988,9 +992,12 @@ static String resolveReleaseUrl(const String &channel) {
 }
 
 // Normalize an incoming channel to the value we persist in settings.
-// Unknown values fall back to "latest" so a malformed websocket payload
-// can never poison the stored setting.
+// "beta" and "nightly" are accepted moving-tag channels; "tag:<semver>" is
+// validated against the STABLE_VERSIONS allow-list. Unknown values fall back
+// to "latest" so a malformed websocket payload can never poison the stored
+// setting.
 static String normalizeChannel(const String &channel) {
+    if (channel == "beta") return "beta";
     if (channel == "nightly") return "nightly";
     if (channel.startsWith("tag:")) {
         const String tag = channel.substring(4);
