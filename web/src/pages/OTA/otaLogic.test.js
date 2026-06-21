@@ -1,13 +1,19 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test, expect } from 'vitest';
 
 import { updateOtaChannel, canFlashTaggedRelease } from './otaLogic.js';
 
 test('updates OTA channel to nightly without changing other form fields', () => {
   const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.3' }, 'nightly');
 
-  assert.equal(next.channel, 'nightly');
-  assert.equal(next.displayVersion, '2.0.3');
+  expect(next.channel).toBe('nightly');
+  expect(next.displayVersion).toBe('2.0.3');
+});
+
+test('updates OTA channel to beta without changing other form fields', () => {
+  const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.3' }, 'beta');
+
+  expect(next.channel).toBe('beta');
+  expect(next.displayVersion).toBe('2.0.3');
 });
 
 test('updates OTA channel to beta without changing other form fields', () => {
@@ -20,81 +26,72 @@ test('updates OTA channel to beta without changing other form fields', () => {
 test('falls back to stable for unexpected OTA channel values', () => {
   const next = updateOtaChannel({ channel: 'nightly' }, 'garbage-channel');
 
-  assert.equal(next.channel, 'latest');
+  expect(next.channel).toBe('latest');
 });
 
 test('passes through tag:<semver> for a specific stable tag', () => {
   const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.10' }, 'tag:2.0.8');
 
-  assert.equal(next.channel, 'tag:2.0.8');
-  assert.equal(next.displayVersion, '2.0.10');
+  expect(next.channel).toBe('tag:2.0.8');
+  expect(next.displayVersion).toBe('2.0.10');
 });
 
 test('falls back to latest for empty tag prefix', () => {
   const next = updateOtaChannel({ channel: 'nightly' }, 'tag:');
 
-  assert.equal(next.channel, 'latest');
+  expect(next.channel).toBe('latest');
 });
 
 test('passes through latest unchanged', () => {
   const next = updateOtaChannel({ channel: 'tag:2.0.8' }, 'latest');
 
-  assert.equal(next.channel, 'latest');
+  expect(next.channel).toBe('latest');
 });
 
 // canFlashTaggedRelease gate
 
 test('canFlashTaggedRelease: enabled when device confirmed the pinned tag', () => {
   const formData = { channel: 'tag:2.0.8', status: '2.0.8' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' }), true);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(true);
 });
 
 test('canFlashTaggedRelease: disabled while OTA is still Checking...', () => {
   const formData = { channel: 'tag:2.0.8', status: 'Checking...' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' }), false);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
 });
 
 test('canFlashTaggedRelease: disabled when status is empty (no check yet)', () => {
   const formData = { channel: 'tag:2.0.8', status: '' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' }), false);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
 });
 
 test('canFlashTaggedRelease: disabled when last check reported failure', () => {
   const formData = { channel: 'tag:2.0.8', status: 'Update failed' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' }), false);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
 });
 
 test('canFlashTaggedRelease: disabled when user has unsaved dropdown change', () => {
   const formData = { channel: 'latest', status: '2.0.10' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' }), false);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
 });
 
 test('canFlashTaggedRelease: disabled when reported tag mismatches pinned tag', () => {
   // Device-acknowledged channel is tag:2.0.8 but checkForUpdates has only
   // resolved _latest_url for the previous channel (e.g. still showing 2.0.10).
   const formData = { channel: 'tag:2.0.8', status: '2.0.10' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' }), false);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
 });
 
 test('canFlashTaggedRelease: returns false for non-tag channels', () => {
-  assert.equal(
-    canFlashTaggedRelease({ formData: { channel: 'latest', status: '2.0.10' }, pendingChannel: 'latest' }),
-    false,
-  );
-  assert.equal(
-    canFlashTaggedRelease({ formData: { channel: 'nightly', status: 'nightly' }, pendingChannel: 'nightly' }),
-    false,
-  );
+  expect(canFlashTaggedRelease({ formData: { channel: 'latest', status: '2.0.10' }, pendingChannel: 'latest' })).toBe(false);
+  expect(canFlashTaggedRelease({ formData: { channel: 'nightly', status: 'nightly' }, pendingChannel: 'nightly' })).toBe(false);
 });
 
 test('canFlashTaggedRelease: returns false for malformed input', () => {
-  assert.equal(canFlashTaggedRelease(), false);
-  assert.equal(canFlashTaggedRelease({}), false);
-  assert.equal(canFlashTaggedRelease({ formData: null, pendingChannel: 'tag:2.0.8' }), false);
-  assert.equal(
-    canFlashTaggedRelease({ formData: { channel: 'tag:', status: 'whatever' }, pendingChannel: 'tag:' }),
-    false,
-  );
+  expect(canFlashTaggedRelease()).toBe(false);
+  expect(canFlashTaggedRelease({})).toBe(false);
+  expect(canFlashTaggedRelease({ formData: null, pendingChannel: 'tag:2.0.8' })).toBe(false);
+  expect(canFlashTaggedRelease({ formData: { channel: 'tag:', status: 'whatever' }, pendingChannel: 'tag:' })).toBe(false);
 });
 
 // v-prefix tolerance — GitHub release tags occasionally carry a leading `v`
@@ -106,20 +103,20 @@ test('canFlashTaggedRelease: returns false for malformed input', () => {
 test('canFlashTaggedRelease: enabled when pinned tag is v-prefixed and status is stripped', () => {
   // Channel stored as "tag:v1.8.2", device reports semver as "1.8.2".
   const formData = { channel: 'tag:v1.8.2', status: '1.8.2' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:v1.8.2' }), true);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:v1.8.2' })).toBe(true);
 });
 
 test('canFlashTaggedRelease: enabled when pinned tag has no v but device reports v-prefixed', () => {
   // Inverse case — defensive: if a future firmware ever reported "v1.8.2"
   // verbatim, a non-v-prefixed channel ("tag:1.8.2") should still match.
   const formData = { channel: 'tag:1.8.2', status: 'v1.8.2' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:1.8.2' }), true);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:1.8.2' })).toBe(true);
 });
 
 test('canFlashTaggedRelease: still rejects mismatched semver even with v-prefix', () => {
   // Channel "tag:v1.8.2" vs status "1.8.3" — different versions, must not match.
   const formData = { channel: 'tag:v1.8.2', status: '1.8.3' };
-  assert.equal(canFlashTaggedRelease({ formData, pendingChannel: 'tag:v1.8.2' }), false);
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:v1.8.2' })).toBe(false);
 });
 
 // canUpdateOnAcknowledgedChannel gate — protects the "Update Display"/"Update
@@ -130,7 +127,7 @@ import { canUpdateOnAcknowledgedChannel } from './otaLogic.js';
 
 test('canUpdateOnAcknowledgedChannel: enabled when dropdown matches device channel', () => {
   const formData = { channel: 'latest', displayUpdateAvailable: true };
-  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'latest' }), true);
+  expect(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'latest' })).toBe(true);
 });
 
 test('canUpdateOnAcknowledgedChannel: disabled when user has unsaved tag selection on a "latest" device', () => {
@@ -140,26 +137,26 @@ test('canUpdateOnAcknowledgedChannel: disabled when user has unsaved tag selecti
   // enabled and clicking it would send `req:ota-start` while the device's
   // `_latest_url` still points at `latest`.
   const formData = { channel: 'latest', displayUpdateAvailable: true };
-  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'tag:2.0.8' }), false);
+  expect(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
 });
 
 test('canUpdateOnAcknowledgedChannel: disabled when user has unsaved nightly selection on a "latest" device', () => {
   const formData = { channel: 'latest', displayUpdateAvailable: true };
-  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'nightly' }), false);
+  expect(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: 'nightly' })).toBe(false);
 });
 
 test('canUpdateOnAcknowledgedChannel: enabled on initial load when pendingChannel is undefined', () => {
   // Initial mount: parent has not yet seeded `pendingChannel` from formData.
   // We trust formData.channel; the gate is for unsaved deltas only.
   const formData = { channel: 'latest', displayUpdateAvailable: true };
-  assert.equal(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: undefined }), true);
+  expect(canUpdateOnAcknowledgedChannel({ formData, pendingChannel: undefined })).toBe(true);
 });
 
 test('canUpdateOnAcknowledgedChannel: returns false for malformed input', () => {
-  assert.equal(canUpdateOnAcknowledgedChannel(), false);
-  assert.equal(canUpdateOnAcknowledgedChannel({}), false);
-  assert.equal(canUpdateOnAcknowledgedChannel({ formData: null, pendingChannel: 'latest' }), false);
-  assert.equal(canUpdateOnAcknowledgedChannel({ formData: { channel: 42 }, pendingChannel: 'latest' }), false);
+  expect(canUpdateOnAcknowledgedChannel()).toBe(false);
+  expect(canUpdateOnAcknowledgedChannel({})).toBe(false);
+  expect(canUpdateOnAcknowledgedChannel({ formData: null, pendingChannel: 'latest' })).toBe(false);
+  expect(canUpdateOnAcknowledgedChannel({ formData: { channel: 42 }, pendingChannel: 'latest' })).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -196,8 +193,8 @@ test('disable rule: tag-pinned + Checking... must NOT re-enable from stale displ
     displayUpdateAvailable: true,
     controllerUpdateAvailable: true,
   };
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'display')).toBe(true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'controller')).toBe(true);
 });
 
 test('disable rule: tag-pinned + status mismatch must NOT re-enable from stale flags', () => {
@@ -208,8 +205,8 @@ test('disable rule: tag-pinned + status mismatch must NOT re-enable from stale f
     displayUpdateAvailable: true,
     controllerUpdateAvailable: true,
   };
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'display')).toBe(true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'controller')).toBe(true);
 });
 
 test('disable rule: tag-pinned + Update failed must NOT re-enable from stale flags', () => {
@@ -219,8 +216,8 @@ test('disable rule: tag-pinned + Update failed must NOT re-enable from stale fla
     displayUpdateAvailable: true,
     controllerUpdateAvailable: true,
   };
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'display')).toBe(true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'controller')).toBe(true);
 });
 
 test('disable rule: tag-pinned + tagFlashReady all-true -> enabled', () => {
@@ -232,8 +229,8 @@ test('disable rule: tag-pinned + tagFlashReady all-true -> enabled', () => {
     displayUpdateAvailable: false,
     controllerUpdateAvailable: false,
   };
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), false);
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), false);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'display')).toBe(false);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'controller')).toBe(false);
 });
 
 test('disable rule: latest channel + unsaved tag selection -> disabled (P1 from prior review)', () => {
@@ -243,8 +240,8 @@ test('disable rule: latest channel + unsaved tag selection -> disabled (P1 from 
     displayUpdateAvailable: true,
     controllerUpdateAvailable: true,
   };
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'display'), true);
-  assert.equal(decideDisabled(formData, 'tag:2.0.8', 'controller'), true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'display')).toBe(true);
+  expect(decideDisabled(formData, 'tag:2.0.8', 'controller')).toBe(true);
 });
 
 test('disable rule: latest channel + saved + flag true -> enabled', () => {
@@ -254,8 +251,8 @@ test('disable rule: latest channel + saved + flag true -> enabled', () => {
     displayUpdateAvailable: true,
     controllerUpdateAvailable: false,
   };
-  assert.equal(decideDisabled(formData, 'latest', 'display'), false);
-  assert.equal(decideDisabled(formData, 'latest', 'controller'), true);
+  expect(decideDisabled(formData, 'latest', 'display')).toBe(false);
+  expect(decideDisabled(formData, 'latest', 'controller')).toBe(true);
 });
 
 test('disable rule: latest channel + saved + flag false -> disabled', () => {
@@ -265,6 +262,6 @@ test('disable rule: latest channel + saved + flag false -> disabled', () => {
     displayUpdateAvailable: false,
     controllerUpdateAvailable: false,
   };
-  assert.equal(decideDisabled(formData, 'latest', 'display'), true);
-  assert.equal(decideDisabled(formData, 'latest', 'controller'), true);
+  expect(decideDisabled(formData, 'latest', 'display')).toBe(true);
+  expect(decideDisabled(formData, 'latest', 'controller')).toBe(true);
 });
