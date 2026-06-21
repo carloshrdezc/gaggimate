@@ -28,6 +28,7 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== Step 1: Build web UI ==="
 cd "$ROOT_DIR/web"
+npm ci
 npm run build
 cd "$ROOT_DIR"
 
