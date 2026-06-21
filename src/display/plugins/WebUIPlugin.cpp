@@ -325,7 +325,9 @@ void WebUIPlugin::loop() {
         doc["btv"] = profileManager->getSelectedProfile().getTotalVolume(); // raw volumetric target for frontend Weight card
         doc["ayo"] = controller->getSettings().isAllowYieldOverride() ? 1 : 0;
         doc["as"] = controller->getSettings().isAutoSteamEnabled() ? 1 : 0;
-        doc["dg"] = controller->getSettings().getDoseGrams();
+        // Round dose grams to 1 decimal so the wire value matches the "float" web contract
+        // (avoids noisy full-precision doubles; firmware keeps full precision internally).
+        doc["dg"] = std::round(controller->getSettings().getDoseGrams() * 10.0) / 10.0;
         doc["led"] = controller->getSystemInfo().capabilities.ledControl;
         doc["gtd"] = controller->getTargetGrindDuration();
         doc["gtv"] = controller->getSettings().getTargetGrindVolume();
@@ -906,9 +908,12 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         // Device-authoritative brew dose in grams (PRO-225). Validated and
         // clamped by Settings::setDoseGrams, rebroadcast as "dg" in evt:status.
         JsonVariantConst gramsValue = doc["grams"];
-        if (gramsValue.is<float>() || gramsValue.is<int>()) {
+        // ArduinoJson treats every JSON number (integer or float) as is<float>()==true,
+        // while strings/bools/null are false, so this single test accepts any numeric value.
+        if (!gramsValue.isNull() && gramsValue.is<float>()) {
             const double grams = gramsValue.as<double>();
-            if (std::isnan(grams) || grams <= 0.0 || grams > 200.0) {
+            // Reject non-finite values (NaN, +/-inf are possible as<float>() outcomes) and out-of-range doses.
+            if (!std::isfinite(grams) || grams <= 0.0 || grams > 200.0) {
                 ESP_LOGW("WebUIPlugin", "req:dose:set ignored: 'grams' out of range");
             } else {
                 controller->getSettings().setDoseGrams(grams);
