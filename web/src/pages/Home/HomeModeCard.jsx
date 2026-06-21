@@ -364,6 +364,7 @@ export default function HomeModeCard({ mode }) {
     targetPressure,
     targetTemperature,
     brewTargetVolume,
+    doseGrams: deviceDoseGrams,
   } = status.value;
   const connected = machine.value.connected;
 
@@ -375,12 +376,18 @@ export default function HomeModeCard({ mode }) {
   const [profileError, setProfileError] = useState(null);
   const [beanError, setBeanError] = useState(null);
 
-  const [doseGrams, setDoseGrams] = useState(() => {
+  // Brew dose is device-authoritative (PRO-226): the device broadcasts `dg` in
+  // evt:status (mapped to status.doseGrams). localStorage is an offline-only
+  // cache used to seed the UI before the first status / when disconnected, and
+  // kept mirrored for the next reload.
+  const [cachedDose, setCachedDose] = useState(() => {
     const stored = localStorage.getItem(DOSE_STORAGE_KEY);
     const value = parseQuantity(stored) ?? DEFAULT_DOSE;
     if (!stored) localStorage.setItem(DOSE_STORAGE_KEY, String(value));
     return value;
   });
+  const doseGrams =
+    connected && Number.isFinite(deviceDoseGrams) ? deviceDoseGrams : cachedDose;
 
   const [targetWeight, setTargetWeight] = useState(() => {
     const stored = localStorage.getItem('gaggimate-target-weight');
@@ -474,23 +481,33 @@ export default function HomeModeCard({ mode }) {
     [api]
   );
 
-  const adjustDose = useCallback((delta) => {
-    setDoseGrams(prev => {
-      const next = Math.round((prev + delta + Number.EPSILON) * 100) / 100;
-      const clamped = Math.max(0, next);
+  // Commit a new dose: clamp to the firmware-valid range, mirror to the offline
+  // cache, and fire-and-forget req:dose:set (device echoes it back as `dg`).
+  const commitDose = useCallback((value) => {
+    const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+    const clamped = Math.min(200, Math.max(0.1, rounded));
+    setCachedDose(clamped);
+    try {
       localStorage.setItem(DOSE_STORAGE_KEY, String(clamped));
-      return clamped;
-    });
-  }, []);
+    } catch {}
+    try {
+      api.send({ tp: 'req:dose:set', grams: clamped });
+    } catch (error) {
+      console.error('Failed to send dose:', error);
+    }
+  }, [api]);
+
+  const adjustDose = useCallback((delta) => {
+    commitDose(doseGrams + delta);
+  }, [commitDose, doseGrams]);
 
   const handleDoseInputChange = useCallback((e) => {
     const raw = e.target.value.replace(/g$/, '').trim();
     const parsed = parseQuantity(raw);
     if (parsed !== null) {
-      setDoseGrams(parsed);
-      localStorage.setItem(DOSE_STORAGE_KEY, String(parsed));
+      commitDose(parsed);
     }
-  }, []);
+  }, [commitDose]);
 
   const adjustWeight = useCallback((delta) => {
     const newWeight = Math.round((targetWeight + delta + Number.EPSILON) * 10) / 10;

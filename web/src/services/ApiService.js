@@ -320,6 +320,9 @@ export default class ApiService {
       brewTargetDuration: message.btd || 0,
       brewTargetVolume: message.btv || 0,
       allowYieldOverride: !!message.ayo,
+      // PRO-226: device-authoritative auto-steam (as: 0/1) and brew dose (dg: float).
+      autoSteamEnabled: !!message.as,
+      doseGrams: Number.isFinite(message.dg) ? message.dg : 18,
       volumetricAvailable: message.bta || false,
       grindTargetDuration: message.gtd || 0,
       grindTargetVolume: message.gtv || 0,
@@ -373,6 +376,8 @@ export const machine = signal({
     brewTargetDuration: 0,
     brewTargetVolume: 0,
     allowYieldOverride: false,
+    autoSteamEnabled: false,
+    doseGrams: 18,
     grindTargetDuration: 0,
     grindTargetVolume: 0,
     grindTarget: 0,

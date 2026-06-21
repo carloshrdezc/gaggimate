@@ -1192,15 +1192,26 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       .catch(() => setScaleName(null));
   }, [s.bluetoothConnected]);
 
-  // Dose — localStorage-backed, editable
-  const [dose, setDoseState] = useState(() => {
+  // Dose — device-authoritative (PRO-226). The device broadcasts `dg` in
+  // evt:status (mapped to s.doseGrams); localStorage is an offline-only cache
+  // that seeds the UI pre-connection and is mirrored on every commit.
+  const [cachedDose, setCachedDose] = useState(() => {
     try { return parseQuantity(localStorage.getItem(DOSE_KEY)) ?? DEFAULT_DOSE; } catch { return DEFAULT_DOSE; }
   });
+  const dose =
+    connected && Number.isFinite(s.doseGrams) ? s.doseGrams : cachedDose;
   const setDose = useCallback(val => {
+    // Clamp to the on-screen range; firmware re-validates/clamps to [0.1, 200].
     const v = Math.max(1, Math.min(50, val));
-    setDoseState(v);
+    setCachedDose(v);
     try { localStorage.setItem(DOSE_KEY, String(v)); } catch {}
-  }, []);
+    try {
+      // Fire-and-forget: device echoes the value back via evt:status `dg`.
+      api.send({ tp: 'req:dose:set', grams: v });
+    } catch (error) {
+      console.error('Failed to send dose:', error);
+    }
+  }, [api]);
 
   // Auto-attach dose and bean to shot notes as soon as the shot becomes active
   useShotDoseRecorder(api, dose);
