@@ -36,6 +36,14 @@ jobs:
           cd web
           npm ci
           npm run build
+      # Gate the PR on the web unit suite (CAR/PRO-229). `npm ci` above already
+      # installed vitest from devDependencies, so this runs the converted
+      # node:test->vitest logic suites plus the existing vitest specs. A failing
+      # web test now fails the job.
+      - name: Run web unit tests
+        run: |
+          cd web
+          npm test
 
   firmware:
     name: Firmware build (display)
