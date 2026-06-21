@@ -2,6 +2,7 @@
 //
 // Accepted values:
 //   - "latest"           -> stable (most recent published, non-prerelease tag)
+//   - "beta"             -> beta build (moving tag tracking the master branch)
 //   - "nightly"          -> nightly build
 //   - "tag:<semver>"     -> a specific stable tag offered in availableVersions
 //                          (firmware allow-lists the tag; a malformed value
@@ -10,6 +11,9 @@
 // Anything else falls back to "latest" so a stale dropdown value can't get
 // us into a broken state on the device.
 export function updateOtaChannel(formData, channel) {
+  if (channel === 'beta') {
+    return { ...formData, channel: 'beta' };
+  }
   if (channel === 'nightly') {
     return { ...formData, channel: 'nightly' };
   }

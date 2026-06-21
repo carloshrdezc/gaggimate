@@ -171,6 +171,7 @@ const SystemInfoCard = ({ formData, pendingChannel, onChannelChange }) => {
                 v{v}
               </option>
             ))}
+            <option value='beta'>Beta (master)</option>
             <option value='nightly'>Nightly</option>
           </select>
           {isUnsavedTagSelection && (
