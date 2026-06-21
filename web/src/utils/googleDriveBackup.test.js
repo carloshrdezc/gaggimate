@@ -1,4 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGoogleDriveProvider } from './googleDriveBackup.js';
+
+const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
 
 describe('GoogleDriveProvider', () => {
 
@@ -31,19 +34,41 @@ describe('GoogleDriveProvider', () => {
     });
   });
 
-  describe('listBackups', () => {
-    it('returns empty array when no files exist', async () => {
-      const originalFetch = window.fetch;
-      try {
-        window.google = {
-          accounts: {
-            oauth2: {
-              initTokenClient: ({ callback }) => {
-                callback({ access_token: 'fake-access-token', expires_in: 3600 });
-              },
+  // Token-requiring tests: ensureGISLoaded() -> loadScript() would append the
+  // real GIS <script> and await its load event, which never fires under jsdom
+  // (the request hangs and the test times out). We pre-insert a fake
+  // already-loaded GIS script so loadScript short-circuits via its
+  // existing-element branch, then mock window.google for the token client.
+  describe('authorized operations', () => {
+    let originalFetch;
+    let gisScript;
+
+    beforeEach(() => {
+      originalFetch = window.fetch;
+      gisScript = document.createElement('script');
+      gisScript.src = GIS_SCRIPT_URL;
+      gisScript.dataset.loaded = 'true';
+      document.head.appendChild(gisScript);
+
+      window.google = {
+        accounts: {
+          oauth2: {
+            initTokenClient: ({ callback }) => {
+              callback({ access_token: 'fake-access-token', expires_in: 3600 });
             },
           },
-        };
+        },
+      };
+    });
+
+    afterEach(() => {
+      window.fetch = originalFetch;
+      delete window.google;
+      gisScript.remove();
+    });
+
+    describe('listBackups', () => {
+      it('returns empty array when no files exist', async () => {
         window.fetch = async () => ({
           ok: true,
           json: async () => ({ files: [] }),
@@ -52,24 +77,9 @@ describe('GoogleDriveProvider', () => {
         const provider = createGoogleDriveProvider({ clientId: 'test' });
         const result = await provider.listBackups();
         expect(result).toEqual([]);
-      } finally {
-        window.fetch = originalFetch;
-        delete window.google;
-      }
-    });
+      });
 
-    it('returns mapped files with fileId, modifiedTime, size', async () => {
-      const originalFetch = window.fetch;
-      try {
-        window.google = {
-          accounts: {
-            oauth2: {
-              initTokenClient: ({ callback }) => {
-                callback({ access_token: 'fake-access-token', expires_in: 3600 });
-              },
-            },
-          },
-        };
+      it('returns mapped files with fileId, modifiedTime, size', async () => {
         const mockFiles = [
           { id: 'file-1', modifiedTime: '2025-01-01T00:00:00Z', size: 1234 },
           { id: 'file-2', modifiedTime: '2025-01-02T00:00:00Z', size: 5678 },
@@ -86,57 +96,37 @@ describe('GoogleDriveProvider', () => {
           { fileId: 'file-1', modifiedTime: '2025-01-01T00:00:00Z', size: 1234 },
           { fileId: 'file-2', modifiedTime: '2025-01-02T00:00:00Z', size: 5678 },
         ]);
-      } finally {
-        window.fetch = originalFetch;
-        delete window.google;
-      }
+      });
     });
-  });
 
-  describe('uploadBackup', () => {
-    it('uploads bundle and returns fileId and modifiedTime', async () => {
-      const originalFetch = window.fetch;
-      try {
-        window.google = {
-          accounts: {
-            oauth2: {
-              initTokenClient: ({ callback }) => {
-                callback({ access_token: 'fake-access-token', expires_in: 3600 });
-              },
-            },
-          },
+    describe('uploadBackup', () => {
+      // uploadBackup first lists existing backups (to decide create vs update),
+      // then performs the upload. The list endpoint must return a files array;
+      // the upload endpoint (/upload/) returns the uploaded file metadata.
+      it('uploads bundle and returns fileId and modifiedTime', async () => {
+        window.fetch = async url => {
+          if (String(url).includes('/upload/')) {
+            return {
+              ok: true,
+              json: async () => ({ id: 'uploaded-file-id', modifiedTime: '2025-01-01T00:00:00Z' }),
+            };
+          }
+          return { ok: true, json: async () => ({ files: [] }) };
         };
-        window.fetch = async () => ({
-          ok: true,
-          json: async () => ({ id: 'uploaded-file-id', modifiedTime: '2025-01-01T00:00:00Z' }),
-        });
         const provider = createGoogleDriveProvider({ clientId: 'test' });
         const bundle = { type: 'gaggimate-backup', version: 2 };
         const result = await provider.uploadBackup(bundle);
         expect(result.fileId).toBe('uploaded-file-id');
         expect(result.modifiedTime).toBe('2025-01-01T00:00:00Z');
-      } finally {
-        window.fetch = originalFetch;
-        delete window.google;
-      }
-    });
+      });
 
-    it('throws when upload does not return a file ID', async () => {
-      const originalFetch = window.fetch;
-      try {
-        window.google = {
-          accounts: {
-            oauth2: {
-              initTokenClient: ({ callback }) => {
-                callback({ access_token: 'fake-access-token', expires_in: 3600 });
-              },
-            },
-          },
+      it('throws when upload does not return a file ID', async () => {
+        window.fetch = async url => {
+          if (String(url).includes('/upload/')) {
+            return { ok: true, json: async () => ({}) };
+          }
+          return { ok: true, json: async () => ({ files: [] }) };
         };
-        window.fetch = async () => ({
-          ok: true,
-          json: async () => ({}),
-        });
         const provider = createGoogleDriveProvider({ clientId: 'test' });
         const bundle = { type: 'gaggimate-backup', version: 2 };
         let threw = false;
@@ -147,26 +137,11 @@ describe('GoogleDriveProvider', () => {
           expect(e.message).toBe('Upload succeeded but did not return a file ID.');
         }
         expect(threw).toBe(true);
-      } finally {
-        window.fetch = originalFetch;
-        delete window.google;
-      }
+      });
     });
-  });
 
-  describe('downloadBackup', () => {
-    it('downloads and parses backup content for given fileId', async () => {
-      const originalFetch = window.fetch;
-      try {
-        window.google = {
-          accounts: {
-            oauth2: {
-              initTokenClient: ({ callback }) => {
-                callback({ access_token: 'fake-access-token', expires_in: 3600 });
-              },
-            },
-          },
-        };
+    describe('downloadBackup', () => {
+      it('downloads and parses backup content for given fileId', async () => {
         const mockBundle = { type: 'gaggimate-backup', version: 2, settings: {} };
         window.fetch = async () => ({
           ok: true,
@@ -175,10 +150,7 @@ describe('GoogleDriveProvider', () => {
         const provider = createGoogleDriveProvider({ clientId: 'test' });
         const result = await provider.downloadBackup('file-id-123');
         expect(result).toEqual(mockBundle);
-      } finally {
-        window.fetch = originalFetch;
-        delete window.google;
-      }
+      });
     });
   });
 
