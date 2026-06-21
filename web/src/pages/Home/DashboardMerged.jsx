@@ -479,8 +479,8 @@ function ManualConsole({
           value={dose}
           unit='g'
           step={0.1}
-          min={1}
-          max={50}
+          min={0.1}
+          max={200}
           onCommit={onDoseCommit}
         />
         <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>{'>'}</span>
@@ -1202,7 +1202,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     connected && Number.isFinite(s.doseGrams) ? s.doseGrams : cachedDose;
   const setDose = useCallback(val => {
     // Clamp to the on-screen range; firmware re-validates/clamps to [0.1, 200].
-    const v = Math.max(1, Math.min(50, val));
+    const v = Math.max(0.1, Math.min(200, val));
     setCachedDose(v);
     try { localStorage.setItem(DOSE_KEY, String(v)); } catch {}
     try {
@@ -1917,8 +1917,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               value={dose}
               unit='g'
               step={0.1}
-              min={1}
-              max={50}
+              min={0.1}
+              max={200}
               onCommit={setDose}
             />
             <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>

@@ -20,6 +20,10 @@ export class WebSocketDisconnectedError extends Error {
 // safety net for a server that opened the socket but never responds.
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
+// Default brew dose (grams) used to seed the pre-connection status object.
+// Matches the firmware default (Settings.h: doseGrams = 18.0).
+const DEFAULT_DOSE_GRAMS = 18;
+
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;
 
@@ -322,7 +326,9 @@ export default class ApiService {
       allowYieldOverride: !!message.ayo,
       // PRO-226: device-authoritative auto-steam (as: 0/1) and brew dose (dg: float).
       autoSteamEnabled: !!message.as,
-      doseGrams: Number.isFinite(message.dg) ? message.dg : 18,
+      // Legacy (pre-PRO-225) firmware doesn't send `dg`; emit null so the
+      // consumer falls back to its localStorage cache instead of clobbering it.
+      doseGrams: Number.isFinite(message.dg) ? message.dg : null,
       volumetricAvailable: message.bta || false,
       grindTargetDuration: message.gtd || 0,
       grindTargetVolume: message.gtv || 0,
@@ -377,7 +383,7 @@ export const machine = signal({
     brewTargetVolume: 0,
     allowYieldOverride: false,
     autoSteamEnabled: false,
-    doseGrams: 18,
+    doseGrams: DEFAULT_DOSE_GRAMS,
     grindTargetDuration: 0,
     grindTargetVolume: 0,
     grindTarget: 0,

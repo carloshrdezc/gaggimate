@@ -43,8 +43,11 @@ export function useAutoSteam() {
 
   const toggleAutoSteam = useCallback(() => {
     const next = !autoSteamSignal.value;
-    // Mirror immediately so a disconnected toggle survives a reload and so the
-    // offline view flips right away even before the device echoes it back.
+    // Device-authoritative: a toggle issued while disconnected is not persisted
+    // on the device and will be overwritten by the next evt:status on reconnect.
+    // Intentional — the device is the source of truth. We still mirror locally
+    // so the offline view flips immediately and survives a reload before the
+    // device echoes it back.
     offlineAutoSteam.value = next;
     writeCache(next);
     try {
