@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test, expect } from 'vitest';
 
 import {
   MODE_GRIND,
@@ -26,8 +25,8 @@ test('steam temperature ring scales progress against the steam target', () => {
     targetTemp: 150,
   });
 
-  assert.equal(metrics.progressFraction, 0.7);
-  assert.equal(metrics.targetFraction, 1);
+  expect(metrics.progressFraction).toBe(0.7);
+  expect(metrics.targetFraction).toBe(1);
 });
 
 test('start steam is tracked as steam, not brew', () => {
@@ -37,52 +36,43 @@ test('start steam is tracked as steam, not brew', () => {
     mode: MODE_STEAM,
   });
 
-  assert.equal(state.label, 'START STEAM');
-  assert.equal(state.action, 'start-process');
-  assert.equal(state.processKind, 'steam');
+  expect(state.label).toBe('START STEAM');
+  expect(state.action).toBe('start-process');
+  expect(state.processKind).toBe('steam');
 });
 
 test('water mode is not tracked as brew for auto-steam', () => {
-  assert.equal(getProcessKindForMode(3), 'water');
+  expect(getProcessKindForMode(3)).toBe('water');
 });
 
 test('grind mode is not selectable when grind is unavailable', () => {
-  assert.equal(getProcessKindForMode(MODE_GRIND, false), null);
+  expect(getProcessKindForMode(MODE_GRIND, false)).toBe(null);
 });
 
 test('available mode options omit unavailable optional modes', () => {
   const options = getAvailableModeOptions(false, false);
 
-  assert.deepEqual(
-    options.map(option => option.name),
-    ['STANDBY', 'BREW', 'STEAM', 'WATER'],
-  );
+  expect(options.map(option => option.name)).toEqual(['STANDBY', 'BREW', 'STEAM', 'WATER']);
 });
 
 test('available mode options include manual before grind when grind is available', () => {
   const options = getAvailableModeOptions(true, true);
 
-  assert.deepEqual(
-    options.map(option => option.name),
-    ['STANDBY', 'BREW', 'STEAM', 'WATER', 'MANUAL', 'GRIND'],
-  );
+  expect(options.map(option => option.name)).toEqual(['STANDBY', 'BREW', 'STEAM', 'WATER', 'MANUAL', 'GRIND']);
 });
 
 test('available mode options include manual when only grind is unavailable', () => {
   const options = getAvailableModeOptions(false, true);
 
-  assert.deepEqual(
-    options.map(option => option.name),
-    ['STANDBY', 'BREW', 'STEAM', 'WATER', 'MANUAL'],
-  );
+  expect(options.map(option => option.name)).toEqual(['STANDBY', 'BREW', 'STEAM', 'WATER', 'MANUAL']);
 });
 
 test('manual mode process kind is manual', () => {
-  assert.equal(getProcessKindForMode(MODE_MANUAL), 'manual');
+  expect(getProcessKindForMode(MODE_MANUAL)).toBe('manual');
 });
 
 test('manual mode is unavailable without pressure capability', () => {
-  assert.equal(getProcessKindForMode(MODE_MANUAL, true, false), null);
+  expect(getProcessKindForMode(MODE_MANUAL, true, false)).toBe(null);
 
   const state = getPrimaryActionState({
     active: false,
@@ -91,9 +81,9 @@ test('manual mode is unavailable without pressure capability', () => {
     isManualAvailable: false,
   });
 
-  assert.equal(state.label, 'MANUAL UNAVAILABLE');
-  assert.equal(state.action, 'noop');
-  assert.equal(state.processKind, null);
+  expect(state.label).toBe('MANUAL UNAVAILABLE');
+  expect(state.action).toBe('noop');
+  expect(state.processKind).toBe(null);
 });
 
 test('manual primary action starts manual when armed', () => {
@@ -103,9 +93,9 @@ test('manual primary action starts manual when armed', () => {
     mode: MODE_MANUAL,
   });
 
-  assert.equal(state.label, 'START MANUAL');
-  assert.equal(state.action, 'start-process');
-  assert.equal(state.processKind, 'manual');
+  expect(state.label).toBe('START MANUAL');
+  expect(state.action).toBe('start-process');
+  expect(state.processKind).toBe('manual');
 });
 
 test('manual primary action stops manual when running', () => {
@@ -115,9 +105,9 @@ test('manual primary action stops manual when running', () => {
     mode: MODE_MANUAL,
   });
 
-  assert.equal(state.label, 'STOP MANUAL');
-  assert.equal(state.action, 'deactivate');
-  assert.equal(state.processKind, null);
+  expect(state.label).toBe('STOP MANUAL');
+  expect(state.action).toBe('deactivate');
+  expect(state.processKind).toBe(null);
 });
 
 test('manual primary action clears manual when finished', () => {
@@ -127,78 +117,78 @@ test('manual primary action clears manual when finished', () => {
     mode: MODE_MANUAL,
   });
 
-  assert.equal(state.label, 'CLEAR');
-  assert.equal(state.action, 'clear');
+  expect(state.label).toBe('CLEAR');
+  expect(state.action).toBe('clear');
 });
 
 test('manual target labels change with target type', () => {
-  assert.deepEqual(getManualControlLabels('pressure'), {
+  expect(getManualControlLabels('pressure')).toEqual({
     pressure: 'PRESSURE TARGET',
     flow: 'FLOW LIMIT',
   });
-  assert.deepEqual(getManualControlLabels('flow'), {
+  expect(getManualControlLabels('flow')).toEqual({
     pressure: 'PRESSURE LIMIT',
     flow: 'FLOW TARGET',
   });
 });
 
 test('manual target values are clamped to first-version bounds', () => {
-  assert.equal(clampManualTemperature(70), 80);
-  assert.equal(clampManualTemperature(110), 105);
-  assert.equal(clampManualPressure(-1), 0);
-  assert.equal(clampManualPressure(15), 12);
-  assert.equal(clampManualFlow(-1), 0);
-  assert.equal(clampManualFlow(7), 6);
+  expect(clampManualTemperature(70)).toBe(80);
+  expect(clampManualTemperature(110)).toBe(105);
+  expect(clampManualPressure(-1)).toBe(0);
+  expect(clampManualPressure(15)).toBe(12);
+  expect(clampManualFlow(-1)).toBe(0);
+  expect(clampManualFlow(7)).toBe(6);
 });
 
 test('manual temperature updates send before start while pump controls stay staged', () => {
-  assert.equal(shouldSendManualUpdate({
+  expect(shouldSendManualUpdate({
     active: false,
     isManualMode: true,
     partial: { temperature: 94 },
-  }), true);
-  assert.equal(shouldSendManualUpdate({
+  })).toBe(true);
+  expect(shouldSendManualUpdate({
     active: false,
     isManualMode: true,
     partial: { pressure: 8 },
-  }), false);
-  assert.equal(shouldSendManualUpdate({
+  })).toBe(false);
+  expect(shouldSendManualUpdate({
     active: true,
     isManualMode: true,
     partial: { pressure: 8 },
-  }), true);
+  })).toBe(true);
 });
 
 test('manual pre-start edits keep the local draft stable until start', () => {
-  assert.equal(shouldKeepManualDraftDirty({
+  expect(shouldKeepManualDraftDirty({
     active: false,
     partial: { temperature: 94 },
-  }), true);
-  assert.equal(shouldKeepManualDraftDirty({
+  })).toBe(true);
+  expect(shouldKeepManualDraftDirty({
     active: false,
     partial: { pressure: 8 },
-  }), true);
-  assert.equal(shouldKeepManualDraftDirty({
+  })).toBe(true);
+  expect(shouldKeepManualDraftDirty({
     active: true,
     partial: { temperature: 94 },
-  }), false);
+  })).toBe(false);
 });
 
 test('manual mode heats like brew before the process starts', () => {
-  assert.equal(getBoilerHeatingState({
+  expect(getBoilerHeatingState({
     mode: MODE_MANUAL,
     active: false,
     finished: false,
     targetTemp: 94,
     tempVal: 88,
-  }), true);
-  assert.equal(getBoilerHeatingState({
+  })).toBe(true);
+  expect(getBoilerHeatingState({
     mode: MODE_MANUAL,
     active: true,
     finished: false,
     targetTemp: 94,
     tempVal: 88,
-  }), false);
+  })).toBe(false);
 });
 
 test('primary action for unavailable grind mode does not start a process', () => {
@@ -209,9 +199,9 @@ test('primary action for unavailable grind mode does not start a process', () =>
     isGrindAvailable: false,
   });
 
-  assert.equal(state.label, 'GRIND UNAVAILABLE');
-  assert.equal(state.action, 'noop');
-  assert.equal(state.processKind, null);
+  expect(state.label).toBe('GRIND UNAVAILABLE');
+  expect(state.action).toBe('noop');
+  expect(state.processKind).toBe(null);
 });
 
 test('stop steam changes mode to standby and clears process tracking', () => {
@@ -221,16 +211,16 @@ test('stop steam changes mode to standby and clears process tracking', () => {
     mode: MODE_STEAM,
   });
 
-  assert.equal(state.label, 'STOP STEAM');
-  assert.equal(state.action, 'change-mode');
-  assert.equal(state.mode, 0);
-  assert.equal(state.processKind, null);
+  expect(state.label).toBe('STOP STEAM');
+  expect(state.action).toBe('change-mode');
+  expect(state.mode).toBe(0);
+  expect(state.processKind).toBe(null);
 });
 
 test('standby primary action wakes the machine into brew', () => {
   const state = getPrimaryActionState({ active: false, finished: false, mode: MODE_STANDBY });
-  assert.equal(state.label, 'WAKE');
-  assert.equal(state.action, 'start-process');
-  assert.equal(state.accent, 'var(--dm-accent)');
-  assert.equal(state.processKind, null);
+  expect(state.label).toBe('WAKE');
+  expect(state.action).toBe('start-process');
+  expect(state.accent).toBe('var(--dm-accent)');
+  expect(state.processKind).toBe(null);
 });
