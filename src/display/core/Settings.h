@@ -74,6 +74,8 @@ class Settings {
     bool isHomekit() const { return homekit; }
     bool isVolumetricTarget() const { return volumetricTarget; }
     bool isAllowYieldOverride() const { return allowYieldOverride; }
+    bool isAutoSteamEnabled() const { return autoSteamEnabled; }
+    double getDoseGrams() const { return doseGrams; }
     String getOTAChannel() const { return otaChannel; }
     String getSavedScale() const { return savedScale; }
     bool isBoilerFillActive() const { return boilerFillActive; }
@@ -148,6 +150,8 @@ class Settings {
     void setHomekit(bool homekit);
     void setVolumetricTarget(bool volumetric_target);
     void setAllowYieldOverride(bool allow_yield_override);
+    void setAutoSteamEnabled(bool auto_steam_enabled);
+    void setDoseGrams(double dose_grams);
     void setOTAChannel(const String &otaChannel);
     void setSavedScale(const String &savedScale);
     void setBoilerFillActive(bool boiler_fill_active);
@@ -218,6 +222,8 @@ class Settings {
     bool homekit = false;
     bool volumetricTarget = false;
     bool allowYieldOverride = false;
+    bool autoSteamEnabled = false;
+    double doseGrams = 18.0;
     bool boilerFillActive = false;
     int startupFillTime = 0;
     int steamFillTime = 0;
