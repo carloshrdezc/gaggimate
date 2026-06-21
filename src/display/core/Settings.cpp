@@ -58,6 +58,8 @@ Settings::Settings() {
     homekit = preferences.getBool("hk", false);
     volumetricTarget = preferences.getBool("vt", false);
     allowYieldOverride = preferences.getBool("ayo", false);
+    autoSteamEnabled = preferences.getBool("autosteam", false);
+    doseGrams = preferences.getDouble("dosegrams", 18.0);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
     savedScale = preferences.getString("ssc", "");
     momentaryButtons = preferences.getBool("mb", false);
@@ -272,6 +274,16 @@ void Settings::setVolumetricTarget(bool volumetric_target) {
 
 void Settings::setAllowYieldOverride(bool allow_yield_override) {
     this->allowYieldOverride = allow_yield_override;
+    save();
+}
+
+void Settings::setAutoSteamEnabled(bool auto_steam_enabled) {
+    this->autoSteamEnabled = auto_steam_enabled;
+    save();
+}
+
+void Settings::setDoseGrams(double dose_grams) {
+    this->doseGrams = std::clamp(dose_grams, 0.1, 200.0);
     save();
 }
 
@@ -591,6 +603,8 @@ void Settings::doSave() {
     preferences.putBool("hk", homekit);
     preferences.putBool("vt", volumetricTarget);
     preferences.putBool("ayo", allowYieldOverride);
+    preferences.putBool("autosteam", autoSteamEnabled);
+    preferences.putDouble("dosegrams", doseGrams);
     preferences.putString("oc", otaChannel);
     preferences.putString("ssc", savedScale);
     preferences.putBool("bf_a", boilerFillActive);
