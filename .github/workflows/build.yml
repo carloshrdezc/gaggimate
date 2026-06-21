@@ -3,6 +3,7 @@ on:
     tags:
       - "*"
       - "!nightly"
+      - "!beta"
 
 permissions:
   contents: write
@@ -77,7 +78,11 @@ jobs:
           # dropped, leaving the just-pushed stable tag out of STABLE_VERSIONS.
           # The old single-job pipeline deleted nightly before any pio run for
           # this reason; each parallel firmware leg must now do the same. (CAR-385)
+          # The `beta` moving tag (PRO-227) is deleted for the same reason — on a
+          # stable-tag release where `beta` still points at the same commit it
+          # could otherwise resolve in `git describe` and shadow the stable tag.
           git tag -d nightly 2>/dev/null || true
+          git tag -d beta 2>/dev/null || true
           pio run -e ${{ matrix.env }}
           mv .pio/build/${{ matrix.env }}/firmware.bin out/${{ matrix.prefix }}-firmware.bin
           mv .pio/build/${{ matrix.env }}/partitions.bin out/${{ matrix.prefix }}-partitions.bin
@@ -123,6 +128,7 @@ jobs:
         run: |
           mkdir -p out
           git tag -d nightly 2>/dev/null || true
+          git tag -d beta 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
       - name: Build embedded web UI
         run: ./scripts/build_webui.sh

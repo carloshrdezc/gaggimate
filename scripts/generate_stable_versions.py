@@ -9,8 +9,8 @@ Why fetch published releases (not just `git tag`)?
     annotated tags that were never promoted to a GitHub Release. Filtering on
     the published-releases feed guarantees every tag in the dropdown is a real
     OTA target.
-  - Auto-prerelease + `nightly` are excluded so the dropdown only ever offers
-    stable, vetted tags.
+  - Auto-prerelease + `nightly` + `beta` are excluded so the dropdown only ever
+    offers stable, vetted tags.
 
 Network resiliency:
   - If the API call succeeds, we (re)write the header.
@@ -54,7 +54,7 @@ USER_AGENT = "gaggimate-build/{}".format(OWNER)
 def _git_describe() -> str:
     try:
         out = subprocess.run(
-            ["git", "describe", "--tags", "--exclude", "nightly", "--abbrev=0"],
+            ["git", "describe", "--tags", "--exclude", "nightly", "--exclude", "beta", "--abbrev=0"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
@@ -76,7 +76,7 @@ def _current_release_tag() -> str | None:
     letting users on the just-released firmware force-reflash that
     exact build via the dropdown without waiting for the next release.
 
-    `nightly` is filtered out — it's a moving tag, not a release line.
+    `nightly` and `beta` are filtered out — they are moving tags, not release lines.
     """
     try:
         out = subprocess.run(
@@ -89,7 +89,7 @@ def _current_release_tag() -> str | None:
         if out.returncode != 0:
             return None
         tag = out.stdout.strip()
-        if not tag or tag.lower() == "nightly":
+        if not tag or tag.lower() in ("nightly", "beta"):
             return None
         return tag
     except Exception:
@@ -122,7 +122,7 @@ def _filter_stable(releases: list[dict]) -> list[str]:
         if rel.get("prerelease") or rel.get("draft"):
             continue
         tag = (rel.get("tag_name") or "").strip()
-        if not tag or tag.lower() == "nightly":
+        if not tag or tag.lower() in ("nightly", "beta"):
             continue
         out.append(tag)
         if len(out) >= MAX_VERSIONS:
