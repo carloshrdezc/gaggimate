@@ -15,6 +15,7 @@
 
 #include <SD_MMC.h>
 #include <algorithm>
+#include <cmath>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/webassets/web_ui_manifest.h>
@@ -323,6 +324,10 @@ void WebUIPlugin::loop() {
         doc["btd"] = profileManager->getSelectedProfile().getTotalDuration();
         doc["btv"] = profileManager->getSelectedProfile().getTotalVolume(); // raw volumetric target for frontend Weight card
         doc["ayo"] = controller->getSettings().isAllowYieldOverride() ? 1 : 0;
+        doc["as"] = controller->getSettings().isAutoSteamEnabled() ? 1 : 0;
+        // Round dose grams to 1 decimal so the wire value matches the "float" web contract
+        // (avoids noisy full-precision doubles; firmware keeps full precision internally).
+        doc["dg"] = std::round(controller->getSettings().getDoseGrams() * 10.0) / 10.0;
         doc["led"] = controller->getSystemInfo().capabilities.ledControl;
         doc["gtd"] = controller->getTargetGrindDuration();
         doc["gtv"] = controller->getSettings().getTargetGrindVolume();
@@ -887,6 +892,34 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             controller->setBrewTarget(static_cast<float>(doc["target"].as<uint8_t>()));
         } else {
             ESP_LOGW("WebUIPlugin", "req:change-brew-target ignored: missing or invalid 'target'");
+        }
+    } else if (msgType == "req:autosteam:set") {
+        // Device-authoritative auto-steam toggle (PRO-225). Persisted via
+        // Settings and rebroadcast to all clients in the next evt:status as "as".
+        JsonVariantConst enabledValue = doc["enabled"];
+        if (enabledValue.is<bool>()) {
+            controller->getSettings().setAutoSteamEnabled(enabledValue.as<bool>());
+        } else if (enabledValue.is<int>()) {
+            controller->getSettings().setAutoSteamEnabled(enabledValue.as<int>() != 0);
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:autosteam:set ignored: missing or invalid 'enabled'");
+        }
+    } else if (msgType == "req:dose:set") {
+        // Device-authoritative brew dose in grams (PRO-225). Validated and
+        // clamped by Settings::setDoseGrams, rebroadcast as "dg" in evt:status.
+        JsonVariantConst gramsValue = doc["grams"];
+        // ArduinoJson treats every JSON number (integer or float) as is<float>()==true,
+        // while strings/bools/null are false, so this single test accepts any numeric value.
+        if (!gramsValue.isNull() && gramsValue.is<float>()) {
+            const double grams = gramsValue.as<double>();
+            // Reject non-finite values (NaN, +/-inf are possible as<float>() outcomes) and out-of-range doses.
+            if (!std::isfinite(grams) || grams <= 0.0 || grams > 200.0) {
+                ESP_LOGW("WebUIPlugin", "req:dose:set ignored: 'grams' out of range");
+            } else {
+                controller->getSettings().setDoseGrams(grams);
+            }
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:dose:set ignored: missing or invalid 'grams'");
         }
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
