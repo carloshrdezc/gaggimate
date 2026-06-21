@@ -3,6 +3,7 @@ on:
     tags:
       - "*"
       - "!nightly"
+      - "!beta"
 
 permissions:
   contents: write
@@ -37,6 +38,11 @@ jobs:
         run: |
           mkdir -p out
           git tag -d nightly 2>/dev/null || true
+          # The `beta` moving tag (PRO-227) is deleted for the same reason as
+          # nightly: on a stable-tag release where `beta` still points at the
+          # same commit, `git describe` could otherwise resolve to it and shadow
+          # the just-pushed stable tag.
+          git tag -d beta 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
       - name: Build Web
         run: ./scripts/build_spiffs.sh

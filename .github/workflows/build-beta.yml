@@ -1,0 +1,195 @@
+on:
+  push:
+    branches:
+      - "master"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+name: Build Beta
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Add version
+        run: |
+          mkdir -p out
+          mkdir -p upload/display
+          mkdir -p upload/headless
+          mkdir -p upload/controller
+          # Delete BOTH moving tags before describe: if master HEAD coincides
+          # with the commit the nightly tag points at (e.g. right after a
+          # dev-master -> master fast-forward), git describe could otherwise
+          # resolve to nightly and write a junk version string (PRO-227 review).
+          git tag -d nightly 2>/dev/null || true
+          git tag -d beta 2>/dev/null || true
+          git describe --tags --dirty > out/version.txt
+      - name: Build Web
+        run: ./scripts/build_spiffs.sh
+      - name: Build controller
+        run: |
+          pio run -e controller
+          cp .pio/build/controller/firmware.bin out/board-firmware.bin
+          cp .pio/build/controller/partitions.bin out/board-partitions.bin
+          cp .pio/build/controller/bootloader.bin out/board-bootloader.bin
+          cp .pio/build/controller/firmware.bin upload/controller/firmware.bin
+          cp .pio/build/controller/partitions.bin upload/controller/partitions.bin
+          cp .pio/build/controller/bootloader.bin upload/controller/bootloader.bin
+      - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
+        continue-on-error: true
+        env:
+          UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_API_KEY: ${{ secrets.UPDATE_SERVER_API_KEY }}
+        with:
+          channel: 'beta'
+          target: 'controller'
+          firmware_dir: 'upload/controller'
+      - name: Build display FS
+        run: |
+          pio run -t buildfs -e display
+          cp .pio/build/display/spiffs.bin upload/display/filesystem.bin
+          cp .pio/build/display/spiffs.bin upload/headless/filesystem.bin
+          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
+          cp .pio/build/display/spiffs.bin out/display-headless-filesystem.bin
+      - name: Build display
+        run: |
+          pio run -e display
+          cp .pio/build/display/firmware.bin out/display-firmware.bin
+          cp .pio/build/display/partitions.bin out/display-partitions.bin
+          cp .pio/build/display/bootloader.bin out/display-bootloader.bin
+          cp .pio/build/display/firmware.bin upload/display/firmware.bin
+          cp .pio/build/display/partitions.bin upload/display/partitions.bin
+          cp .pio/build/display/bootloader.bin upload/display/bootloader.bin
+      - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
+        continue-on-error: true
+        env:
+          UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_API_KEY: ${{ secrets.UPDATE_SERVER_API_KEY }}
+        with:
+          channel: 'beta'
+          target: 'display'
+          firmware_dir: 'upload/display'
+          firmware_files: 'bootloader.bin,partitions.bin,firmware.bin,filesystem.bin'
+      - name: Build headless
+        run: |
+          pio run -e display-headless
+          cp .pio/build/display-headless/firmware.bin out/display-headless-firmware.bin
+          cp .pio/build/display-headless/partitions.bin out/display-headless-partitions.bin
+          cp .pio/build/display-headless/bootloader.bin out/display-headless-bootloader.bin
+          cp .pio/build/display-headless/firmware.bin upload/headless/firmware.bin
+          cp .pio/build/display-headless/partitions.bin upload/headless/partitions.bin
+          cp .pio/build/display-headless/bootloader.bin upload/headless/bootloader.bin
+      - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
+        continue-on-error: true
+        env:
+          UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_API_KEY: ${{ secrets.UPDATE_SERVER_API_KEY }}
+        with:
+          channel: 'beta'
+          target: 'headless'
+          firmware_dir: 'upload/headless'
+          firmware_files: 'bootloader.bin,partitions.bin,firmware.bin,filesystem.bin'
+      - name: Archive Firmware Files
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaggimate-firmware
+          path: "out/*"
+  release-beta:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      pull-requests: write
+    steps:
+      - name: Checkout repo (for tag management)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download Firmware Files
+        uses: actions/download-artifact@v4
+        with:
+          name: gaggimate-firmware
+          path: release
+      - name: Read version
+        id: version
+        run: echo "version=$(cat release/version.txt)" >> $GITHUB_OUTPUT
+      - name: Force-move beta tag to current commit
+        # softprops/action-gh-release sets target_commitish only when CREATING
+        # a tag. If the beta tag already exists from a prior run, the
+        # release source tarball stays pinned to that old commit even though
+        # the assets refresh. Delete-then-recreate the tag so it always
+        # tracks HEAD before the release action runs.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -d beta 2>/dev/null || true
+          git push origin :refs/tags/beta 2>/dev/null || true
+          git tag -f beta "${{ github.sha }}"
+          git push origin "refs/tags/beta" --force
+      - name: Delete any stale beta release records
+        # If a previous run was cancelled mid-publish, softprops/action-gh-release
+        # can leave behind an orphan draft release that still claims the
+        # 'beta' tag. The next run then fails at the finalize step with
+        # 'tag_name already_exists' because two release records race for the
+        # same tag. Delete every release that points at 'beta' (draft or
+        # published) so this run starts from a clean slate.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "beta") | .id' \
+          | while read -r release_id; do
+              if [[ -n "$release_id" ]]; then
+                echo "Deleting stale beta release: $release_id"
+                gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id" || true
+              fi
+            done
+      - name: Update Beta Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: beta
+          name: 'Beta Release ${{ steps.version.outputs.version }}'
+          prerelease: true
+          body: 'Latest beta release, built from the master branch (release-candidate). Select the beta channel in the UI to download this firmware.'
+          files: |
+            release/*
+          make_latest: 'false'
+      - name: Deploy to GitHub Pages subdirectory
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./release
+          destination_dir: beta
+          publish_branch: gh-pages
