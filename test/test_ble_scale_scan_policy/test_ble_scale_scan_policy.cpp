@@ -24,10 +24,45 @@ void test_scale_scan_runs_for_modes_that_can_use_scale_data(void) {
     TEST_ASSERT_TRUE(shouldScanForBleScaleMode(MODE_MANUAL));
 }
 
+// Steam grace window opens only when leaving a scanning mode into STEAM.
+static_assert(shouldStartSteamScaleGrace(MODE_BREW, MODE_STEAM));
+static_assert(shouldStartSteamScaleGrace(MODE_GRIND, MODE_STEAM));
+static_assert(shouldStartSteamScaleGrace(MODE_MANUAL, MODE_STEAM));
+static_assert(!shouldStartSteamScaleGrace(MODE_STANDBY, MODE_STEAM));
+static_assert(!shouldStartSteamScaleGrace(MODE_WATER, MODE_STEAM));
+static_assert(!shouldStartSteamScaleGrace(MODE_STEAM, MODE_STEAM));
+static_assert(!shouldStartSteamScaleGrace(MODE_BREW, MODE_STANDBY));
+static_assert(!shouldStartSteamScaleGrace(MODE_BREW, MODE_WATER));
+static_assert(!shouldStartSteamScaleGrace(MODE_BREW, MODE_GRIND));
+
+void test_steam_grace_opens_only_from_scanning_mode_into_steam(void) {
+    // From a scanning mode into STEAM -> open the grace window.
+    TEST_ASSERT_TRUE(shouldStartSteamScaleGrace(MODE_BREW, MODE_STEAM));
+    TEST_ASSERT_TRUE(shouldStartSteamScaleGrace(MODE_GRIND, MODE_STEAM));
+    TEST_ASSERT_TRUE(shouldStartSteamScaleGrace(MODE_MANUAL, MODE_STEAM));
+}
+
+void test_steam_grace_skipped_when_not_from_scanning_mode(void) {
+    // Reaching STEAM from a non-scanning mode: scale was already disconnected.
+    TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_STANDBY, MODE_STEAM));
+    TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_WATER, MODE_STEAM));
+    TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_STEAM, MODE_STEAM));
+}
+
+void test_steam_grace_skipped_for_non_steam_destinations(void) {
+    // Other transitions out of a scanning mode disconnect immediately, no grace.
+    TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_BREW, MODE_STANDBY));
+    TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_BREW, MODE_WATER));
+    TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_BREW, MODE_GRIND));
+}
+
 static int runBleScaleScanPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_scale_scan_skips_modes_that_do_not_use_scale_data);
     RUN_TEST(test_scale_scan_runs_for_modes_that_can_use_scale_data);
+    RUN_TEST(test_steam_grace_opens_only_from_scanning_mode_into_steam);
+    RUN_TEST(test_steam_grace_skipped_when_not_from_scanning_mode);
+    RUN_TEST(test_steam_grace_skipped_for_non_steam_destinations);
     return UNITY_END();
 }
 

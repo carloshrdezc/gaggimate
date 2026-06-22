@@ -5,6 +5,7 @@
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
+#include "../core/constants.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 
@@ -12,6 +13,13 @@ void on_ble_measurement(float value);
 
 constexpr unsigned long UPDATE_INTERVAL_MS = 1000;
 constexpr unsigned int RECONNECTION_TRIES = 15;
+
+// When the machine transitions from a scanning mode (brew/grind/manual) directly
+// into STEAM, keep the BLE scale connected and reporting for this long before
+// tearing it down. This grace window lets the scale capture the last drops that
+// fall after the shot ends instead of disconnecting the instant steam starts.
+// All other transitions out of a scanning mode disconnect immediately (no grace).
+constexpr unsigned long STEAM_SCALE_GRACE_PERIOD_MS = 5000;
 
 class BLEScalePlugin : public Plugin {
   public:
@@ -62,6 +70,15 @@ class BLEScalePlugin : public Plugin {
 
     unsigned long lastUpdate = 0;
     unsigned int reconnectionTries = 0;
+
+    // Previous controller mode, tracked so the mode-change handler (which only
+    // receives the NEW mode) can detect a scanning-mode -> STEAM transition.
+    int previousMode = MODE_STANDBY;
+    // STEAM grace window: when set, a teardown of the scale is pending until
+    // steamGraceDeadline (millis()) elapses, giving the scale time to catch the
+    // final drips after a shot before disconnecting.
+    bool steamDisconnectPending = false;
+    unsigned long steamGraceDeadline = 0;
 
     // Rate limiting for callbacks
     mutable unsigned long lastMeasurementTime = 0;
