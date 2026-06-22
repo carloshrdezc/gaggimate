@@ -62,6 +62,12 @@ class BLEScalePlugin : public Plugin {
     void update();
     void onProcessStart() const;
 
+    // Teardown shared by the immediate mode-change disconnect path and the
+    // steam grace-window expiry in loop(): stop processing, drop the scale
+    // connection and halt async scanning. Call sites keep their own ESP_LOGI
+    // context so the reason for the teardown stays distinct in the logs.
+    void tearDownScale();
+
     void establishConnection();
 
     bool active = false;

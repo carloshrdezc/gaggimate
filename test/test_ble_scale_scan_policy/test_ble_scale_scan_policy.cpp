@@ -56,6 +56,28 @@ void test_steam_grace_skipped_for_non_steam_destinations(void) {
     TEST_ASSERT_FALSE(shouldStartSteamScaleGrace(MODE_BREW, MODE_GRIND));
 }
 
+// A same-mode re-fire is a no-op and must short-circuit before any
+// scan/teardown logic (so a redundant STEAM->STEAM event can't collapse an
+// in-flight grace window). Distinct modes are real transitions.
+static_assert(isRedundantModeChange(MODE_STEAM, MODE_STEAM));
+static_assert(isRedundantModeChange(MODE_BREW, MODE_BREW));
+static_assert(isRedundantModeChange(MODE_STANDBY, MODE_STANDBY));
+static_assert(!isRedundantModeChange(MODE_BREW, MODE_STEAM));
+static_assert(!isRedundantModeChange(MODE_BREW, MODE_STANDBY));
+static_assert(!isRedundantModeChange(MODE_STEAM, MODE_BREW));
+
+void test_redundant_mode_change_detected_for_same_mode(void) {
+    TEST_ASSERT_TRUE(isRedundantModeChange(MODE_STEAM, MODE_STEAM));
+    TEST_ASSERT_TRUE(isRedundantModeChange(MODE_BREW, MODE_BREW));
+    TEST_ASSERT_TRUE(isRedundantModeChange(MODE_STANDBY, MODE_STANDBY));
+}
+
+void test_redundant_mode_change_false_for_real_transitions(void) {
+    TEST_ASSERT_FALSE(isRedundantModeChange(MODE_BREW, MODE_STEAM));
+    TEST_ASSERT_FALSE(isRedundantModeChange(MODE_BREW, MODE_STANDBY));
+    TEST_ASSERT_FALSE(isRedundantModeChange(MODE_STEAM, MODE_BREW));
+}
+
 static int runBleScaleScanPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_scale_scan_skips_modes_that_do_not_use_scale_data);
@@ -63,6 +85,8 @@ static int runBleScaleScanPolicyTests() {
     RUN_TEST(test_steam_grace_opens_only_from_scanning_mode_into_steam);
     RUN_TEST(test_steam_grace_skipped_when_not_from_scanning_mode);
     RUN_TEST(test_steam_grace_skipped_for_non_steam_destinations);
+    RUN_TEST(test_redundant_mode_change_detected_for_same_mode);
+    RUN_TEST(test_redundant_mode_change_false_for_real_transitions);
     return UNITY_END();
 }
 
