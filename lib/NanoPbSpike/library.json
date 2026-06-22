@@ -1,0 +1,7 @@
+{
+  "name": "NanoPbSpike",
+  "version": "0.0.1",
+  "description": "PRO-239 THROWAWAY footprint-measurement library: nanopb runtime + 2 generated messages. NOT production.",
+  "frameworks": "*",
+  "platforms": "*"
+}
