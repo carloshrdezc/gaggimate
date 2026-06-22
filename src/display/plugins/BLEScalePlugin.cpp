@@ -16,9 +16,7 @@
 #include <scales/varia.h>
 #include <scales/weighmybru.h>
 
-void on_ble_measurement(float value) {
-    BLEScales.onMeasurement(value);
-}
+void on_ble_measurement(float value) { BLEScales.onMeasurement(value); }
 
 BLEScalePlugin BLEScales;
 
@@ -53,6 +51,10 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     this->controller = controller;
     this->pluginRegistry = RemoteScalesPluginRegistry::getInstance();
 
+    // Seed the previous-mode tracker with the controller's current mode so the
+    // very first mode-change transition is classified correctly.
+    this->previousMode = controller->getMode();
+
     // Apply scale plugins with error checking
     AcaiaScalesPlugin::apply();
     BookooScalesPlugin::apply();
@@ -82,6 +84,10 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     });
     manager->on("controller:bluetooth:disconnect", [this](Event const &) {
         ESP_LOGW("BLEScalePlugin", "Controller disconnected, stopping BLE scan");
+        // Clear any in-flight steam grace so a BLE disconnect during the window
+        // doesn't leave the pending flag dangling until the deadline.
+        steamDisconnectPending = false;
+        steamGraceDeadline = 0;
         active = false;
         disconnect();
         scanner->stopAsyncScan();
@@ -89,16 +95,39 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
     manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
     manager->on("controller:mode:change", [this](Event const &event) {
-        if (shouldScanForBleScaleMode(event.getInt("value"))) {
+        const int newMode = event.getInt("value");
+        const int oldMode = previousMode;
+        previousMode = newMode;
+
+        // A same-mode re-fire (e.g. WebUIPlugin re-sending req:change-mode with
+        // the current mode) is a no-op: bail before any scan/teardown logic so a
+        // redundant STEAM->STEAM event can't collapse an in-flight grace window
+        // into an immediate disconnect.
+        if (isRedundantModeChange(oldMode, newMode)) {
+            return;
+        }
+
+        if (shouldScanForBleScaleMode(newMode)) {
+            // Entering (or staying in) a scanning mode: resume scanning and
+            // cancel any pending steam-grace teardown.
+            steamDisconnectPending = false;
+            steamGraceDeadline = 0;
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
+        } else if (shouldStartSteamScaleGrace(oldMode, newMode)) {
+            // Scanning-mode -> STEAM: keep the scale alive for a short grace
+            // window so it can capture the last drops, then disconnect in loop().
+            steamDisconnectPending = true;
+            steamGraceDeadline = millis() + STEAM_SCALE_GRACE_PERIOD_MS;
+            ESP_LOGI("BLEScalePlugin", "Entering steam from scanning mode, keeping scale alive for %lums",
+                     STEAM_SCALE_GRACE_PERIOD_MS);
         } else {
-            active = false;
-            disconnect();
-            if (scanner != nullptr) {
-                scanner->stopAsyncScan();
-            }
+            // Any other non-scanning mode (standby/water, or steam not reached
+            // from a scanning mode): disconnect immediately as before.
+            steamDisconnectPending = false;
+            steamGraceDeadline = 0;
+            tearDownScale();
             ESP_LOGI("BLEScalePlugin", "Stopping scanning, disconnecting");
         }
     });
@@ -109,6 +138,19 @@ void BLEScalePlugin::loop() {
         establishConnection();
     }
     const unsigned long now = millis();
+
+    // Steam grace window: once the deadline passes (and we're still in steam),
+    // perform the same teardown the immediate path does. Done here so timing is
+    // non-blocking. Casting the diff to signed handles millis() rollover safely.
+    if (steamDisconnectPending && (long)(now - steamGraceDeadline) >= 0) {
+        if (controller != nullptr && controller->getMode() == MODE_STEAM) {
+            tearDownScale();
+            ESP_LOGI("BLEScalePlugin", "Steam grace window elapsed, disconnecting scale");
+        }
+        steamDisconnectPending = false;
+        steamGraceDeadline = 0;
+    }
+
     if (now - lastUpdate > UPDATE_INTERVAL_MS) {
         lastUpdate = now;
         update();
@@ -202,6 +244,14 @@ void BLEScalePlugin::disconnect() {
         uuid = "";
         doConnect = false;
         reconnectionTries = 0;
+    }
+}
+
+void BLEScalePlugin::tearDownScale() {
+    active = false;
+    disconnect();
+    if (scanner != nullptr) {
+        scanner->stopAsyncScan();
     }
 }
 
