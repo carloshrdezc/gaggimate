@@ -1,6 +1,16 @@
 #include "../../src/display/plugins/BLEScaleScanPolicy.h"
+#include "../../src/display/plugins/PostStopGracePolicy.h"
 #include <display/core/constants.h>
 #include <unity.h>
+
+// PRO-248: the BLE scale-alive steam grace and ShotHistory's extended-recording
+// window must come from ONE source of truth so they can never diverge again.
+// The unified hard cap is the requested 10 s. (The actual derivation of
+// STEAM_SCALE_GRACE_PERIOD_MS / EXTENDED_RECORDING_DURATION from this constant is
+// proven at compile time by static_asserts in BLEScalePlugin.h and
+// ShotHistoryPlugin.h, which fire during the firmware build — those headers pull
+// in hardware-only dependencies and are not host-includable.)
+static_assert(POST_STOP_GRACE_DURATION_MS == 10000, "PRO-248: unified post-stop grace must be 10s");
 
 static_assert(!shouldScanForBleScaleMode(MODE_STANDBY));
 static_assert(!shouldScanForBleScaleMode(MODE_STEAM));
@@ -78,6 +88,11 @@ void test_redundant_mode_change_false_for_real_transitions(void) {
     TEST_ASSERT_FALSE(isRedundantModeChange(MODE_STEAM, MODE_BREW));
 }
 
+// PRO-248: the unified post-stop grace is the single source of truth for both
+// the BLE scale-alive window and ShotHistory's extended-recording window, and is
+// the requested 10 s hard cap.
+void test_unified_post_stop_grace_is_ten_seconds(void) { TEST_ASSERT_EQUAL_UINT32(10000, POST_STOP_GRACE_DURATION_MS); }
+
 static int runBleScaleScanPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_scale_scan_skips_modes_that_do_not_use_scale_data);
@@ -87,6 +102,7 @@ static int runBleScaleScanPolicyTests() {
     RUN_TEST(test_steam_grace_skipped_for_non_steam_destinations);
     RUN_TEST(test_redundant_mode_change_detected_for_same_mode);
     RUN_TEST(test_redundant_mode_change_false_for_real_transitions);
+    RUN_TEST(test_unified_post_stop_grace_is_ten_seconds);
     return UNITY_END();
 }
 

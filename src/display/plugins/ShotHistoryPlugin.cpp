@@ -606,7 +606,7 @@ void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
     // BLUETOOTH_GRACE_PERIOD_MS, so this opens the window exactly when there is a genuine
     // BLE scale to settle. On non-NIGHTLY builds isVolumetricAvailable() == this, so the
     // flow-estimation / time-based path keeps isBluetoothScaleHealthy() false and steam
-    // still engages immediately (no spurious 3s delay). Opening with weight==0 is safe:
+    // still engages immediately (no spurious settle delay). Opening with weight==0 is safe:
     // the settle loop in record() self-terminates via weight stabilization and is hard-
     // capped by EXTENDED_RECORDING_DURATION; it also closes immediately if the scale
     // goes unhealthy (canProcessWeight check there).
