@@ -3,6 +3,7 @@
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
 #include "BLEScaleScanPolicy.h"
+#include "ShotHistoryPlugin.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <cmath> // For isfinite()
@@ -119,8 +120,10 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
             scan();
             active = true;
         } else if (shouldStartSteamScaleGrace(oldMode, newMode)) {
-            // Scanning-mode -> STEAM: keep the scale alive for a short grace
-            // window so it can capture the last drops, then disconnect in loop().
+            // Scanning-mode -> STEAM: arm the grace window. On the normal auto-steam
+            // path the drips were already captured during the MODE_BREW hold, so
+            // loop() will tear the scale down promptly once isExtendedRecording() is
+            // false; the deadline below is only the hard-cap fallback.
             steamDisconnectPending = true;
             steamGraceDeadline = millis() + STEAM_SCALE_GRACE_PERIOD_MS;
             ESP_LOGI("BLEScalePlugin", "Entering steam from scanning mode, keeping scale alive for %lums",
@@ -142,16 +145,31 @@ void BLEScalePlugin::loop() {
     }
     const unsigned long now = millis();
 
-    // Steam grace window: once the deadline passes (and we're still in steam),
-    // perform the same teardown the immediate path does. Done here so timing is
-    // non-blocking. Casting the diff to signed handles millis() rollover safely.
-    if (steamDisconnectPending && (long)(now - steamGraceDeadline) >= 0) {
-        if (controller != nullptr && controller->getMode() == MODE_STEAM) {
-            tearDownScale();
-            ESP_LOGI("BLEScalePlugin", "Steam grace window elapsed, disconnecting scale");
+    // PRO-248: Steam grace window teardown. The actual drip capture does NOT happen
+    // here — it happens earlier, while the machine is still in MODE_BREW and the
+    // BLUETOOTH source is latched (see DefaultUI's pendingAutoSteam hold, which waits
+    // for ShotHistory.isExtendedRecording() to go false before switching to STEAM).
+    // By the time STEAM is entered and steamDisconnectPending is armed, that recording
+    // window is normally already closed, so the check below fires on the next tick and
+    // we tear the scale down PROMPTLY rather than idling for the full grace.
+    //
+    // recordingWindowClosed (!isExtendedRecording) is the normal trigger; steamGraceDeadline
+    // (millis() + POST_STOP_GRACE_DURATION_MS, the shared cap) is a hard-cap safety net for
+    // the unlikely case that STEAM is entered with a recording window still open — we still
+    // tear down at the cap rather than holding the scale forever. Casting the diff to signed
+    // handles millis() rollover safely.
+    if (steamDisconnectPending) {
+        const bool capElapsed = (long)(now - steamGraceDeadline) >= 0;
+        const bool recordingWindowClosed = !ShotHistory.isExtendedRecording();
+        if (capElapsed || recordingWindowClosed) {
+            if (controller != nullptr && controller->getMode() == MODE_STEAM) {
+                tearDownScale();
+                ESP_LOGI("BLEScalePlugin", "Steam grace window %s, disconnecting scale",
+                         capElapsed ? "hit hard cap" : "closed (extended recording done)");
+            }
+            steamDisconnectPending = false;
+            steamGraceDeadline = 0;
         }
-        steamDisconnectPending = false;
-        steamGraceDeadline = 0;
     }
 
     if (now - lastUpdate > UPDATE_INTERVAL_MS) {

@@ -22,9 +22,12 @@
 //
 // Note we deliberately do NOT require a positive instantaneous weight: opening with
 // weight==0 is safe because the settle loop self-terminates via weight stabilization
-// and is hard-capped by EXTENDED_RECORDING_DURATION, and it closes immediately if the
-// scale stops being healthy. On the no-scale / flow-estimation / time-based path,
-// bluetoothScaleHealthy is false, so the window never opens and steam engages at once.
+// and is hard-capped by EXTENDED_RECORDING_DURATION (PRO-248: now derived from the
+// unified POST_STOP_GRACE_DURATION_MS source of truth shared with BLEScalePlugin's
+// scale-alive grace, so the two windows can never diverge), and it closes immediately
+// if the scale stops being healthy. On the no-scale / flow-estimation / time-based
+// path, bluetoothScaleHealthy is false, so the window never opens and steam engages at
+// once.
 constexpr bool shouldOpenExtendedRecording(bool recording, bool allowExtendedRecording, bool bluetoothScaleHealthy) {
     return recording && allowExtendedRecording && bluetoothScaleHealthy;
 }

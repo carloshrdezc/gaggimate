@@ -651,13 +651,19 @@ void DefaultUI::loop() {
     const unsigned long diff = now - lastRender;
 
     if (pendingAutoSteam) {
-        // PRO-223: Do not transition to steam until the shot is fully finalized.
-        // ShotHistory keeps an extended-recording / weight-settle window open for
-        // up to EXTENDED_RECORDING_DURATION after brew:end so the BLE scale can
-        // settle and post-stop drips are captured in the recorded yield. Calling
-        // controller->clear() here fires controller:brew:clear, which aborts that
-        // window (endExtendedRecording), and setMode(MODE_STEAM) stops record()
-        // logging. So we hold pendingAutoSteam until the settle completes.
+        // PRO-223 / PRO-248: Do not transition to steam until the shot is fully
+        // finalized. ShotHistory keeps an extended-recording / weight-settle
+        // window open for up to POST_STOP_GRACE_DURATION_MS after brew:end (the
+        // single source of truth, shared with BLEScalePlugin's scale-alive grace)
+        // so the BLE scale can settle and post-stop drips are captured in the
+        // recorded yield. While that window is open the mode stays MODE_BREW, so
+        // the BLE scale stays connected and Controller keeps lastProcess alive
+        // with the BLUETOOTH volumetric source latched — every drip still reaches
+        // updateVolume(). Calling controller->clear() here fires
+        // controller:brew:clear, which aborts that window (endExtendedRecording)
+        // and frees lastProcess / sets the source INACTIVE, and setMode(MODE_STEAM)
+        // stops record() logging. So we hold pendingAutoSteam until the settle
+        // completes.
         //
         // When there is no BLE scale (flow-estimation / time-based shots),
         // endRecording() never opens the window, so isExtendedRecording() is
