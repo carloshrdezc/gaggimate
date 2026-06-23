@@ -7,6 +7,14 @@ on:
 permissions:
   contents: write
 name: Build Beta
+# PRO-250: serialize every gh-pages push repo-wide. A concurrency group string
+# is shared across ALL workflows in the repo, so using the identical group name
+# here and in build-nightly.yml makes concurrent nightly/beta runs QUEUE instead
+# of racing on refs/heads/gh-pages (the intermittent "cannot lock ref" failure).
+# cancel-in-progress: false so a queued nightly/beta is never dropped.
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
