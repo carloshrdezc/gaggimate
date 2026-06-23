@@ -1,5 +1,6 @@
 #include <display/core/Event.h>
 #include <display/core/PluginManager.h>
+#include <stdexcept>
 #include <unity.h>
 
 // Exercises the core plugin/event system that the firmware is built around:
@@ -94,6 +95,165 @@ void test_trigger_unregistered_event_is_noop(void) {
     TEST_ASSERT_EQUAL_INT(42, result.getInt("k"));
 }
 
+// CAR-110: triggering a missing key must NOT default-insert into the listeners
+// map. We cannot read the private map directly, but the regression that the old
+// count()+operator[] code allowed is observable: firing an unregistered id, then
+// registering a real listener for that exact id and firing again, must invoke the
+// listener exactly once. (A spurious default-inserted empty vector would not be
+// detectable here, but the find()-based path guarantees no write happens at all.)
+void test_trigger_missing_key_then_register_fires_exactly_once(void) {
+    PluginManager manager;
+    // Fire many times with no listener — under the old code each of these would
+    // have written an empty vector into the map; under find() they are no-ops.
+    for (int i = 0; i < 5; i++) {
+        manager.trigger("evt:lazy");
+    }
+    int seen = 0;
+    manager.on("evt:lazy", [&](Event &) { seen++; });
+    manager.trigger("evt:lazy");
+    manager.trigger("evt:lazy");
+    TEST_ASSERT_EQUAL_INT(2, seen);
+}
+
+// CAR-110: a callback may re-enter trigger() for another event id while the
+// outer trigger() is still on the stack. With a recursive lock and
+// copy-then-invoke-outside-the-lock, this must not deadlock and both listeners
+// must run.
+void test_reentrant_trigger_from_callback(void) {
+    PluginManager manager;
+    int outer = 0, inner = 0;
+    manager.on("evt:inner", [&](Event &) { inner++; });
+    manager.on("evt:outer", [&](Event &) {
+        outer++;
+        manager.trigger("evt:inner"); // re-enter while outer dispatch is active
+    });
+
+    manager.trigger("evt:outer");
+
+    TEST_ASSERT_EQUAL_INT(1, outer);
+    TEST_ASSERT_EQUAL_INT(1, inner);
+}
+
+// CAR-110: a callback may re-enter trigger() for the SAME event id. The dispatch
+// loop iterates a snapshot taken under the lock, so recursion terminates as long
+// as the application's own logic does — here a depth counter caps it. This proves
+// the same-key recursive case neither deadlocks nor iterates a mutating vector.
+void test_reentrant_same_key_trigger_terminates(void) {
+    PluginManager manager;
+    int depth = 0;
+    manager.on("evt:recurse", [&](Event &) {
+        if (++depth < 3) {
+            manager.trigger("evt:recurse");
+        }
+    });
+
+    manager.trigger("evt:recurse");
+
+    TEST_ASSERT_EQUAL_INT(3, depth);
+}
+
+// CAR-110 review follow-up: a callback that ALWAYS re-triggers its own id (no
+// application-side cap) must not recurse without bound — PluginManager caps
+// dispatch at MAX_DISPATCH_DEPTH and bails, so the firmware can't overflow a
+// task stack on a runaway event cycle. The callback runs once per nesting level
+// up to the cap, then the deepest re-trigger is refused.
+void test_reentrant_same_key_trigger_depth_capped(void) {
+    PluginManager manager;
+    int calls = 0;
+    manager.on("evt:runaway", [&](Event &) {
+        calls++;
+        manager.trigger("evt:runaway"); // unconditional self-trigger
+    });
+
+    manager.trigger("evt:runaway");
+
+    // Bounded, not unbounded: the callback fires at each level until the cap
+    // refuses the next dispatch. The exact count is the cap; reference the real
+    // PluginManager::maxDispatchDepth() so this assertion tracks the cap instead
+    // of a hard-coded literal that silently drifts if the cap ever changes. The
+    // assertion that matters is that it terminated at a small bound rather than
+    // recursing until the stack overflowed.
+    TEST_ASSERT_EQUAL_INT(PluginManager::maxDispatchDepth(), calls);
+}
+
+// CAR-384: a callback that THROWS must not leak dispatch depth. trigger()
+// increments a per-call-stack depth counter and previously decremented it in a
+// trailing block that an exception would skip — leaking depth until it pinned at
+// MAX_DISPATCH_DEPTH and silently refused ALL further dispatch. A RAII DepthGuard
+// now decrements on every exit path including the throw, so depth fully recovers
+// and the bus keeps working. This test only runs where exceptions are enabled
+// (the native / native-sanitize host envs).
+void test_throwing_callback_does_not_leak_dispatch_depth(void) {
+    PluginManager manager;
+
+    manager.on("evt:throws", [](Event &) { throw std::runtime_error("boom"); });
+    int delivered = 0;
+    manager.on("evt:ok", [&](Event &) { delivered++; });
+
+    // Fire the throwing event enough times that, if each throw leaked one unit
+    // of depth, the counter would pin at the cap and refuse dispatch. Two extra
+    // iterations past the cap make a leak unmistakable.
+    for (int i = 0; i < PluginManager::maxDispatchDepth() + 2; ++i) {
+        bool caught = false;
+        try {
+            manager.trigger("evt:throws");
+        } catch (const std::runtime_error &) {
+            caught = true;
+        }
+        TEST_ASSERT_TRUE(caught); // the throw propagates out of trigger()
+    }
+
+    // Depth recovered: a normal, non-recursive event still dispatches. If depth
+    // had leaked, this would be silently dropped by the cap check.
+    manager.trigger("evt:ok");
+    TEST_ASSERT_EQUAL_INT(1, delivered);
+}
+
+// CAR-110 review follow-up: stopPropagation set from within a callback that also
+// re-enters trigger() must halt only the OUTER dispatch chain; the inner
+// dispatch carries its own Event, so the two stopPropagation flags are
+// independent. Verifies the snapshot loop's early-out interacts correctly with
+// re-entrancy.
+void test_stop_propagation_with_reentrant_trigger(void) {
+    PluginManager manager;
+    int innerSeen = 0, outerSecond = 0;
+    manager.on("evt:i", [&](Event &) { innerSeen++; });
+    manager.on("evt:o", [&](Event &e) {
+        manager.trigger("evt:i"); // inner dispatch, separate Event
+        e.stopPropagation = true; // halt the outer chain after this listener
+    });
+    manager.on("evt:o", [&](Event &) { outerSecond++; }); // must NOT run
+
+    manager.trigger("evt:o");
+
+    TEST_ASSERT_EQUAL_INT(1, innerSeen);   // inner fired, unaffected by outer stop
+    TEST_ASSERT_EQUAL_INT(0, outerSecond); // outer halted by stopPropagation
+}
+
+// CAR-110: registering a new listener from inside a callback must not affect the
+// in-flight dispatch (the loop runs over a snapshot copied under the lock). The
+// newly added listener only fires on the NEXT trigger.
+void test_register_during_dispatch_uses_snapshot(void) {
+    PluginManager manager;
+    int original = 0, added = 0;
+    manager.on("evt:grow", [&](Event &) {
+        original++;
+        if (original == 1) {
+            manager.on("evt:grow", [&](Event &) { added++; });
+        }
+    });
+
+    manager.trigger("evt:grow");
+    // First dispatch ran the snapshot: only the original listener fired.
+    TEST_ASSERT_EQUAL_INT(1, original);
+    TEST_ASSERT_EQUAL_INT(0, added);
+
+    manager.trigger("evt:grow");
+    // Second dispatch sees both listeners.
+    TEST_ASSERT_EQUAL_INT(2, original);
+    TEST_ASSERT_EQUAL_INT(1, added);
+}
+
 static int runEventSystemTests() {
     UNITY_BEGIN();
     RUN_TEST(test_typed_event_data_round_trips);
@@ -102,6 +262,13 @@ static int runEventSystemTests() {
     RUN_TEST(test_multiple_listeners_run_in_registration_order);
     RUN_TEST(test_stop_propagation_halts_remaining_listeners);
     RUN_TEST(test_trigger_unregistered_event_is_noop);
+    RUN_TEST(test_trigger_missing_key_then_register_fires_exactly_once);
+    RUN_TEST(test_reentrant_trigger_from_callback);
+    RUN_TEST(test_reentrant_same_key_trigger_terminates);
+    RUN_TEST(test_reentrant_same_key_trigger_depth_capped);
+    RUN_TEST(test_throwing_callback_does_not_leak_dispatch_depth);
+    RUN_TEST(test_stop_propagation_with_reentrant_trigger);
+    RUN_TEST(test_register_during_dispatch_uses_snapshot);
     return UNITY_END();
 }
 

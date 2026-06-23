@@ -5,6 +5,7 @@
 #include <SPIFFS.h>
 #include <ctime>
 #include <display/config.h>
+#include <display/config/features.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -16,12 +17,18 @@
 #include <display/plugins/AutoWakeupPlugin.h>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/BoilerFillPlugin.h>
+#if GAGGIMATE_ENABLE_HOMEKIT
 #include <display/plugins/HomekitPlugin.h>
+#endif
 #include <display/plugins/LedControlPlugin.h>
+#if GAGGIMATE_ENABLE_MQTT
 #include <display/plugins/MQTTPlugin.h>
+#endif
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/SmartGrindPlugin.h>
+#if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
+#endif
 #include <display/plugins/mDNSPlugin.h>
 #ifndef GAGGIMATE_HEADLESS
 #include <display/drivers/AmoledDisplayDriver.h>
@@ -67,22 +74,34 @@ void Controller::setup() {
     grinderManager->setup();
     profileManager = new ProfileManager(fs, "/p", settings, pluginManager);
     profileManager->setup();
+#if GAGGIMATE_ENABLE_HOMEKIT
     if (settings.isHomekit())
         pluginManager->registerPlugin(new HomekitPlugin(settings.getWifiSsid(), settings.getWifiPassword()));
     else
         pluginManager->registerPlugin(new mDNSPlugin());
+#else
+    // HomeKit compiled out: register mDNS unconditionally so the device stays
+    // discoverable on the network (HomeKit otherwise provides its own mDNS).
+    pluginManager->registerPlugin(new mDNSPlugin());
+#endif
     if (settings.isBoilerFillActive()) {
         pluginManager->registerPlugin(new BoilerFillPlugin());
     }
     if (settings.isSmartGrindActive()) {
         pluginManager->registerPlugin(new SmartGrindPlugin());
     }
+#if GAGGIMATE_ENABLE_MQTT
     if (settings.isHomeAssistant()) {
         pluginManager->registerPlugin(new MQTTPlugin());
     }
+#endif
+#if GAGGIMATE_ENABLE_WEBUI
     pluginManager->registerPlugin(new WebUIPlugin());
+#endif
     pluginManager->registerPlugin(&ShotHistory);
+#if GAGGIMATE_ENABLE_BLE_SCALE
     pluginManager->registerPlugin(&BLEScales);
+#endif
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
     pluginManager->setup(this);

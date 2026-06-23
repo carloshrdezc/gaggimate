@@ -64,11 +64,38 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       # -Wall -Wextra are on (display_common.build_flags). Warnings are allowed
       # to surface — the build must still succeed (no -Werror, see platformio.ini).
       - name: Build display firmware
         run: pio run -e display
+
+  firmware-flags-off:
+    name: Firmware build (display, all features off)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # CAR-385: compile the all-features-OFF permutation so the `#else` stubs
+      # the feature flags add (BLEScalePlugin, MQTT/HomeKit/WebUI gating) are
+      # actually built somewhere. Without this leg, stub drift only surfaces on a
+      # hand-run flags-off build; here it fails the PR. [env:display-flags-off]
+      # only flips the GAGGIMATE_ENABLE_* macros to 0 on top of [env:display].
+      - name: Build display firmware (flags off)
+        run: pio run -e display-flags-off
 
   native:
     name: Native tests (ASan/UBSan)
@@ -88,7 +115,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       # Sanitizer findings must fail the suite. halt_on_error / abort_on_error
       # turn the first ASan/UBSan report into a non-zero exit.
       - name: Run sanitized host tests
@@ -115,7 +142,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       - name: Install clang-tidy
         run: |
           sudo apt-get update
