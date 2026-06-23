@@ -393,6 +393,111 @@
   --analyzer-source-web-badge-text: #5b7aa7;
 }
 
+/*
+ * App-level base color tokens for the selectable dm-shell themes
+ * (midnight / espresso / matcha / blueprint).
+ *
+ * These themes ship dark surfaces via the `.dm-shell`-scoped variants near the
+ * end of this file, but the base DaisyUI color tokens (`--color-base-*`) were
+ * only overridden inside `.dm-shell`. Because :root-declared derived variables
+ * such as `--statistics-summary-surface-*` and `--home-surface-*` substitute
+ * `var(--color-base-100)` in the :root scope (not the `.dm-shell` scope), they
+ * resolved against the default light theme and rendered white cards on pages
+ * like Statistics. Declaring the base tokens here at the html[data-theme] level
+ * lets every :root color-mix formula resolve against the correct dark palette.
+ */
+html[data-theme='midnight'] {
+  --color-base-100: #121212;
+  --color-base-200: #000000;
+  --color-base-300: #1a1a1a;
+  --color-base-content: #e8e8e8;
+  --color-primary: oklch(45.5% 0.213 23.4);
+  --color-primary-content: oklch(95% 0 0);
+  --color-secondary: oklch(55% 0.08 240);
+  --color-secondary-content: oklch(95% 0 0);
+  --color-accent: oklch(72% 0.1 145);
+  --color-accent-content: oklch(10% 0 0);
+  --color-neutral: oklch(15% 0 0);
+  --color-neutral-content: oklch(85% 0 0);
+  --color-info: oklch(61% 0.11 240);
+  --color-info-content: oklch(95% 0 0);
+  --color-success: oklch(72% 0.11 145);
+  --color-success-content: oklch(10% 0 0);
+  --color-warning: oklch(74% 0.12 84);
+  --color-warning-content: oklch(10% 0 0);
+  --color-error: oklch(45.5% 0.213 23.4);
+  --color-error-content: oklch(95% 0 0);
+}
+
+html[data-theme='espresso'] {
+  --color-base-100: #1b1209;
+  --color-base-200: #0d0905;
+  --color-base-300: #24180c;
+  --color-base-content: #e8e8e8;
+  --color-primary: oklch(57% 0.14 54);
+  --color-primary-content: oklch(96% 0 0);
+  --color-secondary: oklch(55% 0.08 240);
+  --color-secondary-content: oklch(95% 0 0);
+  --color-accent: oklch(67% 0.13 70);
+  --color-accent-content: oklch(10% 0 0);
+  --color-neutral: oklch(18% 0.02 60);
+  --color-neutral-content: oklch(85% 0 0);
+  --color-info: oklch(61% 0.11 240);
+  --color-info-content: oklch(95% 0 0);
+  --color-success: oklch(72% 0.11 145);
+  --color-success-content: oklch(10% 0 0);
+  --color-warning: oklch(74% 0.12 84);
+  --color-warning-content: oklch(10% 0 0);
+  --color-error: oklch(57% 0.14 54);
+  --color-error-content: oklch(96% 0 0);
+}
+
+html[data-theme='matcha'] {
+  --color-base-100: #0d180f;
+  --color-base-200: #040e07;
+  --color-base-300: #131f15;
+  --color-base-content: #e8e8e8;
+  --color-primary: oklch(60% 0.14 145);
+  --color-primary-content: oklch(10% 0 0);
+  --color-secondary: oklch(55% 0.08 240);
+  --color-secondary-content: oklch(95% 0 0);
+  --color-accent: oklch(72% 0.1 145);
+  --color-accent-content: oklch(10% 0 0);
+  --color-neutral: oklch(16% 0.02 145);
+  --color-neutral-content: oklch(85% 0 0);
+  --color-info: oklch(61% 0.11 240);
+  --color-info-content: oklch(95% 0 0);
+  --color-success: oklch(72% 0.11 145);
+  --color-success-content: oklch(10% 0 0);
+  --color-warning: oklch(74% 0.12 84);
+  --color-warning-content: oklch(10% 0 0);
+  --color-error: oklch(60% 0.14 145);
+  --color-error-content: oklch(10% 0 0);
+}
+
+html[data-theme='blueprint'] {
+  --color-base-100: #0d1420;
+  --color-base-200: #04080f;
+  --color-base-300: #121b2b;
+  --color-base-content: #e8e8e8;
+  --color-primary: oklch(56% 0.13 240);
+  --color-primary-content: oklch(96% 0 0);
+  --color-secondary: oklch(55% 0.08 240);
+  --color-secondary-content: oklch(95% 0 0);
+  --color-accent: oklch(64% 0.12 240);
+  --color-accent-content: oklch(10% 0 0);
+  --color-neutral: oklch(16% 0.02 240);
+  --color-neutral-content: oklch(85% 0 0);
+  --color-info: oklch(61% 0.11 240);
+  --color-info-content: oklch(95% 0 0);
+  --color-success: oklch(72% 0.11 145);
+  --color-success-content: oklch(10% 0 0);
+  --color-warning: oklch(74% 0.12 84);
+  --color-warning-content: oklch(10% 0 0);
+  --color-error: oklch(56% 0.13 240);
+  --color-error-content: oklch(96% 0 0);
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --analyzer-pressure-text: #58a6ff;

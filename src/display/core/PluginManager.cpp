@@ -36,6 +36,48 @@ PluginManager::PluginManager() = default;
 PluginManager::~PluginManager() = default;
 #endif
 
+// enterDispatch/exitDispatch maintain the PER-CALL-STACK dispatch depth used to
+// cap runaway self-recursion (CAR-384). On the ESP32 the "call stack" is a
+// FreeRTOS task, so the depth is keyed by the current task handle under the
+// existing listeners lock (the only place dispatchDepthByTask is touched). On
+// the host each thread gets its own depth via thread_local. Either way the cap
+// bounds one task's recursion, never the sum of concurrent dispatches across
+// tasks.
+#if defined(ESP_PLATFORM)
+int PluginManager::enterDispatch() {
+    ListenersLock lock(this);
+    int depth = ++dispatchDepthByTask[xTaskGetCurrentTaskHandle()];
+    return depth;
+}
+
+void PluginManager::exitDispatch() {
+    ListenersLock lock(this);
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    auto it = dispatchDepthByTask.find(task);
+    if (it != dispatchDepthByTask.end()) {
+        if (--it->second <= 0) {
+            // Drop the entry at depth 0 so the map does not grow one slot per
+            // task that ever dispatches and never shrink.
+            dispatchDepthByTask.erase(it);
+        }
+    }
+}
+#else
+namespace {
+// Single per-thread (per-call-stack) dispatch depth shared by enter/exit on the
+// host. Must be ONE object — two separate function-local statics would not share
+// state and the depth would never balance.
+int &hostDispatchDepth() {
+    static thread_local int depth = 0;
+    return depth;
+}
+} // namespace
+
+int PluginManager::enterDispatch() { return ++hostDispatchDepth(); }
+
+void PluginManager::exitDispatch() { --hostDispatchDepth(); }
+#endif
+
 void PluginManager::registerPlugin(Plugin *plugin) { plugins.push_back(plugin); }
 
 void PluginManager::setup(Controller *controller) {
@@ -114,18 +156,20 @@ void PluginManager::trigger(Event &event) {
         if (it != listeners.end()) {
             callbacks = it->second;
         }
-        // Guard against an unbounded self-triggering cycle overflowing the task
-        // stack. The counter is shared across tasks (mutated only under the
-        // lock, so it is race-free) rather than per-call-stack, so it bounds the
-        // SUM of in-flight dispatch nesting; MAX_DISPATCH_DEPTH is set well above
-        // the handful of tasks that legitimately dispatch concurrently so normal
-        // fan-out never trips it, while a runaway recursion still aborts.
-        if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
-            ESP_LOGE("PluginManager", "Dispatch depth %d exceeded for event %s; aborting to avoid stack overflow", dispatchDepth,
-                     event.id.c_str());
-            return;
-        }
-        ++dispatchDepth;
+    }
+
+    // Guard against an unbounded self-triggering cycle overflowing the task
+    // stack. The depth is PER CALL STACK (per FreeRTOS task on the ESP32,
+    // thread_local on the host), so the cap bounds a single task's C-stack
+    // recursion — concurrent fan-out across tasks can never sum into the cap and
+    // drop a legitimate non-recursive event (CAR-384). DepthGuard increments on
+    // construction and decrements in its dtor on EVERY exit path, so a throwing
+    // callback can't leak depth and permanently wedge the bus at the cap.
+    DepthGuard guard(this);
+    if (guard.depth() > MAX_DISPATCH_DEPTH) {
+        ESP_LOGE("PluginManager", "Dispatch depth %d exceeded for event %s; aborting to avoid stack overflow", guard.depth(),
+                 event.id.c_str());
+        return;
     }
 
     if (callbacks) {
@@ -135,10 +179,5 @@ void PluginManager::trigger(Event &event) {
                 break;
             }
         }
-    }
-
-    {
-        ListenersLock lock(this);
-        --dispatchDepth;
     }
 }

@@ -92,6 +92,7 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         }
     }
 
+    int remintedCount = 0;
     for (const String &name : names) {
         const String stem = filenameStem(name);
         // Canonical full path for this entry. File::name() on the ESP32 Arduino
@@ -109,12 +110,14 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         {
             File file = fs->open(oldPath, "r");
             if (!file) {
+                ESP_LOGW("ProfileManager", "Remint: failed to open %s for read; skipping", oldPath.c_str());
                 continue;
             }
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, file);
             file.close();
             if (err) {
+                ESP_LOGW("ProfileManager", "Remint: failed to parse %s (%s); skipping", oldPath.c_str(), err.c_str());
                 continue;
             }
             JsonObject obj = doc.as<JsonObject>();
@@ -122,6 +125,7 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
             parsed = parseProfile(obj, profile);
         }
         if (!parsed) {
+            ESP_LOGW("ProfileManager", "Remint: invalid profile schema in %s; skipping", oldPath.c_str());
             continue;
         }
 
@@ -150,12 +154,15 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         }
         if (fs->exists(newPath)) {
             // Still colliding after retries -- skip rather than risk a clobber.
+            ESP_LOGW("ProfileManager", "Remint: minted id space exhausted (last tried %s) for %s; skipping", newPath.c_str(),
+                     oldPath.c_str());
             continue;
         }
         profile.id = newId;
 
         File out = fs->open(newPath, "w");
         if (!out) {
+            ESP_LOGW("ProfileManager", "Remint: failed to open %s for write; skipping", newPath.c_str());
             continue;
         }
         JsonDocument outDoc;
@@ -169,19 +176,33 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         const size_t written = serializeJson(outDoc, out);
         out.close();
         if (written != expected || expected == 0) {
+            ESP_LOGW("ProfileManager", "Remint: truncated write to %s (%u/%u bytes); rolling back", newPath.c_str(),
+                     static_cast<unsigned>(written), static_cast<unsigned>(expected));
             fs->remove(newPath);
             continue;
         }
 
         // Remove the stale original file unless the rename was a no-op (the new
         // id happened to match the old stem, which generateShortID makes
-        // vanishingly unlikely but is harmless to guard).
+        // vanishingly unlikely but is harmless to guard). The remove is CHECKED:
+        // if it fails (transient SD error / read-only FS) the old unaddressable
+        // file would otherwise survive next to the new one, get reminted AGAIN
+        // on the next boot with a fresh random id, and accumulate orphan copies
+        // while the ref-remapping drifts. Roll back the just-written newPath and
+        // skip emitting this migration so the next boot CONVERGES (it retries the
+        // same unaddressable original) instead of spawning yet another id.
         if (oldPath != newPath) {
-            fs->remove(oldPath);
+            if (!fs->remove(oldPath)) {
+                ESP_LOGW("ProfileManager", "Remint: failed to remove stale %s after writing %s; rolling back to retry next boot",
+                         oldPath.c_str(), newPath.c_str());
+                fs->remove(newPath);
+                continue;
+            }
         }
 
         ESP_LOGW("ProfileManager", "Reminted unaddressable profile id (stem=%s, rawId=%s) -> %s", stem.c_str(), rawId.c_str(),
                  newId.c_str());
+        ++remintedCount;
 
         auto alreadyMapped = [&](const String &from) {
             return std::find_if(migrations.begin(), migrations.end(), [&](const auto &m) { return m.first == from; }) !=
@@ -193,6 +214,10 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         if (stem != newId && stem != rawId && !alreadyMapped(stem)) {
             migrations.emplace_back(stem, newId);
         }
+    }
+
+    if (remintedCount > 0) {
+        ESP_LOGW("ProfileManager", "Reminted %d unaddressable profile(s)", remintedCount);
     }
 
     return migrations;

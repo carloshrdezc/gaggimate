@@ -1,5 +1,6 @@
 #include <display/core/Event.h>
 #include <display/core/PluginManager.h>
+#include <stdexcept>
 #include <unity.h>
 
 // Exercises the core plugin/event system that the firmware is built around:
@@ -167,10 +168,45 @@ void test_reentrant_same_key_trigger_depth_capped(void) {
     manager.trigger("evt:runaway");
 
     // Bounded, not unbounded: the callback fires at each level until the cap
-    // refuses the next dispatch. The exact count is the cap (16); the assertion
-    // that matters is that it terminated at a small bound rather than recursing
-    // until the stack overflowed.
-    TEST_ASSERT_EQUAL_INT(16, calls);
+    // refuses the next dispatch. The exact count is the cap; reference the real
+    // PluginManager::maxDispatchDepth() so this assertion tracks the cap instead
+    // of a hard-coded literal that silently drifts if the cap ever changes. The
+    // assertion that matters is that it terminated at a small bound rather than
+    // recursing until the stack overflowed.
+    TEST_ASSERT_EQUAL_INT(PluginManager::maxDispatchDepth(), calls);
+}
+
+// CAR-384: a callback that THROWS must not leak dispatch depth. trigger()
+// increments a per-call-stack depth counter and previously decremented it in a
+// trailing block that an exception would skip — leaking depth until it pinned at
+// MAX_DISPATCH_DEPTH and silently refused ALL further dispatch. A RAII DepthGuard
+// now decrements on every exit path including the throw, so depth fully recovers
+// and the bus keeps working. This test only runs where exceptions are enabled
+// (the native / native-sanitize host envs).
+void test_throwing_callback_does_not_leak_dispatch_depth(void) {
+    PluginManager manager;
+
+    manager.on("evt:throws", [](Event &) { throw std::runtime_error("boom"); });
+    int delivered = 0;
+    manager.on("evt:ok", [&](Event &) { delivered++; });
+
+    // Fire the throwing event enough times that, if each throw leaked one unit
+    // of depth, the counter would pin at the cap and refuse dispatch. Two extra
+    // iterations past the cap make a leak unmistakable.
+    for (int i = 0; i < PluginManager::maxDispatchDepth() + 2; ++i) {
+        bool caught = false;
+        try {
+            manager.trigger("evt:throws");
+        } catch (const std::runtime_error &) {
+            caught = true;
+        }
+        TEST_ASSERT_TRUE(caught); // the throw propagates out of trigger()
+    }
+
+    // Depth recovered: a normal, non-recursive event still dispatches. If depth
+    // had leaked, this would be silently dropped by the cap check.
+    manager.trigger("evt:ok");
+    TEST_ASSERT_EQUAL_INT(1, delivered);
 }
 
 // CAR-110 review follow-up: stopPropagation set from within a callback that also
@@ -230,6 +266,7 @@ static int runEventSystemTests() {
     RUN_TEST(test_reentrant_trigger_from_callback);
     RUN_TEST(test_reentrant_same_key_trigger_terminates);
     RUN_TEST(test_reentrant_same_key_trigger_depth_capped);
+    RUN_TEST(test_throwing_callback_does_not_leak_dispatch_depth);
     RUN_TEST(test_stop_propagation_with_reentrant_trigger);
     RUN_TEST(test_register_during_dispatch_uses_snapshot);
     return UNITY_END();
