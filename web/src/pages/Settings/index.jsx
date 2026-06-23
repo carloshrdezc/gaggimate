@@ -14,6 +14,7 @@ import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
 import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
+import { normalizeSettings } from './settingsNormalize.js';
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
@@ -38,51 +39,12 @@ export function Settings() {
 
   useEffect(() => {
     if (fetchedSettings) {
-      const settingsWithToggle = {
-        ...fetchedSettings,
-        standbyDisplayEnabled:
-          fetchedSettings.standbyDisplayEnabled !== undefined
-            ? fetchedSettings.standbyDisplayEnabled
-            : fetchedSettings.standbyBrightness > 0,
-        dashboardLayout: fetchedSettings.dashboardLayout || DASHBOARD_LAYOUTS.ORDER_FIRST,
-      };
-
-      if (fetchedSettings.pid) {
-        const pidParts = fetchedSettings.pid.split(',');
-        if (pidParts.length >= 4) {
-          settingsWithToggle.pid = pidParts.slice(0, 3).join(',');
-          settingsWithToggle.kf = pidParts[3];
-        } else {
-          settingsWithToggle.kf = '0.000';
-        }
-      }
-
-      if (fetchedSettings.autowakeupSchedules) {
-        const schedules = [];
-        if (
-          typeof fetchedSettings.autowakeupSchedules === 'string' &&
-          fetchedSettings.autowakeupSchedules.trim()
-        ) {
-          const scheduleStrings = fetchedSettings.autowakeupSchedules.split(';');
-          for (const scheduleStr of scheduleStrings) {
-            const [time, daysStr] = scheduleStr.split('|');
-            if (time && daysStr && daysStr.length === 7) {
-              const days = daysStr.split('').map(d => d === '1');
-              schedules.push({ time, days });
-            }
-          }
-        }
-        if (schedules.length === 0) {
-          schedules.push({ time: '07:00', days: [true, true, true, true, true, true, true] });
-        }
-        setAutoWakeupSchedules(schedules);
-      } else {
-        setAutoWakeupSchedules([
-          { time: '07:00', days: [true, true, true, true, true, true, true] },
-        ]);
-      }
-
-      setFormData(settingsWithToggle);
+      const { formData: normalized, autowakeupSchedules: schedules } = normalizeSettings(
+        fetchedSettings,
+        { defaultDashboardLayout: DASHBOARD_LAYOUTS.ORDER_FIRST },
+      );
+      setAutoWakeupSchedules(schedules);
+      setFormData(normalized);
     } else {
       setFormData({});
       setAutoWakeupSchedules([{ time: '07:00', days: [true, true, true, true, true, true, true] }]);
@@ -281,7 +243,15 @@ export function Settings() {
       reader.onload = async e => {
         try {
           const data = JSON.parse(e.target.result);
-          setFormData(data);
+          // Normalize the imported payload the same way the device-fetch effect
+          // does: split pid/kf and derive the separate autowakeupSchedules array.
+          // Without this, the schedule editor state stays stale and Save writes
+          // the old schedule back, discarding the imported one (PRO-252).
+          const { formData: normalized, autowakeupSchedules: schedules } = normalizeSettings(data, {
+            defaultDashboardLayout: DASHBOARD_LAYOUTS.ORDER_FIRST,
+          });
+          setAutoWakeupSchedules(schedules);
+          setFormData(normalized);
         } catch (error) {
           console.error('Failed to parse settings file:', error);
           alert('Failed to parse settings file. Please ensure it is valid JSON.');
