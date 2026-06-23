@@ -3,6 +3,7 @@
 #include "../config/features.h"
 #include "../core/Plugin.h"
 #include "../core/constants.h"
+#include "PostStopGracePolicy.h"
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
@@ -14,12 +15,23 @@ void on_ble_measurement(float value);
 constexpr unsigned long UPDATE_INTERVAL_MS = 1000;
 constexpr unsigned int RECONNECTION_TRIES = 15;
 
-// When the machine transitions from a scanning mode (brew/grind/manual) directly
-// into STEAM, keep the BLE scale connected and reporting for this long before
-// tearing it down. This grace window lets the scale capture the last drops that
-// fall after the shot ends instead of disconnecting the instant steam starts.
-// All other transitions out of a scanning mode disconnect immediately (no grace).
-constexpr unsigned long STEAM_SCALE_GRACE_PERIOD_MS = 5000;
+// PRO-248: Hard-cap for the steam scale-alive grace window. NOTE: this window is
+// NOT where the last drips are actually captured — that happens earlier, while
+// the machine is still in MODE_BREW. On the normal auto-steam path DefaultUI::loop()
+// holds `pendingAutoSteam` until ShotHistory.isExtendedRecording() is already
+// false, and only THEN calls setMode(MODE_STEAM). The MODE_BREW scanning mode
+// keeps the scale connected and the BLUETOOTH source latched, so the final drops
+// land in the shot yield during that hold. By the time STEAM is entered and the
+// grace window below is armed, the recording window is already closed.
+//
+// Given that, the grace window here behaves as a prompt-teardown safety net:
+// loop() tears the scale down as soon as isExtendedRecording() reads false (which
+// is normally immediate at STEAM entry) instead of waiting the full grace, and
+// only falls back to this hard cap if some path enters STEAM with a recording
+// window still open. Deriving from POST_STOP_GRACE_DURATION_MS keeps that cap in
+// step with the extended-recording cap. All other transitions out of a scanning
+// mode disconnect immediately (no grace).
+constexpr unsigned long STEAM_SCALE_GRACE_PERIOD_MS = POST_STOP_GRACE_DURATION_MS;
 
 class BLEScalePlugin : public Plugin {
   public:
