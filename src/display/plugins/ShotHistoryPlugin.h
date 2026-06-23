@@ -1,6 +1,7 @@
 #ifndef SHOTHISTORYPLUGIN_H
 #define SHOTHISTORYPLUGIN_H
 
+#include "PostStopGracePolicy.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <atomic>
@@ -11,12 +12,16 @@
 #include <freertos/semphr.h>
 
 constexpr size_t SHOT_HISTORY_INTERVAL = 100;
-constexpr size_t MIN_FREE_SPACE_BYTES = 500 * 1024;         // 500 KB reserved free space
-constexpr unsigned long EXTENDED_RECORDING_DURATION = 3000; // 3 seconds
-constexpr unsigned long WEIGHT_STABILIZATION_TIME = 1000;   // 1 second
-constexpr float WEIGHT_STABILIZATION_THRESHOLD = 0.1f;      // 0.1g threshold
-constexpr int SHOT_ID_LENGTH = 6;                           // Shot ID padding length
-constexpr unsigned long STATE_MUTEX_TIMEOUT_MS = 100;       // Mutex timeout for state access
+constexpr size_t MIN_FREE_SPACE_BYTES = 500 * 1024; // 500 KB reserved free space
+// PRO-248: hard cap for the post-stop extended-recording / weight-settle window.
+// Defined as POST_STOP_GRACE_DURATION_MS (single source of truth) so this window
+// and BLEScalePlugin's scale-alive grace cap share one constant. The meaningful
+// value-pin (POST_STOP_GRACE_DURATION_MS == 10000) lives in the host tests.
+constexpr unsigned long EXTENDED_RECORDING_DURATION = POST_STOP_GRACE_DURATION_MS;
+constexpr unsigned long WEIGHT_STABILIZATION_TIME = 1000; // 1 second
+constexpr float WEIGHT_STABILIZATION_THRESHOLD = 0.1f;    // 0.1g threshold
+constexpr int SHOT_ID_LENGTH = 6;                         // Shot ID padding length
+constexpr unsigned long STATE_MUTEX_TIMEOUT_MS = 100;     // Mutex timeout for state access
 
 class ShotHistoryPlugin : public Plugin {
   public:
