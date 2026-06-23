@@ -5,11 +5,12 @@
 
 // PRO-248: the BLE scale-alive steam grace and ShotHistory's extended-recording
 // window must come from ONE source of truth so they can never diverge again.
-// The unified hard cap is the requested 10 s. (The actual derivation of
-// STEAM_SCALE_GRACE_PERIOD_MS / EXTENDED_RECORDING_DURATION from this constant is
-// proven at compile time by static_asserts in BLEScalePlugin.h and
-// ShotHistoryPlugin.h, which fire during the firmware build — those headers pull
-// in hardware-only dependencies and are not host-includable.)
+// The unified hard cap is the requested 10 s. STEAM_SCALE_GRACE_PERIOD_MS
+// (BLEScalePlugin.h) and EXTENDED_RECORDING_DURATION (ShotHistoryPlugin.h) are
+// each defined as `constexpr ... = POST_STOP_GRACE_DURATION_MS;`, so there is no
+// separate value to keep in sync — they cannot diverge by construction. (Those
+// headers pull in hardware-only dependencies and are not host-includable, so we
+// pin the shared value here instead.)
 static_assert(POST_STOP_GRACE_DURATION_MS == 10000, "PRO-248: unified post-stop grace must be 10s");
 
 static_assert(!shouldScanForBleScaleMode(MODE_STANDBY));
