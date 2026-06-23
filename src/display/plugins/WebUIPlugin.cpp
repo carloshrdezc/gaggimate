@@ -499,12 +499,19 @@ void WebUIPlugin::setupServer() {
         serializeJson(doc, *response);
         request->send(response);
     });
-#if GAGGIMATE_ENABLE_BLE_SCALE
+    // BLE-scale HTTP surface. The routes are registered UNCONDITIONALLY so a
+    // flags-off build (GAGGIMATE_ENABLE_BLE_SCALE=0) still answers them: the
+    // prebuilt web bundle fetches /api/scales/* on load regardless of the
+    // device's compiled feature set, and a 404 there shows "Error loading
+    // devices" instead of a clean "no scales" state. With BLE compiled out the
+    // handlers (see the #else block in handleBLEScale*) return a typed empty
+    // payload (list: [], info: {connected:false,...}, scan/connect:
+    // {success:false}) with HTTP 200 so the client renders an empty list
+    // (CAR-386). The default BLE-on behavior is unchanged.
     server.on("/api/scales/list", [this](AsyncWebServerRequest *request) { handleBLEScaleList(request); });
     server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) { handleBLEScaleConnect(request); });
     server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
     server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
-#endif
     FS *fs = &LittleFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
@@ -1550,6 +1557,52 @@ void WebUIPlugin::handleBLEScaleInfo(AsyncWebServerRequest *request) {
     serializeJson(doc, *response);
     request->send(response);
 }
+#else // GAGGIMATE_ENABLE_BLE_SCALE
+
+// BLE scale compiled out (CAR-386). The four /api/scales/* routes are registered
+// unconditionally (see setupServer), so these stubs answer the flag-agnostic web
+// bundle with a typed EMPTY payload and HTTP 200 -- never a 404. That keeps the
+// Scales page in a clean "no devices" state instead of "Error loading devices".
+// Payload shapes mirror the real handlers' so the client parses them unchanged.
+void WebUIPlugin::handleBLEScaleList(AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc.to<JsonArray>(); // empty array: no scales when BLE is compiled out
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
+void WebUIPlugin::handleBLEScaleScan(AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["success"] = false; // scanning unavailable: BLE scale support not built
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
+void WebUIPlugin::handleBLEScaleConnect(AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["success"] = false; // connecting unavailable: BLE scale support not built
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
+void WebUIPlugin::handleBLEScaleInfo(AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["connected"] = false;
+    doc["name"] = "";
+    doc["uuid"] = "";
+    doc["rssi"] = 0;
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
 #endif // GAGGIMATE_ENABLE_BLE_SCALE
 
 void WebUIPlugin::updateOTAStatus(const String &version) {

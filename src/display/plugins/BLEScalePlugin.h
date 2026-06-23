@@ -2,10 +2,10 @@
 #define BLESCALEPLUGIN_H
 #include "../config/features.h"
 #include "../core/Plugin.h"
+#include "../core/constants.h"
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
-#include "../core/constants.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 
