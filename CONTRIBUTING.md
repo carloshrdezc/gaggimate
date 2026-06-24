@@ -72,7 +72,7 @@ When building the firmware, the scripts/build_webui.sh script installs the web d
 3. **Build the project** to verify your environment:
     - `platformio run -e display` and `platformio run -e controller` compile the firmware.
     - `./scripts/build_webui.sh` builds and embeds the web assets.
-4. **Upload the Web UI** by running `platformio run -e display -t uploadfs`
+4. **Flash the seed filesystem** (optional) by running `platformio run -e display -t uploadfs`. The web UI is embedded in the app image (see step 3), so `uploadfs` only writes the seed-profile filesystem image (`data/p`) — it no longer carries the web UI.
 
 ## Code Style
 
