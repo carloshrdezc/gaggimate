@@ -36,7 +36,7 @@ build_src_filter = -<*> +<controller/>
 
 ### Controller Firmware
 
-Located in `lib/GaggiMateControlle` and `src/controller`.
+Located in `lib/GaggiMateController` and `src/controller`.
 Implements hardware control and BLE communication.
 `GaggiMateController.*` sets up peripherals (heater, pump, valve) and handles safety mechanisms such as thermal runaway shutoff.
 Communication with the display uses the NimBLE library.
@@ -71,7 +71,7 @@ When building the firmware, the scripts/build_webui.sh script installs the web d
     - Ensure [PlatformIO](https://platformio.org/) is available for firmware builds.
 3. **Build the project** to verify your environment:
     - `platformio run -e display` and `platformio run -e controller` compile the firmware.
-    - `./scripts/builds_spiffs.sh` builds the web assets.
+    - `./scripts/build_webui.sh` builds and embeds the web assets.
 4. **Upload the Web UI** by running `platformio run -e display -t uploadfs`
 
 ## Code Style

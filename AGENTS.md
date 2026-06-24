@@ -63,7 +63,7 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 
 **Dual-platform project**: ESP32 firmware (PlatformIO) + Preact web UI (Vite)
 - Firmware: `pio run -e display` (display with UI) or `pio run -e display-headless` (no UI)
-- Web UI is embedded into the display/headless app image: `cd web && npm ci && npm run build` then run `scripts/build_webui.sh` (gzips + packs the bundle into `src/display/webassets/`) before `pio run -e display`. The pre-hook stubs an empty bundle so a bare `pio run -e display` still links without a web build.
+- Web UI is embedded into the display/headless app image: run `scripts/build_webui.sh` (it runs `npm ci && npm run build` in `web/`, then gzips + packs the bundle into `src/display/webassets/`) before `pio run -e display`. The pre-hook stubs an empty bundle so a bare `pio run -e display` still links without a web build.
 - The fresh-install filesystem image holds only seed profiles (`data/p`); the web UI no longer ships in `data/w`.
 - Version auto-generated from git tags via `scripts/auto_firmware_version.py` into `src/version.h`
 
