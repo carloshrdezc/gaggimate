@@ -19,9 +19,11 @@ import { LocationProvider, Router, Route, ErrorBoundary, lazy, useLocation } fro
 import { withShell, createLazyRoute } from './routeFactory.jsx';
 
 // Mock PageShell so we don't pull in FontAwesome/heavy chrome; we only care
-// about content-swap behaviour, not the shell markup.
+// about content-swap behaviour, not the shell markup. The mock stamps a
+// `data-shell` marker so a test can prove the shell renders OUTSIDE the lazy
+// boundary (i.e. before the page module resolves) — the property the fix adds.
 vi.mock('./components/PageShell.jsx', () => ({
-  PageShell: ({ children }) => h('div', { 'data-shell': '' }, children),
+  PageShell: ({ children }) => h('div', { 'data-shell': 'yes' }, children),
 }));
 
 let container;
@@ -44,10 +46,23 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 // Build a lazy route the same way routes.jsx does, but with an in-test loader
 // that resolves asynchronously like a real dynamic import.
 const makeLazyRoute = (label, exportName) =>
-  createLazyRoute(
-    () => Promise.resolve({ [exportName]: () => h('h1', null, label) }),
-    exportName,
-  );
+  createLazyRoute(() => Promise.resolve({ [exportName]: () => h('h1', null, label) }), exportName);
+
+// Like makeLazyRoute, but the dynamic import is DEFERRED: it stays pending until
+// you call .resolve(). This lets a test open the PRO-253 race window — navigate
+// to a second lazy route while the first route's import is still unresolved —
+// instead of awaiting full module resolution before navigating (which silently
+// closes the race window and lets buggy code pass).
+const makeDeferredLazyRoute = (label, exportName) => {
+  let resolveFn;
+  const promise = new Promise(res => {
+    resolveFn = res;
+  });
+  return {
+    component: createLazyRoute(() => promise, exportName),
+    resolve: () => resolveFn({ [exportName]: () => h('h1', null, label) }),
+  };
+};
 
 test('createLazyRoute and withShell produce stable, distinct components', () => {
   const a = makeLazyRoute('A', 'A');
@@ -115,32 +130,64 @@ test('a loaded lazy page renders synchronously on re-navigation (no re-suspend)'
 });
 
 test('navigating between two lazy routes swaps rendered content without a refresh', async () => {
+  // PRO-253 regression guard. This MUST exercise the actual race: navigate to a
+  // SECOND lazy route while the FIRST route's import is still PENDING. Awaiting
+  // full module resolution before navigating (as the original test did) closes
+  // the race window and green-lights the buggy pre-fix factory.
+  //
+  // The guard works on TWO fronts, both of which the pre-fix double-wrap
+  // (lazy -> `props => <ShellRoute component={Page}/>`) fails:
+  //
+  //   1. Shell OUTSIDE the lazy boundary: the fix's `withShell(lazy(...))` keeps
+  //      the shell chrome OUTSIDE the suspense boundary, so the shell renders
+  //      synchronously while a page module is still loading. The pre-fix design
+  //      couples shell+page inside one suspend, so nothing renders until the
+  //      import resolves -> the `[data-shell]` assertions below fail on it.
+  //   2. Content swap under the lazy->lazy race: navigating to BETA while its
+  //      import is pending must still land BETA's content in <main>, not leave
+  //      it stuck on ALPHA.
+  const alpha = makeDeferredLazyRoute('ALPHA', 'Alpha');
+  const beta = makeDeferredLazyRoute('BETA', 'Beta');
   const routeTable = [
-    { path: '/alpha', component: makeLazyRoute('ALPHA', 'Alpha') },
-    { path: '/beta', component: makeLazyRoute('BETA', 'Beta') },
+    { path: '/alpha', component: alpha.component },
+    { path: '/beta', component: beta.component },
   ];
 
   let navigate;
   history.replaceState(null, '', '/alpha');
   render(h(Harness, { routeTable, onReady: r => (navigate = r) }), container);
 
-  // First lazy route resolves and renders.
+  // ALPHA's import is still PENDING. The shell chrome must ALREADY be mounted:
+  // the fix renders PageShell outside the lazy boundary. (Pre-fix: no shell yet.)
+  await flush();
+  expect(container.querySelector('[data-shell]')).not.toBeNull();
+  expect(container.textContent).not.toContain('ALPHA');
+
+  // Resolve ALPHA; it renders inside the already-present shell.
+  alpha.resolve();
   await flush();
   await flush();
   expect(container.textContent).toContain('ALPHA');
   expect(container.textContent).not.toContain('BETA');
 
-  // Navigate to the second lazy route (as a menu click would).
+  // Navigate to the second lazy route (as a menu click would) BEFORE its import
+  // resolves — this is the PRO-253 race window.
   navigate('/beta');
   await flush();
-  await flush();
+  // Shell stays mounted across the lazy->lazy transition.
+  expect(container.querySelector('[data-shell]')).not.toBeNull();
 
-  // The regression check: content must swap to BETA, not stay stuck on ALPHA.
+  // Resolve BETA; the regression check: content must swap to BETA, not stay
+  // stuck on ALPHA.
+  beta.resolve();
+  await flush();
+  await flush();
   expect(location.pathname).toBe('/beta');
   expect(container.textContent).toContain('BETA');
   expect(container.textContent).not.toContain('ALPHA');
 
-  // Navigate back; lazy->lazy again, must swap with no refresh.
+  // Navigate back to the (now-loaded) ALPHA; lazy->lazy again, must swap with no
+  // refresh and without re-suspending.
   navigate('/alpha');
   await flush();
   await flush();
