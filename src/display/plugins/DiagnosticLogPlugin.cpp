@@ -45,9 +45,19 @@ void DiagnosticLogPlugin::start(Event const &event) {
 
     udp.begin(UDP_PORT);
 
+    // SECURITY / CONSENT NOTE: once installed, this tee broadcasts every INFO+
+    // log line in cleartext over UDP to the LAN broadcast address. No credential
+    // is emitted today (relay token and WiFi password are never logged), but the
+    // stream is unencrypted and visible to the whole broadcast domain. It is
+    // gated OFF by default and must be enabled explicitly from Settings — enable
+    // only on a trusted network, for debugging.
+
     // Low-priority (1) drain task pinned to core 0 (the protocol/WiFi core), so
     // the time-critical brew control loop on core 1 is never preempted by UDP I/O.
-    BaseType_t created = xTaskCreatePinnedToCore(drainTask, "DiagLogUDP", 4096, this, 1, &taskHandle, 0);
+    // Stack matches the WebUI relay task (WebUIPlugin.cpp, "WebUIRelay" = 16384):
+    // both share the lwip UDP/socket send path, and a logger must never crash the
+    // device on stack overflow.
+    BaseType_t created = xTaskCreatePinnedToCore(drainTask, "DiagLogUDP", 16384, this, 1, &taskHandle, 0);
     if (created != pdPASS) {
         ESP_LOGE(LOG_TAG, "Failed to create drain task (OOM); tee not installed");
         vQueueDelete(queue);
