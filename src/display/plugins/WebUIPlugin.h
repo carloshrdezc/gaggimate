@@ -196,9 +196,15 @@ class WebUIPlugin : public Plugin {
     //
     // volatile handoff (no mutex needed): both fields are written only by the
     // WS/relay handler under a single store each and read/cleared only by loop().
-    // A by-one-tick miss is harmless — loop() re-checks every iteration. The
-    // target is latched before the flag is raised so loop() never observes a
-    // stale target for a freshly-armed deferral.
+    // The target is a single-word scalar latched before the flag is raised, so
+    // there is no tearing. On a dual-core ESP32 bare volatile prevents compiler
+    // reordering but does not establish strict cross-core store ordering (see the
+    // CAR-259 caveat above), so loop() could in principle observe the flag a tick
+    // before the target store lands — but that one-tick stale read is harmless and
+    // self-correcting: the intent is re-posted on every arm and drained every ~2 ms,
+    // making such a window astronomically unlikely and transient regardless. A mutex
+    // is unnecessary because this is a single word (unlike the OTA String payload
+    // above, which is non-atomic and does need otaIntentMutex).
     volatile uint8_t pendingModeChangeTarget = 0;
     volatile bool pendingModeChange = false;
 };
