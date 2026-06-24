@@ -920,15 +920,23 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             // the window PRO-223/PRO-248 built. setMode() now would stop record().
             // A redundant/duplicate request while a window is already in flight just
             // re-posts the same target without collapsing it (no clear() runs).
-            if (ShotHistory.isExtendedRecording()) {
+            // PRO-265: STANDBY is an explicit user stop and must NEVER defer — it
+            // bypasses the settle window entirely and stops immediately, mirroring
+            // Controller::activateStandby() and the physical STANDBY button (which
+            // are not gated). Only non-standby targets (auto-steam MODE_STEAM, grind,
+            // manual) keep PRO-261's settle behavior.
+            if (newMode != MODE_STANDBY && ShotHistory.isExtendedRecording()) {
                 // Latch target before raising the flag so loop() never reads a stale
                 // target for a freshly-armed deferral (volatile handoff, see header).
                 pendingModeChangeTarget = newMode;
                 pendingModeChange = true;
             } else {
                 // No settle window (no scale / flow-estimation / time-based shot, or
-                // not coming from an active brew) — engage the new mode immediately,
-                // no added latency. Also clears any prior deferral that never armed.
+                // not coming from an active brew), OR an explicit STANDBY request —
+                // engage the new mode immediately, no added latency. Setting
+                // pendingModeChange = false here also disarms any prior deferral
+                // (e.g. an auto-steam defer armed moments earlier), so a mid-window
+                // standby cancels the pending transition instead of being shadowed.
                 pendingModeChange = false;
                 controller->clear();
                 controller->setMode(newMode);
