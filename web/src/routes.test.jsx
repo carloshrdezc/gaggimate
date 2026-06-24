@@ -135,17 +135,28 @@ test('navigating between two lazy routes swaps rendered content without a refres
   // full module resolution before navigating (as the original test did) closes
   // the race window and green-lights the buggy pre-fix factory.
   //
-  // The guard works on TWO fronts, both of which the pre-fix double-wrap
-  // (lazy -> `props => <ShellRoute component={Page}/>`) fails:
+  // What actually catches the regression (verified empirically against a
+  // reconstructed pre-fix factory — the `lazy -> props => <ShellRoute
+  // component={Page}/>` double-wrap with a fresh arrow per load):
   //
-  //   1. Shell OUTSIDE the lazy boundary: the fix's `withShell(lazy(...))` keeps
-  //      the shell chrome OUTSIDE the suspense boundary, so the shell renders
-  //      synchronously while a page module is still loading. The pre-fix design
-  //      couples shell+page inside one suspend, so nothing renders until the
-  //      import resolves -> the `[data-shell]` assertions below fail on it.
-  //   2. Content swap under the lazy->lazy race: navigating to BETA while its
-  //      import is pending must still land BETA's content in <main>, not leave
-  //      it stuck on ALPHA.
+  //   THE LOAD-BEARING GUARD is the shell-hoist assertion: `withShell(lazy(...))`
+  //   keeps the shell chrome OUTSIDE the suspense boundary, so PageShell renders
+  //   synchronously while a page module is still loading. The pre-fix design
+  //   couples shell+page inside one suspend, so nothing — not even the shell —
+  //   renders until the import resolves. The `[data-shell]` assertion at the
+  //   PENDING ALPHA checkpoint below (the `.not.toBeNull()` right after the
+  //   first flush, before `alpha.resolve()`) is therefore RED on the bug and is
+  //   the assertion that fails on the pre-fix factory.
+  //
+  //   The content-swap assertions (ALPHA/BETA text + `location.pathname`) are
+  //   kept as SUPPLEMENTARY coverage of the lazy->lazy transition, but they do
+  //   NOT independently fail on the count-ref race in this jsdom/preact-iso
+  //   harness: preact-iso self-heals the dropped-update window via its
+  //   monotonic `count` ref un-suspend gate (router.js ~L190-193, keyed off the
+  //   ~L154 component-identity check), so content reliably lands on the right
+  //   page even with the buggy factory once `[data-shell]` is neutralized.
+  //   They guard against future regressions in the swap path but are not the
+  //   guard that catches the original PRO-253 bug.
   const alpha = makeDeferredLazyRoute('ALPHA', 'Alpha');
   const beta = makeDeferredLazyRoute('BETA', 'Beta');
   const routeTable = [
