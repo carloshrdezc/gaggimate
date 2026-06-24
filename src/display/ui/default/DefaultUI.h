@@ -118,9 +118,6 @@ class DefaultUI {
     int grindAvailable = false;
     int initialized = false;
 
-    // Seasonal flags
-    int christmasMode = false;
-
     bool rerender = false;
     unsigned long lastRender = 0;
 

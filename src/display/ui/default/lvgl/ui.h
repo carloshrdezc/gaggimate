@@ -64,7 +64,6 @@ LV_IMG_DECLARE(ui_img_1424216268);    // assets/equality-40x40.png
 LV_IMG_DECLARE(ui_img_340148213);     // assets/settings-40x40.png
 LV_IMG_DECLARE(ui_img_1456692430);    // assets/pause-40x40.png
 LV_IMG_DECLARE(ui_img_flowmeter_png); // assets/flowmeter.png
-LV_IMG_DECLARE(ui_img_1510335);       // assets/logo-christmas.png
 
 // UI INIT
 void ui_init(void);

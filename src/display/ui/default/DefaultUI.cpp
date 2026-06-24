@@ -1415,8 +1415,7 @@ void DefaultUI::setupReactive() {
         },
         &brewScreenState, &profileDirty);
     effect_mgr.use_effect([=] { return currentScreen == ui_StandbyScreen; },
-                          [=]() { lv_img_set_src(ui_StandbyScreen_logo, christmasMode ? &ui_img_1510335 : &ui_img_logo_png); },
-                          &christmasMode);
+                          [=]() { lv_img_set_src(ui_StandbyScreen_logo, &ui_img_logo_png); });
 }
 
 void DefaultUI::handleScreenChange() {
@@ -1909,8 +1908,6 @@ void DefaultUI::updateStandbyScreen() {
                     lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
                 }
             }
-
-            christmasMode = (timeinfo.tm_mon == 11 && timeinfo.tm_mday < 27) || (timeinfo.tm_mon == 0 && timeinfo.tm_mday < 6);
         } else {
             // WiFi up but NTP hasn't synced yet — getLocalTime() returns false.
             // Without this branch the clock would keep its prior text (often the
