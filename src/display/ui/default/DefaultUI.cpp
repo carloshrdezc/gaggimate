@@ -1893,8 +1893,10 @@ void DefaultUI::updateStandbyScreen() {
             Settings &settings = controller->getSettings();
             const bool is24h = settings.isClock24hFormat();
             const int hour = is24h ? timeinfo.tm_hour : ((timeinfo.tm_hour % 12 == 0) ? 12 : timeinfo.tm_hour % 12);
-            lv_label_set_text_fmt(ui_StandbyScreen_time, "%02d:#D71921 %02d#", hour, timeinfo.tm_min);
-            lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+                lv_label_set_text_fmt(ui_StandbyScreen_time, "%02d:#D71921 %02d#", hour, timeinfo.tm_min);
+                lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            }
 
             // ndot_120 only covers digits+colon; drive the AM/PM suffix separately
             if (lv_obj_is_valid(gm_h.ampm)) {
@@ -1914,7 +1916,9 @@ void DefaultUI::updateStandbyScreen() {
             // Without this branch the clock would keep its prior text (often the
             // screen-init "--:--"), which renders as missing-glyph rectangles in
             // ndot_120. Hide it like the no-WiFi path does. (CAR-299)
-            lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+                lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            }
             if (lv_obj_is_valid(gm_h.ampm)) {
                 lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
             }
@@ -1923,7 +1927,9 @@ void DefaultUI::updateStandbyScreen() {
         // ndot_120 only covers 0x30-0x3A (digits + colon); dashes in "--:--"
         // render as LVGL missing-glyph rectangles. Hide the clock instead and
         // let the kicker label convey state (CAR-299).
-        lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+        if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+            lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+        }
         if (lv_obj_is_valid(gm_h.ampm)) {
             lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
         }
