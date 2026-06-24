@@ -35,31 +35,16 @@ function getChartData(data, brewState) {
     };
   }
 
-  // Check if nothing theme is active for chart colors
-  const isNothingTheme = document.documentElement.getAttribute('data-theme') === 'nothing';
-
-  // Nothing theme chart colors - more muted, fitting monochrome aesthetic
-  const chartColors = isNothingTheme
-    ? {
-        temp: '#ff8c66',
-        tempTarget: '#cc4400',
-        pressure: '#6699cc',
-        pressureTarget: '#334466',
-        flow: '#7cb876',
-        weight: '#a78bfa',
-        weightTarget: '#6b4fa0',
-        phaseLine: '#ff6644',
-      }
-    : {
-        temp: '#F0561D',
-        tempTarget: '#731F00',
-        pressure: '#0066CC',
-        pressureTarget: '#003366',
-        flow: '#63993D',
-        weight: '#8B5CF6',
-        weightTarget: '#4C1D95',
-        phaseLine: '#06B6D4',
-      };
+  const chartColors = {
+    temp: '#F0561D',
+    tempTarget: '#731F00',
+    pressure: '#0066CC',
+    pressureTarget: '#003366',
+    flow: '#63993D',
+    weight: '#8B5CF6',
+    weightTarget: '#4C1D95',
+    phaseLine: '#06B6D4',
+  };
 
   // Stabilize the end time by clearing milliseconds to prevent jiggling
   let end = new Date();
@@ -385,7 +370,7 @@ function getChartData(data, brewState) {
             minRotation: 0,
           },
           grid: {
-            color: isNothingTheme ? 'rgba(255, 255, 255, 0.06)' : 'rgba(128, 128, 128, 0.15)',
+            color: 'rgba(128, 128, 128, 0.15)',
           },
         },
         y1: {
