@@ -192,6 +192,31 @@ void WebUIPlugin::loop() {
             xSemaphoreGive(otaIntentMutex);
         }
     }
+    // Drain the deferred mode-change intent (PRO-261). Runs on the Arduino main
+    // loop task — the only task that touches Controller mode/process state for
+    // this deferral — so it mirrors DefaultUI::loop's pendingAutoSteam gate. Kept
+    // above the `if (!serverRunning) return;` guard below so a request that
+    // arrived over the cloud relay (no local AsyncWebServer running) still
+    // applies once the settle window closes.
+    if (pendingModeChange) {
+        if (ShotHistory.isExtendedRecording()) {
+            // Settle still in progress: hold the mode, keep the BLE scale connected
+            // and record() logging so post-stop drips land in the yield. Re-checked
+            // next iteration (~2 ms) — no blocking wait, no delay() on this task.
+        } else {
+            const uint8_t target = pendingModeChangeTarget;
+            pendingModeChange = false;
+            // Window closed (settle finished, scale went unhealthy, or there was no
+            // scale at all). deactivate() leaves mode == MODE_BREW after a normal
+            // shot; this guard is false only if the user explicitly navigated away
+            // (e.g. to standby) between brew-end and now, in which case discarding
+            // the deferred transition is the correct, display-matching behavior.
+            if (controller->getMode() == MODE_BREW) {
+                controller->clear();
+                controller->setMode(target);
+            }
+        }
+    }
     if (updating) {
         pluginManager->trigger("ota:update:start");
         // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
@@ -880,9 +905,34 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 return;
             if (newMode == MODE_MANUAL && !controller->isManualAvailable())
                 return;
+            // PRO-261: honor the post-shot extended-recording / scale-settle gate
+            // that the display's auto-steam path already respects (DefaultUI::loop
+            // / pendingAutoSteam, PRO-223 / PRO-248 / PRO-232). This handler runs
+            // on the AsyncTCP / relay task, NOT the main loop task. deactivate()
+            // ends the active process and synchronously fires controller:brew:end,
+            // which opens the settle window (ShotHistory.endRecording ->
+            // extendedRecording) iff a healthy BLE scale was the volumetric source.
             controller->deactivate();
-            controller->clear();
-            controller->setMode(newMode);
+            // If the settle window is open, defer clear()+setMode() to loop() (main
+            // task) so the BLE scale stays connected, record() keeps logging, and
+            // the final drips reach the recorded yield. Calling clear() now would
+            // fire controller:brew:clear -> endExtendedRecording(), aborting exactly
+            // the window PRO-223/PRO-248 built. setMode() now would stop record().
+            // A redundant/duplicate request while a window is already in flight just
+            // re-posts the same target without collapsing it (no clear() runs).
+            if (ShotHistory.isExtendedRecording()) {
+                // Latch target before raising the flag so loop() never reads a stale
+                // target for a freshly-armed deferral (volatile handoff, see header).
+                pendingModeChangeTarget = newMode;
+                pendingModeChange = true;
+            } else {
+                // No settle window (no scale / flow-estimation / time-based shot, or
+                // not coming from an active brew) — engage the new mode immediately,
+                // no added latency. Also clears any prior deferral that never armed.
+                pendingModeChange = false;
+                controller->clear();
+                controller->setMode(newMode);
+            }
         }
     } else if (msgType == "req:change-brew-target") {
         // Brew target is a grams value (yield) from the Home dashboard YIELD

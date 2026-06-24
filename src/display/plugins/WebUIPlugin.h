@@ -170,6 +170,37 @@ class WebUIPlugin : public Plugin {
     bool serverRunning = false;
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
+
+    // Deferred mode-change intent (PRO-261). A `req:change-mode` arrives on the
+    // AsyncTCP (`handleWebSocketData`) or relay (`relayLoopTask`) task, never the
+    // Arduino main loop task. The display's own auto-steam path
+    // (DefaultUI::loop / `pendingAutoSteam`) holds the brew->steam transition
+    // until ShotHistory.isExtendedRecording() clears so the BLE scale can settle
+    // and post-stop drips land in the recorded yield (PRO-223 / PRO-248 /
+    // PRO-232). The web `req:change-mode` path bypassed that gate and called
+    // clear()/setMode() immediately, aborting the settle window and producing a
+    // short yield.
+    //
+    // To make the gate firmware-authoritative (protecting web + relay + any
+    // future remote, with no wire-contract change), the handler ends the active
+    // process (deactivate(), which opens the settle window if a healthy BLE scale
+    // was the source) and, when isExtendedRecording() is still true, posts the
+    // requested mode here instead of clearing/switching. loop() — on the main
+    // task — drains this every ~2 ms: it holds while the window is open, then
+    // applies clear()+setMode() once it closes, exactly mirroring the display
+    // gate (including the getMode()==MODE_BREW guard so a user who navigated away
+    // to standby in the meantime does not get an unwanted steam transition).
+    // Non-scale / time-based shots open no window, so isExtendedRecording() is
+    // already false and the handler applies the change inline with no added
+    // latency (this deferral is never armed for them).
+    //
+    // volatile handoff (no mutex needed): both fields are written only by the
+    // WS/relay handler under a single store each and read/cleared only by loop().
+    // A by-one-tick miss is harmless — loop() re-checks every iteration. The
+    // target is latched before the flag is raised so loop() never observes a
+    // stale target for a freshly-armed deferral.
+    volatile uint8_t pendingModeChangeTarget = 0;
+    volatile bool pendingModeChange = false;
 };
 
 #endif // WEBUIPLUGIN_H
