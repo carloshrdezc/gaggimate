@@ -74,6 +74,10 @@ Settings::Settings() {
     homeAssistantIP = preferences.getString("ha_i", "");
     homeAssistantPort = preferences.getInt("ha_p", 1883);
     homeAssistantTopic = preferences.getString("ha_t", DEFAULT_HOME_ASSISTANT_TOPIC);
+    // Self-heal an oversized topic persisted before the clamp shipped, matching setHomeAssistantTopic().
+    if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
+        homeAssistantTopic = homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH);
+    }
     homeAssistantUser = preferences.getString("ha_u", "");
     homeAssistantPassword = preferences.getString("ha_pw", "");
     standbyTimeout = preferences.getInt("sbt", DEFAULT_STANDBY_TIMEOUT_MS);
@@ -342,7 +346,13 @@ void Settings::setHomeAssistantPort(const int homeAssistantPort) {
     save();
 }
 void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
-    this->homeAssistantTopic = homeAssistantTopic;
+    // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
+    // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
+    if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
+        this->homeAssistantTopic = homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH);
+    } else {
+        this->homeAssistantTopic = homeAssistantTopic;
+    }
     save();
 }
 void Settings::setHomeAssistantUser(const String &homeAssistantUser) {
