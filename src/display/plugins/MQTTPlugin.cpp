@@ -95,7 +95,11 @@ void MQTTPlugin::publishDiscovery(Controller *controller) {
     payload["qos"] = 2;
 
     char publishTopic[80];
-    snprintf(publishTopic, sizeof(publishTopic), "%s/device/%s/config", haTopic.c_str(), cmac);
+    const int ret = snprintf(publishTopic, sizeof(publishTopic), "%s/device/%s/config", haTopic.c_str(), cmac);
+    if (ret < 0 || ret >= static_cast<int>(sizeof(publishTopic))) {
+        printf("MQTT discovery topic truncated (haTopic too long); skipping discovery publish.\n");
+        return;
+    }
 
     client.publish(publishTopic, payload.as<String>());
 }
@@ -107,7 +111,11 @@ void MQTTPlugin::publish(const std::string &topic, const std::string &message) {
     mac.replace(":", "_");
     const char *cmac = mac.c_str();
     char publishTopic[80];
-    snprintf(publishTopic, sizeof(publishTopic), "gaggimate/%s/%s", cmac, topic.c_str());
+    const int ret = snprintf(publishTopic, sizeof(publishTopic), "gaggimate/%s/%s", cmac, topic.c_str());
+    if (ret < 0 || ret >= static_cast<int>(sizeof(publishTopic))) {
+        printf("MQTT publish topic truncated; skipping publish.\n");
+        return;
+    }
     client.publish(publishTopic, message.c_str());
 }
 void MQTTPlugin::publishBrewState(const char *state) {
