@@ -11,7 +11,7 @@ void LedControlPlugin::loop() {
     if (!initialized) {
         return;
     }
-    if (lastUpdate + UPDATE_INTERVAL < millis()) {
+    if (millis() - lastUpdate >= UPDATE_INTERVAL) {
         lastUpdate = millis();
         updateControl();
     }
@@ -42,15 +42,15 @@ void LedControlPlugin::updateControl() {
 }
 
 void LedControlPlugin::sendControl(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint8_t ext) {
-    if (r != last_r)
+    if (firstSend || r != last_r)
         this->controller->getClientController()->sendLedControl(0, r);
-    if (g != last_g)
+    if (firstSend || g != last_g)
         this->controller->getClientController()->sendLedControl(1, g);
-    if (b != last_b)
+    if (firstSend || b != last_b)
         this->controller->getClientController()->sendLedControl(2, b);
-    if (w != last_w)
+    if (firstSend || w != last_w)
         this->controller->getClientController()->sendLedControl(3, w);
-    if (ext != last_ext) {
+    if (firstSend || ext != last_ext) {
         this->controller->getClientController()->sendLedControl(4, 255 - ext);
         this->controller->getClientController()->sendLedControl(5, 255 - ext);
         this->controller->getClientController()->sendLedControl(6, 255 - ext);
@@ -61,4 +61,5 @@ void LedControlPlugin::sendControl(uint8_t r, uint8_t g, uint8_t b, uint8_t w, u
     last_b = b;
     last_w = w;
     last_ext = ext;
+    firstSend = false;
 }
