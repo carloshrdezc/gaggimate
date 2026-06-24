@@ -25,7 +25,16 @@ semver_t from_string(const string &version) {
         return {0, 0, 0, nullptr, nullptr};
     }
     // Strip optional leading 'v' so tags like "2.0.0" and "v2.0.0" both parse correctly
-    const string ver = (version[0] == 'v' || version[0] == 'V') ? version.substr(1) : version;
+    string ver = (version[0] == 'v' || version[0] == 'V') ? version.substr(1) : version;
+    // Strip semver build metadata (everything at and after the first '+'). Per semver,
+    // build metadata applies to the whole version, is the trailing component, and does
+    // NOT affect precedence, so we intentionally ignore it before parsing the core
+    // version and prerelease. This must happen before the '.'-split and '-'-split so
+    // neither the patch token nor the prerelease can contain a "+meta" suffix.
+    auto plus_at = ver.find('+');
+    if (plus_at != string::npos) {
+        ver = ver.substr(0, plus_at);
+    }
     auto numbers = split(ver, '.');
     if (numbers.size() < 3) {
         return {0, 0, 0, nullptr, nullptr};
