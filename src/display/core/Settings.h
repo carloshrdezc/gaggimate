@@ -81,6 +81,9 @@ class Settings {
     bool isBoilerFillActive() const { return boilerFillActive; }
     int getStartupFillTime() const { return startupFillTime; }
     int getSteamFillTime() const { return steamFillTime; }
+    // PRO-266: when true, DiagnosticLogPlugin tees ESP_LOG output over UDP on the
+    // LAN for tether-free serial capture. Default false → zero hot-path cost.
+    bool getDiagnosticLogEnabled() const { return diagnosticLogEnabled; }
     bool isSmartGrindActive() const { return smartGrindActive; }
     int getSmartGrindMode() const { return smartGrindMode; }
     String getSmartGrindIp() const { return smartGrindIp; }
@@ -158,6 +161,7 @@ class Settings {
     void setStartupFillTime(int startup_fill_time);
     void setSteamFillTime(int steam_fill_time);
     void setSmartGrindActive(bool smart_grind_active);
+    void setDiagnosticLogEnabled(bool diagnostic_log_enabled);
     void setSmartGrindIp(String smart_grind_ip);
     void setSmartGrindMode(int smart_grind_mode);
     void setHomeAssistant(bool homeAssistant);
@@ -228,6 +232,7 @@ class Settings {
     int startupFillTime = 0;
     int steamFillTime = 0;
     bool smartGrindActive = false;
+    bool diagnosticLogEnabled = false;
     bool smartGrindToggle = false;
     int smartGrindMode = 0;
     String smartGrindIp = "";

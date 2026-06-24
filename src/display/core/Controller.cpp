@@ -34,6 +34,9 @@
 #ifndef GAGGIMATE_SIM // mDNS is device-only (the sim WiFi shim has no real mDNS)
 #include <display/plugins/mDNSPlugin.h>
 #endif
+#ifndef GAGGIMATE_SIM // DiagnosticLogPlugin uses WiFiUDP — device-only (PRO-266)
+#include <display/plugins/DiagnosticLogPlugin.h>
+#endif
 #ifndef GAGGIMATE_HEADLESS
 #ifdef GAGGIMATE_SIM
 #include <SdlDriver.h> // desktop SDL panel stands in for the hardware drivers
@@ -118,6 +121,12 @@ void Controller::setup() {
 #endif
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
+#ifndef GAGGIMATE_SIM
+    // PRO-266: tees ESP_LOG over UDP for tether-free serial capture. Self-gated
+    // on Settings::getDiagnosticLogEnabled() (default OFF) — registered
+    // unconditionally so it can be toggled at runtime without a reflash.
+    pluginManager->registerPlugin(new DiagnosticLogPlugin());
+#endif
     pluginManager->setup(this);
 
     pluginManager->on("profiles:profile:save", [this](Event const &event) {
