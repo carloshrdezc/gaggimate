@@ -41,7 +41,6 @@ SET(SOURCES components/ui_comp_dials.c
     images/ui_img_340148213.c
     images/ui_img_1456692430.c
     images/ui_img_flowmeter_png.c
-    images/ui_img_1510335.c
     images/gm_ic_power.c
     images/gm_ic_cup.c
     images/gm_ic_steam.c
