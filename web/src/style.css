@@ -27,9 +27,11 @@
 }
 
 /* Analyzer color mapping (columns + analysis table + shared statistics visuals incl. trends/summary cards):
-   - default/nord: light theme
-   - dark/coffee/amoled/stealth: dark theme
-   - crisp: light theme
+   - :root holds the light defaults; the `@media (prefers-color-scheme: dark)`
+     block below swaps in the dark variants based on OS preference.
+   - No named theme special-cases these analyzer colors: the selectable themes
+     (midnight/espresso/matcha/blueprint and nothing/nothing-light) only set base
+     `--color-*` tokens, so analyzer visuals inherit the :root / prefers-color-scheme values.
 */
 :root {
   --analyzer-pressure-text: #0066cc;
