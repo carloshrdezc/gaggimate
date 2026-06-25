@@ -6,8 +6,8 @@
 #include <vector>
 
 // PRO-273 — proves the DiagnosticLogPlugin UDP/SD log tee actually captures
-// ESP_LOG output once ARDUHAL is routed through esp_log_writev() (the
-// -DUSE_ESP_IDF_LOG fix).
+// the display firmware's own ESP_LOG output once those calls are routed through
+// esp_log_write() (the src-scoped EspLogTee.h shim).
 //
 // Why this shape: DiagnosticLogPlugin.cpp can't be linked into [env:native] —
 // it depends on WiFiUdp / FreeRTOS queues / SD_MMC, none of which exist on the
@@ -15,8 +15,9 @@
 // into src/display/plugins/DiagLogFormat.h (diaglog::formatLine), which teeVprintf()
 // now calls. This suite exercises THAT real kernel directly, plus a faithful
 // reconstruction of teeVprintf()'s "format into buffer, enqueue, ALWAYS chain to
-// the previous vprintf" contract — the exact behavior esp_log_writev() drives on
-// the device once USE_ESP_IDF_LOG makes ESP_LOG* reach the registered vprintf.
+// the previous vprintf" contract — the exact behavior the registered vprintf
+// sees on the device once EspLogTee.h redefines the five ESP_LOGx macros to call
+// esp_log_write() (which dispatches through the installed vprintf -> the tee).
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -63,6 +64,21 @@ void test_format_line_empty_result_returns_zero(void) {
     TEST_ASSERT_EQUAL_UINT(0, len); // nothing to enqueue
 }
 
+// The EspLogTee.h shim frames each line as
+//   "[%6lu][%c][%s:%u] %s(): [%s] " <format> "\r\n"
+// (timestamp, level letter, file:line, func, tag) before handing the result to
+// esp_log_write() -> the registered vprintf -> formatLine. Assert formatLine
+// preserves that ARDUHAL-style prefix verbatim so the timestamp/level/source
+// framing actually survives into the queued (UDP/SD) line.
+void test_format_line_preserves_arduhal_framing(void) {
+    char buf[256];
+    size_t len = callFormatLine(buf, sizeof(buf), "[%6lu][%c][%s:%u] %s(): [%s] %s\r\n", 1234UL, 'I', "Controller.cpp", 339U,
+                                "loop", "Controller", "setting pressure scale to 1.00");
+    TEST_ASSERT_EQUAL_STRING("[  1234][I][Controller.cpp:339] loop(): [Controller] setting pressure scale to 1.00\r\n", buf);
+    TEST_ASSERT_EQUAL_UINT(strlen("[  1234][I][Controller.cpp:339] loop(): [Controller] setting pressure scale to 1.00\r\n"),
+                           len);
+}
+
 void test_format_line_rejects_zero_capacity(void) {
     char buf[1];
     size_t len = callFormatLine(buf, 0, "x");
@@ -75,7 +91,8 @@ void test_format_line_rejects_zero_capacity(void) {
 // the FreeRTOS queue + UDP/SD drain) AND an unconditional chain to the previous
 // vprintf (stand-in for the original UART sink). This is the behavior that was
 // BROKEN before PRO-273: esp_log_set_vprintf() installed the hook, but ARDUHAL's
-// ESP_LOG* never called it. With USE_ESP_IDF_LOG, esp_log_writev() invokes the
+// ESP_LOGx expanded to log_x -> ets_printf and never called it. With the
+// EspLogTee.h shim, ESP_LOGx now expands to esp_log_write(), which invokes the
 // registered vprintf for every INFO+ line — i.e. this hook now runs.
 
 static std::vector<std::string> g_captured; // the tee sink (queue/UDP/SD)
@@ -157,6 +174,7 @@ static int runDiagLogTeeTests() {
     RUN_TEST(test_format_line_with_numeric_args);
     RUN_TEST(test_format_line_truncates_long_line_to_buffer);
     RUN_TEST(test_format_line_empty_result_returns_zero);
+    RUN_TEST(test_format_line_preserves_arduhal_framing);
     RUN_TEST(test_format_line_rejects_zero_capacity);
     RUN_TEST(test_tee_captures_and_chains_to_uart);
     RUN_TEST(test_tee_chains_uart_even_when_capture_skipped);

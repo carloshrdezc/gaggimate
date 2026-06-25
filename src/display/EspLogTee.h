@@ -27,7 +27,11 @@
 // this override compiles cleanly. Bare log_x calls in the panel drivers are
 // left on the untouched ARDUHAL path. esp_log_write() routes through the
 // registered vprintf -> the tee, and (because the IDF default vprintf chained
-// by the tee still writes to UART) serial-over-USB output is preserved.
+// by the tee still writes to UART) serial-over-USB output is preserved. The
+// shim reproduces the ARDUHAL line framing — timestamp, level letter,
+// file:line, function, and tag (see GAGGIMATE_ESP_LOG below) — so serial lines
+// keep the same shape/observability they had before, the only difference being
+// the route (esp_log_write instead of ets_printf).
 //
 // The RUNTIME tag-level gate (initArduino() does esp_log_level_set("*", ERROR))
 // is raised to INFO at boot in main.cpp so INFO+ reaches esp_log_write() and
@@ -64,6 +68,25 @@
 static inline const char *gmLogTag(const char *tag) { return tag; }
 static inline const char *gmLogTag(const String &tag) { return tag.c_str(); }
 
+// Map an esp_log_level_t to the single ARDUHAL level letter (E/W/I/D/V) so the
+// emitted serial/UDP/SD line keeps the level marker the old ARDUHAL framing had.
+static inline char gmLogLevelLetter(esp_log_level_t level) {
+    switch (level) {
+    case ESP_LOG_ERROR:
+        return 'E';
+    case ESP_LOG_WARN:
+        return 'W';
+    case ESP_LOG_INFO:
+        return 'I';
+    case ESP_LOG_DEBUG:
+        return 'D';
+    case ESP_LOG_VERBOSE:
+        return 'V';
+    default:
+        return '?';
+    }
+}
+
 // esp_log.h leaves LOG_LOCAL_LEVEL at CONFIG_LOG_MAXIMUM_LEVEL (ERROR) because
 // USE_ESP_IDF_LOG is not defined; that would compile out INFO/DEBUG from
 // ESP_LOG_LEVEL_LOCAL. Force the local compile-time gate to INFO so INFO+ is
@@ -80,13 +103,23 @@ static inline const char *gmLogTag(const String &tag) { return tag.c_str(); }
 
 // Route straight to esp_log_write() (which invokes the registered vprintf — the
 // tee — and falls back to the default UART vprintf). The compile-time level
-// check mirrors ESP_LOG_LEVEL_LOCAL but uses our forced INFO local level. The
-// "[%s] " prefix + tag arg reproduces the ARDUHAL "[tag] message" UART format.
+// check mirrors ESP_LOG_LEVEL_LOCAL but uses our forced INFO local level.
+//
+// Framing reproduces the ARDUHAL line shape so serial-over-USB (and the UDP/SD
+// tee) keep their timestamp, level letter, and source location:
+//   [<ms>][<L>][file:line] func(): [tag] message\r\n
+// esp_log_timestamp() supplies the boot-relative millisecond timestamp,
+// gmLogLevelLetter() the E/W/I/D/V marker, and __FILE__/__LINE__/__func__ the
+// call-site location (all cheap macro/inline expansions, -Wformat clean). The
+// shim owns the trailing "\r\n" line terminator — call sites must NOT append
+// their own newline.
 #define GAGGIMATE_ESP_LOG(level, tag, format, ...)                                                                               \
     do {                                                                                                                         \
         if (GAGGIMATE_LOG_LOCAL_LEVEL >= (level)) {                                                                              \
             const char *gmTag_ = gmLogTag(tag);                                                                                  \
-            esp_log_write((level), gmTag_, "[%s] " format "\r\n", gmTag_, ##__VA_ARGS__);                                        \
+            esp_log_write((level), gmTag_, "[%6lu][%c][%s:%u] %s(): [%s] " format "\r\n",                                        \
+                          static_cast<unsigned long>(esp_log_timestamp()), gmLogLevelLetter(level), pathToFileName(__FILE__),    \
+                          static_cast<unsigned>(__LINE__), __func__, gmTag_, ##__VA_ARGS__);                                     \
         }                                                                                                                        \
     } while (0)
 

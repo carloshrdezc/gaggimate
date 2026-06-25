@@ -336,7 +336,7 @@ void Controller::loop() {
     if (clientController.isReadyForConnection() && clientController.connectToServer()) {
         waitingForController = false;
         setupInfos();
-        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f\n", settings.getPressureScaling());
+        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f", settings.getPressureScaling());
         setPressureScale();
         clientController.sendPidSettings(settings.getPid());
         clientController.sendPumpModelCoeffs(settings.getPumpModelCoeffs());

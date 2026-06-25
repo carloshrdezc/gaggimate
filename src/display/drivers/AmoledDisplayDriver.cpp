@@ -10,9 +10,9 @@ static bool detectI2CDevice(uint8_t address, const char *deviceName = nullptr) {
         Wire.beginTransmission(address);
         if (Wire.endTransmission() == 0) {
             if (deviceName) {
-                ESP_LOGI("AmoledDisplayDriver", "Found %s at 0x%02X\n", deviceName, address);
+                ESP_LOGI("AmoledDisplayDriver", "Found %s at 0x%02X", deviceName, address);
             } else {
-                ESP_LOGI("AmoledDisplayDriver", "Found device at 0x%02X\n", address);
+                ESP_LOGI("AmoledDisplayDriver", "Found device at 0x%02X", address);
             }
             return true;
         }
