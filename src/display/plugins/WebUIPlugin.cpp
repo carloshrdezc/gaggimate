@@ -725,7 +725,8 @@ void WebUIPlugin::startRelay() {
 
     // SSL heap usage can reach 50 KB; bail early rather than destabilize the device.
     if (useSSL && esp_get_free_heap_size() < 60000) {
-        ESP_LOGW("WebUIPlugin", "Insufficient heap (%lu B) for SSL relay — skipping", esp_get_free_heap_size());
+        ESP_LOGW("WebUIPlugin", "Insufficient heap (%u B) for SSL relay — skipping",
+                 static_cast<unsigned>(esp_get_free_heap_size()));
         return;
     }
 
@@ -750,7 +751,8 @@ void WebUIPlugin::startRelay() {
     relayTaskHandle = createdHandle;
 
     relayEnabled = true;
-    ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %lu B)", host.c_str(), port, path.c_str(), esp_get_free_heap_size());
+    ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %u B)", host.c_str(), port, path.c_str(),
+             static_cast<unsigned>(esp_get_free_heap_size()));
 }
 
 void WebUIPlugin::stopRelay() {

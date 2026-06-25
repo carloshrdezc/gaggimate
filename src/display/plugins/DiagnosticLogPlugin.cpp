@@ -2,6 +2,7 @@
 #include "../core/Controller.h"
 #include "../core/Event.h"
 #include "../core/PluginManager.h"
+#include "DiagLogFormat.h"
 #include <SD_MMC.h>
 #include <WiFi.h>
 #include <cstdarg>
@@ -179,9 +180,9 @@ int DiagnosticLogPlugin::teeVprintf(const char *format, va_list args) {
     int written = 0;
     if (self != nullptr && self->queue != nullptr) {
         DiagLogLine line;
-        int n = vsnprintf(line.text, sizeof(line.text), format, argsCopy);
-        if (n > 0) {
-            line.len = (static_cast<size_t>(n) < sizeof(line.text)) ? static_cast<size_t>(n) : sizeof(line.text) - 1;
+        // Pure, host-testable format+truncation kernel (PRO-273; DiagLogFormat.h).
+        line.len = diaglog::formatLine(line.text, sizeof(line.text), format, argsCopy);
+        if (line.len > 0) {
             // Non-blocking: drop the line rather than ever stall the caller.
             xQueueSend(self->queue, &line, 0);
         }
