@@ -141,7 +141,7 @@ Every issue must include:
 
 ### Linear workspace details
 
-- **Team**: Carlos Hernández (key: `CAR`)
+- **Team**: Projects (key: `PRO`) — coding work lives here. (Migration 2026-06: coding issues moved from team `CAR` to team `PRO`; the old `CAR` team now holds personal/non-coding issues only.)
 - **Project**: Gaggimate (for all firmware, web UI, hardware, and docs work)
 - **Labels to apply**: choose from `Bug`, `Feature`, `Improvement` plus one of `firmware`, `web-ui`, `hardware`, `documentation`
 - **Priority**: set honestly — `Urgent` for regressions/safety, `High` for user-facing breakage, `Medium` for planned features, `Low` for polish
@@ -149,5 +149,5 @@ Every issue must include:
 ### Process
 
 1. Create the Linear issue (via MCP tools or the Linear app)
-2. Note the issue ID (e.g. `CAR-42`) in your commit messages and PR description
+2. Note the issue ID (e.g. `PRO-42`) in your commit messages and PR description
 3. Move the issue to **In Progress** when work starts, **Done** when the PR merges
