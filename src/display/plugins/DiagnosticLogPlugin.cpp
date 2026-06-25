@@ -23,20 +23,34 @@ DiagnosticLogPlugin *DiagnosticLogPlugin::instance = nullptr;
 void DiagnosticLogPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
     instance = this;
-    // Install the tee only once WiFi is up (we need a usable network stack) and
-    // only when the user explicitly enabled diagnostics. When the flag is off we
-    // never touch esp_log_set_vprintf(), so the hot logging path is untouched.
-    pluginManager->on("controller:wifi:connect", [this](Event const &event) { start(event); });
+    // PRO-271: install must be DETERMINISTIC and IDEMPOTENT, not dependent on
+    // catching a single transient event. tryInstall() is the idempotent core
+    // (guarded by `installed`); we drive it from three places that together
+    // guarantee the tee arms whenever diagnostics is on AND WiFi is up, with no
+    // reboot required:
+    //   * loop()  — the backbone: re-checked every Controller iteration, so a
+    //               setting flip or a late WiFi association always converges.
+    //   * "controller:wifi:connect" — fast path: arm the moment STA gets an IP.
+    //   * "settings:changed"        — fast path: arm the moment the user flips
+    //                                 the flag on while already connected.
+    // When the flag is off we never touch esp_log_set_vprintf(), so the hot
+    // logging path is untouched (zero cost while default-OFF).
+    pluginManager->on("controller:wifi:connect", [this](Event const &) { tryInstall(); });
+    pluginManager->on("settings:changed", [this](Event const &) { tryInstall(); });
 }
 
-void DiagnosticLogPlugin::start(Event const &event) {
+void DiagnosticLogPlugin::loop() { tryInstall(); }
+
+void DiagnosticLogPlugin::tryInstall() {
     if (installed)
-        return; // idempotent: a reconnect must not stack hooks/tasks
+        return; // idempotent: a reconnect / re-check must not stack hooks/tasks
     if (!controller->getSettings().getDiagnosticLogEnabled())
         return; // gated OFF by default — zero cost on the hot path
-    const int apMode = event.getInt("AP");
-    if (apMode)
-        return; // AP fallback: no LAN to broadcast onto
+    // Gate on the ACTUAL link state, not an event payload: we need a usable LAN
+    // to broadcast onto. This also covers AP fallback (WiFi.status() is not
+    // WL_CONNECTED in SoftAP mode), replacing the old, fragile event "AP" flag.
+    if (WiFi.status() != WL_CONNECTED)
+        return; // no STA link yet — try again next loop / next event
 
     queue = xQueueCreate(QUEUE_DEPTH, sizeof(DiagLogLine));
     if (queue == nullptr) {
@@ -83,6 +97,29 @@ void DiagnosticLogPlugin::start(Event const &event) {
     } else {
         ESP_LOGI(LOG_TAG, "SD log sink inactive (no SD card mounted)");
     }
+
+    // PRO-271: proof-of-life. Enqueue a synthetic line DIRECTLY (not via ESP_LOG)
+    // so a single UDP packet is broadcast on install regardless of whether
+    // anything else is logging or how ARDUHAL routes its log levels. This makes
+    // "is the tee working?" verifiable immediately on an idle machine with
+    // `nc -ul 9999`. The drain task picks it up and broadcasts it like any line.
+    enqueueProofOfLife();
+}
+
+// Push a one-time proof-of-life line straight into the drain queue. Same
+// non-blocking contract as the hook (drop on full). Independent of ESP_LOG so
+// the install is verifiable even if no other log line is ever emitted.
+void DiagnosticLogPlugin::enqueueProofOfLife() {
+    if (queue == nullptr)
+        return;
+    DiagLogLine line;
+    int n =
+        snprintf(line.text, sizeof(line.text), "[DiagnosticLogPlugin] proof-of-life: UDP log tee armed on %s:%u (uptime %lums)",
+                 WiFi.localIP().toString().c_str(), UDP_PORT, static_cast<unsigned long>(millis()));
+    if (n <= 0)
+        return;
+    line.len = (static_cast<size_t>(n) < sizeof(line.text)) ? static_cast<size_t>(n) : sizeof(line.text) - 1;
+    xQueueSend(queue, &line, 0);
 }
 
 // Runs in the logging caller's task context. MUST be fast and non-blocking:
