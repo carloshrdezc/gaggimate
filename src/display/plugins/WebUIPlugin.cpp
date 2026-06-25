@@ -1363,7 +1363,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setSteamFillTime(request->arg("steamFillTime").toInt() * 1000);
             settings->setSmartGrindActive(request->hasArg("smartGrindActive"));
             // PRO-266: diagnostic UDP log tee, default OFF. Checkbox semantics —
-            // present means enabled. Takes effect on the next WiFi (re)connect.
+            // present means enabled. PRO-271: takes effect immediately while
+            // online — the "settings:changed" trigger below arms the tee without
+            // a reboot (DiagnosticLogPlugin::tryInstall, also driven from loop()).
             settings->setDiagnosticLogEnabled(request->hasArg("diagnosticLog"));
             if (request->hasArg("smartGrindIp"))
                 settings->setSmartGrindIp(request->arg("smartGrindIp"));

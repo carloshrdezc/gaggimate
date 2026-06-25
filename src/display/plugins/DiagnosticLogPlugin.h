@@ -27,6 +27,14 @@
 //     tee is never installed and there is zero hot-path cost. The SD sink shares
 //     this gate: it is active whenever diagnostics are on AND an SD card is
 //     mounted (Controller::isSDCard()); no separate flag.
+//   * Install is DETERMINISTIC + IDEMPOTENT (PRO-271): tryInstall() arms the tee
+//     whenever the flag is on AND WiFi (STA) is connected, and is driven from
+//     loop() every iteration plus the "controller:wifi:connect" / "settings:changed"
+//     events. So enabling diagnostics while already online arms it with NO reboot,
+//     and the install no longer hinges on catching one transient WiFi event. The
+//     `installed` flag makes every re-attempt a no-op. On install a one-time
+//     proof-of-life line is broadcast straight into the drain queue (independent
+//     of ESP_LOG) so the feature is verifiable immediately on an idle machine.
 //   * Connectionless UDP broadcast (default port 9999) so it survives network
 //     stalls and never blocks on a peer.
 //   * SD append is best-effort: if no card is mounted, or a write/open fails, the
@@ -44,6 +52,7 @@
 #include <WiFiUdp.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 struct Event;
@@ -53,7 +62,7 @@ class PluginManager;
 class DiagnosticLogPlugin : public Plugin {
   public:
     void setup(Controller *controller, PluginManager *pluginManager) override;
-    void loop() override {}
+    void loop() override;
 
     // UDP destination port the tee broadcasts to. Listen with e.g. `nc -ul 9999`.
     static constexpr uint16_t UDP_PORT = 9999;
@@ -82,7 +91,20 @@ class DiagnosticLogPlugin : public Plugin {
     static constexpr uint32_t SD_FLUSH_INTERVAL_MS = 1000;
 
   private:
-    void start(Event const &event);
+    // Idempotent install attempt: arms the tee iff diagnostics is enabled AND
+    // WiFi (STA) is connected. Guarded by `installed` so it is safe to call
+    // repeatedly — from loop(), on WiFi connect, and on a settings flip — which
+    // is what makes the install deterministic and reboot-free (PRO-271).
+    // tryInstall() is now reachable concurrently from THREE FreeRTOS tasks (the
+    // Arduino loop() task, the AsyncTCP task via "settings:changed", and the
+    // arduino_events WiFi-event task via "controller:wifi:connect"), so the
+    // check-and-install is serialized by installMutex — see tryInstall().
+    void tryInstall();
+
+    // Broadcast a one-time proof-of-life line on install, straight into the
+    // drain queue (independent of ESP_LOG) so the feature is verifiable even on
+    // an idle machine. PRO-271.
+    void enqueueProofOfLife();
 
     // vprintf hook installed via esp_log_set_vprintf(). Static because the C API
     // takes a plain function pointer; reaches shared state through the singleton.
@@ -102,6 +124,15 @@ class DiagnosticLogPlugin : public Plugin {
     TaskHandle_t taskHandle = nullptr;
     WiFiUDP udp;
     bool installed = false;
+
+    // Serializes the check-and-install in tryInstall() across the three
+    // FreeRTOS tasks that can reach it concurrently (loop(), AsyncTCP via
+    // "settings:changed", arduino_events WiFi-event via "controller:wifi:connect").
+    // Without it, two tasks could both observe installed==false and run the
+    // irreversible install twice — leaking a 16 KiB drain task + queue and, worse,
+    // capturing our own teeVprintf as previousVprintf (self-recursing log path /
+    // stack overflow). Mirrors the CAR-259 relayLifecycleMutex precedent.
+    SemaphoreHandle_t installMutex = nullptr;
 
     // SD sink state (drain-task-owned; no cross-task sharing).
     bool sdEnabled = false;  // diagnostics on AND an SD card is mounted
