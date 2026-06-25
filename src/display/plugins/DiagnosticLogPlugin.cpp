@@ -20,9 +20,39 @@ struct DiagLogLine {
 vprintf_like_t DiagnosticLogPlugin::previousVprintf = nullptr;
 DiagnosticLogPlugin *DiagnosticLogPlugin::instance = nullptr;
 
+// RAII guard for the install mutex. Takes the mutex on construction (if it
+// exists) and gives it back on destruction, so every return path out of
+// tryInstall() — the early guards, the OOM bailouts, and the normal completion —
+// releases the lock without a hand-audited give at each site (mirrors the
+// CAR-259 RelayLifecycleLock pattern).
+namespace {
+struct InstallLock {
+    SemaphoreHandle_t handle;
+    explicit InstallLock(SemaphoreHandle_t h) : handle(h) {
+        if (handle != nullptr) {
+            xSemaphoreTake(handle, portMAX_DELAY);
+        }
+    }
+    ~InstallLock() {
+        if (handle != nullptr) {
+            xSemaphoreGive(handle);
+        }
+    }
+    InstallLock(const InstallLock &) = delete;
+    InstallLock &operator=(const InstallLock &) = delete;
+};
+} // namespace
+
 void DiagnosticLogPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
     instance = this;
+    // Create the install mutex once here, before any WiFi/server events can fire,
+    // so the check-and-install in tryInstall() is serialized across the three
+    // tasks that can reach it (loop(), AsyncTCP "settings:changed", arduino_events
+    // "controller:wifi:connect"). See tryInstall() (PRO-271; CAR-259 precedent).
+    if (installMutex == nullptr) {
+        installMutex = xSemaphoreCreateMutex();
+    }
     // PRO-271: install must be DETERMINISTIC and IDEMPOTENT, not dependent on
     // catching a single transient event. tryInstall() is the idempotent core
     // (guarded by `installed`); we drive it from three places that together
@@ -42,6 +72,15 @@ void DiagnosticLogPlugin::setup(Controller *controller, PluginManager *pluginMan
 void DiagnosticLogPlugin::loop() { tryInstall(); }
 
 void DiagnosticLogPlugin::tryInstall() {
+    // Serialize the check-and-install. tryInstall() is reachable concurrently
+    // from three FreeRTOS tasks (loop(), AsyncTCP "settings:changed",
+    // arduino_events "controller:wifi:connect"); without this lock two of them
+    // could both pass the `installed` guard and run the irreversible install
+    // twice — leaking a 16 KiB drain task + queue and capturing our own
+    // teeVprintf as previousVprintf (self-recursion / stack overflow). The lock
+    // makes the check-and-claim of `installed` atomic so only one task ever
+    // performs the side effects (CAR-259 relayLifecycleMutex precedent).
+    InstallLock lock(installMutex);
     if (installed)
         return; // idempotent: a reconnect / re-check must not stack hooks/tasks
     if (!controller->getSettings().getDiagnosticLogEnabled())
@@ -118,7 +157,11 @@ void DiagnosticLogPlugin::enqueueProofOfLife() {
                  WiFi.localIP().toString().c_str(), UDP_PORT, static_cast<unsigned long>(millis()));
     if (n <= 0)
         return;
-    line.len = (static_cast<size_t>(n) < sizeof(line.text)) ? static_cast<size_t>(n) : sizeof(line.text) - 1;
+    // No truncation clamp here (unlike teeVprintf): the proof-of-life message is
+    // a fixed string plus an IPv4 address, a port, and uptime, so `n` can never
+    // reach LINE_BUF_SIZE (256) — the branch would be dead. snprintf still
+    // NUL-terminates within the buffer regardless.
+    line.len = static_cast<size_t>(n);
     xQueueSend(queue, &line, 0);
 }
 

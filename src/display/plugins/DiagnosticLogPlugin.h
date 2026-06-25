@@ -52,6 +52,7 @@
 #include <WiFiUdp.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 struct Event;
@@ -94,6 +95,10 @@ class DiagnosticLogPlugin : public Plugin {
     // WiFi (STA) is connected. Guarded by `installed` so it is safe to call
     // repeatedly — from loop(), on WiFi connect, and on a settings flip — which
     // is what makes the install deterministic and reboot-free (PRO-271).
+    // tryInstall() is now reachable concurrently from THREE FreeRTOS tasks (the
+    // Arduino loop() task, the AsyncTCP task via "settings:changed", and the
+    // arduino_events WiFi-event task via "controller:wifi:connect"), so the
+    // check-and-install is serialized by installMutex — see tryInstall().
     void tryInstall();
 
     // Broadcast a one-time proof-of-life line on install, straight into the
@@ -119,6 +124,15 @@ class DiagnosticLogPlugin : public Plugin {
     TaskHandle_t taskHandle = nullptr;
     WiFiUDP udp;
     bool installed = false;
+
+    // Serializes the check-and-install in tryInstall() across the three
+    // FreeRTOS tasks that can reach it concurrently (loop(), AsyncTCP via
+    // "settings:changed", arduino_events WiFi-event via "controller:wifi:connect").
+    // Without it, two tasks could both observe installed==false and run the
+    // irreversible install twice — leaking a 16 KiB drain task + queue and, worse,
+    // capturing our own teeVprintf as previousVprintf (self-recursing log path /
+    // stack overflow). Mirrors the CAR-259 relayLifecycleMutex precedent.
+    SemaphoreHandle_t installMutex = nullptr;
 
     // SD sink state (drain-task-owned; no cross-task sharing).
     bool sdEnabled = false;  // diagnostics on AND an SD card is mounted
