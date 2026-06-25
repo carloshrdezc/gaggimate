@@ -156,9 +156,20 @@ void DiagnosticLogPlugin::sdAppendLine(const char *text, size_t len) {
         sdLastFlushMs = millis();
     }
 
-    sdFile.write(reinterpret_cast<const uint8_t *>(text), len);
-    sdFile.write('\n');
-    sdBytes += len + 1;
+    // Count only the bytes the card actually accepted. On a full/failing card
+    // write() returns short (or 0); if it does, treat it as a write failure and
+    // disable the SD sink for this session (same graceful-degrade as open/rotate)
+    // so we never spin retrying and the byte accounting can't drift. UDP unaffected.
+    const size_t wantBytes = len + 1;
+    size_t wrote = sdFile.write(reinterpret_cast<const uint8_t *>(text), len);
+    wrote += sdFile.write('\n');
+    sdBytes += wrote;
+    if (wrote < wantBytes) {
+        ESP_LOGW(LOG_TAG, "SD log write short (%u/%u; card full/failing?); disabling SD sink", static_cast<unsigned>(wrote),
+                 static_cast<unsigned>(wantBytes));
+        sdEnabled = false;
+        return;
+    }
     sdSinceFlush++;
 
     // Flush periodically so lines actually hit the card before a freeze, but not
@@ -183,8 +194,16 @@ void DiagnosticLogPlugin::sdRotate() {
         sdFile.flush();
         sdFile.close();
     }
-    SD_MMC.remove(SD_LOG_PATH_OLD);                // drop the previous rollover
-    SD_MMC.rename(SD_LOG_PATH, SD_LOG_PATH_OLD);   // current → .1
+    // Check each rename/remove: if a rotation step fails we'd otherwise keep
+    // appending to an over-cap or wrong file, so degrade gracefully instead.
+    // remove() of a non-existent .1 is fine on first rotate, so only the rename
+    // (current → .1) and the fresh open are treated as hard failures.
+    SD_MMC.remove(SD_LOG_PATH_OLD); // drop the previous rollover (absent on first rotate)
+    if (!SD_MMC.rename(SD_LOG_PATH, SD_LOG_PATH_OLD)) {
+        ESP_LOGW(LOG_TAG, "SD log rotate rename failed (%s → %s); disabling SD sink", SD_LOG_PATH, SD_LOG_PATH_OLD);
+        sdEnabled = false;
+        return;
+    }
     sdFile = SD_MMC.open(SD_LOG_PATH, FILE_WRITE); // fresh, truncated active file
     if (!sdFile) {
         ESP_LOGW(LOG_TAG, "SD log rotate failed; disabling SD sink");

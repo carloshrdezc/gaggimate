@@ -31,6 +31,13 @@
 //     stalls and never blocks on a peer.
 //   * SD append is best-effort: if no card is mounted, or a write/open fails, the
 //     SD sink is skipped cleanly and the UDP path is unaffected (never crashes).
+//   * SD contention: the SD sink shares the single SD_MMC volume with ShotHistory,
+//     BeanManager, etc. If diagnostics is enabled mid-shot, the drain task's SD
+//     appends and ShotHistory's SD writes can hit the mount concurrently. This is
+//     SAFE — the build sets FF_FS_REENTRANT=1, so FatFS serializes all access to a
+//     volume behind a per-volume mutex (no corruption); the only cost is bounded
+//     contention/latency. And because the feature is default-OFF, there is no
+//     impact at all unless a user explicitly enables diagnostics mid-shot.
 
 #include "../core/Plugin.h"
 #include <FS.h>
