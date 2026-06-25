@@ -2,6 +2,7 @@
 #include "../core/Controller.h"
 #include "../core/Event.h"
 #include "../core/PluginManager.h"
+#include <SD_MMC.h>
 #include <WiFi.h>
 #include <cstdarg>
 #include <cstdio>
@@ -70,7 +71,18 @@ void DiagnosticLogPlugin::start(Event const &event) {
     previousVprintf = esp_log_set_vprintf(&DiagnosticLogPlugin::teeVprintf);
     installed = true;
 
+    // PRO-268: enable the persistent SD-card sink whenever a card is mounted.
+    // The drain task opens the file lazily on first line; here we only record
+    // intent. No card → SD sink stays off and only UDP runs (graceful no-SD).
+    sdEnabled = controller->isSDCard();
+
     ESP_LOGI(LOG_TAG, "UDP log tee active → 255.255.255.255:%u (listen: nc -ul %u)", UDP_PORT, UDP_PORT);
+    if (sdEnabled) {
+        ESP_LOGI(LOG_TAG, "SD log sink active → %s (rotates to %s at %u bytes)", SD_LOG_PATH, SD_LOG_PATH_OLD,
+                 static_cast<unsigned>(SD_MAX_BYTES));
+    } else {
+        ESP_LOGI(LOG_TAG, "SD log sink inactive (no SD card mounted)");
+    }
 }
 
 // Runs in the logging caller's task context. MUST be fast and non-blocking:
@@ -108,14 +120,78 @@ void DiagnosticLogPlugin::drainTask(void *arg) {
     DiagLogLine line;
     for (;;) {
         // Block until a line is queued — this is the ONLY place that touches the
-        // network, and it runs off the logging hot path.
+        // network or the SD card, and it runs off the logging hot path.
         if (xQueueReceive(self->queue, &line, portMAX_DELAY) == pdTRUE) {
+            // Persistent SD sink first: this is the path that survives a WiFi/web
+            // freeze or a power cycle, so it must run even when the LAN is gone.
+            if (self->sdEnabled)
+                self->sdAppendLine(line.text, line.len);
+
             if (WiFi.status() != WL_CONNECTED)
-                continue; // network gone; drop quietly until it returns
+                continue; // network gone; drop UDP quietly until it returns
             IPAddress broadcast = ~WiFi.subnetMask() | WiFi.localIP();
             self->udp.beginPacket(broadcast, UDP_PORT);
             self->udp.write(reinterpret_cast<const uint8_t *>(line.text), line.len);
             self->udp.endPacket();
         }
     }
+}
+
+// Append one line to the rotating SD log. Runs only in the drain task. Every
+// SD operation is best-effort: any failure disables the SD sink for the rest of
+// this session so we never spin retrying a dead card, and UDP keeps working.
+void DiagnosticLogPlugin::sdAppendLine(const char *text, size_t len) {
+    // Lazily (re)open the active file. SD_MMC is already mounted by the
+    // Controller; we reuse that same mount the display uses for the card.
+    if (!sdFile) {
+        if (!SD_MMC.exists(SD_LOG_DIR))
+            SD_MMC.mkdir(SD_LOG_DIR);
+        sdFile = SD_MMC.open(SD_LOG_PATH, FILE_APPEND);
+        if (!sdFile) {
+            ESP_LOGW(LOG_TAG, "SD log open failed (%s); disabling SD sink", SD_LOG_PATH);
+            sdEnabled = false; // give up cleanly; UDP unaffected
+            return;
+        }
+        sdBytes = sdFile.size();
+        sdLastFlushMs = millis();
+    }
+
+    sdFile.write(reinterpret_cast<const uint8_t *>(text), len);
+    sdFile.write('\n');
+    sdBytes += len + 1;
+    sdSinceFlush++;
+
+    // Flush periodically so lines actually hit the card before a freeze, but not
+    // on every line (SD write amplification / card wear). Whichever of the line
+    // count or the time interval trips first.
+    const uint32_t now = millis();
+    if (sdSinceFlush >= SD_FLUSH_EVERY_LINES || (now - sdLastFlushMs) >= SD_FLUSH_INTERVAL_MS) {
+        sdFile.flush();
+        sdSinceFlush = 0;
+        sdLastFlushMs = now;
+    }
+
+    // Bounded growth: rotate once the active file crosses the cap.
+    if (sdBytes >= SD_MAX_BYTES)
+        sdRotate();
+}
+
+// Roll the active file over to the .1 slot, replacing any prior rollover, and
+// start a fresh active file. Keeps the on-card footprint bounded at ~2x the cap.
+void DiagnosticLogPlugin::sdRotate() {
+    if (sdFile) {
+        sdFile.flush();
+        sdFile.close();
+    }
+    SD_MMC.remove(SD_LOG_PATH_OLD);                // drop the previous rollover
+    SD_MMC.rename(SD_LOG_PATH, SD_LOG_PATH_OLD);   // current → .1
+    sdFile = SD_MMC.open(SD_LOG_PATH, FILE_WRITE); // fresh, truncated active file
+    if (!sdFile) {
+        ESP_LOGW(LOG_TAG, "SD log rotate failed; disabling SD sink");
+        sdEnabled = false;
+        return;
+    }
+    sdBytes = 0;
+    sdSinceFlush = 0;
+    sdLastFlushMs = millis();
 }
