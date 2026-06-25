@@ -553,6 +553,18 @@ void WebUIPlugin::setupServer() {
         }
     });
     server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) { handleCoreDumpDownload(request); });
+    // Diagnostic SD log download (PRO-274). Explicit handlers (not serveStatic)
+    // so a missing file returns a clean 404 instead of falling through to the
+    // SPA catch-all (onNotFound) below. Registered before onNotFound so these
+    // /api/-prefixed routes win. Served regardless of the diagnosticLog flag —
+    // the file may exist from a prior enabled session — but gated on a mounted
+    // SD card inside the handler. Paths mirror DiagnosticLogPlugin::SD_LOG_PATH /
+    // SD_LOG_PATH_OLD; literals are used here rather than including that plugin's
+    // header (it pulls WiFiUdp.h, which the native display-sim build can't resolve).
+    server.on("/api/diag/log.txt", HTTP_GET,
+              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.txt"); });
+    server.on("/api/diag/log.1", HTTP_GET,
+              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.1"); });
     server.on("/test", [](AsyncWebServerRequest *request) {
         ESP_LOGI("WebUI", "TEST endpoint hit!");
         request->send(200, "text/plain", "ESP32 server is alive!");
@@ -1790,5 +1802,59 @@ void WebUIPlugin::handleCoreDumpDownload(AsyncWebServerRequest *request) {
     response->addHeader("Cache-Control", "no-cache");
     addCorsHeaders(response);
 
+    request->send(response);
+}
+
+void WebUIPlugin::handleDiagLogDownload(AsyncWebServerRequest *request, const char *sdPath) {
+    // Gate on a mounted SD card. The diag log sink (PRO-268) only ever writes to
+    // SD_MMC, so without a card there is nothing to serve — return a clean 404
+    // rather than the SPA index. Independent of the diagnosticLog runtime flag:
+    // a file may persist from a prior enabled session and is still downloadable.
+    if (!controller->isSDCard()) {
+        request->send(404, "text/plain", "No SD card");
+        return;
+    }
+    if (!SD_MMC.exists(sdPath)) {
+        request->send(404, "text/plain", "Log not found");
+        return;
+    }
+
+    // Open the file and capture its size up front. The DiagnosticLogPlugin drain
+    // task may append to (or rotate) the active file concurrently; FatFS is built
+    // FF_FS_REENTRANT=1 so the per-volume mutex makes concurrent access safe.
+    // We stream a best-effort snapshot bounded by the size at open: if the file
+    // grows past it we simply don't serve the tail (no crash); if it is rotated
+    // (renamed) out from under us the open handle keeps referencing the original
+    // data, so the read still completes cleanly.
+    auto file = std::make_shared<File>(SD_MMC.open(sdPath, FILE_READ));
+    if (!*file || file->isDirectory()) {
+        if (*file) {
+            file->close();
+        }
+        request->send(404, "text/plain", "Log not found");
+        return;
+    }
+    const size_t total = file->size();
+
+    AsyncWebServerResponse *response =
+        request->beginResponse("text/plain", total, [file, total](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+            if (index >= total) {
+                file->close();
+                return 0;
+            }
+            size_t remaining = total - index;
+            size_t toRead = (remaining < maxLen) ? remaining : maxLen;
+            // Best-effort read; a short read (e.g. file shrank under us) just ends
+            // the stream early without crashing.
+            int read = file->read(buffer, toRead);
+            if (read <= 0) {
+                file->close();
+                return 0;
+            }
+            return static_cast<size_t>(read);
+        });
+
+    response->addHeader("Cache-Control", "no-store");
+    addCorsHeaders(response);
     request->send(response);
 }

@@ -88,6 +88,12 @@ class WebUIPlugin : public Plugin {
     // Core dump download
     void handleCoreDumpDownload(AsyncWebServerRequest *request);
 
+    // Diagnostic SD log download (PRO-274). Streams a diag log file
+    // (/diag/log.txt active, or /diag/log.1 rotated) raw off the SD card.
+    // Returns a clean 404 (NOT the SPA fallback) when no card is mounted or
+    // the file is absent. `sdPath` is the absolute SD path to serve.
+    void handleDiagLogDownload(AsyncWebServerRequest *request, const char *sdPath);
+
     // Thread-safety contract for `ota` (CAR-178):
     //
     // `GitHubOTA` is NOT thread-safe — it carries mutable internal state
