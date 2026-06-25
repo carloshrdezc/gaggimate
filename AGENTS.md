@@ -7,7 +7,7 @@ This file provides guidance to agents when working with code in this repository.
 **Every task — feature, bug, refactor, chore, brainstorm, research, doc update, investigation — gets a Linear issue. No exceptions.** Use the Linear skill for all tooling decisions; this section defines project-specific rules.
 
 ### Defaults
-- **Team**: the workspace's only team (key `CAR`) — use it without asking.
+- **Team**: coding work lives under team `PRO` (key `PRO`) — use it without asking. (Migration 2026-06: coding issues moved from team `CAR` to team `PRO`; the old `CAR` team now holds personal/non-coding issues only. Historical `CAR-NNN` citations below are preserved as provenance.)
 - **Project**: match by name to the GitHub repo. The default project for this repo is `gaggimate`. Resolution rules:
   1. Look for an exact case-insensitive match on the GitHub repo name (`gaggimate`).
   2. If no exact match, pick the closest existing project by name (e.g. `Gaggimate`, `gaggimate-firmware`).
@@ -39,10 +39,10 @@ The agent must drive the issue through these Linear states as work progresses. N
 Always include Linear magic words in the PR description so the link is automatic:
 
 ```
-Fixes CAR-123
+Fixes PRO-123
 ```
 
-(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref CAR-123` for related-but-not-closed issues.
+(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref PRO-123` for related-but-not-closed issues.
 
 ### Workflow Per Task
 
