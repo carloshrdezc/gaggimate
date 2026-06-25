@@ -694,6 +694,25 @@ export function Settings() {
                 port 9999 to the whole local network. Enable only on a trusted network, for
                 debugging. Default off.
               </p>
+              <div className='flex flex-wrap items-center gap-x-4 gap-y-1 -mt-1'>
+                <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
+                  Download SD log:
+                </span>
+                <a
+                  href='/api/diag/log.txt'
+                  download='diag-log.txt'
+                  className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
+                >
+                  log.txt
+                </a>
+                <a
+                  href='/api/diag/log.1'
+                  download='diag-log.1.txt'
+                  className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
+                >
+                  log.1 (rotated)
+                </a>
+              </div>
             </div>
           </Card>
 
