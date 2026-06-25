@@ -67,6 +67,7 @@ Settings::Settings() {
     startupFillTime = preferences.getInt("bf_su", 5000);
     steamFillTime = preferences.getInt("bf_st", 5000);
     smartGrindActive = preferences.getBool("sg_a", false);
+    diagnosticLogEnabled = preferences.getBool("diag_log", false);
     smartGrindIp = preferences.getString("sg_i", "");
     smartGrindToggle = preferences.getBool("sg_t", false);
     smartGrindMode = preferences.getInt("sg_m", smartGrindToggle ? 1 : 0);
@@ -318,6 +319,11 @@ void Settings::setSteamFillTime(int steam_fill_time) {
 
 void Settings::setSmartGrindActive(bool smart_grind_active) {
     smartGrindActive = smart_grind_active;
+    save();
+}
+
+void Settings::setDiagnosticLogEnabled(bool diagnostic_log_enabled) {
+    diagnosticLogEnabled = diagnostic_log_enabled;
     save();
 }
 
@@ -621,6 +627,7 @@ void Settings::doSave() {
     preferences.putInt("bf_su", startupFillTime);
     preferences.putInt("bf_st", steamFillTime);
     preferences.putBool("sg_a", smartGrindActive);
+    preferences.putBool("diag_log", diagnosticLogEnabled);
     preferences.putString("sg_i", smartGrindIp);
     preferences.putBool("sg_t", smartGrindToggle);
     preferences.putInt("sg_m", smartGrindMode);

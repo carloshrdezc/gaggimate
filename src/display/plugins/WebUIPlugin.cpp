@@ -1362,6 +1362,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             if (request->hasArg("steamFillTime"))
                 settings->setSteamFillTime(request->arg("steamFillTime").toInt() * 1000);
             settings->setSmartGrindActive(request->hasArg("smartGrindActive"));
+            // PRO-266: diagnostic UDP log tee, default OFF. Checkbox semantics —
+            // present means enabled. Takes effect on the next WiFi (re)connect.
+            settings->setDiagnosticLogEnabled(request->hasArg("diagnosticLog"));
             if (request->hasArg("smartGrindIp"))
                 settings->setSmartGrindIp(request->arg("smartGrindIp"));
             if (request->hasArg("smartGrindMode"))
@@ -1507,6 +1510,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["startupFillTime"] = settings.getStartupFillTime() / 1000;
     doc["steamFillTime"] = settings.getSteamFillTime() / 1000;
     doc["smartGrindActive"] = settings.isSmartGrindActive();
+    doc["diagnosticLog"] = settings.getDiagnosticLogEnabled(); // PRO-266
     doc["smartGrindIp"] = settings.getSmartGrindIp();
     doc["smartGrindMode"] = settings.getSmartGrindMode();
     doc["momentaryButtons"] = settings.isMomentaryButtons();
