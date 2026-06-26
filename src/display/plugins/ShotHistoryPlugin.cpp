@@ -1,6 +1,7 @@
 #include "ShotHistoryPlugin.h"
 
 #include "ExtendedRecordingPolicy.h"
+#include "ShotIndexMetadataPolicy.h"
 #include <SD_MMC.h>
 #include <LittleFS.h>
 #include <algorithm>
@@ -126,6 +127,32 @@ float roundBeanQuantity(float value) {
     }
     return roundf(value * 100.0f) / 100.0f;
 }
+
+// PRO-277: RAII guard for the index mutex. Blocks (portMAX_DELAY) because index
+// operations are infrequent (shot start/end, notes save, rebuild) and must not be
+// silently skipped the way a timed-out telemetry sample can be — a lost index write
+// is a corrupted/missing shot record. If the mutex was never created (setup failure)
+// the guard is a no-op and the caller proceeds unlocked rather than deadlocking.
+class IndexLockGuard {
+  public:
+    explicit IndexLockGuard(SemaphoreHandle_t mutex) : mutex_(mutex) {
+        if (mutex_ != nullptr) {
+            xSemaphoreTake(mutex_, portMAX_DELAY);
+            held_ = true;
+        }
+    }
+    ~IndexLockGuard() {
+        if (held_) {
+            xSemaphoreGive(mutex_);
+        }
+    }
+    IndexLockGuard(const IndexLockGuard &) = delete;
+    IndexLockGuard &operator=(const IndexLockGuard &) = delete;
+
+  private:
+    SemaphoreHandle_t mutex_;
+    bool held_ = false;
+};
 } // namespace
 
 ShotHistoryPlugin ShotHistory;
@@ -142,6 +169,13 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     stateMutex = xSemaphoreCreateMutex();
     if (stateMutex == nullptr) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create state mutex");
+        return;
+    }
+
+    // PRO-277: serialize all /h/index.bin operations across tasks.
+    indexMutex = xSemaphoreCreateMutex();
+    if (indexMutex == nullptr) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to create index mutex");
         return;
     }
     
@@ -261,7 +295,8 @@ void ShotHistoryPlugin::initializeHeader() {
     header.profileName[sizeof(header.profileName) - 1] = '\0';
 }
 
-ShotLogSample ShotHistoryPlugin::createSample() {
+ShotLogSample ShotHistoryPlugin::createSample(float bluetoothWeight, float estimatedWeight, float temperature,
+                                              float puckResistance) {
     ShotLogSample sample{};
     
     if (!controller) {
@@ -273,29 +308,29 @@ ShotLogSample ShotHistoryPlugin::createSample() {
 
     sample.t = static_cast<uint16_t>(tick);
     sample.tt = encodeUnsigned(controller->getTargetTemp(), TEMP_SCALE, TEMP_MAX_VALUE);
-    sample.ct = encodeUnsigned(currentTemperature, TEMP_SCALE, TEMP_MAX_VALUE);
+    sample.ct = encodeUnsigned(temperature, TEMP_SCALE, TEMP_MAX_VALUE);
     sample.tp = encodeUnsigned(controller->getTargetPressure(), PRESSURE_SCALE, PRESSURE_MAX_VALUE);
     sample.cp = encodeUnsigned(controller->getCurrentPressure(), PRESSURE_SCALE, PRESSURE_MAX_VALUE);
     sample.fl = encodeSigned(controller->getCurrentPumpFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
     sample.tf = encodeSigned(controller->getTargetFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
     sample.pf = encodeSigned(controller->getCurrentPuckFlow(), FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
     sample.vf = encodeSigned(currentBluetoothFlow, FLOW_SCALE, FLOW_MIN_VALUE, FLOW_MAX_VALUE);
-    sample.v = encodeUnsigned(currentBluetoothWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
-    sample.ev = encodeUnsigned(currentEstimatedWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
-    sample.pr = encodeUnsigned(currentPuckResistance, RESISTANCE_SCALE, RESISTANCE_MAX_VALUE);
+    sample.v = encodeUnsigned(bluetoothWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
+    sample.ev = encodeUnsigned(estimatedWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
+    sample.pr = encodeUnsigned(puckResistance, RESISTANCE_SCALE, RESISTANCE_MAX_VALUE);
     sample.si = getSystemInfo();
 
     return sample;
 }
 
-void ShotHistoryPlugin::updateBluetoothFlow() {
+void ShotHistoryPlugin::updateBluetoothFlow(float bluetoothWeight) {
     static constexpr float BLUETOOTH_FLOW_SAMPLE_INTERVAL = 0.25f; // 250ms sample interval
     static constexpr float BLUETOOTH_FLOW_SMOOTHING_FACTOR = 0.25f; // 25% new, 75% old
     
-    float btDiff = currentBluetoothWeight - lastBluetoothWeight;
+    float btDiff = bluetoothWeight - lastBluetoothWeight;
     float btFlow = btDiff / BLUETOOTH_FLOW_SAMPLE_INTERVAL;
     currentBluetoothFlow = currentBluetoothFlow * (1.0f - BLUETOOTH_FLOW_SMOOTHING_FACTOR) + btFlow * BLUETOOTH_FLOW_SMOOTHING_FACTOR;
-    lastBluetoothWeight = currentBluetoothWeight;
+    lastBluetoothWeight = bluetoothWeight;
 }
 
 bool ShotHistoryPlugin::writeSampleToBuffer(const ShotLogSample &sample) {
@@ -324,7 +359,7 @@ void ShotHistoryPlugin::checkEarlyIndexCreation() {
     }
 }
 
-void ShotHistoryPlugin::closeLogFile() {
+void ShotHistoryPlugin::closeLogFile(float finalBluetoothWeight) {
     if (!isFileOpen) {
         return;
     }
@@ -337,7 +372,7 @@ void ShotHistoryPlugin::closeLogFile() {
         return;
     }
 
-    patchHeaderWithFinalData();
+    patchHeaderWithFinalData(finalBluetoothWeight);
     currentFile.close();
     isFileOpen = false;
 
@@ -348,11 +383,10 @@ void ShotHistoryPlugin::closeLogFile() {
     }
 }
 
-void ShotHistoryPlugin::patchHeaderWithFinalData() {
+void ShotHistoryPlugin::patchHeaderWithFinalData(float finalBluetoothWeight) {
     header.sampleCount = sampleCount;
     header.durationMs = millis() - shotStart;
-    float finalWeight = currentBluetoothWeight;
-    header.finalWeight = finalWeight > 0.0f ? encodeUnsigned(finalWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE) : 0;
+    header.finalWeight = finalBluetoothWeight > 0.0f ? encodeUnsigned(finalBluetoothWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE) : 0;
 
     currentFile.seek(0, SeekSet);
     currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
@@ -428,32 +462,50 @@ void ShotHistoryPlugin::appendCompletedShotToIndex(bool hasNotes) {
 
 
 void ShotHistoryPlugin::record() {
-    // Acquire mutex to protect shared state
-    // Note: Mutex is held throughout to prevent race conditions with file I/O and shared state
+    // PRO-277: stateMutex protects ONLY the cross-task scalar telemetry
+    // (currentBluetoothWeight / currentEstimatedWeight / currentTemperature /
+    // currentPuckResistance, written by the event callbacks ~167-192) and the
+    // few settle-window scalars shared with startRecording()/endRecording().
+    //
+    // The blocking SD-card I/O (openLogFileIfNeeded / writeSampleToBuffer's
+    // flushBuffer / closeLogFile) used to run while this lock was held, so a 4 KB
+    // SD flush (tens-to-hundreds of ms) made the 100 ms-timeout event callbacks
+    // drop live samples. record() is the SOLE owner of the file/buffer state
+    // (isFileOpen, currentFile, header, ioBuffer, sampleCount, lastRecordedPhase),
+    // so that I/O needs no lock at all. We snapshot the shared scalars under the
+    // lock, release it, then do all file work lock-free — the callbacks now only
+    // ever contend with a memcpy-speed critical section and stop timing out.
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         return;
     }
-    
+
     bool shouldRecord = recording || extendedRecording;
+
+    // Snapshot the live telemetry scalars while we hold the lock.
+    const float snapBluetoothWeight = currentBluetoothWeight;
+    const float snapEstimatedWeight = currentEstimatedWeight;
+    const float snapTemperature = currentTemperature;
+    const float snapPuckResistance = currentPuckResistance;
+
+    xSemaphoreGive(stateMutex);
+
+    // ---- Everything below runs WITHOUT stateMutex (record() owns this state) ----
 
     // Handle file closing when recording stops
     if (!shouldRecord) {
         if (isFileOpen) {
-            closeLogFile();
+            closeLogFile(snapBluetoothWeight);
         }
-        xSemaphoreGive(stateMutex);
         return;
     }
 
     // Only record during brew mode or extended recording
     if (!controller || ((controller->getMode() != MODE_BREW && controller->getMode() != MODE_MANUAL) && !extendedRecording)) {
-        xSemaphoreGive(stateMutex);
         return;
     }
 
     // Open log file if needed
     if (!openLogFileIfNeeded()) {
-        xSemaphoreGive(stateMutex);
         // Trigger error event to notify user
         if (pluginManager) {
             Event errorEvent;
@@ -464,25 +516,24 @@ void ShotHistoryPlugin::record() {
         return;
     }
 
-    // Update bluetooth flow calculation
-    updateBluetoothFlow();
+    // Update bluetooth flow calculation from the snapshot.
+    updateBluetoothFlow(snapBluetoothWeight);
 
-    // Create and write sample
-    ShotLogSample sample = createSample();
+    // Create and write sample from the snapshotted telemetry.
+    ShotLogSample sample = createSample(snapBluetoothWeight, snapEstimatedWeight, snapTemperature, snapPuckResistance);
 
     // Track phase transitions - use thread-safe method to avoid race condition
     if (controller->getMode() == MODE_BREW && controller->getProcessType() == MODE_BREW) {
         uint8_t currentPhase = controller->getBrewProcessPhaseIndex();
-        
+
         if (currentPhase != lastRecordedPhase) {
             recordPhaseTransition(currentPhase, sampleCount);
             lastRecordedPhase = currentPhase;
         }
     }
 
-    // Write sample to buffer
+    // Write sample to buffer (may flush to SD — now lock-free)
     if (!writeSampleToBuffer(sample)) {
-        xSemaphoreGive(stateMutex);
         return;
     }
 
@@ -506,30 +557,34 @@ void ShotHistoryPlugin::record() {
 
         if (!canProcessWeight) {
             extendedRecording = false;
-            xSemaphoreGive(stateMutex);
             return;
         }
 
-        const float weightDiff = abs(currentBluetoothWeight - lastStableWeight);
+        // The settle scalars (lastStableWeight / lastWeightChangeTime /
+        // extendedRecordingStart) are shared with start/endRecording(), so read and
+        // update them under the lock. weightDiff is computed from the same snapshot
+        // used for the sample.
+        if (stateMutex != nullptr && xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+            const float weightDiff = fabsf(snapBluetoothWeight - lastStableWeight);
 
-        if (weightDiff < WEIGHT_STABILIZATION_THRESHOLD) {
-            if (lastWeightChangeTime == 0) {
-                lastWeightChangeTime = now;
+            if (weightDiff < WEIGHT_STABILIZATION_THRESHOLD) {
+                if (lastWeightChangeTime == 0) {
+                    lastWeightChangeTime = now;
+                }
+                if (now - lastWeightChangeTime >= WEIGHT_STABILIZATION_TIME) {
+                    extendedRecording = false;
+                }
+            } else {
+                lastWeightChangeTime = 0;
+                lastStableWeight = snapBluetoothWeight;
             }
-            if (now - lastWeightChangeTime >= WEIGHT_STABILIZATION_TIME) {
+
+            if (now - extendedRecordingStart >= EXTENDED_RECORDING_DURATION) {
                 extendedRecording = false;
             }
-        } else {
-            lastWeightChangeTime = 0;
-            lastStableWeight = currentBluetoothWeight;
-        }
-
-        if (now - extendedRecordingStart >= EXTENDED_RECORDING_DURATION) {
-            extendedRecording = false;
+            xSemaphoreGive(stateMutex);
         }
     }
-    
-    xSemaphoreGive(stateMutex);
 }
 
 void ShotHistoryPlugin::startRecording() {
@@ -1030,6 +1085,11 @@ bool ShotHistoryPlugin::ensureIndexExists() {
 }
 
 bool ShotHistoryPlugin::appendToIndex(const ShotIndexEntry &entry) {
+    IndexLockGuard guard(indexMutex);
+    return appendToIndexLocked(entry);
+}
+
+bool ShotHistoryPlugin::appendToIndexLocked(const ShotIndexEntry &entry) {
     if (!ensureIndexExists()) {
         return false;
     }
@@ -1080,6 +1140,11 @@ bool ShotHistoryPlugin::appendToIndex(const ShotIndexEntry &entry) {
 }
 
 void ShotHistoryPlugin::updateIndexMetadata(uint32_t shotId, uint8_t rating, uint16_t volume) {
+    IndexLockGuard guard(indexMutex);
+    updateIndexMetadataLocked(shotId, rating, volume);
+}
+
+void ShotHistoryPlugin::updateIndexMetadataLocked(uint32_t shotId, uint8_t rating, uint16_t volume) {
     File indexFile = fs->open("/h/index.bin", "r+");
     if (!indexFile) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to open index file for metadata update");
@@ -1096,13 +1161,9 @@ void ShotHistoryPlugin::updateIndexMetadata(uint32_t shotId, uint8_t rating, uin
     if (entryPos >= 0) {
         ShotIndexEntry entry{};
         if (readEntryAtPosition(indexFile, entryPos, entry)) {
-            entry.rating = rating;
-            if (volume > 0) {
-                entry.volume = volume;
-            }
-            if (rating > 0) {
-                entry.flags |= SHOT_FLAG_HAS_NOTES;
-            }
+            // PRO-277: apply the pure merge rule (rating always, volume only on a
+            // positive override, HAS_NOTES set when rated) — see ShotIndexMetadataPolicy.h.
+            entry = applyIndexMetadata(entry, rating, volume);
 
             if (writeEntryAtPosition(indexFile, entryPos, entry)) {
                 ESP_LOGD("ShotHistoryPlugin", "Updated metadata for shot %u: rating=%u, volume=%u", shotId, rating, volume);
@@ -1116,6 +1177,11 @@ void ShotHistoryPlugin::updateIndexMetadata(uint32_t shotId, uint8_t rating, uin
 }
 
 void ShotHistoryPlugin::markIndexDeleted(uint32_t shotId) {
+    IndexLockGuard guard(indexMutex);
+    markIndexDeletedLocked(shotId);
+}
+
+void ShotHistoryPlugin::markIndexDeletedLocked(uint32_t shotId) {
     File indexFile = fs->open("/h/index.bin", "r+");
     if (!indexFile) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to open index file for deletion marking");
@@ -1183,6 +1249,11 @@ void ShotHistoryPlugin::startAsyncRebuild() {
 }
 
 void ShotHistoryPlugin::rebuildIndex() {
+    IndexLockGuard guard(indexMutex);
+    rebuildIndexLocked();
+}
+
+void ShotHistoryPlugin::rebuildIndexLocked() {
     ESP_LOGI("ShotHistoryPlugin", "Starting index rebuild...");
 
     // Send scanning event
@@ -1322,8 +1393,10 @@ void ShotHistoryPlugin::rebuildIndex() {
 
         shotFile.close();
 
-        // Append to index
-        appendToIndex(entry);
+        // Append to index. We already hold indexMutex (rebuildIndex took it), so
+        // call the unlocked variant — appendToIndex() would re-take the non-recursive
+        // mutex and self-deadlock. PRO-277.
+        appendToIndexLocked(entry);
 
         // Emit progress update with adaptive frequency
         // Update every file for small rebuilds, every few files for larger ones
