@@ -133,6 +133,18 @@ float roundBeanQuantity(float value) {
 // silently skipped the way a timed-out telemetry sample can be — a lost index write
 // is a corrupted/missing shot record. If the mutex was never created (setup failure)
 // the guard is a no-op and the caller proceeds unlocked rather than deadlocking.
+//
+// The no-op is safe in that degraded-boot state: setup() returns early (L177-180)
+// when indexMutex creation fails and therefore never spawns the loopTask, so the
+// loopTask's index writers (record() -> createEarlyIndexEntry / appendCompletedShotToIndex,
+// cleanupHistory -> markIndexDeleted) can never run. The WebUI request path
+// (WebUIPlugin -> handleRequest -> updateIndexMetadata / markIndexDeleted) and the
+// async-rebuild task are NOT gated on setup() success, so they remain reachable —
+// but they are still mutually serialized without the mutex: the WebSocket handler
+// runs on the single AsyncTCP relay task (one request at a time), and a heap so
+// exhausted that xSemaphoreCreateMutex() failed will also fail the rebuild task's
+// xTaskCreatePinnedToCore(), so no second concurrent index writer materializes.
+// Hence the unlocked fallback cannot interleave two index writers in practice.
 class IndexLockGuard {
   public:
     explicit IndexLockGuard(SemaphoreHandle_t mutex) : mutex_(mutex) {
@@ -462,19 +474,41 @@ void ShotHistoryPlugin::appendCompletedShotToIndex(bool hasNotes) {
 
 
 void ShotHistoryPlugin::record() {
-    // PRO-277: stateMutex protects ONLY the cross-task scalar telemetry
+    // PRO-277: stateMutex protects the cross-task scalar telemetry
     // (currentBluetoothWeight / currentEstimatedWeight / currentTemperature /
     // currentPuckResistance, written by the event callbacks ~167-192) and the
     // few settle-window scalars shared with startRecording()/endRecording().
     //
+    // Field ownership while a shot is ACTIVELY recording (shouldRecord == true):
+    //   - loopTask-exclusive (this task only touches them; no other task reads or
+    //     writes them once a shot is open): currentFile, header, ioBuffer, isFileOpen.
+    //   - start-reset fields written by startRecording()/endRecording() on the
+    //     controller task BEFORE the shot opens, then read here: currentId,
+    //     currentBeanName, currentProfileName, sampleCount, ioBufferPos,
+    //     lastRecordedPhase. These are reset under stateMutex by startRecording()
+    //     and are not mutated again by another task while shouldRecord stays true,
+    //     so the lock-free sample path below is safe for the active-shot case.
+    //
     // The blocking SD-card I/O (openLogFileIfNeeded / writeSampleToBuffer's
-    // flushBuffer / closeLogFile) used to run while this lock was held, so a 4 KB
-    // SD flush (tens-to-hundreds of ms) made the 100 ms-timeout event callbacks
-    // drop live samples. record() is the SOLE owner of the file/buffer state
-    // (isFileOpen, currentFile, header, ioBuffer, sampleCount, lastRecordedPhase),
-    // so that I/O needs no lock at all. We snapshot the shared scalars under the
-    // lock, release it, then do all file work lock-free — the callbacks now only
-    // ever contend with a memcpy-speed critical section and stop timing out.
+    // flushBuffer) used to run while this lock was held, so a 4 KB SD flush
+    // (tens-to-hundreds of ms) made the 100 ms-timeout event callbacks drop live
+    // samples. We snapshot the shared scalars under the lock, release it, then do
+    // the active-shot file work lock-free — the callbacks now only ever contend
+    // with a memcpy-speed critical section and stop timing out.
+    //
+    // The close path (shouldRecord == false) is the one exception: it MUST run with
+    // stateMutex still held. closeLogFile() reads currentId / currentBeanName /
+    // header, and startRecording() (controller task, core 1) concurrently rewrites
+    // currentId (Arduino String realloc), currentBeanName, sampleCount, ioBufferPos
+    // and sets recording = true WITHOUT touching isFileOpen. If the close ran
+    // lock-free, a brew:start landing in the close window would (a) tear/UAF the
+    // String reads inside closeLogFile() and (b) see isFileOpen == true, skip
+    // openLogFileIfNeeded(), and write the new shot's samples into the OLD file
+    // being closed. Holding the lock across the close restores the base-code mutual
+    // exclusion: startRecording() blocks on stateMutex until the close finishes and
+    // then correctly observes isFileOpen == false. The close runs once at end-of-
+    // shot when no live samples for that shot remain, so holding the lock here does
+    // not reintroduce the steady-state sample-drop the lock-free path fixed.
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         return;
     }
@@ -487,17 +521,21 @@ void ShotHistoryPlugin::record() {
     const float snapTemperature = currentTemperature;
     const float snapPuckResistance = currentPuckResistance;
 
-    xSemaphoreGive(stateMutex);
-
-    // ---- Everything below runs WITHOUT stateMutex (record() owns this state) ----
-
-    // Handle file closing when recording stops
+    // Handle file closing when recording stops — KEEP THE LOCK HELD across the
+    // close so it is mutually exclusive with a concurrent startRecording() (see
+    // the ownership note above). closeLogFile() may perform SD I/O; that is
+    // acceptable here because no live shot is being sampled during the close.
     if (!shouldRecord) {
         if (isFileOpen) {
             closeLogFile(snapBluetoothWeight);
         }
+        xSemaphoreGive(stateMutex);
         return;
     }
+
+    xSemaphoreGive(stateMutex);
+
+    // ---- Everything below runs WITHOUT stateMutex (active-shot path) ----
 
     // Only record during brew mode or extended recording
     if (!controller || ((controller->getMode() != MODE_BREW && controller->getMode() != MODE_MANUAL) && !extendedRecording)) {

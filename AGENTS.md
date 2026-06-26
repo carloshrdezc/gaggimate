@@ -150,7 +150,7 @@ beans onto the same model.
 
 ## Testing
 
-**No test framework configured**: `test/` directory exists but contains only PlatformIO boilerplate. No unit tests currently implemented.
+**Unity host tests on the `native` env**: `test/` holds Unity test suites for pure/host-testable logic (e.g. `test_shot_index_metadata`, `test_extended_recording_policy`, `test_profile_validation`, `test_event_system`, `test_volumetric_target`, `test_ble_scale_scan_policy`, `test_diag_log_tee`). Run them with `pio test -e native` (and `pio test -e native-sanitize` under ASan/UBSan — both are gating CI legs). FreeRTOS-level concurrency and on-device behavior are not unit-tested; prefer extracting pure policy logic into a header so it can be host-tested.
 
 ## Local Libraries
 
