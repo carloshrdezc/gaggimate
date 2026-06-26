@@ -1224,7 +1224,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // req:change-brew-target; otherwise it is read-only. Non-volumetric profiles
   // keep the disabled/locked treatment regardless of the override setting,
   // because Controller::setBrewTarget() ignores a brew target for them.
-  const yieldEditable = !!s.allowYieldOverride && !!s.brewTarget;
+  const yieldEditable = !!s.allowYieldOverride && !!s.brewTarget && !!s.bluetoothConnected;
   const [yieldTarget, setYieldTargetState] = useState(() => s.brewTargetVolume || DEFAULT_YIELD);
 
   // Reseed to the active profile's target on profile change (and whenever the
