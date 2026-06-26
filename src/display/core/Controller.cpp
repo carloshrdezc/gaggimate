@@ -242,11 +242,11 @@ void Controller::setupBluetooth() {
 
 void Controller::setupInfos() {
     const std::string info = clientController.readInfo();
-    printf("System info: %s\n", info.c_str());
+    ESP_LOGI(LOG_TAG, "System info: %s", info.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, info);
     if (err) {
-        printf("Error deserializing JSON: %s\n", err.c_str());
+        ESP_LOGE(LOG_TAG, "Error deserializing JSON: %s", err.c_str());
         systemInfo = SystemInfo{
             .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
     } else {
@@ -1419,7 +1419,7 @@ void Controller::onVolumetricDelete() {
 }
 
 void Controller::handleBrewButton(int brewButtonStatus) {
-    printf("current screen %d, brew button %d\n", getMode(), brewButtonStatus);
+    ESP_LOGD(LOG_TAG, "current screen %d, brew button %d", getMode(), brewButtonStatus);
     if (brewButtonStatus) {
         switch (getMode()) {
         case MODE_STANDBY:
@@ -1459,7 +1459,7 @@ void Controller::handleBrewButton(int brewButtonStatus) {
 }
 
 void Controller::handleSteamButton(int steamButtonStatus) {
-    printf("current screen %d, steam button %d\n", getMode(), steamButtonStatus);
+    ESP_LOGD(LOG_TAG, "current screen %d, steam button %d", getMode(), steamButtonStatus);
     if (steamButtonStatus) {
         switch (getMode()) {
         case MODE_STANDBY:
