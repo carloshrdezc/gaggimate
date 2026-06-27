@@ -5,6 +5,7 @@
 
 #include <DNSServer.h>
 #include <WebSocketsClient.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -143,7 +144,7 @@ class WebUIPlugin : public Plugin {
     // Serializes the relay lifecycle (startRelay()/stopRelay()). Those two run on
     // different FreeRTOS tasks (the arduino_events WiFi-event task via start()/stop()
     // and the AsyncTCP /api/settings task via handleSettings()) and can genuinely
-    // interleave, so the volatile-flag handoff with relayLoopTask is only coherent
+    // interleave, so the atomic-flag handoff with relayLoopTask is only coherent
     // when the lifecycle itself is mutually excluded by this mutex (CAR-259).
     SemaphoreHandle_t relayLifecycleMutex = nullptr;
     std::vector<String> relayOutBuffer;
@@ -153,18 +154,18 @@ class WebUIPlugin : public Plugin {
     // relayTaskExitRequested and waits for the task to tear down its own
     // WebSocket state and self-delete (nulling relayTaskHandle), rather than
     // calling vTaskDelete on a remote handle mid-relayWs.loop() (CAR-259).
-    volatile bool relayTaskExitRequested = false;
-    // volatile: this handle is the variable stopRelay()'s bounded spin-wait
-    // polls while the relay task (other core) writes it to nullptr just before
-    // vTaskDelete(NULL). Without volatile the compiler may hoist/cache the load
-    // and never observe the null, spuriously timing out a clean shutdown (CAR-259).
-    // NOTE: volatile only prevents a cached/hoisted load of this handle — it does
-    // NOT establish cross-core ordering. In particular it does not guarantee the
-    // relay task's relayWs.disconnect() is visible before its relayTaskHandle =
-    // nullptr store on the observing core. Hardening that ordering (migrating the
-    // handle/flags to std::atomic with acquire/release semantics) is tracked as a
-    // separate follow-up and is intentionally NOT done here (CAR-259).
-    volatile TaskHandle_t relayTaskHandle = nullptr;
+    // std::atomic (release on set / acquire on the relay task's top-of-loop
+    // read) so the request is published without relying on plain-volatile,
+    // which never guaranteed cross-core ordering (PRO-35).
+    std::atomic<bool> relayTaskExitRequested{false};
+    // std::atomic handle: stopRelay()'s bounded spin-wait reads it with acquire
+    // while the relay task (other core) stores nullptr with release just before
+    // vTaskDelete(NULL). The release store / acquire load pair closes the
+    // cross-core ordering gap the old plain-volatile handle left open: it now
+    // guarantees the relay task's relayWs.disconnect() / relayConnected teardown
+    // happens-before the observing core sees relayTaskHandle == nullptr, so a
+    // clean shutdown is never observed half-torn-down (PRO-35, was CAR-259).
+    std::atomic<TaskHandle_t> relayTaskHandle{nullptr};
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;

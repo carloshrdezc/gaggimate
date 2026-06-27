@@ -147,13 +147,16 @@ void WebUIPlugin::relayLoopTask(void *arg) {
         // Cooperative shutdown: stopRelay() requests exit, and the teardown
         // runs here on the task that owns the WebSocket allocations / mbedTLS
         // state, never via vTaskDelete on a remote handle mid-loop (CAR-259).
-        if (plugin->relayTaskExitRequested) {
+        if (plugin->relayTaskExitRequested.load(std::memory_order_acquire)) {
             plugin->relayWs.disconnect();
             plugin->relayConnected = false;
             // Publish NULL before self-deleting so stopRelay()'s wait observes
-            // the task is gone. After vTaskDelete(NULL) this task never runs
-            // again, so no further access to plugin state occurs.
-            plugin->relayTaskHandle = nullptr;
+            // the task is gone. The release store pairs with stopRelay()'s
+            // acquire load so the relayWs.disconnect() / relayConnected teardown
+            // above happens-before the observer sees the null handle. After
+            // vTaskDelete(NULL) this task never runs again, so no further access
+            // to plugin state occurs.
+            plugin->relayTaskHandle.store(nullptr, std::memory_order_release);
             vTaskDelete(nullptr);
             return; // unreachable; keeps the compiler happy
         }
@@ -662,7 +665,7 @@ void WebUIPlugin::startRelay() {
     // AsyncTCP /api/settings task and calls stopRelay()+startRelay() back-to-back.
     // A WiFi (dis)connect can therefore genuinely interleave with a cloud-relay
     // settings toggle. They are now serialized by relayLifecycleMutex (taken at the
-    // top of both functions, released on every return path) so the volatile-flag
+    // top of both functions, released on every return path) so the atomic-flag
     // handoff with relayLoopTask stays coherent and two starts can never both
     // observe relayTaskHandle==nullptr and orphan a live task (CAR-259). A plain
     // (non-recursive) mutex is correct: start() calls stop() then startRelay()
@@ -694,15 +697,15 @@ void WebUIPlugin::startRelay() {
     // fall through to create a fresh task. If it has not cleared in time, skip
     // this start; the pending exit will complete and the next disconnect/
     // reconnect or settings change re-triggers startRelay() cleanly.
-    if (relayTaskHandle != nullptr) {
+    if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
         constexpr TickType_t drainInterval = pdMS_TO_TICKS(10);
         constexpr int maxDrainPolls = 50; // ~500 ms
         int drainPolls = 0;
-        while (relayTaskHandle != nullptr && drainPolls < maxDrainPolls) {
+        while (relayTaskHandle.load(std::memory_order_acquire) != nullptr && drainPolls < maxDrainPolls) {
             vTaskDelay(drainInterval);
             ++drainPolls;
         }
-        if (relayTaskHandle != nullptr) {
+        if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
             // NOTE(CAR-259): no internal retry timer here. This deferred start
             // relies on the next external re-trigger — a WiFi reconnect
             // (start()), a stop()/start() cycle, or another /api/settings toggle
@@ -756,9 +759,12 @@ void WebUIPlugin::startRelay() {
     }
 
     // relayTaskHandle is guaranteed null here (the live-task case returned above).
-    relayTaskExitRequested = false; // fresh task must not see a stale exit request
-    // xTaskCreatePinnedToCore wants a non-volatile TaskHandle_t*; create into a
-    // local, then publish to the volatile member.
+    // Relaxed reset is sufficient: the fresh task is published below and
+    // xTaskCreatePinnedToCore is itself the synchronization point, so the new
+    // task is guaranteed to observe this cleared flag before it runs.
+    relayTaskExitRequested.store(false, std::memory_order_relaxed); // fresh task must not see a stale exit request
+    // xTaskCreatePinnedToCore wants a raw TaskHandle_t*; create into a local,
+    // then publish to the atomic member.
     TaskHandle_t createdHandle = nullptr;
     BaseType_t created = xTaskCreatePinnedToCore(relayLoopTask, "WebUIRelay", 16384, this, 1, &createdHandle, 0);
     if (created != pdPASS) {
@@ -766,7 +772,9 @@ void WebUIPlugin::startRelay() {
         relayWs.disconnect();
         return;
     }
-    relayTaskHandle = createdHandle;
+    // Release store: published under relayLifecycleMutex before the task can null
+    // it; pairs with stopRelay()/startRelay() acquire loads of the handle.
+    relayTaskHandle.store(createdHandle, std::memory_order_release);
 
     relayEnabled = true;
     ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %u B)", host.c_str(), port, path.c_str(),
@@ -782,13 +790,13 @@ void WebUIPlugin::stopRelay() {
     if (!relayEnabled) return;
     relayEnabled = false;
     relayConnected = false;
-    if (relayTaskHandle != nullptr) {
+    if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
         // Cooperative shutdown (CAR-259): ask the task to tear down its own
         // WebSocket state and self-delete. We must NOT vTaskDelete a remote
         // handle while it may be inside relayWs.loop() (WebSocketsClient /
         // AsyncTCP / mbedTLS allocations), which leaks heap or corrupts the
         // allocator. The task nulls relayTaskHandle just before vTaskDelete(NULL).
-        relayTaskExitRequested = true;
+        relayTaskExitRequested.store(true, std::memory_order_release);
         // Bound the wait so a wedged task can never hang the caller (this runs
         // on the WiFi-event / AsyncTCP web-server task). Loop cadence is 10 ms;
         // a single relayWs.loop() with an SSL handshake or large frame in flight
@@ -796,11 +804,11 @@ void WebUIPlugin::stopRelay() {
         constexpr TickType_t pollInterval = pdMS_TO_TICKS(10);
         constexpr int maxPolls = 50; // ~500 ms
         int polls = 0;
-        while (relayTaskHandle != nullptr && polls < maxPolls) {
+        while (relayTaskHandle.load(std::memory_order_acquire) != nullptr && polls < maxPolls) {
             vTaskDelay(pollInterval);
             ++polls;
         }
-        if (relayTaskHandle != nullptr) {
+        if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
             // Task did not exit in time (likely wedged in a long relayWs.loop()).
             // Do NOT vTaskDelete it from here — that is exactly the unsafe
             // primitive we are avoiding. Leave relayTaskExitRequested = true so
@@ -817,7 +825,9 @@ void WebUIPlugin::stopRelay() {
         }
     }
     // Task is gone (or never existed). Clear the request flag for the next start.
-    relayTaskExitRequested = false;
+    // Relaxed: no relay task is running on this path (handle observed null above),
+    // so there is nothing to synchronize with.
+    relayTaskExitRequested.store(false, std::memory_order_relaxed);
 }
 
 void WebUIPlugin::broadcastAll(const String &msg) {
