@@ -8,6 +8,7 @@ import {
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
+  computeYieldEditable,
   getAvailableModeOptions,
   getBoilerHeatingState,
   getManualControlLabels,
@@ -223,4 +224,34 @@ test('standby primary action wakes the machine into brew', () => {
   expect(state.action).toBe('start-process');
   expect(state.accent).toBe('var(--dm-accent)');
   expect(state.processKind).toBe(null);
+});
+
+test('yield is editable when override is on, the profile is volumetric, and the scale is connected', () => {
+  expect(
+    computeYieldEditable({ allowYieldOverride: true, brewTarget: true, bluetoothConnected: true })
+  ).toBe(true);
+});
+
+test('yield is locked when the override is off', () => {
+  expect(
+    computeYieldEditable({ allowYieldOverride: false, brewTarget: true, bluetoothConnected: true })
+  ).toBe(false);
+});
+
+test('yield is locked when the profile is not volumetric', () => {
+  expect(
+    computeYieldEditable({ allowYieldOverride: true, brewTarget: false, bluetoothConnected: true })
+  ).toBe(false);
+});
+
+test('yield is locked when the scale is disconnected', () => {
+  expect(
+    computeYieldEditable({ allowYieldOverride: true, brewTarget: true, bluetoothConnected: false })
+  ).toBe(false);
+});
+
+test('yield is locked when all conditions are false', () => {
+  expect(
+    computeYieldEditable({ allowYieldOverride: false, brewTarget: false, bluetoothConnected: false })
+  ).toBe(false);
 });
