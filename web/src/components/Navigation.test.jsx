@@ -48,7 +48,10 @@ describe('Navigation', () => {
     // A representative primary destination from each section renders as a link.
     const dashboard = screen.getByRole('link', { name: /Dashboard/i });
     expect(dashboard).toBeTruthy();
-    expect(dashboard.getAttribute('href')).toBe('/');
+    // BASE_URL-robust: the Dashboard link points at the app root. Vite's base
+    // is '/' by default and '/gaggimate/' under GITHUB_PAGES=1, so assert a
+    // trailing slash rather than exact-matching '/' (PRO-285).
+    expect(dashboard.getAttribute('href')).toMatch(/\/$/);
 
     expect(screen.getByRole('link', { name: /Settings/i })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Profiles/i })).toBeTruthy();
