@@ -44,11 +44,15 @@ constexpr bool shouldDeferModeChange(uint8_t newMode, bool isExtendedRecording) 
 static_assert(!shouldDeferModeChange(MODE_STANDBY, true), "PRO-265: STANDBY must never defer (settle open)");
 static_assert(!shouldDeferModeChange(MODE_STANDBY, false), "PRO-265: STANDBY must never defer (no settle)");
 // Non-STANDBY target defers IFF the settle window is open:
+static_assert(shouldDeferModeChange(MODE_BREW, true), "PRO-261: non-standby + settle open -> defer");
 static_assert(shouldDeferModeChange(MODE_STEAM, true), "PRO-261: non-standby + settle open -> defer");
+static_assert(shouldDeferModeChange(MODE_WATER, true), "PRO-261: non-standby + settle open -> defer");
 static_assert(shouldDeferModeChange(MODE_GRIND, true), "PRO-261: non-standby + settle open -> defer");
 static_assert(shouldDeferModeChange(MODE_MANUAL, true), "PRO-261: non-standby + settle open -> defer");
 // Non-STANDBY target with no settle window engages immediately:
+static_assert(!shouldDeferModeChange(MODE_BREW, false), "no settle window -> engage immediately");
 static_assert(!shouldDeferModeChange(MODE_STEAM, false), "no settle window -> engage immediately");
+static_assert(!shouldDeferModeChange(MODE_WATER, false), "no settle window -> engage immediately");
 static_assert(!shouldDeferModeChange(MODE_GRIND, false), "no settle window -> engage immediately");
 static_assert(!shouldDeferModeChange(MODE_MANUAL, false), "no settle window -> engage immediately");
 
