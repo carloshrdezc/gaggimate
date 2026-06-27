@@ -79,3 +79,29 @@ describe('RatingNumberInput (PRO-299)', () => {
     expect(input.value).toBe('8.5');
   });
 });
+
+describe('RatingNumberInput id / aria-label passthrough (PRO-302)', () => {
+  test('forwards id and aria-label to the underlying input when provided', () => {
+    render(
+      h(RatingNumberInput, {
+        value: 0,
+        onCommit: vi.fn(),
+        id: 'shot-rating',
+        ariaLabel: 'Shot rating (0-10)',
+      }),
+    );
+
+    // The input is now reachable by its accessible name.
+    const input = screen.getByRole('textbox', { name: 'Shot rating (0-10)' });
+    expect(input.getAttribute('id')).toBe('shot-rating');
+    expect(input.getAttribute('aria-label')).toBe('Shot rating (0-10)');
+  });
+
+  test('does not emit id / aria-label attributes when not provided', () => {
+    render(h(RatingNumberInput, { value: 0, onCommit: vi.fn() }));
+    const input = screen.getByRole('textbox');
+
+    expect(input.hasAttribute('id')).toBe(false);
+    expect(input.hasAttribute('aria-label')).toBe(false);
+  });
+});

@@ -24,6 +24,9 @@ import { normalizeTenPointRating } from '../utils/ratings.js';
  * @param {number} value     Stored normalized rating (source of truth when not editing).
  * @param {(n:number)=>void} onCommit  Called on blur with the normalized number.
  * @param {string} className Extra classes for the <input>.
+ * @param {string} [id]         Optional id forwarded to the <input> (only when provided).
+ * @param {string} [ariaLabel]  Optional accessible name forwarded to the <input> as
+ *                              aria-label (only when provided).
  */
 export function RatingNumberInput({
   value,
@@ -31,6 +34,8 @@ export function RatingNumberInput({
   className = '',
   style,
   placeholder = '0-10',
+  id,
+  ariaLabel,
 }) {
   // `null` means "not actively editing — mirror the stored value". A string
   // (including '') means the user is mid-edit and we show their raw input.
@@ -48,6 +53,8 @@ export function RatingNumberInput({
     <input
       type='text'
       inputMode='decimal'
+      {...(id ? { id } : {})}
+      {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
       className={className}
       style={style}
       value={displayValue}

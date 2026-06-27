@@ -63,6 +63,7 @@ export function NotesBarExpanded({
           <RatingNumberInput
             className={`${inputCls} w-20`}
             value={notes.rating}
+            ariaLabel='Shot rating (0-10)'
             onCommit={rating => onInputChange('rating', rating)}
           />
         ) : (
