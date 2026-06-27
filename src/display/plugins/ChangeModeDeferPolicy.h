@@ -50,10 +50,10 @@ static_assert(shouldDeferModeChange(MODE_WATER, true), "PRO-261: non-standby + s
 static_assert(shouldDeferModeChange(MODE_GRIND, true), "PRO-261: non-standby + settle open -> defer");
 static_assert(shouldDeferModeChange(MODE_MANUAL, true), "PRO-261: non-standby + settle open -> defer");
 // Non-STANDBY target with no settle window engages immediately:
-static_assert(!shouldDeferModeChange(MODE_BREW, false), "no settle window -> engage immediately");
-static_assert(!shouldDeferModeChange(MODE_STEAM, false), "no settle window -> engage immediately");
-static_assert(!shouldDeferModeChange(MODE_WATER, false), "no settle window -> engage immediately");
-static_assert(!shouldDeferModeChange(MODE_GRIND, false), "no settle window -> engage immediately");
-static_assert(!shouldDeferModeChange(MODE_MANUAL, false), "no settle window -> engage immediately");
+static_assert(!shouldDeferModeChange(MODE_BREW, false), "PRO-261: no settle window -> engage immediately");
+static_assert(!shouldDeferModeChange(MODE_STEAM, false), "PRO-261: no settle window -> engage immediately");
+static_assert(!shouldDeferModeChange(MODE_WATER, false), "PRO-261: no settle window -> engage immediately");
+static_assert(!shouldDeferModeChange(MODE_GRIND, false), "PRO-261: no settle window -> engage immediately");
+static_assert(!shouldDeferModeChange(MODE_MANUAL, false), "PRO-261: no settle window -> engage immediately");
 
 #endif // CHANGEMODEDEFERPOLICY_H
