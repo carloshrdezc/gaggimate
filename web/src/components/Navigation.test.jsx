@@ -48,10 +48,16 @@ describe('Navigation', () => {
     // A representative primary destination from each section renders as a link.
     const dashboard = screen.getByRole('link', { name: /Dashboard/i });
     expect(dashboard).toBeTruthy();
-    // BASE_URL-robust: the Dashboard link points at the app root. Vite's base
-    // is '/' by default and '/gaggimate/' under GITHUB_PAGES=1, so assert a
-    // trailing slash rather than exact-matching '/' (PRO-285).
-    expect(dashboard.getAttribute('href')).toMatch(/\/$/);
+    // BASE_URL-robust: the Dashboard link points at the app root route ('/').
+    // Navigation.jsx builds every href as `_NAV_BASE + link` where
+    // `_NAV_BASE = BASE_URL.replace(/\/$/, '')`, so the Dashboard href is
+    // exactly `${navBase}/` — which equals '/' under Vite's default base and
+    // '/gaggimate/' under GITHUB_PAGES=1. Mirror that derivation and assert
+    // equality so a regression pointing Dashboard at the wrong target (e.g.
+    // '/profiles/' or a bad base '/oops/') fails, instead of any trailing-slash
+    // href slipping through (PRO-296, was the loose /\/$/ match from PRO-285).
+    const navBase = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+    expect(dashboard.getAttribute('href')).toBe(`${navBase}/`);
 
     expect(screen.getByRole('link', { name: /Settings/i })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Profiles/i })).toBeTruthy();
