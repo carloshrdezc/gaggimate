@@ -9,6 +9,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include "../core/constants.h"
 #include "GitHubOTA.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
@@ -220,5 +221,10 @@ class WebUIPlugin : public Plugin {
     volatile uint8_t pendingModeChangeTarget = 0;
     volatile bool pendingModeChange = false;
 };
+
+// PRO-286: enforce at compile time the invariant the comment above documents — the
+// pendingModeChangeTarget default-0 initializer only reads as "standby" if MODE_STANDBY == 0.
+static_assert(MODE_STANDBY == 0,
+              "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
 
 #endif // WEBUIPLUGIN_H
