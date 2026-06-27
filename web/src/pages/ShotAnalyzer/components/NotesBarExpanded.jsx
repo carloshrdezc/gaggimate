@@ -14,6 +14,7 @@ import {
   getAnalyzerSurfaceTriggerClasses,
   getAnalyzerTextButtonClasses,
 } from './analyzerControlStyles';
+import { formatTenPointRating, getRatingFillPercent } from '../../../utils/ratings.js';
 
 const tasteOptions = [
   { value: 'bitter', label: 'Bitter' },
@@ -47,25 +48,39 @@ export function NotesBarExpanded({
     };
   };
 
-  // Render stars (editable in edit mode)
-  const renderStars = () => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <button
-          key={i}
-          type='button'
-          disabled={!isEditing}
-          onClick={() => isEditing && onInputChange('rating', i)}
-          className={`text-xl ${i <= notes.rating ? 'text-yellow-400' : 'text-base-content/20'} ${
-            isEditing ? 'cursor-pointer hover:text-yellow-300' : 'cursor-default'
-          }`}
-        >
-          ★
-        </button>,
-      );
-    }
-    return <div className='flex gap-0.5'>{stars}</div>;
+  // Render a 0-10 rating control. Edit mode: numeric input (step 0.1) wired
+  // through the shared ratings helpers so the stored value matches Shot
+  // History exactly. Backward compat: option A — legacy Analyzer entries were
+  // stored on a 1-5 scale and are now read as low 0-10 scores (no migration).
+  const renderRating = () => {
+    const fillStyle = { width: getRatingFillPercent(notes.rating) };
+    return (
+      <div className='flex items-center gap-2'>
+        <div className='relative inline-flex text-lg leading-none'>
+          <div className='text-base-content/20'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
+          <div
+            className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
+            style={fillStyle}
+          >
+            {'\u2605\u2605\u2605\u2605\u2605'}
+          </div>
+        </div>
+        {isEditing ? (
+          <input
+            type='number'
+            min='0'
+            max='10'
+            step='0.1'
+            className={`${inputCls} w-20`}
+            value={notes.rating || ''}
+            onChange={e => onInputChange('rating', e.target.value)}
+            placeholder='0-10'
+          />
+        ) : (
+          <span className='text-sm font-medium'>{formatTenPointRating(notes.rating)}</span>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -78,7 +93,7 @@ export function NotesBarExpanded({
             <div className='grid grid-cols-2 gap-4'>
               <div>
                 <div className={`${labelCls} mb-1.5`}>Rating</div>
-                {renderStars()}
+                {renderRating()}
               </div>
               <div>
                 <div className={`${labelCls} mb-1.5`}>Balance / Taste</div>

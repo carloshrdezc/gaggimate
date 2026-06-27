@@ -346,7 +346,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
                 type='number'
                 min='0'
                 max='10'
-                step='0.25'
+                step='0.1'
                 className='nd-input'
                 style={{ width: '112px' }}
                 value={notes.rating || ''}
