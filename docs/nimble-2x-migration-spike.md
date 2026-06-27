@@ -17,13 +17,19 @@ migration child (PRO-290) is dispatched.
 | `lib/NimBLEComm/src/NimBLEServerController.{h,cpp}` | Controller-side GATT **server** (the device the display connects to) | `NimBLEDevice::init/setPower/setMTU/createServer/getAdvertising`, `NimBLEServer`, `NimBLEService`, `NimBLECharacteristic`, `NimBLEAdvertising`, `NIMBLE_PROPERTY::*`, **`NimBLEServerCallbacks`** + **`NimBLECharacteristicCallbacks`** (this class inherits both), `onConnect/onDisconnect/onWrite`, `setValue/notify/getValue/getUUID`, `NimBLEUUID` |
 | `lib/NimBLEComm/src/NimBLEClientController.{h,cpp}` | Display-side GATT **client** + scanner | `NimBLEDevice::createClient/getScan`, `NimBLEClient`, `NimBLEScan`, `NimBLERemoteService`, `NimBLERemoteCharacteristic`, **`NimBLEClientCallbacks`** + **`NimBLEAdvertisedDeviceCallbacks`** (this class inherits both), `client->connect/isConnected/getService/updateConnParams`, `scanner->setAdvertisedDeviceCallbacks/setInterval/setWindow/setMaxResults/setDuplicateFilter/setActiveScan/start/stop/clearDuplicateCache/isScanning`, `char->subscribe/writeValue/readValue/canNotify/canRead`, `NimBLEAdvertisedDevice::haveServiceUUID/isAdvertisingService/getAddress/toString`, `NimBLEAddress` |
 | `lib/ble_ota_dfu/src/ble_ota_dfu.{hpp,cpp}` | BLE OTA firmware-update GATT service (attached to the controller server) | Uses the **legacy `BLE*` aliases**: `BLEDevice`, `BLEServer`, `BLECharacteristic`, `BLECharacteristicCallbacks` (`onWrite`/`onNotify`), plus `NimBLEServer*` in `configure_OTA`. `getValue()` used as **`std::string`**. `NIMBLE_PROPERTY::WRITE/WRITE_ENC/WRITE_NR/NOTIFY`. |
+| `lib/OTA/src/ControllerOTA.{h,cpp}` + `GitHubOTA.{h,cpp}` | **Client side** of the controller-firmware-OTA flow (display pushes new controller FW over BLE) | `#include <NimBLEDevice.h>`; holds a `NimBLEClient*`; `client->getService`, `NimBLERemoteService::getCharacteristic`, `NimBLERemoteCharacteristic`, `NimBLEUUID`, `canNotify`, `subscribe(...)`, notify callback `onReceive(NimBLERemoteCharacteristic*, uint8_t*, size_t, bool)`. `GitHubOTA::init(NimBLEClient*)` just forwards the client. **Same client-side 2.x changes as `NimBLEClientController`.** |
 | `src/display/plugins/BLEScalePlugin.{h,cpp}` | BLE kitchen-scale integration | **Does NOT touch NimBLE directly.** Talks to the `RemoteScales*` API (`remote_scales.h`, `RemoteScalesScanner`, `RemoteScalesFactory`, `RemoteScalesPluginRegistry`) from the external `esp-arduino-ble-scales` lib. The NimBLE-2.x burden for scales is **inside that library**, not GaggiMate. |
 | `esp-arduino-ble-scales` (`lib_deps`, `#5f8f2cd`) | External: vendor scale drivers (Acaia, Bookoo, etc.) over NimBLE | Owns its own NimBLE client/scan code. **The hard external dependency** — see "Gating risk" below. |
 | `sim/comms/*` (desktop simulator) | Host build, NOT firmware | Uses a hand-written `NimBLEClient.h` stub, not the real lib. Unaffected by the firmware bump; ignore for this migration. |
 
-**Key scoping conclusion:** all first-party NimBLE code is in **`lib/NimBLEComm`
-(2 classes) + `lib/ble_ota_dfu` (1 file)**. The application layer, plugins, and
-UI never see NimBLE types. This is a tight, well-bounded migration.
+**Key scoping conclusion:** all first-party NimBLE code is in **three libraries
+— `lib/NimBLEComm` (2 classes), `lib/ble_ota_dfu` (1 file), and `lib/OTA`
+(`ControllerOTA`/`GitHubOTA`, the client-side controller-OTA path)**. The
+application layer, plugins, and UI never call NimBLE APIs: `src/display/core/`
+holds wrapper *members* (`Controller.h` owns a `NimBLEClientController` and
+`#include`s `NimBLEComm.h`) but issues no NimBLE calls itself — the wrapper
+classes own the API surface. This is a tight, well-bounded migration across
+three libs.
 
 ## NimBLE 1.x → 2.x API delta (what actually changes)
 
@@ -142,6 +148,7 @@ together on a branch — still scoped to the same two libs.
 - `lib/NimBLEComm/src/NimBLEClientController.h` — swap `NimBLEAdvertisedDeviceCallbacks` → `NimBLEScanCallbacks`; `onDisconnect` + `reason` param; `onResult` const param.
 - `lib/NimBLEComm/src/NimBLEClientController.cpp` — `scan()` uses `setScanCallbacks`; `onResult` const param; `onDisconnect(NimBLEClient*, int)`; verify `subscribe()` bind + `updateConnParams`.
 - `lib/ble_ota_dfu/src/ble_ota_dfu.cpp` + `.hpp` — `BLECharacteristicCallbacks::onWrite/onNotify` signatures; verify `getValue()`→`std::string`; verify `WRITE_ENC` security path.
+- `lib/OTA/src/ControllerOTA.{h,cpp}` — client-side notify callback `onReceive(NimBLERemoteCharacteristic*, uint8_t*, size_t, bool)` (same shape, verify constness); `subscribe()` call; `canNotify`; `getService`/`getCharacteristic` are API-stable. `lib/OTA/src/GitHubOTA.{h,cpp}` only forwards a `NimBLEClient*` — likely no change beyond a recompile.
 - `platformio.ini` — `h2zero/NimBLE-Arduino@1.4.3` → `@^2.x` in `[display_common] lib_deps_default` and `[env:controller] lib_deps`. Re-check `-DCONFIG_NIMBLE_CPP_LOG_LEVEL` / `-DCONFIG_BT_NIMBLE_PINNED_TO_CORE` flag names (NimBLE 2.x renamed some CPP config macros).
 - `lib_deps` `esp-arduino-ble-scales` pin → a NimBLE-2.x-compatible revision/fork (gating — see C-11).
 - `sim/comms/*` — no change (uses its own stub).
