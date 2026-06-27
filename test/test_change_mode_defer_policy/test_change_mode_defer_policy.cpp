@@ -33,6 +33,8 @@ void test_non_standby_defers_when_settle_open(void) {
     TEST_ASSERT_TRUE(shouldDeferModeChange(MODE_STEAM, true));  // auto-steam
     TEST_ASSERT_TRUE(shouldDeferModeChange(MODE_GRIND, true));  // grind
     TEST_ASSERT_TRUE(shouldDeferModeChange(MODE_MANUAL, true)); // manual
+    TEST_ASSERT_TRUE(shouldDeferModeChange(MODE_BREW, true));   // brew
+    TEST_ASSERT_TRUE(shouldDeferModeChange(MODE_WATER, true));  // water
 }
 
 // No settle window (no scale / flow-estimation / time-based shot, or not from an
