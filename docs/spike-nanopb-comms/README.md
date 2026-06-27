@@ -12,7 +12,7 @@ Contents:
 - `roundtrip_test.cpp`, `run.sh` — lossless round-trip host harness (`./run.sh`).
 - `findings.md` — the deliverable.
 
-The throwaway footprint-measurement build lives in `../../lib/NanoPbSpike/` +
-the `[env:display-nanopb-spike]` env in `platformio.ini`. **Delete both before
-any production merge** — they exist only so the +7,776 B flash number is
-reproducible.
+The throwaway footprint-measurement build (a probe lib under `lib/` plus an
+extra `platformio.ini` env) that produced the +7,776 B flash number was
+**removed in PRO-241** when the production nanopb infra landed. It is gone on
+purpose; the number it produced is preserved in `findings.md` §3.

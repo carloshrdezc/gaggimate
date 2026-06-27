@@ -96,9 +96,10 @@ uses `std::to_string(float)` (6 dp), so it is **not** the lossy path — the
 ## 3. Measured footprint delta (the key number)
 
 Measured against the **real `pio run -e display` firmware**, not a minimal
-sketch. Method: build baseline `display`, then a throwaway `display-nanopb-spike`
+sketch. Method: build baseline `display`, then a throwaway footprint-measurement
 env that links the nanopb runtime + the 2 generated messages via a force-linked
-probe (`-Wl,-u,nanopb_spike_probe`, see `lib/NanoPbSpike/`), and diff.
+probe, and diff. (That throwaway env + its probe lib were removed in PRO-241 once
+the number below was captured; this section preserves the measurement.)
 
 PlatformIO "used" figures:
 
@@ -269,17 +270,16 @@ adoption supersedes it.
 - `gen/comms.pb.{c,h}` — real nanopb-generated output (nanopb 0.4.9.1).
 - `runtime/pb_*.{c,h}` — vendored nanopb runtime (from nanopb@0.4.9.1).
 - `roundtrip_test.cpp` + `run.sh` — the lossless round-trip harness (PASS).
-- `../../lib/NanoPbSpike/` + `[env:display-nanopb-spike]` in `platformio.ini` —
-  the throwaway footprint-measurement build. **Delete before any production
-  merge** (kept here only so the +7,776 B number is reproducible).
+- The throwaway footprint-measurement build (a probe lib + an extra
+  `platformio.ini` env) that produced the +7,776 B number above was **removed in
+  PRO-241** when the production nanopb infra landed. It is intentionally gone;
+  the measurement is preserved in §3.
 
 ### Reproduce
 ```sh
 # round-trip test
 cd docs/spike-nanopb-comms && ./run.sh
-
-# footprint delta
-pio run -e display                 # baseline -> note Flash/RAM
-pio run -e display-nanopb-spike    # +nanopb  -> diff Flash/RAM
-xtensa-esp32s3-elf-size .pio/build/display{,-nanopb-spike}/firmware.elf
 ```
+
+The footprint-delta reproduction relied on the throwaway measurement env, which
+was removed in PRO-241 (see §3); the captured numbers above stand on their own.
