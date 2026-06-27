@@ -14,7 +14,8 @@ import {
   getAnalyzerSurfaceTriggerClasses,
   getAnalyzerTextButtonClasses,
 } from './analyzerControlStyles';
-import { formatTenPointRating, getRatingFillPercent } from '../../../utils/ratings.js';
+import { formatTenPointRating } from '../../../utils/ratings.js';
+import { RatingStars } from '../../../components/RatingStars.jsx';
 
 const tasteOptions = [
   { value: 'bitter', label: 'Bitter' },
@@ -53,18 +54,9 @@ export function NotesBarExpanded({
   // History exactly. Backward compat: option A — legacy Analyzer entries were
   // stored on a 1-5 scale and are now read as low 0-10 scores (no migration).
   const renderRating = () => {
-    const fillStyle = { width: getRatingFillPercent(notes.rating) };
     return (
       <div className='flex items-center gap-2'>
-        <div className='relative inline-flex text-lg leading-none'>
-          <div className='text-base-content/20'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
-          <div
-            className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
-            style={fillStyle}
-          >
-            {'\u2605\u2605\u2605\u2605\u2605'}
-          </div>
-        </div>
+        <RatingStars rating={notes.rating} />
         {isEditing ? (
           <input
             type='number'

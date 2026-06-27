@@ -2,16 +2,13 @@ import { useState, useEffect, useContext, useCallback } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
+import { RatingStars } from '../../components/RatingStars.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans } from '../../utils/beanManager.js';
 import { listGrinders, recordGrinder } from '../../utils/grinderManager.js';
-import {
-  formatTenPointRating,
-  getRatingFillPercent,
-  normalizeTenPointRating,
-} from '../../utils/ratings.js';
+import { formatTenPointRating, normalizeTenPointRating } from '../../utils/ratings.js';
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const apiService = useContext(ApiServiceContext);
@@ -263,18 +260,6 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
       .trim()
       .toLowerCase();
 
-  const renderStars = rating => (
-    <div className='relative inline-flex text-lg leading-none'>
-      <div className='text-gray-300'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
-      <div
-        className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
-        style={{ width: getRatingFillPercent(rating) }}
-      >
-        {'\u2605\u2605\u2605\u2605\u2605'}
-      </div>
-    </div>
-  );
-
   const getTasteColor = taste => {
     switch (taste) {
       case 'bitter':
@@ -340,7 +325,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             Rating
           </label>
           <div className='flex items-center gap-3'>
-            {renderStars(notes.rating)}
+            <RatingStars rating={notes.rating} />
             {isEditing ? (
               <input
                 type='number'
