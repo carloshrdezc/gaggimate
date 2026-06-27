@@ -334,6 +334,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
                 className='nd-input'
                 style={{ width: '112px' }}
                 value={notes.rating}
+                ariaLabel='Shot rating (0-10)'
                 onCommit={rating => handleInputChange('rating', rating)}
               />
             ) : (
