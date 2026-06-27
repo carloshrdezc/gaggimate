@@ -212,6 +212,11 @@ class WebUIPlugin : public Plugin {
     // making such a window astronomically unlikely and transient regardless. A mutex
     // is unnecessary because this is a single word (unlike the OTA String payload
     // above, which is non-atomic and does need otaIntentMutex).
+    //
+    // The default initializer 0 deliberately equals MODE_STANDBY (see
+    // constants.h), so an un-armed/default target reads as standby. This relies
+    // on MODE_STANDBY == 0; redefining MODE_STANDBY nonzero would silently change
+    // the default-target meaning.
     volatile uint8_t pendingModeChangeTarget = 0;
     volatile bool pendingModeChange = false;
 };
