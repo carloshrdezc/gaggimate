@@ -7,8 +7,8 @@ constexpr size_t MAX_CONNECT_RETRIES = 3;
 NimBLEClientController::NimBLEClientController() : client(nullptr) {}
 
 void NimBLEClientController::initClient() {
-    ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", (unsigned)esp_get_free_heap_size(),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
     NimBLEDevice::init("GPBLC");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
