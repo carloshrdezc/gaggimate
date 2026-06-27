@@ -6,6 +6,7 @@
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -1123,8 +1124,21 @@ void Controller::deactivateGrind() {
 }
 
 void Controller::activateStandby() {
-    setMode(MODE_STANDBY);
+    // PRO-278: tear the running process down BEFORE flipping the mode, never
+    // the other way around. The reverse order (setMode then deactivate) leaves
+    // a window in which mode == MODE_STANDBY while the steam/brew process is
+    // still currentProcess and isActive(). In that window setMode() has already
+    // dispatched the mutable `controller:mode:change` event, and a re-assert
+    // path (a still-active SteamProcess, the steam UI screen, or a mode-change
+    // handler) can flip the mode back to MODE_STEAM/MODE_BREW before deactivate()
+    // lands — the user-reported "stop-steam bounces back, second press sticks"
+    // bug. Deactivating first means the mode-change event fires with no active
+    // process to re-assert against, so a single press lands in Standby and stays.
+    // This matches every sibling teardown: deactivateStandby(), the steam-button
+    // release in handleSteamButton(), and WebUIPlugin's req:change-mode STANDBY
+    // path all deactivate() before setMode().
     deactivate();
+    setMode(MODE_STANDBY);
 }
 
 void Controller::deactivateStandby() {
