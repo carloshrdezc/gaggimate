@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <display/plugins/BLEScalePlugin.h>
+#include <display/plugins/ChangeModeDeferPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/webassets/web_ui_manifest.h>
 #include <string>
@@ -199,7 +200,12 @@ void WebUIPlugin::loop() {
     // arrived over the cloud relay (no local AsyncWebServer running) still
     // applies once the settle window closes.
     if (pendingModeChange) {
-        if (ShotHistory.isExtendedRecording()) {
+        // "Still hold" is the same defer decision as the arming gate (PRO-267):
+        // a deferral is only ever armed for non-STANDBY targets, so
+        // shouldDeferModeChange(pendingModeChangeTarget, ...) reduces to the
+        // settle-window check here — sharing the predicate keeps the hold/apply
+        // decision in lock-step with the arming gate.
+        if (shouldDeferModeChange(pendingModeChangeTarget, ShotHistory.isExtendedRecording())) {
             // Settle still in progress: hold the mode, keep the BLE scale connected
             // and record() logging so post-stop drips land in the yield. Re-checked
             // next iteration (~2 ms) — no blocking wait, no delay() on this task.
@@ -939,7 +945,7 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             // Controller::activateStandby() and the physical STANDBY button (which
             // are not gated). Only non-standby targets (auto-steam MODE_STEAM, grind,
             // manual) keep PRO-261's settle behavior.
-            if (newMode != MODE_STANDBY && ShotHistory.isExtendedRecording()) {
+            if (shouldDeferModeChange(newMode, ShotHistory.isExtendedRecording())) {
                 // Latch target before raising the flag so loop() never reads a stale
                 // target for a freshly-armed deferral (volatile handoff, see header).
                 pendingModeChangeTarget = newMode;
