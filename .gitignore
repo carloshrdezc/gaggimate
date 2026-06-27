@@ -15,6 +15,17 @@ src/stable_versions.h
 src/display/ui/default/lvgl/project.info
 # Generated web UI bundle embedded into firmware flash (scripts/embed_webui.py)
 src/display/webassets/
+
+# PRO-241: nanopb-generated protobuf sources are BUILD ARTIFACTS, never committed.
+# The codegen pre-step (nanopb's platformio_generator.py) emits them into
+# $BUILD_DIR/nanopb/generated-src (under .pio/, already ignored above); this
+# rule additionally guards against a stray *.pb.{c,h} landing in the source tree
+# if the generator is ever run by hand. The .proto is the only committed source.
+*.pb.c
+*.pb.h
+# ...except the spike's pinned design-record output (committed as the PRO-239 record).
+!docs/spike-nanopb-comms/gen/*.pb.c
+!docs/spike-nanopb-comms/gen/*.pb.h
 bean-whisperer/
 .worktrees/
 .playwright-mcp
