@@ -47,4 +47,14 @@ describe('getRatingFillPercent', () => {
     expect(getRatingFillPercent(10)).toBe('100%');
     expect(getRatingFillPercent(0)).toBe('0%');
   });
+
+  it('rounds away floating-point dust so the width string stays clean (PRO-300)', () => {
+    // Regression pin for the Math.round guard in getRatingFillPercent.
+    // (5.7 / 10) * 100 evaluates to 57.00000000000001 in IEEE-754, and 2.9
+    // gives 28.999999999999996. Without the rounding guard those leak straight
+    // into the inline `width` style. This asserts the guard keeps them clean —
+    // remove the Math.round in getRatingFillPercent and these expectations fail.
+    expect(getRatingFillPercent(5.7)).toBe('57%');
+    expect(getRatingFillPercent(2.9)).toBe('29%');
+  });
 });
