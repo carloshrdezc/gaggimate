@@ -26,7 +26,7 @@ import { cleanName, analyzerUiColors } from '../utils/analyzerUtils';
 import { NotesBarExpanded } from './NotesBarExpanded';
 import { SourceMarker } from './SourceMarker';
 import { getAnalyzerIconButtonClasses } from './analyzerControlStyles';
-import { formatTenPointRating, normalizeTenPointRating } from '../../../utils/ratings.js';
+import { formatTenPointRating } from '../../../utils/ratings.js';
 
 function isTypingTarget(target) {
   const activeElement =
@@ -307,7 +307,9 @@ export function NotesBar({
     setNotes(prev => {
       const updated = {
         ...prev,
-        [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
+        // PRO-299: rating is normalized on blur inside RatingNumberInput
+        // (onCommit emits an already-normalized number), so store it as-is.
+        [field]: value,
       };
       if (field === 'doseIn' || field === 'doseOut') {
         const dIn = field === 'doseIn' ? value : prev.doseIn;

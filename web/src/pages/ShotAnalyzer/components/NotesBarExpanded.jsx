@@ -16,6 +16,7 @@ import {
 } from './analyzerControlStyles';
 import { formatTenPointRating } from '../../../utils/ratings.js';
 import { RatingStars } from '../../../components/RatingStars.jsx';
+import { RatingNumberInput } from '../../../components/RatingNumberInput.jsx';
 
 const tasteOptions = [
   { value: 'bitter', label: 'Bitter' },
@@ -49,24 +50,20 @@ export function NotesBarExpanded({
     };
   };
 
-  // Render a 0-10 rating control. Edit mode: numeric input (step 0.1) wired
-  // through the shared ratings helpers so the stored value matches Shot
-  // History exactly. Backward compat: option A — legacy Analyzer entries were
-  // stored on a 1-5 scale and are now read as low 0-10 scores (no migration).
+  // Render a 0-10 rating control. Edit mode uses the shared RatingNumberInput
+  // (PRO-299): it holds the raw string while typing and normalizes + commits on
+  // blur, so decimals like "7.5" survive entry instead of collapsing to "75".
+  // Backward compat: option A — legacy Analyzer entries were stored on a 1-5
+  // scale and are now read as low 0-10 scores (no migration).
   const renderRating = () => {
     return (
       <div className='flex items-center gap-2'>
         <RatingStars rating={notes.rating} />
         {isEditing ? (
-          <input
-            type='number'
-            min='0'
-            max='10'
-            step='0.1'
+          <RatingNumberInput
             className={`${inputCls} w-20`}
-            value={notes.rating || ''}
-            onChange={e => onInputChange('rating', e.target.value)}
-            placeholder='0-10'
+            value={notes.rating}
+            onCommit={rating => onInputChange('rating', rating)}
           />
         ) : (
           <span className='text-sm font-medium'>{formatTenPointRating(notes.rating)}</span>

@@ -3,12 +3,13 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { RatingStars } from '../../components/RatingStars.jsx';
+import { RatingNumberInput } from '../../components/RatingNumberInput.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans } from '../../utils/beanManager.js';
 import { listGrinders, recordGrinder } from '../../utils/grinderManager.js';
-import { formatTenPointRating, normalizeTenPointRating } from '../../utils/ratings.js';
+import { formatTenPointRating } from '../../utils/ratings.js';
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const apiService = useContext(ApiServiceContext);
@@ -237,7 +238,9 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
           : availableBeans.find(bean => bean.id === prev.beanId) || null;
       const newNotes = {
         ...prev,
-        [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
+        // PRO-299: rating is normalized on blur inside RatingNumberInput
+        // (onCommit emits an already-normalized number), so store it as-is.
+        [field]: value,
       };
 
       if (field === 'beanType') {
@@ -327,16 +330,11 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
           <div className='flex items-center gap-3'>
             <RatingStars rating={notes.rating} />
             {isEditing ? (
-              <input
-                type='number'
-                min='0'
-                max='10'
-                step='0.1'
+              <RatingNumberInput
                 className='nd-input'
                 style={{ width: '112px' }}
-                value={notes.rating || ''}
-                onChange={e => handleInputChange('rating', e.target.value)}
-                placeholder='0-10'
+                value={notes.rating}
+                onCommit={rating => handleInputChange('rating', rating)}
               />
             ) : (
               <div className='font-nd-mono text-[13px] text-[var(--text-primary,#e8e8e8)]'>
