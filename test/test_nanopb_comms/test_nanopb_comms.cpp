@@ -566,6 +566,80 @@ static void test_led_control_roundtrip() {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(src.brightness, dst.brightness, "brightness equal");
 }
 
+// ===========================================================================
+// PRO-309 — negative-path + discriminator-only-frame decode coverage
+// (follow-up from PRO-242 / PR #285). Purely additive host tests: the existing
+// suite proves valid frames round-trip; these prove the decoder REJECTS a
+// malformed body and that a 1-byte discriminator-only frame (empty proto3 body)
+// decodes to an all-zero message for both OUTPUT_CONTROL sub-types.
+// ===========================================================================
+
+// NEGATIVE PATH — a malformed/truncated OUTPUT_CONTROL body must make pb_decode
+// return false. The buffer is a field tag with wire type 2 (length-delimited)
+// claiming 5 payload bytes, but the stream ends immediately, so nanopb runs off
+// the end while reading the length-delimited content. Hand-built and
+// deterministic (no rand); validated to actually return false.
+static void test_output_control_decode_rejects_truncated_body() {
+    // 0x0A = field 1, wire type 2 (length-delimited); 0x05 = claimed length 5;
+    // no further bytes -> the decoder must fail reading the missing payload.
+    const uint8_t garbage[] = {0x0A, 0x05};
+    gaggimate_SimpleOutput dst = gaggimate_SimpleOutput_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(garbage, sizeof(garbage));
+    TEST_ASSERT_FALSE_MESSAGE(pb_decode(&is, gaggimate_SimpleOutput_fields, &dst),
+                              "pb_decode rejects truncated/garbage SimpleOutput body");
+}
+
+// NEGATIVE PATH (SensorData variant) — a tag byte announcing a fixed32 field
+// (wire type 5) followed by fewer than 4 bytes truncates mid-value, so the
+// decoder must fail. SensorData field 1 (temperature) is a float => fixed32.
+static void test_sensor_data_decode_rejects_truncated_body() {
+    // 0x0D = field 1, wire type 5 (32-bit); only 2 of the required 4 bytes
+    // follow, so nanopb runs off the end reading the fixed32 value.
+    const uint8_t garbage[] = {0x0D, 0xFF, 0xFF};
+    gaggimate_SensorData dst = gaggimate_SensorData_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(garbage, sizeof(garbage));
+    TEST_ASSERT_FALSE_MESSAGE(pb_decode(&is, gaggimate_SensorData_fields, &dst),
+                              "pb_decode rejects truncated/garbage SensorData body");
+}
+
+// DISCRIMINATOR-ONLY FRAME — a frame carrying just the leading type byte and an
+// EMPTY (0-length) proto3 message body. Mirrors the framing in
+// test_output_control_discriminator_framing (body = frame+1, len = total-1; for
+// a discriminator-only frame total=1 so the body length is 0). A 0-length
+// proto3 message is valid and decodes to all-default (zero/false) fields, for
+// both type 0 (SimpleOutput) and type 1 (AdvancedOutput).
+static void test_output_control_discriminator_only_frame_zero_fills() {
+    // ---- type 0 / simple ----
+    {
+        const uint8_t frame[] = {0}; // discriminator only, empty body
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, frame[0], "simple discriminator byte == 0");
+
+        gaggimate_SimpleOutput dst = gaggimate_SimpleOutput_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(frame + 1, sizeof(frame) - 1);
+        TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_SimpleOutput_fields, &dst),
+                                 "pb_decode empty SimpleOutput body succeeds");
+        TEST_ASSERT_FALSE_MESSAGE(dst.valve, "empty frame => valve false");
+        TEST_ASSERT_TRUE_MESSAGE(bit_equal(0.0f, dst.pump_setpoint), "empty frame => pump_setpoint 0");
+        TEST_ASSERT_TRUE_MESSAGE(bit_equal(0.0f, dst.boiler_setpoint), "empty frame => boiler_setpoint 0");
+    }
+
+    // ---- type 1 / advanced ----
+    {
+        const uint8_t frame[] = {1}; // discriminator only, empty body
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(1, frame[0], "advanced discriminator byte == 1");
+
+        gaggimate_AdvancedOutput dst = gaggimate_AdvancedOutput_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(frame + 1, sizeof(frame) - 1);
+        TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_AdvancedOutput_fields, &dst),
+                                 "pb_decode empty AdvancedOutput body succeeds");
+        TEST_ASSERT_FALSE_MESSAGE(dst.valve, "empty frame => valve false");
+        TEST_ASSERT_TRUE_MESSAGE(bit_equal(0.0f, dst.boiler_setpoint), "empty frame => boiler_setpoint 0");
+        TEST_ASSERT_FALSE_MESSAGE(dst.pressure_target, "empty frame => pressure_target false");
+        TEST_ASSERT_TRUE_MESSAGE(bit_equal(0.0f, dst.pump_pressure), "empty frame => pump_pressure 0");
+        TEST_ASSERT_TRUE_MESSAGE(bit_equal(0.0f, dst.pump_flow), "empty frame => pump_flow 0");
+    }
+}
+
 static int runNanopbCommsTests() {
     UNITY_BEGIN();
     RUN_TEST(test_sensor_data_roundtrip_bit_exact);
@@ -573,6 +647,10 @@ static int runNanopbCommsTests() {
     RUN_TEST(test_simple_output_roundtrip_bit_exact);
     RUN_TEST(test_advanced_output_roundtrip_bit_exact);
     RUN_TEST(test_output_control_discriminator_framing);
+    // PRO-309 — negative-path + discriminator-only-frame decode coverage.
+    RUN_TEST(test_output_control_decode_rejects_truncated_body);
+    RUN_TEST(test_sensor_data_decode_rejects_truncated_body);
+    RUN_TEST(test_output_control_discriminator_only_frame_zero_fills);
     RUN_TEST(test_error_roundtrip);
     RUN_TEST(test_brew_button_roundtrip);
     RUN_TEST(test_steam_button_roundtrip);
