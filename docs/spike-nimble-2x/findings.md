@@ -67,7 +67,7 @@ tag (`98d45b8`), which is the most concrete proof of the exact deltas.
 | `NimBLEServerCallbacks::onDisconnect(NimBLEServer*)` | **`onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason)`** | `NimBLEServerController.cpp:264`, decl `.h:70` |
 | `NimBLECharacteristicCallbacks::onWrite(NimBLECharacteristic*)` | **`onWrite(NimBLECharacteristic*, NimBLEConnInfo&)`** | `NimBLEServerController.cpp:270`, decl `.h:73` |
 | `pServer->startAdvertising()` in `onDisconnect` | works, **but advertising no longer auto-restarts** in 2.x — the manual restart at `:267` becomes load-bearing (keep it) OR call `NimBLEServer::advertiseOnDisconnect(true)` | `NimBLEServerController.cpp:267` |
-| notify subscribe callback `(NimBLERemoteCharacteristic*, uint8_t*, size_t, bool)` | **same 4-arg shape** in 2.x `notify_callback` typedef — `std::bind(...)` subscriptions need no body change beyond the const-correctness of args | `NimBLEClientController.cpp:136-175` (8 subscribe sites), `notifyCallback` decl `.h:89` |
+| notify subscribe callback `(NimBLERemoteCharacteristic*, uint8_t*, size_t, bool)` | **same 4-arg shape** in 2.x `notify_callback` typedef — `std::bind(...)` subscriptions need no body change beyond the const-correctness of args | `NimBLEClientController.cpp:136-175` (7 subscribe sites), `notifyCallback` decl `.h:89` |
 | `NIMBLE_PROPERTY::WRITE/NOTIFY/READ` | **unchanged** ✅ | `NimBLEServerController.cpp:26-75` (all `createCharacteristic`) |
 | `char->setValue(buf,len)` / `->notify()` / `->writeValue(buf,len,false)` | **unchanged** ✅ (`notify()` just no longer takes the `bool is_notification` arg, which we don't pass) | server `sendXxx` (`.cpp:114-221`), client `sendXxx` (`.cpp:55-359`) |
 | `pCharacteristic->getValue()` → `NimBLEAttValue` | unchanged shape; `.data()/.size()/[0]` all still work | `NimBLEServerController.cpp:276,311,325,...` (`onWrite` decode) ✅ |
@@ -146,7 +146,7 @@ makes this a platform-migration slice, not an isolated bump.
 
 Fully inventoried in §1. Net: `NimBLEClientController` takes the bigger hit
 (scan-callback class swap + `clearDuplicateCache` removal + client `onDisconnect`
-reason param + 8 subscribe sites to recompile), `NimBLEServerController` takes 3
+reason param + 7 subscribe sites to recompile), `NimBLEServerController` takes 3
 callback-signature edits (`onConnect`/`onDisconnect`/`onWrite`). All the nanopb
 encode/decode bodies (PRO-241..245) are NimBLE-agnostic and unaffected — they
 operate on `uint8_t*`/`NimBLEAttValue` buffers whose API is stable.
