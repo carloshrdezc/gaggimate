@@ -200,10 +200,11 @@ namespace {
 //   * No lock-order inversion: the guarded mutexes (wsMutex, relayLifecycleMutex)
 //     never nest with each other or with relayMutex; each critical section takes
 //     exactly one of them, so portMAX_DELAY cannot deadlock.
-//   * NO BLOCKING CALLS under this lock: because acquire is portMAX_DELAY, any
-//     blocking operation inside the locked scope (network I/O, taking another
-//     lock, a long wait) would turn into a hard hang. Keep the critical section
-//     to short, non-blocking work only.
+//   * NO UNBOUNDED BLOCKING under this lock: because acquire is portMAX_DELAY,
+//     any unbounded blocking operation inside the locked scope (network I/O,
+//     taking another lock, a portMAX_DELAY-style wait) would turn into a hard
+//     hang. Keep critical sections short; only a strictly BOUNDED, CPU-yielding
+//     wait is acceptable (e.g. the ~500 ms vTaskDelay spin-wait in stopRelay()).
 struct SemaphoreGuard {
     SemaphoreHandle_t handle;
     explicit SemaphoreGuard(SemaphoreHandle_t h) : handle(h) {
