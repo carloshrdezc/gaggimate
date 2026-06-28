@@ -1,20 +1,18 @@
 // GaggiMate fork (carloshrdezc) controller <-> display BLE protocol — nanopb
-// spike schema (PRO-239). This DRAFT models the 18 message types our fork's
-// lib/NimBLEComm actually uses today, derived directly from the encode/decode
-// functions in NimBLEServerController.cpp / NimBLEClientController.cpp and the
-// callback typedefs in NimBLEComm.h:35-53.
+// schema. Models the 18 message types this fork's lib/NimBLEComm uses, derived
+// from the encode/decode functions in NimBLEServerController.cpp /
+// NimBLEClientController.cpp and the callback typedefs in NimBLEComm.h:35-53.
 //
-// IMPORTANT — this is a SPIKE artifact, NOT a production schema:
-//   * It is deliberately a 1:1 mapping of our CURRENT 18 BLE characteristics so
-//     the footprint/round-trip numbers below reflect a like-for-like wire-format
-//     swap (text -> protobuf) on our existing NimBLE transport.
-//   * Upstream GaggiMate's NanoPbComm (GM-82, lib v2.0.0) uses a richer design:
-//     a single Frame{ id, ack, repeated Payload } with a oneof Payload tagged
-//     union, a coalescing acknowledged outbound queue, and a transport
-//     abstraction (BLE today, UART tomorrow). That is a comms *architecture*,
-//     not just a wire format. See findings.md "Option B" for what absorbing it
-//     drags along. Where field shapes are obvious we mirror upstream's tags to
-//     keep a future convergence cheaper, but we do NOT adopt Frame/oneof here.
+// This is a 1:1 mapping of the current 18 BLE characteristics: a like-for-like
+// wire-format swap (text -> protobuf) on the existing NimBLE transport.
+//
+// Convergence note: upstream GaggiMate's NanoPbComm (GM-82, lib v2.0.0) uses a
+// richer design — a single Frame{ id, ack, repeated Payload } with a oneof
+// Payload tagged union, a coalescing acknowledged outbound queue, and a
+// transport abstraction (BLE today, UART tomorrow). That is a comms
+// *architecture*, not just a wire format. Where field shapes are obvious we
+// mirror upstream's tags to keep a future convergence cheaper, but we do NOT
+// adopt Frame/oneof here.
 //
 // Field types follow the existing code:
 //   - floats stay float (32-bit) — matches the on-device float math and avoids
@@ -26,7 +24,7 @@
 
 syntax = "proto3";
 
-package gaggimate_spike;
+package gaggimate;
 
 // ===========================================================================
 // Controller -> Display (NOTIFY characteristics)
