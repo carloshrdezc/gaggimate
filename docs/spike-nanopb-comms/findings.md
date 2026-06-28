@@ -276,10 +276,9 @@ adoption supersedes it.
   the measurement is preserved in §3.
 
 ### Reproduce
-```sh
-# round-trip test
-cd docs/spike-nanopb-comms && ./run.sh
-```
 
-The footprint-delta reproduction relied on the throwaway measurement env, which
-was removed in PRO-241 (see §3); the captured numbers above stand on their own.
+Run the lossless round-trip test with `cd docs/spike-nanopb-comms && ./run.sh`.
+
+The footprint-delta measurement is not reproducible here: it relied on the
+throwaway measurement env, which was removed in PRO-241 (see §3). The captured
+numbers above stand on their own.
