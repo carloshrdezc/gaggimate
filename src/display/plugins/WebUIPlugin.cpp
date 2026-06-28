@@ -187,29 +187,37 @@ void WebUIPlugin::relayLoopTask(void *arg) {
 }
 
 namespace {
-// RAII guard for the AsyncWebSocket client-list mutex (PRO-313). Takes wsMutex
-// on construction (if it exists) and releases it on destruction, so every `ws`
-// access that walks or mutates the client list is bracketed without a
-// hand-audited give at each return path. Blocks (portMAX_DELAY): the critical
-// section is a single short ws call (a client-list walk, microseconds), and
-// blocking briefly is strictly preferable to skipping serialization and
-// risking the use-after-free reboot this guard exists to prevent. ws access
-// never nests and never happens while holding relayMutex, so portMAX_DELAY
-// cannot deadlock here.
-struct WsClientsLock {
+// Shared RAII guard for a non-recursive FreeRTOS mutex (PRO-314, unifying the
+// former WsClientsLock from PRO-313 and RelayLifecycleLock from CAR-259). Takes
+// the handle on construction (if it exists) and gives it back on destruction,
+// so every critical section is bracketed without a hand-audited give at each
+// return path. Blocks (portMAX_DELAY) on acquire and degrades to a no-op when
+// the handle is nullptr.
+//
+// INVARIANTS (callers must uphold; see per-site comments):
+//   * Non-recursive: never construct a second guard for the same mutex while
+//     one is already live on this task.
+//   * No lock-order inversion: the guarded mutexes (wsMutex, relayLifecycleMutex)
+//     never nest with each other or with relayMutex; each critical section takes
+//     exactly one of them, so portMAX_DELAY cannot deadlock.
+//   * NO BLOCKING CALLS under this lock: because acquire is portMAX_DELAY, any
+//     blocking operation inside the locked scope (network I/O, taking another
+//     lock, a long wait) would turn into a hard hang. Keep the critical section
+//     to short, non-blocking work only.
+struct SemaphoreGuard {
     SemaphoreHandle_t handle;
-    explicit WsClientsLock(SemaphoreHandle_t h) : handle(h) {
+    explicit SemaphoreGuard(SemaphoreHandle_t h) : handle(h) {
         if (handle != nullptr) {
             xSemaphoreTake(handle, portMAX_DELAY);
         }
     }
-    ~WsClientsLock() {
+    ~SemaphoreGuard() {
         if (handle != nullptr) {
             xSemaphoreGive(handle);
         }
     }
-    WsClientsLock(const WsClientsLock &) = delete;
-    WsClientsLock &operator=(const WsClientsLock &) = delete;
+    SemaphoreGuard(const SemaphoreGuard &) = delete;
+    SemaphoreGuard &operator=(const SemaphoreGuard &) = delete;
 };
 } // namespace
 
@@ -367,7 +375,7 @@ void WebUIPlugin::loop() {
     // keeps the lock scoped to the O(1) read; the JSON build below touches no ws
     // state and broadcastAll() re-takes the lock for the actual send.
     if (now - lastStatus > STATUS_PERIOD && ([this] {
-            WsClientsLock lock(wsMutex);
+            SemaphoreGuard lock(wsMutex);
             return !ws.getClients().empty();
         }() || relayConnected)) {
         lastStatus = now;
@@ -495,7 +503,7 @@ void WebUIPlugin::loop() {
         lastCleanup = now;
         // PRO-313: cleanupClients() walks AND erases the client list; serialize
         // it against the AsyncTCP task's connect/disconnect mutation.
-        WsClientsLock lock(wsMutex);
+        SemaphoreGuard lock(wsMutex);
         ws.cleanupClients();
     }
     if (now - lastDns > DNS_PERIOD && dnsServer != nullptr) {
@@ -650,11 +658,11 @@ void WebUIPlugin::setupServer() {
             // forking it. See the invariant at the `ws` declaration.
             if (type == WS_EVT_CONNECT) {
                 client->setCloseClientOnQueueFull(true);
-                WsClientsLock lock(wsMutex);
+                SemaphoreGuard lock(wsMutex);
                 ESP_LOGI("WebUIPlugin", "WebSocket client connected (%d open connections)", server->getClients().size());
             } else if (type == WS_EVT_DISCONNECT) {
                 {
-                    WsClientsLock lock(wsMutex);
+                    SemaphoreGuard lock(wsMutex);
                     ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)",
                              server->getClients().size());
                 }
@@ -690,7 +698,7 @@ void WebUIPlugin::stop() {
         // PRO-313: closeAll() walks the client list and runs on the WiFi-event
         // task (start()/stop()), a third task distinct from loopTask and
         // AsyncTCP. Serialize it against their client-list access.
-        WsClientsLock lock(wsMutex);
+        SemaphoreGuard lock(wsMutex);
         ws.closeAll();
     }
     if (dnsServer != nullptr) {
@@ -706,28 +714,13 @@ void WebUIPlugin::stop() {
     serverRunning = false;
 }
 
-// RAII guard for the relay lifecycle mutex. Takes the mutex on construction
-// (if it exists) and gives it back on destruction, so every return path out of
+// The relay lifecycle mutex is taken via the shared SemaphoreGuard (defined
+// near the top of this file). It takes the mutex on construction (if it exists)
+// and gives it back on destruction, so every return path out of
 // startRelay()/stopRelay() — early guards, the deferred-start/timeout returns,
 // the SSL heap-guard, the OOM path, and the normal returns — releases the lock
-// without a hand-audited give at each site (CAR-259).
-namespace {
-struct RelayLifecycleLock {
-    SemaphoreHandle_t handle;
-    explicit RelayLifecycleLock(SemaphoreHandle_t h) : handle(h) {
-        if (handle != nullptr) {
-            xSemaphoreTake(handle, portMAX_DELAY);
-        }
-    }
-    ~RelayLifecycleLock() {
-        if (handle != nullptr) {
-            xSemaphoreGive(handle);
-        }
-    }
-    RelayLifecycleLock(const RelayLifecycleLock &) = delete;
-    RelayLifecycleLock &operator=(const RelayLifecycleLock &) = delete;
-};
-} // namespace
+// without a hand-audited give at each site (CAR-259). relayLifecycleMutex never
+// nests with wsMutex or relayMutex, so its portMAX_DELAY acquire cannot deadlock.
 
 void WebUIPlugin::startRelay() {
     // Caller-context: startRelay()/stopRelay() are invoked from two different
@@ -742,7 +735,7 @@ void WebUIPlugin::startRelay() {
     // (non-recursive) mutex is correct: start() calls stop() then startRelay()
     // sequentially (not nested), and handleSettings() calls them sequentially too —
     // neither function calls the other while holding the lock.
-    RelayLifecycleLock lock(relayLifecycleMutex);
+    SemaphoreGuard lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
     if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
@@ -857,7 +850,7 @@ void WebUIPlugin::stopRelay() {
     // for the cross-task rationale, CAR-259). The lock is held across the bounded
     // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
     // (yields the CPU) and is strictly bounded.
-    RelayLifecycleLock lock(relayLifecycleMutex);
+    SemaphoreGuard lock(relayLifecycleMutex);
     if (!relayEnabled) return;
     relayEnabled = false;
     relayConnected = false;
@@ -906,7 +899,7 @@ void WebUIPlugin::broadcastAll(const String &msg) {
     // task's connect/disconnect mutation. The lock is released before
     // broadcastRelayMsg() (which takes relayMutex) so the two locks never nest.
     {
-        WsClientsLock lock(wsMutex);
+        SemaphoreGuard lock(wsMutex);
         ws.textAll(msg);
     }
     broadcastRelayMsg(msg);
@@ -938,7 +931,7 @@ void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
             // makeBuffer()/serializeJson() above touch no client list, so only
             // the send is serialized. Lock released before broadcastRelayMsg()
             // (relayMutex) so the two locks never nest.
-            WsClientsLock lock(wsMutex);
+            SemaphoreGuard lock(wsMutex);
             ws.text(clientId, buffer);
         }
     }
