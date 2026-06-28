@@ -118,46 +118,106 @@ void NimBLEServerController::sendSensorData(float temperature, float pressure, f
 
 void NimBLEServerController::sendError(int errorCode) {
     if (deviceConnected) {
-        errorChar->setValue(std::to_string(errorCode));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_Error msg = gaggimate_Error_init_zero;
+        msg.code = errorCode;
+
+        uint8_t buf[gaggimate_Error_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_Error_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendError encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        errorChar->setValue(buf, os.bytes_written);
         errorChar->notify();
     }
 }
 
 void NimBLEServerController::sendBrewBtnState(bool brewButtonStatus) {
     if (deviceConnected) {
-        // Send brew notification to the client
-        brewBtnChar->setValue(std::to_string(static_cast<int>(brewButtonStatus)));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_BrewButton msg = gaggimate_BrewButton_init_zero;
+        msg.pressed = brewButtonStatus;
+
+        uint8_t buf[gaggimate_BrewButton_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_BrewButton_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendBrewBtnState encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        brewBtnChar->setValue(buf, os.bytes_written);
         brewBtnChar->notify();
     }
 }
 
 void NimBLEServerController::sendSteamBtnState(bool steamButtonStatus) {
     if (deviceConnected) {
-        // Send steam notification to the client
-        steamBtnChar->setValue(std::to_string(static_cast<int>(steamButtonStatus)));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_SteamButton msg = gaggimate_SteamButton_init_zero;
+        msg.pressed = steamButtonStatus;
+
+        uint8_t buf[gaggimate_SteamButton_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_SteamButton_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendSteamBtnState encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        steamBtnChar->setValue(buf, os.bytes_written);
         steamBtnChar->notify();
     }
 }
 
 void NimBLEServerController::sendAutotuneResult(float Kp, float Ki, float Kd) {
     if (deviceConnected) {
-        // Send with default Kf=0.0 (disabled)
-        std::string value = float_to_string(Kp) + "," + float_to_string(Ki) + "," + float_to_string(Kd) + ",0.0";
-        autotuneResultChar->setValue(value);
+        // PRO-243: nanopb wire format (was lossy 3-dp float_to_string text with a
+        // "0.0" Kf token appended). Kf stays at its proto default (0 = disabled);
+        // the public 3-float signature is unchanged.
+        gaggimate_AutotuneResult msg = gaggimate_AutotuneResult_init_zero;
+        msg.kp = Kp;
+        msg.ki = Ki;
+        msg.kd = Kd;
+
+        uint8_t buf[gaggimate_AutotuneResult_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_AutotuneResult_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendAutotuneResult encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        autotuneResultChar->setValue(buf, os.bytes_written);
         autotuneResultChar->notify();
     }
 }
 
 void NimBLEServerController::sendVolumetricMeasurement(float value) {
     if (deviceConnected) {
-        volumetricMeasurementChar->setValue(float_to_string(value));
+        // PRO-243: nanopb wire format (was lossy 3-dp float_to_string text).
+        gaggimate_VolumetricMeasurement msg = gaggimate_VolumetricMeasurement_init_zero;
+        msg.value = value;
+
+        uint8_t buf[gaggimate_VolumetricMeasurement_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_VolumetricMeasurement_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendVolumetricMeasurement encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        volumetricMeasurementChar->setValue(buf, os.bytes_written);
         volumetricMeasurementChar->notify();
     }
 }
 
 void NimBLEServerController::sendTofMeasurement(int value) {
     if (deviceConnected) {
-        tofMeasurementChar->setValue(std::to_string(value));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_TofMeasurement msg = gaggimate_TofMeasurement_init_zero;
+        msg.distance_mm = value;
+
+        uint8_t buf[gaggimate_TofMeasurement_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_TofMeasurement_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendTofMeasurement encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        tofMeasurementChar->setValue(buf, os.bytes_written);
         tofMeasurementChar->notify();
     }
 }
@@ -181,7 +241,11 @@ void NimBLEServerController::registerLedControlCallback(const led_control_callba
 
 void NimBLEServerController::setInfo(const String infoString) {
     this->infoString = infoString;
-    infoChar->setValue(infoString);
+    // PRO-243: infoString carries the raw nanopb SystemInfo bytes (built by
+    // make_system_info). Write via the length-delimited buffer overload so any
+    // embedded NUL bytes in the protobuf payload survive (a String overload
+    // could stop at the first NUL).
+    infoChar->setValue(reinterpret_cast<const uint8_t *>(infoString.c_str()), infoString.length());
 }
 
 void NimBLEServerController::registerPidControlCallback(const pid_control_callback_t &callback) { pidControlCallback = callback; }
