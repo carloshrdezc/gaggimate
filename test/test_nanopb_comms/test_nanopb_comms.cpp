@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 void setUp(void) {}
@@ -176,6 +177,189 @@ static void test_output_control_discriminator_framing() {
     }
 }
 
+// ===========================================================================
+// PRO-243 — the seven remaining Controller->Display NOTIFY/READ characteristics
+// converted from comma-delimited text (and ArduinoJson for SystemInfo) to
+// nanopb. The lossy float paths (AutotuneResult, VolumetricMeasurement) get the
+// same bit-exact + regression-guard treatment SensorData got in PRO-242.
+// ===========================================================================
+
+// Error (int32 code).
+static void test_error_roundtrip() {
+    gaggimate_Error src = gaggimate_Error_init_zero;
+    src.code = 4; // ERROR_CODE_RUNAWAY
+
+    uint8_t buf[16];
+    pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_Error_fields, &src), "pb_encode Error");
+
+    gaggimate_Error dst = gaggimate_Error_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+    TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_Error_fields, &dst), "pb_decode Error");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(src.code, dst.code, "error code equal");
+}
+
+// BrewButton (bool pressed) — assert both true and false survive.
+static void test_brew_button_roundtrip() {
+    for (int b = 0; b <= 1; b++) {
+        gaggimate_BrewButton src = gaggimate_BrewButton_init_zero;
+        src.pressed = (b == 1);
+
+        uint8_t buf[8];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_BrewButton_fields, &src), "pb_encode BrewButton");
+
+        gaggimate_BrewButton dst = gaggimate_BrewButton_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+        TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_BrewButton_fields, &dst), "pb_decode BrewButton");
+        TEST_ASSERT_TRUE_MESSAGE(src.pressed == dst.pressed, "brew pressed equal");
+    }
+}
+
+// SteamButton (bool pressed) — assert both true and false survive.
+static void test_steam_button_roundtrip() {
+    for (int b = 0; b <= 1; b++) {
+        gaggimate_SteamButton src = gaggimate_SteamButton_init_zero;
+        src.pressed = (b == 1);
+
+        uint8_t buf[8];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_SteamButton_fields, &src), "pb_encode SteamButton");
+
+        gaggimate_SteamButton dst = gaggimate_SteamButton_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+        TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_SteamButton_fields, &dst), "pb_decode SteamButton");
+        TEST_ASSERT_TRUE_MESSAGE(src.pressed == dst.pressed, "steam pressed equal");
+    }
+}
+
+// AutotuneResult (Kp,Ki,Kd) — a primary lossy path. The controller sends only
+// three gains (Kf stays 0); assert all four fields survive bit-exact.
+static void test_autotune_result_roundtrip_bit_exact() {
+    gaggimate_AutotuneResult src = gaggimate_AutotuneResult_init_zero;
+    src.kp = 2.456789f;
+    src.ki = 0.0876543f;
+    src.kd = 18.234567f;
+    // kf intentionally left at the proto default (0) — matches sendAutotuneResult.
+
+    uint8_t buf[32];
+    pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_AutotuneResult_fields, &src), "pb_encode AutotuneResult");
+
+    gaggimate_AutotuneResult dst = gaggimate_AutotuneResult_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+    TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_AutotuneResult_fields, &dst), "pb_decode AutotuneResult");
+
+    TEST_ASSERT_TRUE_MESSAGE(bit_equal(src.kp, dst.kp), "kp bit-exact");
+    TEST_ASSERT_TRUE_MESSAGE(bit_equal(src.ki, dst.ki), "ki bit-exact");
+    TEST_ASSERT_TRUE_MESSAGE(bit_equal(src.kd, dst.kd), "kd bit-exact");
+    TEST_ASSERT_TRUE_MESSAGE(bit_equal(0.0f, dst.kf), "kf default 0 bit-exact");
+}
+
+// Pin the regression: the OLD AutotuneResult text path stringified each gain
+// with float_to_string (3-dp round) before the display re-parsed it, losing
+// precision nanopb now preserves.
+static void test_autotune_result_old_text_format_was_lossy() {
+    const float ki = 0.0876543f; // rounds to 0.088 in 3dp text
+    const float kd = 18.234567f; // rounds to 18.235 in 3dp text
+    TEST_ASSERT_FALSE_MESSAGE(bit_equal(ki, text_round_3dp(ki)), "old 3dp text format lost Ki precision (regression guard)");
+    TEST_ASSERT_FALSE_MESSAGE(bit_equal(kd, text_round_3dp(kd)), "old 3dp text format lost Kd precision (regression guard)");
+}
+
+// VolumetricMeasurement (float value) — the other lossy path.
+static void test_volumetric_measurement_roundtrip_bit_exact() {
+    gaggimate_VolumetricMeasurement src = gaggimate_VolumetricMeasurement_init_zero;
+    src.value = 36.123456f; // carries >3 decimals so the old text path would round
+
+    uint8_t buf[16];
+    pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_VolumetricMeasurement_fields, &src), "pb_encode VolumetricMeasurement");
+
+    gaggimate_VolumetricMeasurement dst = gaggimate_VolumetricMeasurement_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+    TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_VolumetricMeasurement_fields, &dst), "pb_decode VolumetricMeasurement");
+    TEST_ASSERT_TRUE_MESSAGE(bit_equal(src.value, dst.value), "volumetric value bit-exact");
+}
+
+static void test_volumetric_measurement_old_text_format_was_lossy() {
+    const float value = 36.123456f; // rounds to 36.123 in the old 3dp text path
+    TEST_ASSERT_FALSE_MESSAGE(bit_equal(value, text_round_3dp(value)),
+                              "old 3dp text format lost volumetric precision (regression guard)");
+}
+
+// TofMeasurement (int32 distance_mm).
+static void test_tof_measurement_roundtrip() {
+    gaggimate_TofMeasurement src = gaggimate_TofMeasurement_init_zero;
+    src.distance_mm = 1234;
+
+    uint8_t buf[16];
+    pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_TofMeasurement_fields, &src), "pb_encode TofMeasurement");
+
+    gaggimate_TofMeasurement dst = gaggimate_TofMeasurement_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+    TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_TofMeasurement_fields, &dst), "pb_decode TofMeasurement");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(src.distance_mm, dst.distance_mm, "tof distance equal");
+}
+
+// SystemInfo + Capabilities — the INFO characteristic, formerly an ArduinoJson
+// {"hw","v","cp":{...}} string. Assert the strings and all four capability
+// bools survive the nanopb round trip.
+static void test_system_info_roundtrip() {
+    gaggimate_SystemInfo src = gaggimate_SystemInfo_init_zero;
+    snprintf(src.hardware, sizeof(src.hardware), "%s", "GaggiMate Pro Rev 1.1");
+    snprintf(src.version, sizeof(src.version), "%s", "v2.3.4-rc1");
+    src.has_capabilities = true;
+    src.capabilities.dimming = true;
+    src.capabilities.pressure = true;
+    src.capabilities.led_control = false;
+    src.capabilities.tof = true;
+
+    uint8_t buf[gaggimate_SystemInfo_size];
+    pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(pb_encode(&os, gaggimate_SystemInfo_fields, &src), "pb_encode SystemInfo");
+
+    gaggimate_SystemInfo dst = gaggimate_SystemInfo_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+    TEST_ASSERT_TRUE_MESSAGE(pb_decode(&is, gaggimate_SystemInfo_fields, &dst), "pb_decode SystemInfo");
+
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("GaggiMate Pro Rev 1.1", dst.hardware, "hardware string equal");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("v2.3.4-rc1", dst.version, "version string equal");
+    TEST_ASSERT_TRUE_MESSAGE(dst.has_capabilities, "capabilities present");
+    TEST_ASSERT_TRUE_MESSAGE(dst.capabilities.dimming == true, "dimming equal");
+    TEST_ASSERT_TRUE_MESSAGE(dst.capabilities.pressure == true, "pressure equal");
+    TEST_ASSERT_TRUE_MESSAGE(dst.capabilities.led_control == false, "led_control equal");
+    TEST_ASSERT_TRUE_MESSAGE(dst.capabilities.tof == true, "tof equal");
+}
+
+// Exhaustively round-trip every combination of the four capability bools so a
+// future field-order/packing change can't silently swap two of them.
+static void test_system_info_capability_permutations() {
+    for (int mask = 0; mask < 16; mask++) {
+        gaggimate_SystemInfo src = gaggimate_SystemInfo_init_zero;
+        snprintf(src.hardware, sizeof(src.hardware), "%s", "hw");
+        snprintf(src.version, sizeof(src.version), "%s", "v");
+        src.has_capabilities = true;
+        src.capabilities.dimming = (mask & 0x1) != 0;
+        src.capabilities.pressure = (mask & 0x2) != 0;
+        src.capabilities.led_control = (mask & 0x4) != 0;
+        src.capabilities.tof = (mask & 0x8) != 0;
+
+        uint8_t buf[gaggimate_SystemInfo_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        TEST_ASSERT_TRUE(pb_encode(&os, gaggimate_SystemInfo_fields, &src));
+
+        gaggimate_SystemInfo dst = gaggimate_SystemInfo_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(buf, os.bytes_written);
+        TEST_ASSERT_TRUE(pb_decode(&is, gaggimate_SystemInfo_fields, &dst));
+
+        TEST_ASSERT_TRUE_MESSAGE(src.capabilities.dimming == dst.capabilities.dimming, "dimming permutation");
+        TEST_ASSERT_TRUE_MESSAGE(src.capabilities.pressure == dst.capabilities.pressure, "pressure permutation");
+        TEST_ASSERT_TRUE_MESSAGE(src.capabilities.led_control == dst.capabilities.led_control, "led_control permutation");
+        TEST_ASSERT_TRUE_MESSAGE(src.capabilities.tof == dst.capabilities.tof, "tof permutation");
+    }
+}
+
 static int runNanopbCommsTests() {
     UNITY_BEGIN();
     RUN_TEST(test_sensor_data_roundtrip_bit_exact);
@@ -183,6 +367,16 @@ static int runNanopbCommsTests() {
     RUN_TEST(test_simple_output_roundtrip_bit_exact);
     RUN_TEST(test_advanced_output_roundtrip_bit_exact);
     RUN_TEST(test_output_control_discriminator_framing);
+    RUN_TEST(test_error_roundtrip);
+    RUN_TEST(test_brew_button_roundtrip);
+    RUN_TEST(test_steam_button_roundtrip);
+    RUN_TEST(test_autotune_result_roundtrip_bit_exact);
+    RUN_TEST(test_autotune_result_old_text_format_was_lossy);
+    RUN_TEST(test_volumetric_measurement_roundtrip_bit_exact);
+    RUN_TEST(test_volumetric_measurement_old_text_format_was_lossy);
+    RUN_TEST(test_tof_measurement_roundtrip);
+    RUN_TEST(test_system_info_roundtrip);
+    RUN_TEST(test_system_info_capability_permutations);
     return UNITY_END();
 }
 

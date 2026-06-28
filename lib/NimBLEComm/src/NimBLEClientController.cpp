@@ -315,27 +315,43 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
 // Notification callback
 void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length,
                                             bool) const {
-    std::string rawData((char *)pData, length);
-
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(ERROR_CHAR_UUID))) {
-        int errorCode = atoi(rawData.c_str());
-        ESP_LOGV(LOG_TAG, "Error read: %d", errorCode);
+        // PRO-243: nanopb wire format (was atoi text).
+        gaggimate_Error msg = gaggimate_Error_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_Error_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "Error decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Error read: %d", static_cast<int>(msg.code));
         if (remoteErrorCallback != nullptr) {
-            remoteErrorCallback(errorCode);
+            remoteErrorCallback(msg.code);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(BREW_BTN_UUID))) {
-        int brewButtonStatus = atoi(rawData.c_str());
-        ESP_LOGV(LOG_TAG, "brew button: %d", brewButtonStatus);
+        // PRO-243: nanopb wire format (was atoi text).
+        gaggimate_BrewButton msg = gaggimate_BrewButton_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_BrewButton_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "BrewButton decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "brew button: %d", msg.pressed);
         if (brewBtnCallback != nullptr) {
-            brewBtnCallback(brewButtonStatus);
+            brewBtnCallback(msg.pressed);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(STEAM_BTN_UUID))) {
-        int steamButtonStatus = atoi(rawData.c_str());
-        ESP_LOGV(LOG_TAG, "steam button: %d", steamButtonStatus);
+        // PRO-243: nanopb wire format (was atoi text).
+        gaggimate_SteamButton msg = gaggimate_SteamButton_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_SteamButton_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "SteamButton decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "steam button: %d", msg.pressed);
         if (steamBtnCallback != nullptr) {
-            steamBtnCallback(steamButtonStatus);
+            steamBtnCallback(msg.pressed);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(SENSOR_DATA_UUID))) {
@@ -354,34 +370,44 @@ void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteC
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(AUTOTUNE_RESULT_UUID))) {
-        String settings = String(rawData.c_str());
-        ESP_LOGV(LOG_TAG, "autotune result: %s", settings.c_str());
+        // PRO-243: nanopb wire format (was lossy comma text "Kp,Ki,Kd,Kf"). The
+        // proto carries Kf too; the controller only ever sends Kp/Ki/Kd (Kf=0),
+        // so decoded kf stays 0. Callback signature (Kp,Ki,Kd,Kf) is unchanged.
+        gaggimate_AutotuneResult msg = gaggimate_AutotuneResult_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_AutotuneResult_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "AutotuneResult decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "autotune result: Kp=%.4f Ki=%.4f Kd=%.4f Kf=%.4f", msg.kp, msg.ki, msg.kd, msg.kf);
         if (autotuneResultCallback != nullptr) {
-            float Kp = get_token(settings, 0, ',').toFloat();
-            float Ki = get_token(settings, 1, ',').toFloat();
-            float Kd = get_token(settings, 2, ',').toFloat();
-
-            // Handle optional Kf parameter with default
-            float Kf = 0.0f; // Default combined Kff
-            String kfToken = get_token(settings, 3, ',');
-            if (kfToken.length() > 0)
-                Kf = kfToken.toFloat();
-
-            autotuneResultCallback(Kp, Ki, Kd, Kf);
+            autotuneResultCallback(msg.kp, msg.ki, msg.kd, msg.kf);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(VOLUMETRIC_MEASUREMENT_UUID))) {
-        float value = atof(rawData.c_str());
-        ESP_LOGV(LOG_TAG, "Volumetric measurement: %.2f", value);
+        // PRO-243: nanopb wire format (was lossy 3-dp float text via atof).
+        gaggimate_VolumetricMeasurement msg = gaggimate_VolumetricMeasurement_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_VolumetricMeasurement_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "VolumetricMeasurement decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Volumetric measurement: %.2f", msg.value);
         if (volumetricMeasurementCallback != nullptr) {
-            volumetricMeasurementCallback(value);
+            volumetricMeasurementCallback(msg.value);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(TOF_MEASUREMENT_UUID))) {
-        int value = atoi(rawData.c_str());
-        ESP_LOGV(LOG_TAG, "ToF measurement: %d", value);
+        // PRO-243: nanopb wire format (was atoi text).
+        gaggimate_TofMeasurement msg = gaggimate_TofMeasurement_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_TofMeasurement_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "TofMeasurement decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "ToF measurement: %d", static_cast<int>(msg.distance_mm));
         if (tofMeasurementCallback != nullptr) {
-            tofMeasurementCallback(value);
+            tofMeasurementCallback(msg.distance_mm);
         }
     }
 }

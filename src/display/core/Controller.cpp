@@ -1,5 +1,11 @@
 #include "Controller.h"
 #include "ArduinoJson.h"
+#ifndef GAGGIMATE_SIM
+// PRO-243: nanopb SystemInfo decode for the INFO characteristic (real firmware
+// only; the sim keeps the legacy JSON path — see setupInfos()).
+#include "comms.pb.h"
+#include "pb_decode.h"
+#endif
 #include "esp_sntp.h"
 #include <SD_MMC.h>
 #include <LittleFS.h>
@@ -243,7 +249,11 @@ void Controller::setupBluetooth() {
 
 void Controller::setupInfos() {
     const std::string info = clientController.readInfo();
-    ESP_LOGI(LOG_TAG, "System info: %s", info.c_str());
+#ifdef GAGGIMATE_SIM
+    // PRO-243: the simulator's NimBLEClientController (sim/comms, intentionally
+    // untouched) still serves the legacy JSON info string and the sim build does
+    // not link the nanopb codegen, so keep parsing JSON here for the sim only.
+    ESP_LOGI(LOG_TAG, "System info (sim/json): %s", info.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, info);
     if (err) {
@@ -260,6 +270,28 @@ void Controller::setupInfos() {
                                     .tof = doc["cp"]["tof"].as<bool>(),
                                 }};
     }
+#else
+    // PRO-243: nanopb SystemInfo wire format (was an ArduinoJson string). The
+    // controller encodes gaggimate_SystemInfo in make_system_info(); decode it
+    // back into the firmware's SystemInfo struct here.
+    ESP_LOGI(LOG_TAG, "System info: %u bytes", static_cast<unsigned>(info.size()));
+    gaggimate_SystemInfo msg = gaggimate_SystemInfo_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(reinterpret_cast<const uint8_t *>(info.data()), info.size());
+    if (!pb_decode(&is, gaggimate_SystemInfo_fields, &msg)) {
+        ESP_LOGE(LOG_TAG, "Error decoding SystemInfo: %s", PB_GET_ERROR(&is));
+        systemInfo = SystemInfo{
+            .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
+    } else {
+        systemInfo = SystemInfo{.hardware = String(msg.hardware),
+                                .version = String(msg.version),
+                                .capabilities = SystemCapabilities{
+                                    .dimming = msg.capabilities.dimming,
+                                    .pressure = msg.capabilities.pressure,
+                                    .ledControl = msg.capabilities.led_control,
+                                    .tof = msg.capabilities.tof,
+                                }};
+    }
+#endif
 }
 
 void Controller::setupWifi() {
