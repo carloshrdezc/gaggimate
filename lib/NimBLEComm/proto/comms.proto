@@ -14,6 +14,9 @@
 // mirror upstream's tags to keep a future convergence cheaper, but we do NOT
 // adopt Frame/oneof here.
 //
+// Rationale and the Option B convergence analysis: see
+// docs/spike-nanopb-comms/findings.md (Option B).
+//
 // Field types follow the existing code:
 //   - floats stay float (32-bit) — matches the on-device float math and avoids
 //     the lossy 3-decimal float_to_string() quantization the text format uses.

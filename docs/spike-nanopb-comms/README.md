@@ -5,6 +5,8 @@ Throwaway spike evaluating replacing the delimiter-separated ASCII BLE protocol
 
 **Read `findings.md` for the verdict + numbers.**
 
+**Relationship to production:** this spike's `comms.proto` (package `gaggimate_spike`) is intentionally decoupled from the build and is NOT the production schema — the production proto lives at `lib/NimBLEComm/proto/comms.proto`.
+
 Contents:
 - `comms.proto` — draft schema for all 18 message types.
 - `gen/` — real nanopb-generated `comms.pb.{c,h}` (nanopb 0.4.9.1).
