@@ -79,8 +79,6 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     int_callback_t tofMeasurementCallback = nullptr;
     void_callback_t disconnectCallback = nullptr;
 
-    String _lastOutputControl = "";
-
     // BLEAdvertisedDeviceCallbacks override
     void onResult(NimBLEAdvertisedDevice *advertisedDevice) override;
 

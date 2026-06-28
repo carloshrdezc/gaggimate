@@ -1,5 +1,8 @@
 #include "NimBLEClientController.h"
 
+#include "comms.pb.h"
+#include "pb_decode.h"
+#include "pb_encode.h"
 #include <esp_heap_caps.h>
 
 constexpr size_t MAX_CONNECT_RETRIES = 3;
@@ -176,20 +179,43 @@ void NimBLEClientController::loop() {
 void NimBLEClientController::sendAdvancedOutputControl(bool valve, float boilerSetpoint, bool pressureTarget, float pressure,
                                                        float flow) {
     if (client->isConnected() && outputControlChar != nullptr) {
-        const std::string value = "1," + std::to_string(valve ? 1 : 0) + ",100.0," + std::to_string(boilerSetpoint) + "," +
-                                  std::to_string(pressureTarget ? 1 : 0) + "," + float_to_string(pressure) + "," +
-                                  float_to_string(flow);
-        _lastOutputControl = String(value.c_str());
-        outputControlChar->writeValue(_lastOutputControl, false);
+        // PRO-242: nanopb wire format. Byte 0 = type discriminator (1=advanced),
+        // bytes 1.. = encoded AdvancedOutput.
+        gaggimate_AdvancedOutput msg = gaggimate_AdvancedOutput_init_zero;
+        msg.valve = valve;
+        msg.boiler_setpoint = boilerSetpoint;
+        msg.pressure_target = pressureTarget;
+        msg.pump_pressure = pressure;
+        msg.pump_flow = flow;
+
+        uint8_t buf[1 + gaggimate_AdvancedOutput_size];
+        buf[0] = 1;
+        pb_ostream_t os = pb_ostream_from_buffer(buf + 1, sizeof(buf) - 1);
+        if (!pb_encode(&os, gaggimate_AdvancedOutput_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendAdvancedOutputControl encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        outputControlChar->writeValue(buf, 1 + os.bytes_written, false);
     }
 }
 
 void NimBLEClientController::sendOutputControl(bool valve, float pumpSetpoint, float boilerSetpoint) {
     if (client->isConnected() && outputControlChar != nullptr) {
-        const std::string value =
-            "0," + std::to_string(valve ? 1 : 0) + "," + std::to_string(pumpSetpoint) + "," + std::to_string(boilerSetpoint);
-        _lastOutputControl = String(value.c_str());
-        outputControlChar->writeValue(_lastOutputControl, false);
+        // PRO-242: nanopb wire format. Byte 0 = type discriminator (0=simple),
+        // bytes 1.. = encoded SimpleOutput.
+        gaggimate_SimpleOutput msg = gaggimate_SimpleOutput_init_zero;
+        msg.valve = valve;
+        msg.pump_setpoint = pumpSetpoint;
+        msg.boiler_setpoint = boilerSetpoint;
+
+        uint8_t buf[1 + gaggimate_SimpleOutput_size];
+        buf[0] = 0;
+        pb_ostream_t os = pb_ostream_from_buffer(buf + 1, sizeof(buf) - 1);
+        if (!pb_encode(&os, gaggimate_SimpleOutput_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendOutputControl encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        outputControlChar->writeValue(buf, 1 + os.bytes_written, false);
     }
 }
 
@@ -313,18 +339,18 @@ void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteC
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(SENSOR_DATA_UUID))) {
-        String data = String(rawData.c_str());
-        float temperature = get_token(data, 0, ',').toFloat();
-        float pressure = get_token(data, 1, ',').toFloat();
-        float puckFlow = get_token(data, 2, ',').toFloat();
-        float pumpFlow = get_token(data, 3, ',').toFloat();
-        float puckResistance = get_token(data, 4, ',').toFloat();
-
+        // PRO-242: nanopb wire format (was lossy 3-dp float_to_string text).
+        gaggimate_SensorData msg = gaggimate_SensorData_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(pData, length);
+        if (!pb_decode(&is, gaggimate_SensorData_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "SensorData decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
         ESP_LOGV(LOG_TAG,
                  "Received sensor data: temperature=%.1f, pressure=%.1f, puck_flow=%.1f, pump_flow=%.1f, puck_resistance=%.1f",
-                 temperature, pressure, puckFlow, pumpFlow, puckResistance);
+                 msg.temperature, msg.pressure, msg.puck_flow, msg.pump_flow, msg.puck_resistance);
         if (sensorCallback != nullptr) {
-            sensorCallback(temperature, pressure, puckFlow, pumpFlow, puckResistance);
+            sensorCallback(msg.temperature, msg.pressure, msg.puck_flow, msg.pump_flow, msg.puck_resistance);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(AUTOTUNE_RESULT_UUID))) {
