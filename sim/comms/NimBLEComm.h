@@ -6,9 +6,7 @@
 #define NIMBLECOMM_H
 
 #include <Arduino.h>
-#include <cmath>
 #include <functional>
-#include <string>
 
 // UUIDs (kept for any code that references them; unused by the mock transport).
 #define SERVICE_UUID "e75bc5b6-ff6e-4337-9d31-0c128f2e6e68"
@@ -64,7 +62,5 @@ struct SystemInfo {
     String version;
     SystemCapabilities capabilities;
 };
-
-inline std::string float_to_string(float f) { return std::to_string(std::round(f * 1000.0f) / 1000.0f); }
 
 #endif // NIMBLECOMM_H
