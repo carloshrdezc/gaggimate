@@ -1,5 +1,8 @@
 #include "NimBLEServerController.h"
 
+#include "comms.pb.h"
+#include "pb_decode.h"
+#include "pb_encode.h"
 #include <esp_heap_caps.h>
 
 NimBLEServerController::NimBLEServerController() {}
@@ -94,9 +97,21 @@ void NimBLEServerController::loop() {
 void NimBLEServerController::sendSensorData(float temperature, float pressure, float puckFlow, float pumpFlow,
                                             float puckResistance) {
     if (deviceConnected && sensorChar != nullptr) {
-        std::string value = float_to_string(temperature) + "," + float_to_string(pressure) + "," + float_to_string(puckFlow) +
-                            "," + float_to_string(pumpFlow) + "," + float_to_string(puckResistance);
-        sensorChar->setValue(value);
+        // PRO-242: nanopb wire format (was lossy 3-dp float_to_string text).
+        gaggimate_SensorData msg = gaggimate_SensorData_init_zero;
+        msg.temperature = temperature;
+        msg.pressure = pressure;
+        msg.puck_flow = puckFlow;
+        msg.pump_flow = pumpFlow;
+        msg.puck_resistance = puckResistance;
+
+        uint8_t buf[gaggimate_SensorData_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_SensorData_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendSensorData encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        sensorChar->setValue(buf, os.bytes_written);
         sensorChar->notify();
     }
 }
@@ -192,25 +207,39 @@ void NimBLEServerController::onWrite(NimBLECharacteristic *pCharacteristic) {
     ESP_LOGV(LOG_TAG, "Write received!");
 
     if (pCharacteristic->getUUID().equals(NimBLEUUID(OUTPUT_CONTROL_UUID))) {
-        auto control = String(pCharacteristic->getValue().c_str());
-        uint8_t type = get_token(control, 0, ',').toInt();
-        uint8_t valve = get_token(control, 1, ',').toInt();
-        float boilerSetpoint = get_token(control, 3, ',').toFloat();
+        // PRO-242: nanopb wire format. Byte 0 = type discriminator (0 simple /
+        // 1 advanced), bytes 1.. = the encoded SimpleOutput / AdvancedOutput.
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        if (raw.size() < 1) {
+            ESP_LOGW(LOG_TAG, "Output control payload too short");
+            return;
+        }
+        const uint8_t type = raw[0];
+        const uint8_t *body = raw.data() + 1;
+        const size_t bodyLen = raw.size() - 1;
         if (type == 0) {
-            float pumpSetpoint = get_token(control, 2, ',').toFloat();
-            ESP_LOGV(LOG_TAG, "Received output control: type=%d, valve=%d, pump=%.1f, boiler=%.1f", type, valve, pumpSetpoint,
-                     boilerSetpoint);
+            gaggimate_SimpleOutput msg = gaggimate_SimpleOutput_init_zero;
+            pb_istream_t is = pb_istream_from_buffer(body, bodyLen);
+            if (!pb_decode(&is, gaggimate_SimpleOutput_fields, &msg)) {
+                ESP_LOGE(LOG_TAG, "SimpleOutput decode failed: %s", PB_GET_ERROR(&is));
+                return;
+            }
+            ESP_LOGV(LOG_TAG, "Received output control: type=%d, valve=%d, pump=%.1f, boiler=%.1f", type, msg.valve,
+                     msg.pump_setpoint, msg.boiler_setpoint);
             if (outputControlCallback != nullptr) {
-                outputControlCallback(valve == 1, pumpSetpoint, boilerSetpoint);
+                outputControlCallback(msg.valve, msg.pump_setpoint, msg.boiler_setpoint);
             }
         } else if (type == 1) {
-            bool pressureTarget = get_token(control, 4, ',').toInt() == 1;
-            float pumpPressure = get_token(control, 5, ',').toFloat();
-            float pumpFlow = get_token(control, 6, ',').toFloat();
+            gaggimate_AdvancedOutput msg = gaggimate_AdvancedOutput_init_zero;
+            pb_istream_t is = pb_istream_from_buffer(body, bodyLen);
+            if (!pb_decode(&is, gaggimate_AdvancedOutput_fields, &msg)) {
+                ESP_LOGE(LOG_TAG, "AdvancedOutput decode failed: %s", PB_GET_ERROR(&is));
+                return;
+            }
             ESP_LOGV(LOG_TAG, "Received advanced output control: type=%d, valve=%d, pressure_target=%d, pressure=%.1f, flow=%.1f",
-                     type, valve, pressureTarget, pumpPressure, pumpFlow);
+                     type, msg.valve, msg.pressure_target, msg.pump_pressure, msg.pump_flow);
             if (advancedControlCallback != nullptr) {
-                advancedControlCallback(valve == 1, boilerSetpoint, pressureTarget, pumpPressure, pumpFlow);
+                advancedControlCallback(msg.valve, msg.boiler_setpoint, msg.pressure_target, msg.pump_pressure, msg.pump_flow);
             }
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(ALT_CONTROL_CHAR_UUID))) {
