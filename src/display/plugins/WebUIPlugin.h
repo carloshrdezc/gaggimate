@@ -131,7 +131,31 @@ class WebUIPlugin : public Plugin {
     String pendingUpdateComponent = ""; // guarded by otaIntentMutex
     volatile bool pendingOtaStart = false;
     AsyncWebServer server;
+    // INVARIANT (PRO-313): every access to `ws` that walks or mutates its
+    // internal client list MUST hold `wsMutex` for the duration of the call.
+    // AsyncWebSocket (ESP32Async/ESPAsyncWebServer v3.9.1) is NOT thread-safe:
+    // it keeps a std::list<AsyncWebSocketClient> with no internal locking, and
+    // this firmware touches it from two FreeRTOS tasks that run on different
+    // cores (loopTask on the Arduino core; the AsyncTCP task pinned to core 0
+    // via CONFIG_ASYNC_TCP_RUNNING_CORE=0). loopTask walks the list in
+    // textAll() / cleanupClients() / getClients(); the AsyncTCP task mutates it
+    // (emplace_back on connect, erase on disconnect) from inside the onEvent
+    // callback path. Concurrent walk+mutate corrupts the list and reboots the
+    // device (LoadProhibited). `wsMutex` serializes the two sides. The lock is
+    // taken on BOTH sides or it does nothing: every loopTask broadcast/cleanup
+    // site AND the onEvent connect/disconnect reads take it (the onEvent data
+    // path locks inside sendResponse() instead). Build the JSON payload BEFORE
+    // taking the lock — keep the critical section to just the ws call. See
+    // WsClientsLock (the RAII guard) and broadcastAll().
     AsyncWebSocket ws;
+    // Serializes all `ws` client-list access across loopTask and the AsyncTCP
+    // task (PRO-313). Created in setup() before setupServer() registers the
+    // onEvent handler, so it exists before any client can connect. Plain
+    // (non-recursive) mutex: critical sections are a single ws call and never
+    // nest, and ws access never happens while holding relayMutex (broadcastAll
+    // / sendResponse release wsMutex before calling broadcastRelayMsg), so
+    // there is no lock-ordering inversion.
+    SemaphoreHandle_t wsMutex = nullptr;
     WebSocketsClient relayWs;
     Controller *controller = nullptr;
     PluginManager *pluginManager = nullptr;

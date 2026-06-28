@@ -138,6 +138,15 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         otaIntentMutex = xSemaphoreCreateMutex();
     }
 
+    // Serializes all `ws` client-list access between loopTask and the AsyncTCP
+    // task (PRO-313). MUST be created before setupServer() registers ws.onEvent
+    // and addHandler(&ws) below, so the mutex already exists the first time a
+    // client connects on the AsyncTCP task. See the invariant at the `ws`
+    // declaration in WebUIPlugin.h.
+    if (wsMutex == nullptr) {
+        wsMutex = xSemaphoreCreateMutex();
+    }
+
     setupServer();
 }
 
@@ -176,6 +185,33 @@ void WebUIPlugin::relayLoopTask(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
+
+namespace {
+// RAII guard for the AsyncWebSocket client-list mutex (PRO-313). Takes wsMutex
+// on construction (if it exists) and releases it on destruction, so every `ws`
+// access that walks or mutates the client list is bracketed without a
+// hand-audited give at each return path. Blocks (portMAX_DELAY): the critical
+// section is a single short ws call (a client-list walk, microseconds), and
+// blocking briefly is strictly preferable to skipping serialization and
+// risking the use-after-free reboot this guard exists to prevent. ws access
+// never nests and never happens while holding relayMutex, so portMAX_DELAY
+// cannot deadlock here.
+struct WsClientsLock {
+    SemaphoreHandle_t handle;
+    explicit WsClientsLock(SemaphoreHandle_t h) : handle(h) {
+        if (handle != nullptr) {
+            xSemaphoreTake(handle, portMAX_DELAY);
+        }
+    }
+    ~WsClientsLock() {
+        if (handle != nullptr) {
+            xSemaphoreGive(handle);
+        }
+    }
+    WsClientsLock(const WsClientsLock &) = delete;
+    WsClientsLock &operator=(const WsClientsLock &) = delete;
+};
+} // namespace
 
 void WebUIPlugin::loop() {
     // Latch deferred OTA-start intent posted by handleOTAStart on the WS/relay
@@ -324,7 +360,16 @@ void WebUIPlugin::loop() {
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
     }
-    if (now - lastStatus > STATUS_PERIOD && (!ws.getClients().empty() || relayConnected)) {
+    // PRO-313: reading the WS client list (even .empty()) races with the
+    // AsyncTCP task's connect/disconnect mutation, so snapshot it under wsMutex.
+    // The && short-circuits on the cheap STATUS_PERIOD timer first, so the lock
+    // is taken at most once per status interval, not every loop pass. The lambda
+    // keeps the lock scoped to the O(1) read; the JSON build below touches no ws
+    // state and broadcastAll() re-takes the lock for the actual send.
+    if (now - lastStatus > STATUS_PERIOD && ([this] {
+            WsClientsLock lock(wsMutex);
+            return !ws.getClients().empty();
+        }() || relayConnected)) {
         lastStatus = now;
         JsonDocument doc;
         doc["tp"] = "evt:status";
@@ -448,6 +493,9 @@ void WebUIPlugin::loop() {
     }
     if (now - lastCleanup > CLEANUP_PERIOD) {
         lastCleanup = now;
+        // PRO-313: cleanupClients() walks AND erases the client list; serialize
+        // it against the AsyncTCP task's connect/disconnect mutation.
+        WsClientsLock lock(wsMutex);
         ws.cleanupClients();
     }
     if (now - lastDns > DNS_PERIOD && dnsServer != nullptr) {
@@ -588,11 +636,28 @@ void WebUIPlugin::setupServer() {
     server.onNotFound([this](AsyncWebServerRequest *request) { serveWebAsset(request); });
     ws.onEvent(
         [this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+            // PRO-313: this callback runs on the AsyncTCP task. The
+            // server->getClients() reads below walk the same client list that
+            // loopTask broadcasts over, so they must hold wsMutex too — the
+            // lock only serializes the two tasks if BOTH sides take it. The
+            // WS_EVT_DATA path takes wsMutex itself inside sendResponse(), so it
+            // is intentionally NOT wrapped here (wsMutex is non-recursive;
+            // double-taking on this task would deadlock). NOTE: the structural
+            // emplace_back (connect) / erase (disconnect) on _clients happens in
+            // ESPAsyncWebServer's own code immediately before this callback
+            // fires, so it cannot be bracketed from here; serializing every
+            // app-side walk is the complete fix this library permits without
+            // forking it. See the invariant at the `ws` declaration.
             if (type == WS_EVT_CONNECT) {
                 client->setCloseClientOnQueueFull(true);
+                WsClientsLock lock(wsMutex);
                 ESP_LOGI("WebUIPlugin", "WebSocket client connected (%d open connections)", server->getClients().size());
             } else if (type == WS_EVT_DISCONNECT) {
-                ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
+                {
+                    WsClientsLock lock(wsMutex);
+                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)",
+                             server->getClients().size());
+                }
                 rxBuffers.erase(client->id());
             } else if (type == WS_EVT_DATA) {
                 handleWebSocketData(server, client, type, arg, data, len);
@@ -621,7 +686,13 @@ void WebUIPlugin::stop() {
     if (!serverRunning)
         return;
     server.end();
-    ws.closeAll();
+    {
+        // PRO-313: closeAll() walks the client list and runs on the WiFi-event
+        // task (start()/stop()), a third task distinct from loopTask and
+        // AsyncTCP. Serialize it against their client-list access.
+        WsClientsLock lock(wsMutex);
+        ws.closeAll();
+    }
     if (dnsServer != nullptr) {
         dnsServer->stop();
         delete dnsServer;
@@ -831,7 +902,13 @@ void WebUIPlugin::stopRelay() {
 }
 
 void WebUIPlugin::broadcastAll(const String &msg) {
-    ws.textAll(msg);
+    // PRO-313: textAll() walks the client list; serialize against the AsyncTCP
+    // task's connect/disconnect mutation. The lock is released before
+    // broadcastRelayMsg() (which takes relayMutex) so the two locks never nest.
+    {
+        WsClientsLock lock(wsMutex);
+        ws.textAll(msg);
+    }
     broadcastRelayMsg(msg);
 }
 
@@ -856,6 +933,12 @@ void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
         auto *buffer = ws.makeBuffer(bufferSize);
         if (buffer) {
             serializeJson(response, buffer->get(), bufferSize);
+            // PRO-313: text(id, ...) resolves the client by walking the client
+            // list, which races with loopTask's textAll()/cleanupClients(). The
+            // makeBuffer()/serializeJson() above touch no client list, so only
+            // the send is serialized. Lock released before broadcastRelayMsg()
+            // (relayMutex) so the two locks never nest.
+            WsClientsLock lock(wsMutex);
             ws.text(clientId, buffer);
         }
     }
