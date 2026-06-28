@@ -23,6 +23,10 @@ inline String make_system_info(ControllerConfig config, String version) {
     uint8_t buf[gaggimate_SystemInfo_size];
     pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
     if (!pb_encode(&os, gaggimate_SystemInfo_fields, &msg)) {
+        // PRO-310: surface the encode failure instead of silently returning an
+        // empty String (which the display decodes as an all-default SystemInfo,
+        // bypassing Controller::setupInfos()'s decode-fail fallback).
+        ESP_LOGE("make_system_info", "encode failed: %s", PB_GET_ERROR(&os));
         return String();
     }
     String out;
