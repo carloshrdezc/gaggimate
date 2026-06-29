@@ -205,6 +205,9 @@ namespace {
 //     taking another lock, a portMAX_DELAY-style wait) would turn into a hard
 //     hang. Keep critical sections short; only a strictly BOUNDED, CPU-yielding
 //     wait is acceptable (e.g. the ~500 ms vTaskDelay spin-wait in stopRelay()).
+//     Such a bounded in-lock wait must STILL NOT acquire another guarded mutex
+//     in-scope: it remains bound by the no-lock-order-inversion invariant above
+//     (these guards never nest with each other or with relayMutex).
 struct SemaphoreGuard {
     SemaphoreHandle_t handle;
     explicit SemaphoreGuard(SemaphoreHandle_t h) : handle(h) {
