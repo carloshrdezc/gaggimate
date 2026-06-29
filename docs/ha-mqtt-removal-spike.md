@@ -159,6 +159,13 @@ Firmware:
 - `src/display/plugins/WebUIPlugin.cpp` — remove form ingest of `homeAssistant`/`haUser`/
   `haPassword`/`haIP`/`haPort`/`haTopic` (L1484-1494) and the `/api/settings` serialization of
   `homeAssistant`/`haUser`/`haPassword`/`haIP`/`haPort`/`haTopic` (L1605-1610).
+  - **`haPassword` is a sentinel round-trip, not a plain serialized value.** The `/api/settings`
+    serialization emits the `kSecretSentinel` placeholder (`"---unchanged---"`,
+    `WebUIPlugin.cpp:36`) for `haPassword` (`WebUIPlugin.cpp:1607`) rather than the raw secret, and
+    the form-ingest path skips the write when the incoming value equals that sentinel
+    (`WebUIPlugin.cpp:1487-1488`), preserving the stored password on round-trip. An implementer
+    executing the conditional full removal must handle `haPassword` as a sentinel round-trip (drop
+    both the sentinel-emit and the sentinel-guarded ingest), not as a plain serialized field.
 
 Web UI:
 - `web/src/pages/Settings/PluginCard.jsx` — remove the entire "Home Assistant over MQTT
