@@ -275,7 +275,7 @@ export function PluginCard({
         )}
       </div>
 
-      {/* Home Assistant over MQTT (Deprecated) */}
+      {/* Home Assistant over MQTT (Deprecated) — header + toggle always visible; deprecated body shown only when enabled (PRO-323) */}
       <div className='nd-card p-4'>
         <div className='flex items-center justify-between'>
           <span className='font-nd-mono text-[16px] text-[var(--text-primary,#e8e8e8)]'>
