@@ -1,0 +1,13 @@
+# PRO-293: custom 4 MB no-OTA partition table for the display-headless-4m env
+# (board esp32-s3-supermini: 4 MB flash, no OTA). The stock no_ota.csv pinned by
+# the board JSON gives the app partition only 0x200000 (2 MB). The Arduino-esp32
+# 3.x toolchain (IDF 5.5.4 / xtensa gcc 14.2.0) produces a ~3.08 MB firmware image
+# that overflows that 2 MB app slot. This is a no-OTA board, so there is no second
+# app slot to budget for: give the single factory app 0x320000 (3.125 MB, ~98 KB
+# headroom over the current image) and keep a LittleFS data partition for the rest.
+# Total = 0x10000 + 0x320000 + 0xC0000 + 0x10000 = 0x400000 (4 MB). 64 KB-aligned app.
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+app0,     app,  factory, 0x10000, 0x320000,
+spiffs,   data, spiffs,  0x330000,0xC0000,
+coredump, data, coredump,0x3F0000,0x10000,
