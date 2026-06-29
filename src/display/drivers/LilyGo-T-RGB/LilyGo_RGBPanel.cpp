@@ -385,6 +385,13 @@ void LilyGo_RGBPanel::initBUS() {
         .vsync_gpio_num = BOARD_TFT_VSYNC,
         .de_gpio_num = BOARD_TFT_DE,
         .pclk_gpio_num = BOARD_TFT_PCLK,
+        // PRO-293: IDF 5.x reordered esp_lcd_rgb_panel_config_t so disp_gpio_num
+        // precedes data_gpio_nums; designated initializers must follow declaration
+        // order, so disp_gpio_num is placed before data_gpio_nums here. IDF 5.x also
+        // removed on_frame_trans_done / user_ctx (the trans-done callback now
+        // registers via esp_lcd_rgb_panel_register_event_callbacks()); this driver
+        // registered no callback (both were NULL), so dropping them is behavior-preserving.
+        .disp_gpio_num = GPIO_NUM_NC,
         .data_gpio_nums =
             {
                 // BOARD_TFT_DATA0,
@@ -408,9 +415,6 @@ void LilyGo_RGBPanel::initBUS() {
                 BOARD_TFT_DATA4,
                 BOARD_TFT_DATA5,
             },
-        .disp_gpio_num = GPIO_NUM_NC,
-        .on_frame_trans_done = NULL,
-        .user_ctx = NULL,
         .flags =
             {
                 .fb_in_psram = 1, // allocate frame buffer in PSRAM

@@ -290,7 +290,9 @@ bool Amoled_DisplayPanel::initDisplay(Amoled_Display_Panel_Color_Order colorOrde
 
     // required for correct GRAM initialization
     displayBus->writeCommand(CO5300_C_PTLON);
-    display->fillScreen(BLACK);
+    // PRO-293: GFX "GFX Library for Arduino" 1.6.x renamed the bare color macros
+    // (e.g. BLACK -> RGB565_BLACK). Use the prefixed name on core 3.x.
+    display->fillScreen(RGB565_BLACK);
 
     return success;
 }

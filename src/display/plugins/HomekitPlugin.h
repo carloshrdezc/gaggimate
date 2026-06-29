@@ -1,7 +1,20 @@
 #ifndef HOMEKITPLUGIN_H
 #define HOMEKITPLUGIN_H
 #include "../core/Plugin.h"
+
+// PRO-293: HomeSpan 2.x (required by Arduino-esp32 core 3.x) declares a global
+// `class Controller` in HomeSpan.h. GaggiMate also has a global `class Controller`
+// (../core/Controller.h), so any translation unit that pulls in both — this
+// header's includers (e.g. Controller.cpp) and HomekitPlugin.cpp — hit a
+// "redefinition of 'class Controller'" error and resolve `controller->` calls
+// against the wrong type. HomeSpan 1.9.1 had no such global, so this is a 2.x
+// regression. GaggiMate never references HomeSpan's `Controller` type by name, so
+// we lexically rename it to `HomeSpanController` only while parsing HomeSpan.h.
+// This is a header-local rename (HomeSpan's own .cpp TUs are unaffected) and is
+// safe because none of the HomeSpan APIs GaggiMate calls mention `Controller`.
+#define Controller HomeSpanController
 #include "HomeSpan.h"
+#undef Controller
 
 #define HOMESPAN_PORT 8080
 #define DEVICE_NAME "GaggiMate"

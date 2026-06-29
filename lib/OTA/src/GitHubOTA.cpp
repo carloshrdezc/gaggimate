@@ -23,7 +23,9 @@ GitHubOTA::GitHubOTA(const String &display_version, const String &controller_ver
     _progress_callback = progress_callback;
 
     Updater.rebootOnUpdate(false);
-    _wifi_client.setCACertBundle(x509_crt_imported_bundle_bin_start);
+    // PRO-293: core 3.x setCACertBundle() requires an explicit size argument.
+    _wifi_client.setCACertBundle(x509_crt_imported_bundle_bin_start,
+                                 x509_crt_imported_bundle_bin_end - x509_crt_imported_bundle_bin_start);
 
     Updater.onStart(update_started);
     Updater.onEnd(update_finished);
