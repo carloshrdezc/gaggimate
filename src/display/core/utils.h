@@ -3,6 +3,7 @@
 #define UTILS_H
 #include <Arduino.h>
 #include <memory>
+#include <stdexcept>
 
 template <typename T, typename... Args> std::unique_ptr<T> make_unique(Args &&...args) {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
@@ -34,5 +35,18 @@ extern String implode(const std::vector<String> &strings, String delim);
  * `../config` reaching ProfileManager / BeanManager filesystem helpers.
  */
 extern bool isSafeId(const String &id);
+
+/**
+ * Resolve the addressable id for a profile/bean given its in-file `id` field
+ * and the stem of its on-disk filename. Returns the safe id callers should key
+ * delete/select/favorite on, or an empty String when the entry is
+ * unaddressable (neither the in-file id nor the filename stem is safe).
+ *
+ * Resolution mirrors the historical loadProfile() behaviour: a safe in-file id
+ * wins; otherwise the filename stem is adopted only when it is itself safe.
+ * An empty result is the signal that the entry must be reminted (see
+ * ProfileManager::setup) before any WebUI action can address it.
+ */
+extern String resolveAddressableProfileId(const String &inFileId, const String &filenameStem);
 
 #endif // UTILS_H

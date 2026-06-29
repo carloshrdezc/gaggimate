@@ -16,7 +16,14 @@ void onBrewCancel(lv_event_t *e) {
     controller.clear();
 }
 
-void onBrewStart(lv_event_t *e) { controller.activate(); }
+void onBrewStart(lv_event_t *e) {
+    // CAR-318 (PR #153 review 4424398936 P2): no click-gate needed. The START
+    // SHOT button is hidden while heating on round displays (the button/pill
+    // swap lives in DefaultUI.cpp), so a shot can't be triggered before
+    // at-target — and rectangular layouts (which never hide the button on
+    // heating) are unaffected by a gate that used to fire for all displays.
+    controller.activate();
+}
 
 void onBrewTempLower(lv_event_t *e) {
     controller.getUI()->markProfileDirty();
@@ -42,6 +49,42 @@ void onSteamTempLower(lv_event_t *e) { controller.lowerTemp(); }
 
 void onSteamTempRaise(lv_event_t *e) { controller.raiseTemp(); }
 
+// CAR-358: Quick-settings (MenuScreen) water/steam temp steppers.
+//
+// These adjust the persisted Settings target temps directly, independent of
+// the controller's current mode. The shared controller.raiseTemp()/lowerTemp()
+// (and onSteamTempRaise above) route through getTargetTemp()/setTargetTemp(),
+// which act on whatever mode is active — wrong for a settings list reached from
+// the mode hub, where the user may be in MODE_BREW. So mirror the ±1°C
+// constrain (MIN_TEMP..MAX_TEMP) against the specific setter/getter. The
+// setters persist via Settings::save().
+void onMenuWaterTempLower(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetWaterTemp((int)constrain(s.getTargetWaterTemp() - 1, MIN_TEMP, MAX_TEMP));
+}
+
+void onMenuWaterTempRaise(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetWaterTemp((int)constrain(s.getTargetWaterTemp() + 1, MIN_TEMP, MAX_TEMP));
+}
+
+void onMenuSteamTempLower(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetSteamTemp((int)constrain(s.getTargetSteamTemp() - 1, MIN_TEMP, MAX_TEMP));
+}
+
+void onMenuSteamTempRaise(lv_event_t *e) {
+    Settings &s = controller.getSettings();
+    s.setTargetSteamTemp((int)constrain(s.getTargetSteamTemp() + 1, MIN_TEMP, MAX_TEMP));
+}
+
+// CAR-358: C-callable accessors so the (C) ui_MenuScreen stepper callbacks can
+// refresh their value labels immediately after a +/- press. The persisted
+// water/steam targets are not reactive signals, so without this the label would
+// only update on the next screen (re)activation.
+int gmGetWaterTempSetting(void) { return controller.getSettings().getTargetWaterTemp(); }
+int gmGetSteamTempSetting(void) { return controller.getSettings().getTargetSteamTemp(); }
+
 void onBrewScreen(lv_event_t *e) {
     controller.getUI()->changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
     controller.deactivate();
@@ -49,15 +92,28 @@ void onBrewScreen(lv_event_t *e) {
 }
 
 void onWaterScreen(lv_event_t *e) {
-    controller.getUI()->changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
     controller.setMode(MODE_WATER);
     controller.deactivate();
+    // Drop any prior process (e.g. a finished BREW) so the StatusScreen's water
+    // branch doesn't render stale brew metrics from getProcessSnapshot()'s
+    // lastProcess fallback. ui_SimpleProcessScreen used to mask this; the
+    // Nothing-themed StatusScreen reads the snapshot directly. clear() must
+    // run BEFORE changeScreen() because it emits controller:brew:clear, and
+    // DefaultUI's listener for that event redirects ui_StatusScreen back to
+    // ui_BrewScreen — switching first would briefly enter water then bounce
+    // back to brew. (CAR-292 PR #133)
+    controller.clear();
+    controller.getUI()->changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
 }
 
 void onSteamScreen(lv_event_t *e) {
-    controller.getUI()->changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
     controller.setMode(MODE_STEAM);
     controller.deactivate();
+    // See onWaterScreen() — clear lastProcess before navigating so steam
+    // doesn't inherit a brew snapshot AND the brew-clear listener doesn't
+    // bounce us back to ui_BrewScreen.
+    controller.clear();
+    controller.getUI()->changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
 }
 
 void onWakeup(lv_event_t *e) {
@@ -65,9 +121,11 @@ void onWakeup(lv_event_t *e) {
         !controller.getClientController()->isConnected()) {
         return;
     }
-    controller.getUI()->changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
+    // CAR-300: land on the mode hub (Nothing-theme ModeScreen) on wake, not the
+    // old SquareLine BrewScreen dials layout. Mirrors the onMenuClick() path.
     controller.deactivate();
     controller.setMode(MODE_BREW);
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
 }
 
 void onLoadStarted(lv_event_t *e) {}
@@ -87,7 +145,21 @@ void onGrindTimeRaise(lv_event_t *e) { controller.raiseGrindTarget(); }
 void onMenuClick(lv_event_t *e) {
     controller.deactivate();
     controller.setMode(MODE_BREW);
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
+}
+
+void onSettingsClick(lv_event_t *e) {
+    // CAR-279: settings entry from the mode hub -> Quick-settings
+    // (the rebuilt ui_MenuScreen).
     controller.getUI()->changeScreen(&ui_MenuScreen, &ui_MenuScreen_screen_init);
+}
+
+void onBackToModeScreen(lv_event_t *e) {
+    // CAR-291 review fix: Quick-settings back button must NOT carry the
+    // deactivate()+setMode(MODE_BREW) side-effects that onMenuClick uses for
+    // the legacy idle-screen entry path. Going back from Quick-settings
+    // should just return to the mode hub without altering controller state.
+    controller.getUI()->changeScreen(&ui_ModeScreen, &ui_ModeScreen_screen_init);
 }
 
 void onGrindScreen(lv_event_t *e) {
@@ -109,11 +181,17 @@ void onProfileSelect(lv_event_t *e) { controller.getUI()->onProfileSwitch(); }
 
 void onFlush(lv_event_t *e) { controller.onFlush(); }
 
-void onSimpleProcessToggle(lv_event_t *e) {
-    if (controller.getMode() != MODE_STEAM) {
+// CAR-292: onSimpleProcessToggle / onSimpleProcessScreenLoad removed alongside
+// ui_SimpleProcessScreen. ui_StatusScreen replaces the water dispense
+// start/stop affordance with a tap-to-toggle handler on the screen body
+// (steam regulates automatically via PID once the mode is set, and brew has
+// its own start affordance on ui_BrewScreen).
+void onStatusScreenTap(lv_event_t *e) {
+    if (controller.getMode() == MODE_WATER) {
         controller.isActiveSafe() ? controller.deactivate() : controller.activate();
     }
 }
+
 
 void onProfileScreenLoad(lv_event_t *e) {
     lv_obj_set_ext_click_area(ui_ProfileScreen_previousProfileBtn, 30);
@@ -123,11 +201,19 @@ void onProfileScreenLoad(lv_event_t *e) {
 }
 
 void onMenuScreenLoad(lv_event_t *e) {
-    lv_obj_set_ext_click_area(ui_MenuScreen_btnBrew, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_btnSteam, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_waterBtn, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_grindBtn, 15);
-    lv_obj_set_ext_click_area(ui_MenuScreen_standbyButton, 20);
+    // CAR-279: ui_MenuScreen is now the Quick-settings list. The mode-hub
+    // ext-click widening moved to onModeScreenLoad. No ext-click tweaks
+    // needed here yet; the Quick-settings rows are full-width.
+    (void)e;
+}
+
+void onModeScreenLoad(lv_event_t *e) {
+    lv_obj_set_ext_click_area(ui_ModeScreen_btnBrew, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_btnSteam, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_waterBtn, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_grindBtn, 15);
+    lv_obj_set_ext_click_area(ui_ModeScreen_standbyButton, 20);
+    lv_obj_set_ext_click_area(ui_ModeScreen_settingsButton, 20);
 }
 
 void onBrewScreenLoad(lv_event_t *e) {
@@ -140,16 +226,16 @@ void onBrewScreenLoad(lv_event_t *e) {
     lv_obj_set_ext_click_area(ui_BrewScreen_downTempButton, 15);
 }
 
-void onSimpleProcessScreenLoad(lv_event_t *e) {
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_downTempButton, 40);
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_upTempButton, 40);
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_goButton, 25);
-    lv_obj_set_ext_click_area(ui_SimpleProcessScreen_ImgButton6, 20);
-}
-
 void onStatusScreenLoad(lv_event_t *e) {
-    lv_obj_set_ext_click_area(ui_StatusScreen_pauseButton, 25);
-    lv_obj_set_ext_click_area(ui_StatusScreen_ImgButton8, 20);
+    // CAR-278 status rebuild removed the SquareLine pause/menu image buttons —
+    // the screen now uses a top-edge gesture handler for menu access and the
+    // process is canceled from the menu, so there's nothing to widen here.
+    //
+    // CAR-278 review #3: cancel during brew is intentionally menu-driven
+    // (top-edge swipe -> menu -> cancel), not a face button. Do not "fix"
+    // by adding an inline cancel chip without re-opening the design
+    // discussion.
+    (void)e;
 }
 
 void onGrindScreenLoad(lv_event_t *e) {

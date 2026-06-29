@@ -50,8 +50,12 @@ bool WavesharePanel::begin(WS_RGBPanel_Color_Order order) {
 
     _order = order;
 
-    ledcSetup(WS_PWM_CHANNEL, WS_PWM_FREQ, WS_PWM_RESOLUTION);
-    ledcAttachPin(WS_BOARD_TFT_BL, WS_PWM_CHANNEL);
+    // PRO-293: Arduino-esp32 3.x replaced the channel-based LEDC API
+    // (ledcSetup + ledcAttachPin) with a pin-based one. ledcAttach(pin, freq,
+    // resolution) configures and binds in one call and auto-allocates the
+    // channel internally; WS_PWM_CHANNEL is no longer used (ledcWrite is now
+    // keyed by pin — see setBrightness()).
+    ledcAttach(WS_BOARD_TFT_BL, WS_PWM_FREQ, WS_PWM_RESOLUTION);
 
     initExtension();
     Set_EXIO(EXIO_PIN8, Low);
@@ -112,7 +116,8 @@ void WavesharePanel::uninstallSD() {
 void WavesharePanel::setBrightness(uint8_t value) {
     value = constrain(value, 0, WS_BACKLIGHT_MAX);
     _brightness = value;
-    ledcWrite(WS_PWM_CHANNEL, _brightness);
+    // PRO-293: core 3.x ledcWrite is keyed by GPIO pin, not LEDC channel.
+    ledcWrite(WS_BOARD_TFT_BL, _brightness);
 }
 
 uint8_t WavesharePanel::getBrightness() const { return _brightness; }
@@ -845,6 +850,13 @@ void WavesharePanel::initBUS() {
         .vsync_gpio_num = WS_BOARD_TFT_VSYNC,
         .de_gpio_num = WS_BOARD_TFT_DE,
         .pclk_gpio_num = WS_BOARD_TFT_PCLK,
+        // PRO-293: IDF 5.x reordered esp_lcd_rgb_panel_config_t so disp_gpio_num
+        // precedes data_gpio_nums; designated initializers must follow declaration
+        // order, so disp_gpio_num is placed before data_gpio_nums here. IDF 5.x also
+        // removed on_frame_trans_done / user_ctx (the trans-done callback now
+        // registers via esp_lcd_rgb_panel_register_event_callbacks()); this driver
+        // registered no callback (both were NULL), so dropping them is behavior-preserving.
+        .disp_gpio_num = GPIO_NUM_NC,
         .data_gpio_nums =
             {
                 ESP_PANEL_LCD_PIN_NUM_RGB_DATA0,
@@ -864,9 +876,6 @@ void WavesharePanel::initBUS() {
                 ESP_PANEL_LCD_PIN_NUM_RGB_DATA14,
                 ESP_PANEL_LCD_PIN_NUM_RGB_DATA15,
             },
-        .disp_gpio_num = GPIO_NUM_NC,
-        .on_frame_trans_done = NULL,
-        .user_ctx = NULL,
         .flags =
             {
                 .fb_in_psram = 1, // allocate frame buffer in PSRAM

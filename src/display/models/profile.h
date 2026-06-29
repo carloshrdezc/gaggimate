@@ -79,13 +79,29 @@ struct Phase {
         }
     }
 
+    // `suppressDurationForVolumetric` tells this phase to treat its volumetric
+    // target as the authoritative stop and ignore its own `duration` cap. The
+    // caller sets it true ONLY for the profile's terminal volumetric phase when
+    // the shot is running volumetrically (scale connected) — see
+    // BrewProcess::isCurrentPhaseFinished. Intermediate volumetric phases keep
+    // their duration cap so they still advance on time.
     bool isFinished(bool enableVolumetric, float volume, float time_in_phase, float current_flow, float current_pressure,
-                    float water_pumped, String type) const {
+                    float water_pumped, bool suppressDurationForVolumetric = false) const {
         bool volumetricTested = false;
         for (const auto &target : targets) {
             switch (target.type) {
             case TargetType::TARGET_TYPE_VOLUMETRIC:
-                volumetricTested = enableVolumetric;
+                // Only a positive-value target is a real volumetric stop. Guard
+                // on `value > 0` to stay consistent with hasVolumetricTarget()
+                // (and indexOfFinalVolumetricPhase, which selects this phase):
+                // a malformed 0-value GTE target would otherwise set
+                // volumetricTested and be "reached" at volume 0, exiting the
+                // phase immediately / suppressing its duration cap spuriously.
+                if (target.value <= 0.0f) {
+                    break;
+                }
+                // OR-accumulate: a phase may carry >1 volumetric target; don't let a later case clobber a positive result.
+                volumetricTested = volumetricTested || enableVolumetric;
                 if (enableVolumetric && target.isReached(volume)) {
                     return true;
                 }
@@ -107,7 +123,29 @@ struct Phase {
                 break;
             }
         }
-        if (type == "standard" && volumetricTested) {
+        // CAR-367: on the profile's TERMINAL volumetric phase, when the shot is
+        // running volumetrically (a scale is connected), the cumulative
+        // volumetric weight is the authoritative stop — do NOT pre-empt it with
+        // the phase's own `duration` cap. This makes the dashboard YIELD
+        // authoritative even when the user raises it above what the phase
+        // duration would otherwise produce.
+        //
+        // CRITICAL — scope: this skip MUST be limited to the terminal volumetric
+        // phase (`suppressDurationForVolumetric`). Intermediate phases that also
+        // carry a volumetric target (e.g. Adaptive v2's "Pressurize" phase, which
+        // has a 6 s duration + pressure + a 38 g volumetric target) MUST keep
+        // their duration cap — otherwise they would hold until the cumulative
+        // yield is reached (running the whole shot at the intermediate phase's
+        // pressure) instead of advancing on time. CAR-367 originally suppressed
+        // the cap on every volumetric phase, which regressed multi-volumetric-
+        // phase pro profiles; caught in review of PR #172.
+        //
+        // Safety: the non-volumetric targets above (pressure/flow/pumped) still
+        // `return true` to advance multi-target phases, and the hard
+        // BREW_SAFETY_DURATION_MS ceiling in BrewProcess::isCurrentPhaseFinished
+        // still bounds the whole phase, so suppressing the time cap here cannot
+        // strand a shot.
+        if (volumetricTested && suppressDurationForVolumetric) {
             return false;
         }
         return time_in_phase > duration;
@@ -167,12 +205,31 @@ struct Profile {
 
     float getTotalVolume() const {
         float volume = 0.0;
+        // Last-wins: deliberately returns the LAST volumetric phase's value (overwrite per
+        // iteration). indexOfFinalVolumetricPhase() depends on this contract — the two must
+        // stay in lockstep if phase-ordering assumptions change.
         for (const auto &phase : phases) {
             if (phase.hasVolumetricTarget()) {
                 volume = phase.getVolumetricTarget().value;
             }
         }
         return volume;
+    }
+
+    // Index of the LAST phase that carries a volumetric target, or -1 if none.
+    // This is the phase whose volumetric target represents the shot's
+    // authoritative cumulative yield stop (matches getTotalVolume(), which
+    // reports that phase's value, and setVolumetricTarget(), which scales it).
+    // CAR-367: only this phase may ignore its `duration` cap when running
+    // volumetrically; intermediate volumetric phases keep their cap.
+    int indexOfFinalVolumetricPhase() const {
+        int index = -1;
+        for (size_t i = 0; i < phases.size(); ++i) {
+            if (phases[i].hasVolumetricTarget()) {
+                index = static_cast<int>(i);
+            }
+        }
+        return index;
     }
 
     void adjustDuration(float amount) {
@@ -193,27 +250,39 @@ struct Profile {
 
     void adjustVolumetricTarget(float amount) {
         float max = getTotalVolume();
+        if (max <= 0.0f) return; // no volumetric target configured; nothing to scale
         float adjustedMax = max + amount;
         float adjustment = adjustedMax / max;
+        // Scale every phase that carries a volumetric target. This MUST match
+        // the phase set that getTotalVolume() (the denominator above) and the
+        // shot-stop logic (Phase::isFinished) read — otherwise the stop phase
+        // is left untouched and the adjustment is a silent no-op. Do NOT filter
+        // on PHASE_TYPE_BREW here: the volumetric stop target can live on a
+        // phase that is not tagged "brew".
         for (auto &phase : phases) {
-            if (phase.hasVolumetricTarget() && phase.phase == PhaseType::PHASE_TYPE_BREW) {
+            if (phase.hasVolumetricTarget()) {
                 phase.adjustVolumetricTarget(adjustment);
             }
         }
     }
 
-    // Set the absolute total volumetric target for the brew phase(s).
-    // If the profile already has a volumetric target, scale all brew phases
-    // proportionally so the cumulative volume equals `value`. If the profile
-    // has no volumetric target, do nothing — caller should check
+    // Set the absolute total volumetric target so the shot stops at `value`.
+    // If the profile already has a volumetric target, scale every volumetric
+    // phase proportionally so the cumulative stop volume equals `value`. If the
+    // profile has no volumetric target, do nothing — caller should check
     // `isVolumetric()` first or fall back to a different code path.
     void setVolumetricTarget(float value) {
         if (value <= 0.0f) return;
         float current = getTotalVolume();
         if (current <= 0.0f) return; // no volumetric target configured
         float ratio = value / current;
+        // Scale the SAME phases that getTotalVolume() and Phase::isFinished
+        // read (every phase with a volumetric target), not just PHASE_TYPE_BREW
+        // phases. The phase carrying the stop target may be tagged
+        // "preinfusion"; filtering on "brew" here would skip it and leave the
+        // shot stopping at the profile's saved target — the CAR-355 bug.
         for (auto &phase : phases) {
-            if (phase.hasVolumetricTarget() && phase.phase == PhaseType::PHASE_TYPE_BREW) {
+            if (phase.hasVolumetricTarget()) {
                 phase.adjustVolumetricTarget(ratio);
             }
         }

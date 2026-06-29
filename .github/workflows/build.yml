@@ -3,16 +3,40 @@ on:
     tags:
       - "*"
       - "!nightly"
+      - "!beta"
 
 permissions:
   contents: write
 name: Build
+
+# CAR-385: the firmware targets (controller, display, display-headless) are
+# independent and were previously built serially in a single job. They now run
+# as a parallel matrix, the SPIFFS filesystem image is built in its own job
+# (it needs the web assets), and a final `release` job collects every artifact
+# and publishes the GitHub Release with the same asset set as before.
 jobs:
-  build:
+  # Build the three firmware targets in parallel. Each leg uploads only its own
+  # bootloader/partitions/firmware as a per-target artifact so the release job
+  # can reassemble the flat `out/` layout the release expects.
+  firmware:
+    name: Firmware (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: controller
+            env: controller
+            prefix: board
+          - target: display
+            env: display
+            prefix: display
+          - target: headless
+            env: display-headless
+            prefix: display-headless
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-tags: true
           fetch-depth: 0
@@ -22,12 +46,79 @@ jobs:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
+          # Per-target cache key: parallel matrix legs writing one shared key
+          # race and corrupt each other's cache. Scope by target.
+          key: ${{ runner.os }}-pio-${{ matrix.target }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
+      # The web UI is embedded into the display/headless app image (PRO-215), so
+      # those firmware builds must run build_webui.sh first; otherwise
+      # embed_webui_pre.py stubs an EMPTY bundle and the released firmware serves
+      # 404 for / instead of the UI. The controller target has no web UI, so skip
+      # it there. (Node is only needed for the web build.)
+      - uses: actions/setup-node@v4
+        if: matrix.target != 'controller'
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build embedded web UI
+        if: matrix.target != 'controller'
+        run: bash scripts/build_webui.sh
+      - name: Build ${{ matrix.target }}
+        run: |
+          mkdir -p out
+          # Delete the moving `nightly` tag locally before building. The display
+          # pre-script (generate_stable_versions.py) runs `git describe --tags
+          # --exact-match HEAD`; on a stable-tag release where `nightly` still
+          # points at the same commit, that can resolve to `nightly` and get
+          # dropped, leaving the just-pushed stable tag out of STABLE_VERSIONS.
+          # The old single-job pipeline deleted nightly before any pio run for
+          # this reason; each parallel firmware leg must now do the same. (CAR-385)
+          # The `beta` moving tag (PRO-227) is deleted for the same reason — on a
+          # stable-tag release where `beta` still points at the same commit it
+          # could otherwise resolve in `git describe` and shadow the stable tag.
+          git tag -d nightly 2>/dev/null || true
+          git tag -d beta 2>/dev/null || true
+          pio run -e ${{ matrix.env }}
+          mv .pio/build/${{ matrix.env }}/firmware.bin out/${{ matrix.prefix }}-firmware.bin
+          mv .pio/build/${{ matrix.env }}/partitions.bin out/${{ matrix.prefix }}-partitions.bin
+          mv .pio/build/${{ matrix.env }}/bootloader.bin out/${{ matrix.prefix }}-bootloader.bin
+      - name: Archive ${{ matrix.target }} firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}
+          path: "out/*"
+
+  # Build the fresh-install filesystem image. Since the web UI is embedded into
+  # the app image (PRO-215), this image no longer carries /w; it stages only /p
+  # (seed profiles) for fresh USB installs. build_webui.sh keeps `mkdir -p
+  # data/p` and produces no data/w, so `pio run -t buildfs` packages /p only.
+  # The image is shared by both display and headless targets.
+  filesystem:
+    name: Filesystem (seed profiles)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-filesystem
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -37,45 +128,38 @@ jobs:
         run: |
           mkdir -p out
           git tag -d nightly 2>/dev/null || true
+          # The `beta` moving tag (PRO-227) is deleted for the same reason as
+          # nightly: on a stable-tag release where `beta` still points at the
+          # same commit, `git describe` could otherwise resolve to it and shadow
+          # the just-pushed stable tag.
+          git tag -d beta 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
-      - name: Build controller
-        run: |
-          pio run -e controller
-          mv .pio/build/controller/firmware.bin out/board-firmware.bin
-          mv .pio/build/controller/partitions.bin out/board-partitions.bin
-          mv .pio/build/controller/bootloader.bin out/board-bootloader.bin
-      - name: Build display
-        run: |
-          pio run -e display
-          mv .pio/build/display/firmware.bin out/display-firmware.bin
-          mv .pio/build/display/partitions.bin out/display-partitions.bin
-          mv .pio/build/display/bootloader.bin out/display-bootloader.bin
-      - name: Build headless
-        run: |
-          pio run -e display-headless
-          mv .pio/build/display-headless/firmware.bin out/display-headless-firmware.bin
-          mv .pio/build/display-headless/partitions.bin out/display-headless-partitions.bin
-          mv .pio/build/display-headless/bootloader.bin out/display-headless-bootloader.bin
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-headless-filesystem.bin
-      - name: Archive Firmware Files
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-headless-filesystem.bin
+      - name: Archive filesystem + version
         uses: actions/upload-artifact@v4
         with:
-          name: gaggimate-firmware
+          name: firmware-filesystem
           path: "out/*"
+
+  # Collect every per-job artifact into one flat directory and publish the
+  # release, exactly as the previous single-job pipeline did.
   release:
-    needs: build
+    needs: [firmware, filesystem]
     runs-on: ubuntu-latest
     steps:
-      - name: Download Firmware Files
+      - name: Download all firmware artifacts
         uses: actions/download-artifact@v4
         with:
-          name: gaggimate-firmware
+          # All build jobs upload artifacts named firmware-*; merge them into
+          # one flat directory (merge-multiple flattens the per-artifact dirs).
+          pattern: firmware-*
+          merge-multiple: true
           path: release
       - name: Release Firmware
         uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af

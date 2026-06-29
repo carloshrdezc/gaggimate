@@ -1,0 +1,268 @@
+# CAR-341: Unified CI gate for pull requests targeting dev-master or master.
+#
+# Runs the full local-equivalent check suite on every PR to dev-master:
+#   1. web        — cd web && npm ci && npm run build
+#   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
+#   3. native     — pio test -e native-sanitize (ASan/UBSan; findings fail CI)
+#   4. analysis   — pio check (cppcheck, GATING) + clang-tidy over in-scope logic
+#
+# pio check display/controller gating also runs in check.yml on push; this
+# workflow re-runs it scoped to PRs so dev-master is protected by one cohesive
+# required-checks set. Keep the setup (cache + setup-python + PlatformIO install)
+# in sync with check.yml / build.yml.
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - dev-master
+      - master
+
+jobs:
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build web UI
+        run: |
+          cd web
+          npm ci
+          npm run build
+      # Gate the PR on the web unit suite (CAR/PRO-229). `npm ci` above already
+      # installed vitest from devDependencies, so this runs the converted
+      # node:test->vitest logic suites plus the existing vitest specs. A failing
+      # web test now fails the job.
+      - name: Run web unit tests
+        run: |
+          cd web
+          npm test
+
+  firmware:
+    name: Firmware build (display)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # -Wall -Wextra are on (display_common.build_flags). Warnings are allowed
+      # to surface — the build must still succeed (no -Werror, see platformio.ini).
+      - name: Build display firmware
+        run: pio run -e display
+
+  firmware-flags-off:
+    name: Firmware build (display, all features off)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # CAR-385: compile the all-features-OFF permutation so the `#else` stubs
+      # the feature flags add (BLEScalePlugin, MQTT/HomeKit/WebUI gating) are
+      # actually built somewhere. Without this leg, stub drift only surfaces on a
+      # hand-run flags-off build; here it fails the PR. [env:display-flags-off]
+      # only flips the GAGGIMATE_ENABLE_* macros to 0 on top of [env:display].
+      - name: Build display firmware (flags off)
+        run: pio run -e display-flags-off
+
+  firmware-headless-4m:
+    name: Firmware build (display-headless-4m)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-316: compile the 4MB-flash headless target on every PR. [env:display-headless-4m]
+      # The no_ota single ~2,097,152 B app slot is selected by this repo's own board
+      # definition (boards/esp32-s3-supermini.json -> "partitions": "no_ota.csv"); only the
+      # CSV byte layout ships with the Espressif/Arduino platform. It is not set by this env
+      # or platformio.ini. It links today at ~99.7% flash (~7 KB headroom). Without this leg,
+      # a future change that adds a few KB would silently push it over the partition limit
+      # with nothing in CI to catch it.
+      # PlatformIO's linker exits non-zero on a region overflow, so a plain `pio run` fails
+      # the PR — no silent truncation. Like the sibling display jobs, this relies on
+      # embed_webui_pre.py's empty-bundle stub; the real web UI isn't needed to exercise
+      # the linker/partition check that gates flash overflow.
+      - name: Build display-headless-4m firmware
+        run: pio run -e display-headless-4m
+
+  native:
+    name: Native tests (ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # Sanitizer findings must fail the suite. halt_on_error / abort_on_error
+      # turn the first ASan/UBSan report into a non-zero exit.
+      - name: Run sanitized host tests
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
+        run: pio test -e native-sanitize
+
+  analysis:
+    name: Static analysis (cppcheck + clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+          clang-tidy --version
+      # GATING cppcheck — mirrors check.yml. Display excludes generated UI;
+      # controller analyses its own sources. Pre-existing findings will surface
+      # here; if they are noise, raise the threshold or add inline suppressions.
+      - name: Static code analysis for display (gating)
+        run: platformio check -e display --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"
+      - name: Static code analysis for controller (gating)
+        run: platformio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"
+      # clang-tidy runs against the NATIVE env's compile database — the only
+      # compile DB we can build without the full xtensa ESP32 toolchain. This
+      # covers the same platform-independent logic slice the native tests cover
+      # (src/display/core/**). Generated UI (src/display/ui) and vendored drivers
+      # (src/display/drivers) are excluded by construction (not in the native
+      # build) and by .clang-tidy's HeaderFilterRegex.
+      # `pio run -t compiledb` writes compile_commands.json to the PROJECT ROOT.
+      - name: Generate native compile database
+        run: pio run -e native -t compiledb
+      - name: Run clang-tidy over in-scope logic
+        run: |
+          DB=compile_commands.json
+          if [ ! -f "$DB" ]; then
+            echo "compile_commands.json not found at $DB" >&2
+            exit 1
+          fi
+          echo "::group::compile_commands.json file entries"
+          python -c "import json,sys; [print(e.get('file','')) for e in json.load(open('$DB'))]"
+          echo "::endgroup::"
+          FILES=$(python scripts/select_tidy_sources.py "$DB")
+          if [ -z "$FILES" ]; then
+            echo "No in-scope source files found in compile DB — nothing to lint." >&2
+            exit 1
+          fi
+          echo "Linting:"
+          echo "$FILES"
+          # -p points clang-tidy at the directory holding the compile DB (repo
+          # root) so it uses the real flags. No -warnings-as-errors here: this
+          # step reports tidy findings and gates only on clang-tidy's own
+          # non-zero (config/usage) errors. Flip to gating once the codebase is
+          # clean (mirrors the -Werror note).
+          echo "$FILES" | xargs clang-tidy -p .
+
+  simulator:
+    name: Simulator build (display-sim)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # The display-sim env links SDL2 via `sdl2-config` on Linux
+      # (see scripts/sim_sdl_flags.py), so the dev libs must be present.
+      - name: Install SDL2 dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+      # Build AND embed the web UI before the sim build. The simulator serves
+      # the WebUI from the firmware-embedded flash blob (gWebUiBlobStart) via the
+      # same serveWebAsset() path as the device — NOT from a filesystem dir — so
+      # build_webui.sh (npm build -> gzip -> embed_webui.py) must run to populate
+      # src/display/webassets/ with the real bundle. A bare `npm run build`
+      # leaves embed_webui_pre.py to drop an empty stub, which links but renders
+      # nothing, defeating the parity check this job exists for. [PRO-216]
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build and embed web UI
+        run: ./scripts/build_webui.sh
+      # Build the desktop simulator. Fails the PR if display-sim doesn't
+      # compile/link, so the simulator can't silently bit-rot when src/display
+      # or the sim/ shims change. With the real embedded bundle above, a broken
+      # serveWebAsset/blob path also fails the build, not just a link gap.
+      - name: Build display-sim simulator
+        run: pio run -e display-sim

@@ -1,10 +1,18 @@
 #include "Controller.h"
 #include "ArduinoJson.h"
+#ifndef GAGGIMATE_SIM
+// PRO-243: nanopb SystemInfo decode for the INFO characteristic (real firmware
+// only; the sim keeps the legacy JSON path — see setupInfos()).
+#include "comms.pb.h"
+#include "pb_decode.h"
+#endif
 #include "esp_sntp.h"
 #include <SD_MMC.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <ctime>
 #include <display/config.h>
+#include <display/config/features.h>
+#include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -14,19 +22,36 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
+#endif
 #include <display/plugins/BoilerFillPlugin.h>
+#if GAGGIMATE_ENABLE_HOMEKIT
 #include <display/plugins/HomekitPlugin.h>
+#endif
 #include <display/plugins/LedControlPlugin.h>
+#if GAGGIMATE_ENABLE_MQTT
 #include <display/plugins/MQTTPlugin.h>
+#endif
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/SmartGrindPlugin.h>
+#if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
+#endif
+#ifndef GAGGIMATE_SIM // mDNS is device-only (the sim WiFi shim has no real mDNS)
 #include <display/plugins/mDNSPlugin.h>
+#endif
+#ifndef GAGGIMATE_SIM // DiagnosticLogPlugin uses WiFiUDP — device-only (PRO-266)
+#include <display/plugins/DiagnosticLogPlugin.h>
+#endif
 #ifndef GAGGIMATE_HEADLESS
+#ifdef GAGGIMATE_SIM
+#include <SdlDriver.h> // desktop SDL panel stands in for the hardware drivers
+#else
 #include <display/drivers/AmoledDisplayDriver.h>
 #include <display/drivers/LilyGoDriver.h>
 #include <display/drivers/WaveshareDriver.h>
+#endif
 #endif
 
 const String LOG_TAG = F("Controller");
@@ -40,8 +65,14 @@ void Controller::setup() {
         ESP_LOGE(LOG_TAG, "Failed to create process mutex");
     }
 
-    if (!SPIFFS.begin(true)) {
-        Serial.println(F("An Error has occurred while mounting SPIFFS"));
+    // Web assets are served from this partition. LittleFS (not SPIFFS): SPIFFS
+    // has no directory tree, so stat()/exists() is O(whole filesystem) and a
+    // miss scans every page -- the web handler does that synchronously in the
+    // async_tcp task for every request, which under a multi-tab load burst
+    // pegged CPU0 for >5s and tripped the task watchdog (reboot). LittleFS
+    // lookups are O(path). maxOpenFiles 16 for concurrent asset serving. [GM-90]
+    if (!LittleFS.begin(true, "/littlefs", 16)) {
+        Serial.println(F("An Error has occurred while mounting LittleFS"));
     }
 
 #ifndef GAGGIMATE_HEADLESS
@@ -57,32 +88,52 @@ void Controller::setup() {
         ESP_LOGI(LOG_TAG, "Used: %lluMB, Capacity: %lluMB", SD_MMC.usedBytes() / 1024 / 1024, SD_MMC.cardSize() / 1024 / 1024);
     }
 #endif
-    FS *fs = &SPIFFS;
+    FS *fs = &LittleFS;
     if (sdcard) {
         fs = &SD_MMC;
     }
     beanManager = new BeanManager(fs, "/b");
     beanManager->setup();
+    grinderManager = new GrinderManager(fs, "/g/grinders.json");
+    grinderManager->setup();
     profileManager = new ProfileManager(fs, "/p", settings, pluginManager);
     profileManager->setup();
+#if GAGGIMATE_ENABLE_HOMEKIT
     if (settings.isHomekit())
         pluginManager->registerPlugin(new HomekitPlugin(settings.getWifiSsid(), settings.getWifiPassword()));
     else
         pluginManager->registerPlugin(new mDNSPlugin());
+#elif !defined(GAGGIMATE_SIM)
+    // HomeKit compiled out: register mDNS unconditionally so the device stays
+    // discoverable on the network (HomeKit otherwise provides its own mDNS).
+    pluginManager->registerPlugin(new mDNSPlugin());
+#endif
     if (settings.isBoilerFillActive()) {
         pluginManager->registerPlugin(new BoilerFillPlugin());
     }
     if (settings.isSmartGrindActive()) {
         pluginManager->registerPlugin(new SmartGrindPlugin());
     }
+#if GAGGIMATE_ENABLE_MQTT
     if (settings.isHomeAssistant()) {
         pluginManager->registerPlugin(new MQTTPlugin());
     }
+#endif
+#if GAGGIMATE_ENABLE_WEBUI
     pluginManager->registerPlugin(new WebUIPlugin());
+#endif
     pluginManager->registerPlugin(&ShotHistory);
+#if GAGGIMATE_ENABLE_BLE_SCALE
     pluginManager->registerPlugin(&BLEScales);
+#endif
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
+#ifndef GAGGIMATE_SIM
+    // PRO-266: tees ESP_LOG over UDP for tether-free serial capture. Self-gated
+    // on Settings::getDiagnosticLogEnabled() (default OFF) — registered
+    // unconditionally so it can be toggled at runtime without a reflash.
+    pluginManager->registerPlugin(new DiagnosticLogPlugin());
+#endif
     pluginManager->setup(this);
 
     pluginManager->on("profiles:profile:save", [this](Event const &event) {
@@ -127,6 +178,9 @@ void Controller::connect() {
 
 #ifndef GAGGIMATE_HEADLESS
 void Controller::setupPanel() {
+#ifdef GAGGIMATE_SIM
+    driver = SdlDriver::getInstance(); // desktop SDL panel
+#else
     if (LilyGoDriver::getInstance()->isCompatible()) {
         driver = LilyGoDriver::getInstance();
     } else if (AmoledDisplayDriver::getInstance()->isCompatible()) {
@@ -138,6 +192,7 @@ void Controller::setupPanel() {
         delay(10000);
         ESP.restart();
     }
+#endif
     driver->init();
 }
 #endif
@@ -194,11 +249,15 @@ void Controller::setupBluetooth() {
 
 void Controller::setupInfos() {
     const std::string info = clientController.readInfo();
-    printf("System info: %s\n", info.c_str());
+#ifdef GAGGIMATE_SIM
+    // PRO-243: the simulator's NimBLEClientController (sim/comms, intentionally
+    // untouched) still serves the legacy JSON info string and the sim build does
+    // not link the nanopb codegen, so keep parsing JSON here for the sim only.
+    ESP_LOGI(LOG_TAG, "System info (sim/json): %s", info.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, info);
     if (err) {
-        printf("Error deserializing JSON: %s\n", err.c_str());
+        ESP_LOGE(LOG_TAG, "Error deserializing JSON: %s", err.c_str());
         systemInfo = SystemInfo{
             .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
     } else {
@@ -211,6 +270,28 @@ void Controller::setupInfos() {
                                     .tof = doc["cp"]["tof"].as<bool>(),
                                 }};
     }
+#else
+    // PRO-243: nanopb SystemInfo wire format (was an ArduinoJson string). The
+    // controller encodes gaggimate_SystemInfo in make_system_info(); decode it
+    // back into the firmware's SystemInfo struct here.
+    ESP_LOGI(LOG_TAG, "System info: %u bytes", static_cast<unsigned>(info.size()));
+    gaggimate_SystemInfo msg = gaggimate_SystemInfo_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(reinterpret_cast<const uint8_t *>(info.data()), info.size());
+    if (!pb_decode(&is, gaggimate_SystemInfo_fields, &msg)) {
+        ESP_LOGE(LOG_TAG, "Error decoding SystemInfo: %s", PB_GET_ERROR(&is));
+        systemInfo = SystemInfo{
+            .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
+    } else {
+        systemInfo = SystemInfo{.hardware = String(msg.hardware),
+                                .version = String(msg.version),
+                                .capabilities = SystemCapabilities{
+                                    .dimming = msg.capabilities.dimming,
+                                    .pressure = msg.capabilities.pressure,
+                                    .ledControl = msg.capabilities.led_control,
+                                    .tof = msg.capabilities.tof,
+                                }};
+    }
+#endif
 }
 
 void Controller::setupWifi() {
@@ -288,7 +369,7 @@ void Controller::loop() {
     if (clientController.isReadyForConnection() && clientController.connectToServer()) {
         waitingForController = false;
         setupInfos();
-        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f\n", settings.getPressureScaling());
+        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f", settings.getPressureScaling());
         setPressureScale();
         clientController.sendPidSettings(settings.getPid());
         clientController.sendPumpModelCoeffs(settings.getPumpModelCoeffs());
@@ -327,6 +408,7 @@ void Controller::loop() {
                     auto brewProcess = static_cast<BrewProcess *>(currentProcess);
                     brewProcess->updatePressure(pressure);
                     brewProcess->updateFlow(currentPumpFlow);
+                    brewProcess->setVolumetricAvailable(isActiveVolumetricSourceLive());
                 }
                 currentProcess->progress();
                 bool stillActive = currentProcess->isActive();
@@ -396,6 +478,31 @@ bool Controller::isVolumetricAvailable() const {
 #endif
 }
 
+// True when the volumetric source that the *active* shot is actually consuming
+// is still delivering usable measurements. This is the correct signal for the
+// CAR-367 duration-cap suppression gate, NOT isVolumetricAvailable():
+// onVolumetricMeasurement() rejects any measurement whose source != the latched
+// currentVolumetricSource (Controller.cpp), so once a shot starts on BLUETOOTH
+// it only consumes BLE weights for its lifetime. Under NIGHTLY_BUILD on a
+// dimming-capable controller, isVolumetricAvailable() returns true even with a
+// dead scale (flow-estimation capability), but the BLE-sourced shot's currentVolume
+// would go stale — leaving suppression on and running to BREW_SAFETY_DURATION_MS.
+// Gate on the health of the active source instead: BLUETOOTH needs a healthy
+// scale; FLOW_ESTIMATION is always live; INACTIVE is not volumetric.
+// Depends on the cross-shot invariant that currentVolumetricSource is reset to
+// INACTIVE in clear() between shots, so a stale BLUETOOTH source can't leak in.
+bool Controller::isActiveVolumetricSourceLive() const {
+    switch (currentVolumetricSource) {
+    case VolumetricMeasurementSource::BLUETOOTH:
+        return isBluetoothScaleHealthy();
+    case VolumetricMeasurementSource::FLOW_ESTIMATION:
+        return true;
+    case VolumetricMeasurementSource::INACTIVE:
+    default:
+        return false;
+    }
+}
+
 void Controller::autotune(int testTime, int samples) {
     if (isActiveSafe() || !isReady()) {
         return;
@@ -456,6 +563,8 @@ float Controller::getTargetTemp() const {
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         // If we can't get mutex, return safe default based on mode
         switch (mode) {
+        case MODE_STANDBY:
+            return profileManager->getSelectedProfile().temperature;
         case MODE_BREW:
             return profileManager->getSelectedProfile().temperature;
         case MODE_STEAM:
@@ -473,6 +582,9 @@ float Controller::getTargetTemp() const {
     float result = 0;
     
     switch (mode) {
+    case MODE_STANDBY:
+        result = profileManager->getSelectedProfile().temperature;
+        break;
     case MODE_BREW:
         if (proc != nullptr && proc->isActive() && proc->getType() == MODE_BREW) {
             auto brewProcess = static_cast<BrewProcess *>(proc);
@@ -497,6 +609,127 @@ float Controller::getTargetTemp() const {
     
     xSemaphoreGive(processMutex);
     return result;
+}
+
+// Computes the first phase's configured pressure value for standby preview.
+// Returns true and sets `out` when the selected profile's first phase uses an
+// advanced pump with an applicable (non-sentinel) value; returns false when no
+// target is applicable (simple pump, empty profile, or the "hold current value"
+// -1 sentinel that can't be resolved without a live measurement). For an
+// advanced phase the active-brew path publishes BOTH pressure and flow (the
+// non-primary axis is the configured limit), so standby previews both —
+// keeping the readout consistent with the first brew tick.
+static bool firstPhasePressureTarget(const Profile &profile, float &out) {
+    if (profile.phases.empty()) {
+        return false;
+    }
+    const Phase &first = profile.phases[0];
+    if (first.pumpIsSimple) {
+        return false;
+    }
+    // -1 is the "hold current value at phase start" sentinel, resolved to a live
+    // measurement by BrewProcess during a brew. In standby there is no measurement
+    // to resolve against, so report it as unavailable rather than a misleading 0.
+    if (first.pumpAdvanced.pressure < 0.0f) {
+        return false;
+    }
+    out = first.pumpAdvanced.pressure;
+    return true;
+}
+
+// Computes the first phase's configured flow value for standby preview.
+// See firstPhasePressureTarget for semantics.
+static bool firstPhaseFlowTarget(const Profile &profile, float &out) {
+    if (profile.phases.empty()) {
+        return false;
+    }
+    const Phase &first = profile.phases[0];
+    if (first.pumpIsSimple) {
+        return false;
+    }
+    if (first.pumpAdvanced.flow < 0.0f) {
+        return false;
+    }
+    out = first.pumpAdvanced.flow;
+    return true;
+}
+
+float Controller::getTargetPressure() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
+        return v;
+    }
+    return targetPressure;
+}
+
+float Controller::getTargetFlow() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
+        return v;
+    }
+    return targetFlow;
+}
+
+// Reports whether a pump pressure/flow target is actually applicable for the
+// current active process — used so WebUIPlugin can emit JSON null (not a
+// misleading 0) when there is no target. Mirrors updateControl()'s branch
+// logic: the entire target-setting block is gated on
+// systemInfo.capabilities.pressure (Controller.cpp ~L856), so without pressure
+// support NO mode drives a pump target. With pressure support, only
+// advanced-pump brews, manual, and steam set real targets; simple-pump brews,
+// water, grind, and the inactive fallthrough leave the members at 0. (Standby
+// is handled by the callers via the first-phase helpers, so it never reaches
+// here.)
+//
+// Takes processMutex before touching currentProcess: status serialization runs
+// on a different task than activate()/deactivate(), which can move and delete
+// the process — dereferencing it unlocked would be a use-after-free. On mutex
+// timeout we return false (treat the target as unavailable) rather than risk it.
+bool Controller::hasPumpTarget() const {
+    // No pressure hardware → updateControl() never populates pump targets in any
+    // mode, so they are always an unavailable 0.
+    if (!systemInfo.capabilities.pressure) {
+        return false;
+    }
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return false;
+    }
+    bool result = false;
+    Process *proc = currentProcess;
+    if (proc != nullptr && proc->isActive()) {
+        switch (proc->getType()) {
+        case MODE_BREW:
+            result = static_cast<BrewProcess *>(proc)->isAdvancedPump();
+            break;
+        case MODE_MANUAL:
+        case MODE_STEAM:
+            result = true;
+            break;
+        default: // MODE_WATER, MODE_GRIND — no pump pressure/flow target
+            result = false;
+            break;
+        }
+    }
+    xSemaphoreGive(processMutex);
+    return result;
+}
+
+bool Controller::hasTargetPressure() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        return firstPhasePressureTarget(profileManager->getSelectedProfile(), v);
+    }
+    return hasPumpTarget();
+}
+
+bool Controller::hasTargetFlow() const {
+    if (mode == MODE_STANDBY) {
+        float v = 0.0f;
+        return firstPhaseFlowTarget(profileManager->getSelectedProfile(), v);
+    }
+    return hasPumpTarget();
 }
 
 void Controller::setTargetTemp(float temperature) {
@@ -582,6 +815,12 @@ void Controller::lowerTemp() {
 
 void Controller::raiseBrewTarget() {
     if (isVolumetricAvailable() && profileManager->getSelectedProfile().isVolumetric()) {
+        // CAR-375: for volumetric profiles these buttons edit per-shot YIELD,
+        // which is locked to the profile when the override is disabled. The
+        // duration path below is not yield, so it stays reachable.
+        if (!settings.isAllowYieldOverride()) {
+            return;
+        }
         profileManager->getSelectedProfile().adjustVolumetricTarget(1);
     } else {
         profileManager->getSelectedProfile().adjustDuration(1);
@@ -591,6 +830,11 @@ void Controller::raiseBrewTarget() {
 
 void Controller::lowerBrewTarget() {
     if (isVolumetricAvailable() && profileManager->getSelectedProfile().isVolumetric()) {
+        // CAR-375: see raiseBrewTarget — only the volumetric YIELD path honors
+        // the yield lock; duration adjustment remains available.
+        if (!settings.isAllowYieldOverride()) {
+            return;
+        }
         profileManager->getSelectedProfile().adjustVolumetricTarget(-1);
     } else {
         profileManager->getSelectedProfile().adjustDuration(-1);
@@ -606,6 +850,13 @@ void Controller::setBrewTarget(float value) {
     // the in-memory mutation pattern of raise/lowerBrewTarget — the change
     // applies to the next shot but is NOT persisted to disk; reloading the
     // profile restores the saved target.
+    //
+    // CAR-375: when the per-shot yield override is disabled, the yield is
+    // locked to the profile. Ignore any incoming brew-target so the display
+    // and any stale web client honor the lock.
+    if (!settings.isAllowYieldOverride()) {
+        return;
+    }
     if (!profileManager->getSelectedProfile().isVolumetric()) {
         return;
     }
@@ -763,6 +1014,20 @@ void Controller::updateControl() {
 void Controller::activate() {
     if (isActiveSafe())
         return;
+    // Any activate() call while in standby (web/remote req:process:activate,
+    // or the LVGL onBrewStart path) mirrors the physical brew button's first
+    // press: wake into BREW (boiler starts heating). A second activate() then
+    // starts the shot. See handleBrewButton() MODE_STANDBY case.
+    //
+    // Not covered by a native unit test: the host test env (build_src_filter)
+    // compiles only test/native/* + PluginManager.cpp, and a real Controller
+    // pulls in SD_MMC/SPIFFS/BLE/LVGL/FreeRTOS + ~10 plugins, which the harness
+    // does not shim. This guard is exercised by the firmware compile in CI and
+    // is symmetric with the handleBrewButton() standby case above.
+    if (mode == MODE_STANDBY) {
+        deactivateStandby();
+        return;
+    }
     clear();
     // Tare + settle is only meaningful for modes that consume scale/volumetric
     // data. Steam and water modes have no scale and no volumetric phase, so
@@ -891,8 +1156,21 @@ void Controller::deactivateGrind() {
 }
 
 void Controller::activateStandby() {
-    setMode(MODE_STANDBY);
+    // PRO-278: tear the running process down BEFORE flipping the mode, never
+    // the other way around. The reverse order (setMode then deactivate) leaves
+    // a window in which mode == MODE_STANDBY while the steam/brew process is
+    // still currentProcess and isActive(). In that window setMode() has already
+    // dispatched the mutable `controller:mode:change` event, and a re-assert
+    // path (a still-active SteamProcess, the steam UI screen, or a mode-change
+    // handler) can flip the mode back to MODE_STEAM/MODE_BREW before deactivate()
+    // lands — the user-reported "stop-steam bounces back, second press sticks"
+    // bug. Deactivating first means the mode-change event fires with no active
+    // process to re-assert against, so a single press lands in Standby and stays.
+    // This matches every sibling teardown: deactivateStandby(), the steam-button
+    // release in handleSteamButton(), and WebUIPlugin's req:change-mode STANDBY
+    // path all deactivate() before setMode().
     deactivate();
+    setMode(MODE_STANDBY);
 }
 
 void Controller::deactivateStandby() {
@@ -1187,7 +1465,7 @@ void Controller::onVolumetricDelete() {
 }
 
 void Controller::handleBrewButton(int brewButtonStatus) {
-    printf("current screen %d, brew button %d\n", getMode(), brewButtonStatus);
+    ESP_LOGD(LOG_TAG, "current screen %d, brew button %d", getMode(), brewButtonStatus);
     if (brewButtonStatus) {
         switch (getMode()) {
         case MODE_STANDBY:
@@ -1227,7 +1505,7 @@ void Controller::handleBrewButton(int brewButtonStatus) {
 }
 
 void Controller::handleSteamButton(int steamButtonStatus) {
-    printf("current screen %d, steam button %d\n", getMode(), steamButtonStatus);
+    ESP_LOGD(LOG_TAG, "current screen %d, steam button %d", getMode(), steamButtonStatus);
     if (steamButtonStatus) {
         switch (getMode()) {
         case MODE_STANDBY:

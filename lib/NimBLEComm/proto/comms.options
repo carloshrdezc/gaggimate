@@ -1,0 +1,9 @@
+# PRO-243: bound the SystemInfo string fields so nanopb generates fixed char
+# arrays (char hardware[48] / char version[48]) instead of pb_callback_t. This
+# keeps SystemInfo a plain value struct — no encode/decode callbacks — and lets
+# gaggimate_SystemInfo_size be a compile-time constant for stack buffers.
+# Longest hardware name today is "GaggiMate Standard Rev 2.x" (26 chars);
+# version is a git-describe string (BUILD_GIT_VERSION). 48 leaves comfortable
+# headroom incl. the NUL.
+gaggimate.SystemInfo.hardware max_size:48
+gaggimate.SystemInfo.version  max_size:48

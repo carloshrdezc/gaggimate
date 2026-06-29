@@ -4,7 +4,7 @@
 #include "NimBLEComm.h"
 #include "cstring"
 
-class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLEClientCallbacks {
+class NimBLEClientController : public NimBLEScanCallbacks, NimBLEClientCallbacks {
   public:
     NimBLEClientController();
     void initClient();
@@ -35,8 +35,6 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void registerDisconnectCallback(const void_callback_t &callback);
     std::string readInfo() const;
     NimBLEClient *getClient() const { return client; };
-    bool isAuthFailed() const { return bleAuthFailed; }
-    void factoryResetBonds();
 
   private:
     NimBLEClient *client;
@@ -63,9 +61,13 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     NimBLERemoteCharacteristic *volumetricTareChar = nullptr;
     NimBLERemoteCharacteristic *ledControlChar = nullptr;
     NimBLERemoteCharacteristic *tofMeasurementChar = nullptr;
-    NimBLEAdvertisedDevice *serverDevice = nullptr;
+    // Cache the address by value (not the NimBLE-owned NimBLEAdvertisedDevice*).
+    // The scan-result cache that backs the advertised-device pointer can be freed
+    // after scanner->stop(), which would leave a dangling pointer for the display
+    // task's connectToServer() to dereference. NimBLEAddress is a value type and
+    // safe to copy across the scan-callback / display-task boundary.
+    NimBLEAddress serverAddress{};
     bool readyForConnection = false;
-    bool bleAuthFailed = false;
     xTaskHandle taskHandle;
 
     remote_err_callback_t remoteErrorCallback = nullptr;
@@ -77,17 +79,14 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     int_callback_t tofMeasurementCallback = nullptr;
     void_callback_t disconnectCallback = nullptr;
 
-    String _lastOutputControl = "";
+    // NimBLEScanCallbacks override (NimBLE 2.x: NimBLEAdvertisedDeviceCallbacks
+    // was replaced by NimBLEScanCallbacks; onResult now takes a const pointer).
+    // PRO-290.
+    void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override;
 
-    // BLEAdvertisedDeviceCallbacks override
-    void onResult(NimBLEAdvertisedDevice *advertisedDevice) override;
-
-    // NimBLEClientCallbacks override
-    void onDisconnect(NimBLEClient *pServer) override;
-    void onAuthenticationComplete(ble_gap_conn_desc *desc) override;
-
-    bool writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const String &value, bool response = true);
-    bool writeRemoteValue(NimBLERemoteCharacteristic *characteristic, const std::string &value, bool response = true);
+    // NimBLEClientCallbacks override (NimBLE 2.x: onDisconnect gained an int
+    // reason parameter). PRO-290.
+    void onDisconnect(NimBLEClient *pClient, int reason) override;
 
     // Notification callback
     void notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length, bool isNotify) const;

@@ -160,8 +160,6 @@ void GaggiMateController::loop() {
 
 void GaggiMateController::registerBoardConfig(ControllerConfig config) { configs.push_back(config); }
 
-void GaggiMateController::factoryResetBonds() { _ble.factoryResetBonds(); }
-
 void GaggiMateController::detectBoard() {
     constexpr int MAX_DETECT_RETRIES = 3;
     pinMode(DETECT_EN_PIN, OUTPUT);

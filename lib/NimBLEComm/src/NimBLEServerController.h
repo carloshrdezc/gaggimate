@@ -29,16 +29,9 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     void registerTareCallback(const void_callback_t &callback);
     void registerLedControlCallback(const led_control_callback_t &callback);
     void setInfo(String infoString);
-    void factoryResetBonds();
 
   private:
     bool deviceConnected = false;
-    // True only between onConnect and the first authenticated callback for a connection.
-    // Used by onAuthenticationComplete to distinguish a real initial-pair failure
-    // (must hard-disconnect) from a transient unencrypted callback fire on an
-    // already-bonded link (must NOT disconnect — would tear down a healthy session).
-    // See CAR-231.
-    bool pendingInitialPair = false;
     String infoString = "";
     NimBLEAdvertising *advertising = nullptr;
     NimBLEServer *server = nullptr;
@@ -72,17 +65,18 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     void_callback_t tareCallback = nullptr;
     led_control_callback_t ledControlCallback = nullptr;
 
-    // BLEServerCallbacks overrides
-    void onConnect(NimBLEServer *pServer) override;
-    void onDisconnect(NimBLEServer *pServer) override;
-    void onAuthenticationComplete(ble_gap_conn_desc *desc) override;
+    // NimBLEServerCallbacks overrides (NimBLE 2.x: connection callbacks gained a
+    // NimBLEConnInfo& param; onDisconnect also gained an int reason). PRO-290.
+    void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override;
+    void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override;
 
-    // BLECharacteristicCallbacks overrides
-    void onWrite(NimBLECharacteristic *pCharacteristic) override;
+    // NimBLECharacteristicCallbacks override (NimBLE 2.x: onWrite gained a
+    // NimBLEConnInfo& param; body unchanged). PRO-290.
+    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
 
     BLE_OTA_DFU ota_dfu_ble;
 
-    const char *LOG_TAG = "NimBLEClientController";
+    const char *LOG_TAG = "NimBLEServerController";
     xTaskHandle taskHandle;
     static void loopTask(void *arg);
 };

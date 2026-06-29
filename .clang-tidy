@@ -1,0 +1,52 @@
+# clang-tidy configuration for GaggiMate hand-written firmware logic.
+#
+# Scope (CAR-341): this config governs the platform-independent firmware *logic*
+# that the host (`native`) test environment compiles — primarily
+# src/display/core/** plus the small host shims. CI runs clang-tidy against the
+# native env's compile database (see .github/workflows/ci.yml), which is the
+# only compile DB we can reliably generate without the full xtensa ESP32
+# toolchain. Generated LVGL UI (src/display/ui/**) and vendored drivers
+# (src/display/drivers/**) are intentionally NOT analysed — see the CI step's
+# path filter and the HeaderFilterRegex below.
+#
+# Checks: bugprone-* and cppcoreguidelines-* per the issue, with a handful of
+# noisy / firmware-inappropriate checks disabled with justification:
+#   - cppcoreguidelines-avoid-magic-numbers: embedded code is full of
+#       intentional hardware constants; too noisy.
+#   - cppcoreguidelines-pro-type-vararg: ESP_LOG*/printf-style logging is
+#       pervasive in firmware.
+#   - cppcoreguidelines-pro-bounds-pointer-arithmetic /
+#     cppcoreguidelines-pro-bounds-array-to-pointer-decay:
+#       C-string and buffer handling against the Arduino/ESP-IDF C APIs.
+#   - cppcoreguidelines-avoid-non-const-global-variables:
+#       firmware uses module-level state and globals extensively.
+#   - cppcoreguidelines-non-private-member-variables-in-classes:
+#       plugin/event structs deliberately expose public data members.
+#   - cppcoreguidelines-owning-memory: no gsl::owner in this codebase.
+#   - bugprone-easily-swappable-parameters: high-noise, low-signal here.
+#
+# This is intentionally NOT WarningsAsErrors at the config level; the CI step
+# decides whether tidy findings gate (see ci.yml). Individual findings can be
+# silenced inline with `// NOLINT(check-name)` plus a comment.
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -bugprone-easily-swappable-parameters
+
+# Only diagnose headers that live under src/display/{core,plugins,models}; never
+# warn on system, framework, or third-party library headers pulled in
+# transitively. The CI step additionally restricts the *source files* passed to
+# tidy to the in-scope logic, so generated UI / vendored drivers are excluded.
+HeaderFilterRegex: 'src/display/(core|plugins|models)/'
+
+WarningsAsErrors: ''
+
+FormatStyle: none

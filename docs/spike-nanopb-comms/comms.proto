@@ -1,0 +1,167 @@
+// GaggiMate fork (carloshrdezc) controller <-> display BLE protocol — nanopb
+// spike schema (PRO-239). This DRAFT models the 18 message types our fork's
+// lib/NimBLEComm actually uses today, derived directly from the encode/decode
+// functions in NimBLEServerController.cpp / NimBLEClientController.cpp and the
+// callback typedefs in NimBLEComm.h:35-53.
+//
+// IMPORTANT — this is a SPIKE artifact, NOT a production schema:
+//   * It is deliberately a 1:1 mapping of our CURRENT 18 BLE characteristics so
+//     the footprint/round-trip numbers below reflect a like-for-like wire-format
+//     swap (text -> protobuf) on our existing NimBLE transport.
+//   * Upstream GaggiMate's NanoPbComm (GM-82, lib v2.0.0) uses a richer design:
+//     a single Frame{ id, ack, repeated Payload } with a oneof Payload tagged
+//     union, a coalescing acknowledged outbound queue, and a transport
+//     abstraction (BLE today, UART tomorrow). That is a comms *architecture*,
+//     not just a wire format. See findings.md "Option B" for what absorbing it
+//     drags along. Where field shapes are obvious we mirror upstream's tags to
+//     keep a future convergence cheaper, but we do NOT adopt Frame/oneof here.
+//
+// Field types follow the existing code:
+//   - floats stay float (32-bit) — matches the on-device float math and avoids
+//     the lossy 3-decimal float_to_string() quantization the text format uses.
+//   - bools map to proto bool.
+//   - the "type" discriminator byte in OUTPUT_CONTROL (0=simple, 1=advanced) is
+//     modeled as two distinct messages, matching the two callbacks
+//     (simple_output_callback_t / advanced_output_callback_t).
+
+syntax = "proto3";
+
+package gaggimate_spike;
+
+// ===========================================================================
+// Controller -> Display (NOTIFY characteristics)
+// ===========================================================================
+
+// SENSOR_DATA_UUID — sendSensorData(): 5 floats, the hottest packet (~10 Hz).
+// NimBLEServerController.cpp:90-98 / decode NimBLEClientController.cpp:311-325.
+message SensorData {
+  float temperature = 1;    // degC
+  float pressure = 2;       // bar
+  float puck_flow = 3;      // ml/s
+  float pump_flow = 4;      // ml/s
+  float puck_resistance = 5;
+}
+
+// OUTPUT_CONTROL_UUID is WRITE (display -> controller) but lives here next to
+// its sibling for readability. See the command section below.
+
+// ERROR_CHAR_UUID — sendError(int). NimBLEServerController.cpp:100-105.
+message Error {
+  int32 code = 1; // matches ERROR_CODE_* constants in NimBLEComm.h:28-33
+}
+
+// BREW_BTN_UUID — sendBrewBtnState(bool). cpp:107-113.
+message BrewButton {
+  bool pressed = 1;
+}
+
+// STEAM_BTN_UUID — sendSteamBtnState(bool). cpp:115-121.
+message SteamButton {
+  bool pressed = 1;
+}
+
+// AUTOTUNE_RESULT_UUID — sendAutotuneResult(Kp,Ki,Kd) + Kf appended as "0.0".
+// cpp:123-130. Decode reads 4 tokens (NimBLEClientController.cpp:326-342).
+message AutotuneResult {
+  float kp = 1;
+  float ki = 2;
+  float kd = 3;
+  float kf = 4; // combined thermal feedforward gain (0 = disabled)
+}
+
+// VOLUMETRIC_MEASUREMENT_UUID — sendVolumetricMeasurement(float). cpp:132-137.
+message VolumetricMeasurement {
+  float value = 1; // grams / ml
+}
+
+// TOF_MEASUREMENT_UUID — sendTofMeasurement(int). cpp:139-144.
+message TofMeasurement {
+  int32 distance_mm = 1; // distance to water surface, mm
+}
+
+// INFO_UUID — setInfo()/readInfo(). Today a JSON string
+// {"hw","v","cp":{"dm","ps","led","tof"}} parsed in Controller.cpp:234-253.
+// Modeled here as structured fields (the JSON is itself a serialization layer
+// on top of the BLE characteristic, so nanopb would replace BOTH).
+message Capabilities {
+  bool dimming = 1;     // "dm"
+  bool pressure = 2;    // "ps"
+  bool led_control = 3; // "led"
+  bool tof = 4;         // "tof"
+}
+
+message SystemInfo {
+  string hardware = 1;            // "hw"
+  string version = 2;             // "v"
+  Capabilities capabilities = 3;  // "cp"
+}
+
+// ===========================================================================
+// Display -> Controller (WRITE characteristics)
+// ===========================================================================
+
+// OUTPUT_CONTROL_UUID type==0 — sendOutputControl(valve, pumpSetpoint,
+// boilerSetpoint). NimBLEClientController.cpp:183-190 / decode
+// NimBLEServerController.cpp:195-201. THE SECOND HOTTEST PACKET.
+message SimpleOutput {
+  bool valve = 1;
+  float pump_setpoint = 2;
+  float boiler_setpoint = 3;
+}
+
+// OUTPUT_CONTROL_UUID type==1 — sendAdvancedOutputControl(valve, boilerSetpoint,
+// pressureTarget, pressure, flow). cpp:172-181 / decode cpp:202-211.
+message AdvancedOutput {
+  bool valve = 1;
+  float boiler_setpoint = 2;
+  bool pressure_target = 3;
+  float pump_pressure = 4;
+  float pump_flow = 5;
+}
+
+// ALT_CONTROL_CHAR_UUID — sendAltControl(bool). cpp:216-220 / decode :212-217.
+message AltControl {
+  bool active = 1;
+}
+
+// PING_CHAR_UUID — sendPing(). Empty payload (today writes literal "1").
+message Ping {}
+
+// PID_CONTROL_CHAR_UUID — sendPidSettings(String). The display today sends a
+// pre-formatted comma string; the controller parses Kp,Ki,Kd,[Kf].
+// decode NimBLEServerController.cpp:231-250.
+message PidSettings {
+  float kp = 1;
+  float ki = 2;
+  float kd = 3;
+  float kf = 4; // optional; 0 = use default
+}
+
+// PUMP_MODEL_COEFFS_CHAR_UUID — sendPumpModelCoeffs(String). 4 floats; c and d
+// may be NaN (two-point flow mode). decode cpp:251-260.
+message PumpModelCoeffs {
+  float a = 1;
+  float b = 2;
+  float c = 3; // may be NaN
+  float d = 4; // may be NaN
+}
+
+// AUTOTUNE_CHAR_UUID — sendAutotune(testTime, samples). decode cpp:223-230.
+message AutotuneRequest {
+  int32 test_time = 1; // seconds
+  int32 samples = 2;
+}
+
+// PRESSURE_SCALE_UUID — setPressureScale(float). decode cpp:261-268.
+message PressureScale {
+  float scale = 1;
+}
+
+// VOLUMETRIC_TARE_UUID — tare(). Empty payload (today writes literal "1").
+message Tare {}
+
+// LED_CONTROL_UUID — sendLedControl(channel, brightness). decode cpp:274-281.
+message LedControl {
+  uint32 channel = 1;    // 0..7
+  uint32 brightness = 2; // 0..255
+}

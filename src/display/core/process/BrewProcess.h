@@ -12,6 +12,10 @@ class BrewProcess : public Process {
   public:
     Profile profile;
     ProcessTarget target;
+    // Live scale availability, pushed by Controller each tick; gates the CAR-367
+    // terminal-phase duration-cap suppression so a mid-shot scale loss restores
+    // the duration fallback. Defaults true to preserve behavior if never set.
+    bool volumetricAvailable = true;
     double brewDelay;
     unsigned int phaseIndex = 0;
     Phase currentPhase;
@@ -54,6 +58,8 @@ class BrewProcess : public Process {
 
     void updateFlow(float flow) { currentFlow = flow; }
 
+    void setVolumetricAvailable(bool available) { volumetricAvailable = available; }
+
     unsigned long getTotalDuration() const { return profile.getTotalDuration() * 1000L; }
 
     unsigned long getPhaseDuration() const { return static_cast<long>(currentPhase.duration) * 1000L; }
@@ -70,8 +76,19 @@ class BrewProcess : public Process {
             volume = currentVolume + predictedAddedVolume;
         }
         float timeInPhase = static_cast<float>(millis() - currentPhaseStarted) / 1000.0f;
+        // CAR-367: only the profile's terminal volumetric phase may treat its
+        // volumetric target as the authoritative stop and ignore its duration
+        // cap. Intermediate volumetric phases keep their duration cap so they
+        // still advance on time (see Phase::isFinished + PR #172 review).
+        // Additionally gate on live volumetric availability: if the scale goes
+        // unhealthy mid-shot (volumetricAvailable false), restore the duration
+        // cap so the phase still advances on time, bounded as before by
+        // BREW_SAFETY_DURATION_MS, rather than running to that safety ceiling.
+        bool suppressDurationForVolumetric =
+            target == ProcessTarget::VOLUMETRIC && volumetricAvailable &&
+            static_cast<int>(phaseIndex) == profile.indexOfFinalVolumetricPhase();
         return currentPhase.isFinished(target == ProcessTarget::VOLUMETRIC, volume, timeInPhase, currentFlow, currentPressure,
-                                       waterPumped, profile.type);
+                                       waterPumped, suppressDurationForVolumetric);
     }
 
     bool isUtility() const { return profile.utility; }

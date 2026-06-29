@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test, expect } from 'vitest';
 
 import { buildRemoteAccessLink, SECRET_SENTINEL } from './remoteAccessLogic.js';
 
@@ -10,7 +9,7 @@ test('remote access link is hidden while relay is disabled', () => {
     relayToken: 'secret-token',
   });
 
-  assert.equal(link, null);
+  expect(link).toBe(null);
 });
 
 test('remote access link is generated only when relay is enabled and configured', () => {
@@ -21,10 +20,7 @@ test('remote access link is generated only when relay is enabled and configured'
     pagesOrigin: 'https://example.test/gaggimate',
   });
 
-  assert.equal(
-    link,
-    'https://example.test/gaggimate?relay=wss%3A%2F%2Frelay.example%2Fconnect&token=secret-token',
-  );
+  expect(link).toBe('https://example.test/gaggimate?relay=wss%3A%2F%2Frelay.example%2Fconnect&token=secret-token');
 });
 
 test('remote access link is null when relayToken is the masked sentinel', () => {
@@ -38,7 +34,7 @@ test('remote access link is null when relayToken is the masked sentinel', () => 
     pagesOrigin: 'https://example.test/gaggimate',
   });
 
-  assert.equal(link, null);
+  expect(link).toBe(null);
 });
 
 test('remote access link is null when relayToken is empty', () => {
@@ -49,5 +45,5 @@ test('remote access link is null when relayToken is empty', () => {
     pagesOrigin: 'https://example.test/gaggimate',
   });
 
-  assert.equal(link, null);
+  expect(link).toBe(null);
 });

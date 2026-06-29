@@ -180,7 +180,7 @@ function getRingVisual({
   }
 
   if (!active && mode === 0) {
-    const progress = getTemperatureProgress(currentTemperature, 93);
+    const progress = getTemperatureProgress(currentTemperature, targetTemperature || 93);
     return {
       background: buildSolidRingBackground(progress, 'var(--home-ring-standby, #333)'),
       progress,

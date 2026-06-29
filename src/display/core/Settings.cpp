@@ -57,6 +57,9 @@ Settings::Settings() {
     mdnsName = preferences.getString("mn", DEFAULT_MDNS_NAME);
     homekit = preferences.getBool("hk", false);
     volumetricTarget = preferences.getBool("vt", false);
+    allowYieldOverride = preferences.getBool("ayo", false);
+    autoSteamEnabled = preferences.getBool("autosteam", false);
+    doseGrams = preferences.getDouble("dosegrams", 18.0);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
     savedScale = preferences.getString("ssc", "");
     momentaryButtons = preferences.getBool("mb", false);
@@ -64,6 +67,7 @@ Settings::Settings() {
     startupFillTime = preferences.getInt("bf_su", 5000);
     steamFillTime = preferences.getInt("bf_st", 5000);
     smartGrindActive = preferences.getBool("sg_a", false);
+    diagnosticLogEnabled = preferences.getBool("diag_log", false);
     smartGrindIp = preferences.getString("sg_i", "");
     smartGrindToggle = preferences.getBool("sg_t", false);
     smartGrindMode = preferences.getInt("sg_m", smartGrindToggle ? 1 : 0);
@@ -71,6 +75,10 @@ Settings::Settings() {
     homeAssistantIP = preferences.getString("ha_i", "");
     homeAssistantPort = preferences.getInt("ha_p", 1883);
     homeAssistantTopic = preferences.getString("ha_t", DEFAULT_HOME_ASSISTANT_TOPIC);
+    // Self-heal an oversized topic persisted before the clamp shipped, matching setHomeAssistantTopic().
+    if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
+        homeAssistantTopic = homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH);
+    }
     homeAssistantUser = preferences.getString("ha_u", "");
     homeAssistantPassword = preferences.getString("ha_pw", "");
     standbyTimeout = preferences.getInt("sbt", DEFAULT_STANDBY_TIMEOUT_MS);
@@ -269,6 +277,21 @@ void Settings::setVolumetricTarget(bool volumetric_target) {
     save();
 }
 
+void Settings::setAllowYieldOverride(bool allow_yield_override) {
+    this->allowYieldOverride = allow_yield_override;
+    save();
+}
+
+void Settings::setAutoSteamEnabled(bool auto_steam_enabled) {
+    this->autoSteamEnabled = auto_steam_enabled;
+    save();
+}
+
+void Settings::setDoseGrams(double dose_grams) {
+    this->doseGrams = std::clamp(dose_grams, 0.1, 200.0);
+    save();
+}
+
 void Settings::setOTAChannel(const String &otaChannel) {
     this->otaChannel = otaChannel;
     save();
@@ -299,6 +322,11 @@ void Settings::setSmartGrindActive(bool smart_grind_active) {
     save();
 }
 
+void Settings::setDiagnosticLogEnabled(bool diagnostic_log_enabled) {
+    diagnosticLogEnabled = diagnostic_log_enabled;
+    save();
+}
+
 void Settings::setSmartGrindIp(String smart_grind_ip) {
     this->smartGrindIp = std::move(smart_grind_ip);
     save();
@@ -324,7 +352,13 @@ void Settings::setHomeAssistantPort(const int homeAssistantPort) {
     save();
 }
 void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
-    this->homeAssistantTopic = homeAssistantTopic;
+    // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
+    // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
+    if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
+        this->homeAssistantTopic = homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH);
+    } else {
+        this->homeAssistantTopic = homeAssistantTopic;
+    }
     save();
 }
 void Settings::setHomeAssistantUser(const String &homeAssistantUser) {
@@ -584,12 +618,16 @@ void Settings::doSave() {
     preferences.putString("mn", mdnsName);
     preferences.putBool("hk", homekit);
     preferences.putBool("vt", volumetricTarget);
+    preferences.putBool("ayo", allowYieldOverride);
+    preferences.putBool("autosteam", autoSteamEnabled);
+    preferences.putDouble("dosegrams", doseGrams);
     preferences.putString("oc", otaChannel);
     preferences.putString("ssc", savedScale);
     preferences.putBool("bf_a", boilerFillActive);
     preferences.putInt("bf_su", startupFillTime);
     preferences.putInt("bf_st", steamFillTime);
     preferences.putBool("sg_a", smartGrindActive);
+    preferences.putBool("diag_log", diagnosticLogEnabled);
     preferences.putString("sg_i", smartGrindIp);
     preferences.putBool("sg_t", smartGrindToggle);
     preferences.putInt("sg_m", smartGrindMode);

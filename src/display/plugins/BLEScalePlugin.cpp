@@ -1,4 +1,9 @@
 #include "BLEScalePlugin.h"
+
+#if GAGGIMATE_ENABLE_BLE_SCALE
+
+#include "BLEScaleScanPolicy.h"
+#include "ShotHistoryPlugin.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <cmath> // For isfinite()
@@ -15,9 +20,7 @@
 #include <scales/varia.h>
 #include <scales/weighmybru.h>
 
-void on_ble_measurement(float value) {
-    BLEScales.onMeasurement(value);
-}
+void on_ble_measurement(float value) { BLEScales.onMeasurement(value); }
 
 BLEScalePlugin BLEScales;
 
@@ -52,6 +55,10 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     this->controller = controller;
     this->pluginRegistry = RemoteScalesPluginRegistry::getInstance();
 
+    // Seed the previous-mode tracker with the controller's current mode so the
+    // very first mode-change transition is classified correctly.
+    this->previousMode = controller->getMode();
+
     // Apply scale plugins with error checking
     AcaiaScalesPlugin::apply();
     BookooScalesPlugin::apply();
@@ -73,7 +80,7 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     }
 
     manager->on("controller:bluetooth:connect", [this](Event const &) {
-        if (this->controller != nullptr && this->controller->getMode() != MODE_STANDBY) {
+        if (this->controller != nullptr && shouldScanForBleScaleMode(this->controller->getMode())) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
@@ -81,6 +88,10 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     });
     manager->on("controller:bluetooth:disconnect", [this](Event const &) {
         ESP_LOGW("BLEScalePlugin", "Controller disconnected, stopping BLE scan");
+        // Clear any in-flight steam grace so a BLE disconnect during the window
+        // doesn't leave the pending flag dangling until the deadline.
+        steamDisconnectPending = false;
+        steamGraceDeadline = 0;
         active = false;
         disconnect();
         scanner->stopAsyncScan();
@@ -88,16 +99,41 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
     manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
     manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
     manager->on("controller:mode:change", [this](Event const &event) {
-        if (event.getInt("value") != MODE_STANDBY) {
+        const int newMode = event.getInt("value");
+        const int oldMode = previousMode;
+        previousMode = newMode;
+
+        // A same-mode re-fire (e.g. WebUIPlugin re-sending req:change-mode with
+        // the current mode) is a no-op: bail before any scan/teardown logic so a
+        // redundant STEAM->STEAM event can't collapse an in-flight grace window
+        // into an immediate disconnect.
+        if (isRedundantModeChange(oldMode, newMode)) {
+            return;
+        }
+
+        if (shouldScanForBleScaleMode(newMode)) {
+            // Entering (or staying in) a scanning mode: resume scanning and
+            // cancel any pending steam-grace teardown.
+            steamDisconnectPending = false;
+            steamGraceDeadline = 0;
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
+        } else if (shouldStartSteamScaleGrace(oldMode, newMode)) {
+            // Scanning-mode -> STEAM: arm the grace window. On the normal auto-steam
+            // path the drips were already captured during the MODE_BREW hold, so
+            // loop() will tear the scale down promptly once isExtendedRecording() is
+            // false; the deadline below is only the hard-cap fallback.
+            steamDisconnectPending = true;
+            steamGraceDeadline = millis() + STEAM_SCALE_GRACE_PERIOD_MS;
+            ESP_LOGI("BLEScalePlugin", "Entering steam from scanning mode, keeping scale alive for %lums",
+                     STEAM_SCALE_GRACE_PERIOD_MS);
         } else {
-            active = false;
-            disconnect();
-            if (scanner != nullptr) {
-                scanner->stopAsyncScan();
-            }
+            // Any other non-scanning mode (standby/water, or steam not reached
+            // from a scanning mode): disconnect immediately as before.
+            steamDisconnectPending = false;
+            steamGraceDeadline = 0;
+            tearDownScale();
             ESP_LOGI("BLEScalePlugin", "Stopping scanning, disconnecting");
         }
     });
@@ -108,6 +144,34 @@ void BLEScalePlugin::loop() {
         establishConnection();
     }
     const unsigned long now = millis();
+
+    // PRO-248: Steam grace window teardown. The actual drip capture does NOT happen
+    // here — it happens earlier, while the machine is still in MODE_BREW and the
+    // BLUETOOTH source is latched (see DefaultUI's pendingAutoSteam hold, which waits
+    // for ShotHistory.isExtendedRecording() to go false before switching to STEAM).
+    // By the time STEAM is entered and steamDisconnectPending is armed, that recording
+    // window is normally already closed, so the check below fires on the next tick and
+    // we tear the scale down PROMPTLY rather than idling for the full grace.
+    //
+    // recordingWindowClosed (!isExtendedRecording) is the normal trigger; steamGraceDeadline
+    // (millis() + POST_STOP_GRACE_DURATION_MS, the shared cap) is a hard-cap safety net for
+    // the unlikely case that STEAM is entered with a recording window still open — we still
+    // tear down at the cap rather than holding the scale forever. Casting the diff to signed
+    // handles millis() rollover safely.
+    if (steamDisconnectPending) {
+        const bool capElapsed = (long)(now - steamGraceDeadline) >= 0;
+        const bool recordingWindowClosed = !ShotHistory.isExtendedRecording();
+        if (capElapsed || recordingWindowClosed) {
+            if (controller != nullptr && controller->getMode() == MODE_STEAM) {
+                tearDownScale();
+                ESP_LOGI("BLEScalePlugin", "Steam grace window %s, disconnecting scale",
+                         capElapsed ? "hit hard cap" : "closed (extended recording done)");
+            }
+            steamDisconnectPending = false;
+            steamGraceDeadline = 0;
+        }
+    }
+
     if (now - lastUpdate > UPDATE_INTERVAL_MS) {
         lastUpdate = now;
         update();
@@ -201,6 +265,14 @@ void BLEScalePlugin::disconnect() {
         uuid = "";
         doConnect = false;
         reconnectionTries = 0;
+    }
+}
+
+void BLEScalePlugin::tearDownScale() {
+    active = false;
+    disconnect();
+    if (scanner != nullptr) {
+        scanner->stopAsyncScan();
     }
 }
 
@@ -323,3 +395,14 @@ std::vector<DiscoveredDevice> BLEScalePlugin::getDiscoveredScales() const {
     }
     return scanner->getDiscoveredScales();
 }
+
+#else // GAGGIMATE_ENABLE_BLE_SCALE
+
+// BLE scale compiled out (CAR-382): the heavy implementation above (and the
+// entire esp-arduino-ble-scales library it pulls in) is excluded from the
+// build. Only the global instance — referenced by address in Controller.cpp
+// and by name in the SquareLine-generated ui_events.cpp — is defined here, as
+// the lightweight no-op stub declared in the header.
+BLEScalePlugin BLEScales;
+
+#endif // GAGGIMATE_ENABLE_BLE_SCALE

@@ -2,6 +2,9 @@
 #include "../core/Controller.h"
 #include <ArduinoJson.h>
 #include <ctime>
+#include <esp_log.h>
+
+static const char *LOG_TAG = "MQTTPlugin";
 
 bool MQTTPlugin::connect(Controller *controller) {
     const Settings settings = controller->getSettings();
@@ -13,16 +16,14 @@ bool MQTTPlugin::connect(Controller *controller) {
 
     client.begin(ip.c_str(), haPort, net);
     client.setKeepAlive(10);
-    printf("Connecting to MQTT");
+    ESP_LOGI(LOG_TAG, "Connecting to MQTT...");
     for (int i = 0; i < MQTT_CONNECTION_RETRIES; i++) {
         if (client.connect(clientId.c_str(), haUser.c_str(), haPassword.c_str())) {
-            printf("\n");
             return true;
         }
-        printf(".");
         delay(MQTT_CONNECTION_DELAY);
     }
-    printf("\nConnection to MQTT failed.\n");
+    ESP_LOGW(LOG_TAG, "Connection to MQTT failed after %d retries", MQTT_CONNECTION_RETRIES);
     return false;
 }
 
@@ -95,7 +96,11 @@ void MQTTPlugin::publishDiscovery(Controller *controller) {
     payload["qos"] = 2;
 
     char publishTopic[80];
-    snprintf(publishTopic, sizeof(publishTopic), "%s/device/%s/config", haTopic.c_str(), cmac);
+    const int ret = snprintf(publishTopic, sizeof(publishTopic), "%s/device/%s/config", haTopic.c_str(), cmac);
+    if (ret < 0 || ret >= static_cast<int>(sizeof(publishTopic))) {
+        ESP_LOGW(LOG_TAG, "MQTT discovery topic truncated (haTopic too long); skipping discovery publish.");
+        return;
+    }
 
     client.publish(publishTopic, payload.as<String>());
 }
@@ -107,7 +112,11 @@ void MQTTPlugin::publish(const std::string &topic, const std::string &message) {
     mac.replace(":", "_");
     const char *cmac = mac.c_str();
     char publishTopic[80];
-    snprintf(publishTopic, sizeof(publishTopic), "gaggimate/%s/%s", cmac, topic.c_str());
+    const int ret = snprintf(publishTopic, sizeof(publishTopic), "gaggimate/%s/%s", cmac, topic.c_str());
+    if (ret < 0 || ret >= static_cast<int>(sizeof(publishTopic))) {
+        ESP_LOGW(LOG_TAG, "MQTT publish topic truncated; skipping publish.");
+        return;
+    }
     client.publish(publishTopic, message.c_str());
 }
 void MQTTPlugin::publishBrewState(const char *state) {

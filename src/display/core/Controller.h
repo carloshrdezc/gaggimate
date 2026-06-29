@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
+#include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
 
@@ -98,9 +99,19 @@ class Controller {
     bool isAutotuning() const;
     bool isReady() const;
     bool isVolumetricAvailable() const;
+    // True when the active shot's volumetric source is still delivering usable
+    // measurements (CAR-367 duration-cap suppression gate). See definition.
+    bool isActiveVolumetricSourceLive() const;
     bool isSDCard() const { return sdcard; }
-    virtual float getTargetPressure() const { return targetPressure; }
-    virtual float getTargetFlow() const { return targetFlow; }
+    virtual float getTargetPressure() const;
+    virtual float getTargetFlow() const;
+    // True when a target pressure/flow is actually applicable for the current
+    // mode. In standby this is false for simple-pump profiles, empty profiles,
+    // and "hold current value" (-1) phases — letting the API send null rather
+    // than a misleading 0. Always true in active modes (the member field holds
+    // the live target).
+    bool hasTargetPressure() const;
+    bool hasTargetFlow() const;
     virtual float getCurrentPressure() const { return pressure; }
     virtual float getCurrentPuckFlow() const { return currentPuckFlow; }
     virtual float getCurrentPumpFlow() const { return currentPumpFlow; }
@@ -130,6 +141,7 @@ class Controller {
     ProcessSnapshot getProcessSnapshot() const;
     Settings &getSettings() { return settings; }
     BeanManager *getBeanManager() { return beanManager; }
+    GrinderManager *getGrinderManager() { return grinderManager; }
     ProfileManager *getProfileManager() { return profileManager; }
 #ifndef GAGGIMATE_HEADLESS
     DefaultUI *getUI() const { return ui; }
@@ -188,6 +200,10 @@ class Controller {
 
     // Functional methods
     void updateControl();
+    // Whether the active process drives a real pump pressure/flow target
+    // (advanced-pump brew / manual / steam). False for simple-pump brew, water,
+    // grind, and when inactive. Non-standby helper for hasTargetPressure/Flow.
+    bool hasPumpTarget() const;
 
     // Event handlers
     void onTempRead(float temperature);
@@ -209,6 +225,7 @@ class Controller {
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
+    GrinderManager *grinderManager{};
     ProfileManager *profileManager{};
 
     int mode = MODE_BREW;

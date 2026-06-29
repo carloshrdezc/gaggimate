@@ -98,6 +98,10 @@ export function shouldKeepManualDraftDirty({ active, partial }) {
   return !active && Object.keys(partial ?? {}).length > 0;
 }
 
+export function computeYieldEditable({ allowYieldOverride, brewTarget, bluetoothConnected }) {
+  return !!allowYieldOverride && !!brewTarget && !!bluetoothConnected;
+}
+
 export function getAvailableModeOptions(isGrindAvailable = true, isManualAvailable = true) {
   return MODE_OPTIONS.filter(option => {
     if (option.id === MODE_GRIND) return isGrindAvailable;
@@ -169,6 +173,18 @@ export function getPrimaryActionState({ active, finished, mode, isGrindAvailable
       label: 'CLEAR',
       accent: isSteamMode ? 'var(--dm-warn)' : 'var(--dm-accent)',
       action: 'clear',
+    };
+  }
+
+  if (mode === MODE_STANDBY) {
+    // Wakes the machine into BREW (mirrors the physical brew button's first
+    // press). Firmware maps req:process:activate in MODE_STANDBY to
+    // deactivateStandby(). A second tap then starts the shot.
+    return {
+      label: 'WAKE',
+      accent: 'var(--dm-accent)',
+      action: 'start-process',
+      processKind: null,
     };
   }
 

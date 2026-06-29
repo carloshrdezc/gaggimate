@@ -1,6 +1,6 @@
 #include "ControllerOTA.h"
 #include <HTTPClient.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
 static constexpr uint8_t FIRMWARE_MAGIC_HEADER = 0xE9;
 
@@ -25,15 +25,15 @@ void ControllerOTA::init(NimBLEClient *client, const ctr_progress_callback_t &pr
 }
 
 bool ControllerOTA::update(WiFiClientSecure &wifi_client, const String &release_url) {
-    if (SPIFFS.exists("/board-firmware.bin")) {
+    if (LittleFS.exists("/board-firmware.bin")) {
         ESP_LOGI("ControllerOTA", "Removing previous update file");
-        SPIFFS.remove("/board-firmware.bin");
+        LittleFS.remove("/board-firmware.bin");
     }
     if (!downloadFile(wifi_client, release_url)) {
         ESP_LOGE("ControllerOTA", "Download of firmware file failed");
         return false;
     }
-    File file = SPIFFS.open("/board-firmware.bin", FILE_READ);
+    File file = LittleFS.open("/board-firmware.bin", FILE_READ);
     if (!file) {
         ESP_LOGE("ControllerOTA", "Failed to open downloaded firmware file");
         return false;
@@ -70,7 +70,10 @@ bool ControllerOTA::downloadFile(WiFiClientSecure &wifi_client, const String &re
         return false;
     }
 
-    WiFiClient *tcp = http.getStreamPtr();
+    // PRO-293: core 3.x reorganized the network stack under NetworkClient;
+    // HTTPClient::getStreamPtr() now returns NetworkClient* (WiFiClient is a
+    // typedef of NetworkClient but is not in scope via <HTTPClient.h> alone).
+    NetworkClient *tcp = http.getStreamPtr();
     delay(100);
 
     if (tcp->peek() != FIRMWARE_MAGIC_HEADER) {
@@ -79,7 +82,7 @@ bool ControllerOTA::downloadFile(WiFiClientSecure &wifi_client, const String &re
         return false;
     }
 
-    File file = SPIFFS.open("/board-firmware.bin", FILE_WRITE, true);
+    File file = LittleFS.open("/board-firmware.bin", FILE_WRITE, true);
     if (!file) {
         ESP_LOGE("ControllerOTA", "Failed to create firmware file");
         http.end();

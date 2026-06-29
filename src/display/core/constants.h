@@ -22,6 +22,11 @@
 #define DEFAULT_OTA_CHANNEL "latest"
 #define DEFAULT_TIMEZONE "Europe/Rome"
 #define DEFAULT_HOME_ASSISTANT_TOPIC "homeassistant"
+// Max length of the HA discovery topic prefix. The discovery topic is built into an
+// 80-byte buffer as "<haTopic>/device/<mac>/config"; with a MAC like AA_BB_CC_DD_EE_FF
+// (17 chars) plus "/device/" (8) + "/config" (7) + NUL (1) = 33 bytes of fixed overhead,
+// leaving 47 bytes for the prefix before snprintf would truncate.
+#define MAX_HOME_ASSISTANT_TOPIC_LENGTH 47
 #define DEFAULT_STEAM_PUMP_PERCENTAGE 4.f
 #define DEFAULT_STEAM_PUMP_CUTOFF 2.f
 #define WIFI_CONNECT_ATTEMPTS 20

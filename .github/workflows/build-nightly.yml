@@ -1,17 +1,26 @@
 on:
   push:
     branches:
-      - "master"
+      - "dev-master"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
 name: Build Nightly
+# PRO-250: serialize every gh-pages push repo-wide. A concurrency group string
+# is shared across ALL workflows in the repo, so using the identical group name
+# here and in build-beta.yml makes concurrent nightly/beta runs QUEUE instead of
+# racing on refs/heads/gh-pages (the intermittent "cannot lock ref" failure).
+# cancel-in-progress: false so a queued nightly/beta is never dropped.
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-tags: true
           fetch-depth: 0
@@ -26,7 +35,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -38,10 +47,25 @@ jobs:
           mkdir -p upload/display
           mkdir -p upload/headless
           mkdir -p upload/controller
+          # `beta` and `nightly` are MOVING tags (re-pointed on every release) and
+          # must never anchor the version string: if git describe resolves to one,
+          # out/version.txt becomes e.g. `beta-NNN-g<sha>`, which semver-parses to
+          # 0.0.0 (the token has no digits) so a 2.0.x device treats the nightly as
+          # OLDER and refuses the OTA update (PRO-321). Delete BOTH local tags AND
+          # pass --exclude for each (belt-and-suspenders) so describe falls back to
+          # the real release tag (e.g. 2.0.14-...). Mirrors build-beta.yml and
+          # scripts/auto_firmware_version.py.
           git tag -d nightly 2>/dev/null || true
-          git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
+          git tag -d beta 2>/dev/null || true
+          git describe --tags --dirty --exclude nightly --exclude beta > out/version.txt
+      # The web UI is embedded into the display/headless app image (PRO-215), so
+      # build_webui.sh must run before the display/headless pio builds; otherwise
+      # embed_webui_pre.py stubs an EMPTY bundle and the nightly firmware serves
+      # 404 for / instead of the UI. Run once here; the generated manifest+blob in
+      # src/display/webassets/ are reused by the display and headless builds. It
+      # also stages data/p (seed profiles) for the fresh-install filesystem image.
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build controller
         run: |
           export PLATFORMIO_BUILD_FLAGS="'-DNIGHTLY_BUILD'"
@@ -53,6 +77,7 @@ jobs:
           cp .pio/build/controller/partitions.bin upload/controller/partitions.bin
           cp .pio/build/controller/bootloader.bin upload/controller/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -64,10 +89,10 @@ jobs:
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin upload/display/filesystem.bin
-          cp .pio/build/display/spiffs.bin upload/headless/filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-headless-filesystem.bin
+          cp .pio/build/display/littlefs.bin upload/display/filesystem.bin
+          cp .pio/build/display/littlefs.bin upload/headless/filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-headless-filesystem.bin
       - name: Build display
         run: |
           export PLATFORMIO_BUILD_FLAGS="'-DNIGHTLY_BUILD'"
@@ -79,6 +104,7 @@ jobs:
           cp .pio/build/display/partitions.bin upload/display/partitions.bin
           cp .pio/build/display/bootloader.bin upload/display/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -99,6 +125,7 @@ jobs:
           cp .pio/build/display-headless/partitions.bin upload/headless/partitions.bin
           cp .pio/build/display-headless/bootloader.bin upload/headless/bootloader.bin
       - uses: ./.github/actions/upload-firmware
+        if: ${{ vars.ENABLE_UPDATE_SERVER_UPLOAD == 'true' }}
         continue-on-error: true
         env:
           UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
@@ -121,6 +148,10 @@ jobs:
       pages: write
       pull-requests: write
     steps:
+      - name: Checkout repo (for tag management)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download Firmware Files
         uses: actions/download-artifact@v4
         with:
@@ -129,8 +160,43 @@ jobs:
       - name: Read version
         id: version
         run: echo "version=$(cat release/version.txt)" >> $GITHUB_OUTPUT
+      - name: Force-move nightly tag to current commit
+        # softprops/action-gh-release sets target_commitish only when CREATING
+        # a tag. If the nightly tag already exists from a prior run, the
+        # release source tarball stays pinned to that old commit even though
+        # the assets refresh. Delete-then-recreate the tag so it always
+        # tracks HEAD before the release action runs.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -d nightly 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+          git tag -f nightly "${{ github.sha }}"
+          git push origin "refs/tags/nightly" --force
+      - name: Delete any stale nightly release records
+        # If a previous run was cancelled mid-publish, softprops/action-gh-release
+        # can leave behind an orphan draft release that still claims the
+        # 'nightly' tag. The next run then fails at the finalize step with
+        # 'tag_name already_exists' because two release records race for the
+        # same tag. Delete every release that points at 'nightly' (draft or
+        # published) so this run starts from a clean slate.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "nightly") | .id' \
+          | while read -r release_id; do
+              if [[ -n "$release_id" ]]; then
+                echo "Deleting stale nightly release: $release_id"
+                gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id" || true
+              fi
+            done
       - name: Update Nightly Release
-        uses: andelf/nightly-release@c5ed4bdb7c1da04a4fa1e40bc5e67306f682563b
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -140,6 +206,7 @@ jobs:
           body: 'Latest nightly release, use the nightly channel in the UI to download this firmware.'
           files: |
             release/*
+          make_latest: 'false'
       - name: Deploy to GitHub Pages subdirectory
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
         with:

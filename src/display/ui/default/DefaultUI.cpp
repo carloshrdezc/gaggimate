@@ -5,11 +5,15 @@
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/Process.h>
 #include <display/core/zones.h>
+#ifndef GAGGIMATE_SIM // hardware panel drivers are device-only
 #include <display/drivers/AmoledDisplayDriver.h>
 #include <display/drivers/LilyGoDriver.h>
 #include <display/drivers/WaveshareDriver.h>
 #include <display/drivers/common/LV_Helper.h>
+#endif
 #include <display/main.h>
+#include <display/plugins/ShotHistoryPlugin.h>
+#include <display/ui/default/lvgl/gm_ui.h>
 #include <display/ui/default/lvgl/ui_theme_manager.h>
 #include <display/ui/default/lvgl/ui_themes.h>
 #include <display/ui/utils/effects.h>
@@ -19,6 +23,15 @@
 #include "esp_sntp.h"
 
 static EffectManager effect_mgr;
+
+// True when the active panel is the AMOLED display (drives a few theme/contrast
+// tweaks). In the desktop simulator there is no hardware AMOLED panel and the
+// driver classes are not compiled, so this is always false.
+#ifdef GAGGIMATE_SIM
+#define GM_PANEL_IS_AMOLED(panelDriver) (false)
+#else
+#define GM_PANEL_IS_AMOLED(panelDriver) (AmoledDisplayDriver::getInstance() == (panelDriver))
+#endif
 
 namespace {
 constexpr lv_opa_t OPA_45 = static_cast<lv_opa_t>(45);
@@ -125,6 +138,7 @@ struct RingVisualContext {
     bool active;
     bool grindActive;
     Controller *controller;
+    bool temperatureStable;
 };
 
 constexpr int MIN_STEAM_TARGET_C = 120;
@@ -251,7 +265,7 @@ RingVisual buildRingVisual(const DisplayPalette &palette, const RingVisualContex
     switch (context.mode) {
     case MODE_BREW:
         return {temperatureProgress(context.currentTemperature, context.targetTemperature), palette.accent,
-                context.currentTemperature < context.targetTemperature ? "HEATING" : "BREW"};
+                context.temperatureStable ? "BREW" : "HEATING"};
     case MODE_STEAM: {
         const int steamTarget =
             context.targetTemperature > MIN_STEAM_TARGET_C ? context.targetTemperature : DEFAULT_STEAM_TARGET_C;
@@ -410,20 +424,16 @@ void styleFixedLabel(lv_obj_t *obj, const lv_coord_t width, const lv_coord_t hei
 }
 
 void alignMetricPair(lv_obj_t *icon, lv_obj_t *label, const lv_coord_t centerX, const lv_coord_t centerY, const lv_color_t tone,
-                     const DisplayPalette &palette) {
+                     const DisplayPalette &palette, const lv_font_t *font = &ndot_24) {
     styleMetricIcon(icon, tone);
-    styleFixedLabel(label, 82, 28, &ndot_24, palette.textPrimary);
+    styleFixedLabel(label, 82, 28, font, palette.textPrimary);
     lv_obj_align(icon, LV_ALIGN_CENTER, centerX - 38, centerY);
     lv_obj_align(label, LV_ALIGN_CENTER, centerX + 18, centerY);
 }
 
-void styleMenuTile(lv_obj_t *obj, const DisplayPalette &palette, const lv_color_t tone) {
-    if (obj == nullptr || !lv_obj_is_valid(obj))
-        return;
-    styleGlassButton(obj, palette, tone, 999, 1, OPA_200);
-    lv_obj_set_style_bg_img_recolor(obj, tone, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_img_recolor_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-}
+// CAR-308: styleMenuTile() removed. The Nothing-theme mode launcher
+// (ui_ModeScreen) styles its own tiles via gm_* builders + GM_* tokens
+// directly in ui_ModeScreen_screen_init; no shared restyle helper needed.
 
 void styleScreenBase(lv_obj_t *screen, const DisplayPalette &palette, const bool roundDisplay) {
     if (screen == nullptr || !lv_obj_is_valid(screen))
@@ -541,11 +551,15 @@ void DefaultUI::init() {
         case MODE_GRIND:
             changeScreen(&ui_GrindScreen, &ui_GrindScreen_screen_init);
             break;
+        // CAR-292: STEAM and WATER share ui_StatusScreen with the brew path.
+        // gm_status_apply_mode() retints + relayouts per mode; updateStatusScreen()
+        // drives hero/kicker/metrics directly from class state, so idle entry
+        // (no live shot) renders the per-mode static layout cleanly.
         case MODE_STEAM:
-            changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
+            changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
             break;
         case MODE_WATER:
-            changeScreen(&ui_SimpleProcessScreen, &ui_SimpleProcessScreen_screen_init);
+            changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
             break;
         default:
             break;
@@ -648,14 +662,41 @@ void DefaultUI::loop() {
     const unsigned long diff = now - lastRender;
 
     if (pendingAutoSteam) {
-        pendingAutoSteam = false;
-        // Controller::deactivate() triggers brew:end without changing mode, so
-        // the mode stays MODE_BREW after a normal shot ends. The guard only
-        // fires false if the user explicitly navigated away (e.g. to standby)
-        // between brew:end and this loop tick, in which case discarding is correct.
-        if (controller->getMode() == MODE_BREW) {
-            controller->clear();
-            controller->setMode(MODE_STEAM);
+        // PRO-223 / PRO-248: Do not transition to steam until the shot is fully
+        // finalized. ShotHistory keeps an extended-recording / weight-settle
+        // window open for up to POST_STOP_GRACE_DURATION_MS after brew:end (the
+        // single source of truth, shared with BLEScalePlugin's scale-alive grace)
+        // so the BLE scale can settle and post-stop drips are captured in the
+        // recorded yield. While that window is open the mode stays MODE_BREW, so
+        // the BLE scale stays connected and Controller keeps lastProcess alive
+        // with the BLUETOOTH volumetric source latched — every drip still reaches
+        // updateVolume(). Calling controller->clear() here fires
+        // controller:brew:clear, which aborts that window (endExtendedRecording)
+        // and frees lastProcess / sets the source INACTIVE, and setMode(MODE_STEAM)
+        // stops record() logging. So we hold pendingAutoSteam until the settle
+        // completes.
+        //
+        // When there is no BLE scale (flow-estimation / time-based shots),
+        // endRecording() never opens the window, so isExtendedRecording() is
+        // already false and steam engages immediately on this tick.
+        if (ShotHistory.isExtendedRecording()) {
+            // Settle still in progress; keep the request pending and re-check next
+            // tick. No rerender needed here — the active/idle interval below keeps
+            // the screen refreshing during the brew, and we render explicitly when
+            // the gate releases (in the else branch).
+        } else {
+            pendingAutoSteam = false;
+            // Controller::deactivate() triggers brew:end without changing mode, so
+            // the mode stays MODE_BREW after a normal shot ends. The
+            // getMode() == MODE_BREW check is false only if the user explicitly
+            // navigated away (e.g. to standby) between brew:end and this tick, in
+            // which case discarding the auto-steam transition is correct.
+            if (controller->getMode() == MODE_BREW) {
+                controller->clear();
+                controller->setMode(MODE_STEAM);
+                // Gate released — guarantee exactly one render for the steam transition.
+                rerender = true;
+            }
         }
     }
 
@@ -695,6 +736,36 @@ void DefaultUI::loop() {
             updateStandbyScreen();
         if (lv_scr_act() == ui_StatusScreen)
             updateStatusScreen();
+        // CAR-308 P2 #2 (Codex review): drive the status-bar clock on the
+        // mode launcher too. ui_ModeScreen calls gm_status_bar(scr, false)
+        // and points gm_h.status_time at its own clock label, but neither
+        // updateStandbyScreen() nor updateStatusScreen() runs while
+        // ModeScreen is active — so without this branch the launcher's
+        // clock stayed at the gm_status_bar() builder placeholder ("--:--").
+        // updateStatusBarClock() is the shared formatter used by
+        // updateStatusScreen() above; it no-ops when gm_h.status_time is
+        // NULL/invalid, so this is safe to call unconditionally for
+        // ModeScreen.
+        if (lv_scr_act() == ui_ModeScreen)
+            updateStatusBarClock();
+        // CAR-315: BrewScreen also owns a gm_status_bar() and points
+        // gm_h.status_time at its own clock (bs_status_time), but no
+        // per-frame update path drove it — so the clock stuck at the
+        // builder placeholder and rendered as missing-glyph rectangles.
+        // updateStatusBarClock() no-ops on NULL/invalid handles, so this is
+        // safe to call unconditionally while BrewScreen is active.
+        if (lv_scr_act() == ui_BrewScreen)
+            updateStatusBarClock();
+        // CAR-315 (PR #151 Codex review P2): GrindScreen also owns a
+        // gm_status_bar(ui_GrindScreen, true) and points gm_h.status_time at
+        // its own clock (gs_status_time), but had no per-frame update path.
+        // Since gm_status_bar() now seeds the clock label HIDDEN (so the
+        // "--:--" placeholder never renders as missing-glyph rectangles), a
+        // screen with no update hook would keep its clock hidden forever.
+        // updateStatusBarClock() no-ops on NULL/invalid handles, so this is
+        // safe to call unconditionally while GrindScreen is active.
+        if (lv_scr_act() == ui_GrindScreen)
+            updateStatusBarClock();
         effect_mgr.evaluate_all();
     }
 
@@ -799,46 +870,56 @@ void DefaultUI::setupState() {
 }
 
 void DefaultUI::setupReactive() {
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustDials(ui_MenuScreen_dials); },
-                          &pressureAvailable);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; }, [=]() { adjustDials(ui_StatusScreen_dials); },
-                          &pressureAvailable);
+    // CAR-330 M2: _ui_flag_modify() polarity (single canonical explanation;
+    // the per-call repeats below were collapsed to references). It is tri-state
+    // on the third arg (ui_helpers.c:80-89): 0 ADDs the flag, 1 REMOVEs it. For
+    // LV_OBJ_FLAG_HIDDEN that means a passed bool reads as "true => REMOVE HIDDEN
+    // => shown, false => ADD HIDDEN => hidden". So to SHOW a widget, pass the
+    // condition under which it should be visible (e.g. !atTarget to show a pill
+    // only while heating).
+    // adjustDials() paints the dial arc colors from the live palette using plain (non-themeable) local styles. A theme
+    // switch makes ui_theme_set() reapply the themeable arc-color registrations in ui_comp_dials.c, which would otherwise
+    // overwrite those palette colors until the next dial recalculation. Depending on currentThemeMode here forces a full
+    // restyle on theme change so the dials never snap back to the generated defaults.
+    // CAR-308: ui_ModeScreen no longer hosts a SquareLine dials component —
+    // the rebuilt Nothing-theme launcher is a static hub with no live
+    // pressure/temp readouts. No use_effect dial reactor here.
+    // CAR-278: ui_StatusScreen no longer hosts a SquareLine dials component —
+    // the rebuilt screen owns its visuals via gm_h. updateStatusScreen() drives
+    // accents and metric values directly, so no use_effect dial reactor here.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; }, [=]() { adjustDials(ui_BrewScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; }, [=]() { adjustDials(ui_GrindScreen_dials); },
-                          &pressureAvailable);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { adjustDials(ui_SimpleProcessScreen_dials); }, &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustDials(ui_ProfileScreen_dials); },
-                          &pressureAvailable);
+                          &pressureAvailable, &currentThemeMode);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; }, [=]() { adjustHeatingIndicator(ui_BrewScreen_dials); },
                           &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { adjustHeatingIndicator(ui_SimpleProcessScreen_dials); }, &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustHeatingIndicator(ui_MenuScreen_dials); },
-                          &isTemperatureStable, &heatingFlash);
+    // CAR-292: ui_StatusScreen has no SquareLine dials/heating-indicator
+    // widgets; visuals are driven by updateStatusScreen() + gm_status_apply_mode().
+    // CAR-308: ui_ModeScreen has no SquareLine dials/heating-indicator widgets
+    // anymore; the Nothing-theme launcher doesn't surface live heating state.
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() { adjustHeatingIndicator(ui_ProfileScreen_dials); }, &isTemperatureStable, &heatingFlash);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
                           [=]() { adjustHeatingIndicator(ui_GrindScreen_dials); }, &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() { adjustHeatingIndicator(ui_StatusScreen_dials); }, &isTemperatureStable, &heatingFlash);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() { lv_label_set_text(ui_SimpleProcessScreen_mainLabel5, mode == MODE_STEAM ? "STEAM" : "WATER"); },
-                          &mode);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(uic_MenuScreen_dials_tempText, "%d°C", currentTemp);
-                          },
-                          &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(uic_StatusScreen_dials_tempText, "%d°C", currentTemp);
-                          },
-                          &currentTemp);
+    // CAR-278: status screen no longer has a SquareLine dial widget for the
+    // heating indicator. updateStatusScreen() handles its visuals directly.
+    // CAR-292: ui_StatusScreen sets the kicker text per mode (BREW / STEAM /
+    // WATER) inline in updateStatusScreen(); no separate effect needed.
+    // CAR-308: no temp readout on the rebuilt mode launcher — live boiler temp
+    // surfaces on ui_StatusScreen / ui_BrewScreen / ui_GrindScreen instead.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_BrewScreen_dials_tempText, "%d°C", currentTemp);
+                              // CAR-301 review C2: mirror live boiler temp into the new
+                              // chat2 hero numeral. The dials cluster's tempText is no
+                              // longer the prominent readout — the centered ndot_150
+                              // numeral is. Hero is integer-only ("93") with the
+                              // separate "°" suffix label above; no °C unit here.
+                              if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
+                                  lv_label_set_text_fmt(uic_BrewScreen_hero_value, "%d", currentTemp);
+                              }
                           },
                           &currentTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
@@ -846,24 +927,40 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_GrindScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(uic_SimpleProcessScreen_dials_tempText, "%d°C", currentTemp);
-                          },
-                          &currentTemp);
+    // CAR-292: current temp on ui_StatusScreen is driven directly through
+    // gm_h.m_temp / gm_h.w_temp / gm_h.hero in updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() {
                               lv_label_set_text_fmt(uic_ProfileScreen_dials_tempText, "%d°C", currentTemp);
                           },
                           &currentTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; }, [=]() { adjustTempTarget(ui_MenuScreen_dials); },
-                          &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
+    // CAR-308: no target-temp dial on the rebuilt mode launcher.
+    // CAR-279 review fix: Quick-settings brew-temp readout is driven by the
+    // same targetTemp signal so the +/- stepper gives immediate feedback and
+    // the initial value reflects the real target instead of the static "93"
+    // placeholder set in ui_MenuScreen_screen_init.
+    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
                           [=]() {
-                              lv_label_set_text_fmt(ui_StatusScreen_targetTemp, "%d°C", targetTemp);
-                              adjustTempTarget(ui_StatusScreen_dials);
+                              if (lv_obj_is_valid(ui_MenuScreen_brewTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_brewTempValue, "%d", targetTemp);
+                              }
+                              // CAR-358: seed/refresh the WATER + STEAM temp readouts from the
+                              // persisted Settings values. These are not reactive signals, so this
+                              // effect re-seeds them on every screen (re)activation (and on the
+                              // targetTemp dep below); the stepper handlers themselves persist the
+                              // change and the next render re-reads here.
+                              if (lv_obj_is_valid(ui_MenuScreen_waterTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_waterTempValue, "%d",
+                                                        controller->getSettings().getTargetWaterTemp());
+                              }
+                              if (lv_obj_is_valid(ui_MenuScreen_steamTempValue)) {
+                                  lv_label_set_text_fmt(ui_MenuScreen_steamTempValue, "%d",
+                                                        controller->getSettings().getTargetSteamTemp());
+                              }
                           },
                           &targetTemp);
+    // CAR-278: target temp surfaces on the status screen via the steam-mode
+    // arc + hero readout, both updated from updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_label_set_text_fmt(ui_BrewScreen_targetTemp, "%d°C", targetTemp);
@@ -872,26 +969,13 @@ void DefaultUI::setupReactive() {
                           &targetTemp);
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; }, [=]() { adjustTempTarget(ui_GrindScreen_dials); },
                           &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              lv_label_set_text_fmt(ui_SimpleProcessScreen_targetTemp, "%d°C", targetTemp);
-                              adjustTempTarget(ui_SimpleProcessScreen_dials);
-                          },
-                          &targetTemp);
+    // CAR-292: target temp on ui_StatusScreen surfaces through the steam-mode
+    // arc + hero readout populated each frame in updateStatusScreen().
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; }, [=]() { adjustTempTarget(ui_ProfileScreen_dials); },
                           &targetTemp);
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
-                          [=]() {
-                              lv_arc_set_value(uic_MenuScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_MenuScreen_dials_pressureText, "%.1f bar", pressure);
-                          },
-                          &pressure);
-    effect_mgr.use_effect([=] { return currentScreen == ui_StatusScreen; },
-                          [=]() {
-                              lv_arc_set_value(uic_StatusScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_StatusScreen_dials_pressureText, "%.1f bar", pressure);
-                          },
-                          &pressure);
+    // CAR-308: no pressure dial on the rebuilt mode launcher.
+    // CAR-278: status screen pressure shows in the brew metric row
+    // (gm_h.m_press) — populated from updateStatusScreen() each tick.
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               lv_arc_set_value(uic_BrewScreen_dials_pressureGauge, pressure * 10.0f);
@@ -904,12 +988,8 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text_fmt(uic_GrindScreen_dials_pressureText, "%.1f bar", pressure);
                           },
                           &pressure);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              lv_arc_set_value(uic_SimpleProcessScreen_dials_pressureGauge, pressure * 10.0f);
-                              lv_label_set_text_fmt(uic_SimpleProcessScreen_dials_pressureText, "%.1f bar", pressure);
-                          },
-                          &pressure);
+    // CAR-292: pressure on ui_StatusScreen flows through gm_h.m_press in
+    // updateStatusScreen() — no SimpleProcessScreen effect needed.
     effect_mgr.use_effect([=] { return currentScreen == ui_ProfileScreen; },
                           [=]() {
                               lv_arc_set_value(uic_ProfileScreen_dials_pressureGauge, pressure * 10.0f);
@@ -924,25 +1004,24 @@ void DefaultUI::setupReactive() {
                           &updateAvailable);
     effect_mgr.use_effect([=] { return currentScreen == ui_StandbyScreen; },
                           [=]() {
-                              bool deactivated = true;
+                              // Drive the standby kicker line: a state message when not ready,
+                              // otherwise the ambient "STANDBY · READY". (spacemono_14 is
+                              // uppercase-only, so messages are uppercased.)
+                              const char *msg = nullptr;
                               if (updateActive) {
-                                  lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Updating...");
+                                  msg = "UPDATING";
                               } else if (error) {
-                                  if (controller->getError() == ERROR_CODE_RUNAWAY) {
-                                      lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Temperature error, please restart");
-                                  }
+                                  msg = controller->getError() == ERROR_CODE_RUNAWAY ? "TEMP ERROR \xC2\xB7 RESTART" : "ERROR \xC2\xB7 RESTART";
                               } else if (autotuning) {
-                                  lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Autotuning...");
+                                  msg = "AUTOTUNING";
                               } else if (waitingForController) {
-                                  lv_label_set_text_fmt(ui_StandbyScreen_mainLabel, "Waiting for controller...");
-                              } else {
-                                  deactivated = !initialized;
+                                  msg = "WAITING FOR CONTROLLER";
+                              } else if (!initialized) {
+                                  msg = "STARTING";
                               }
-                              _ui_flag_modify(ui_StandbyScreen_mainLabel, LV_OBJ_FLAG_HIDDEN, deactivated);
-                              _ui_flag_modify(ui_StandbyScreen_touchIcon, LV_OBJ_FLAG_HIDDEN, !deactivated);
-                              _ui_flag_modify(ui_StandbyScreen_statusContainer, LV_OBJ_FLAG_HIDDEN, !deactivated);
+                              lv_label_set_text(ui_StandbyScreen_mainLabel, msg ? msg : "STANDBY \xC2\xB7 READY");
                           },
-                          &updateAvailable, &error, &autotuning, &waitingForController, &initialized);
+                          &updateActive, &updateAvailable, &error, &autotuning, &waitingForController, &initialized);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               if (brewVolumetric) {
@@ -951,7 +1030,10 @@ void DefaultUI::setupReactive() {
                                   const double secondsDouble = targetDuration;
                                   const auto minutes = static_cast<int>(secondsDouble / 60.0);
                                   const auto seconds = static_cast<int>(secondsDouble) % 60;
-                                  lv_label_set_text_fmt(ui_BrewScreen_targetDuration, "%2d:%02d", minutes, seconds);
+                                  // CAR-327: %d (not %2d) — the space-padding for
+                                  // single-digit minutes rendered as a placeholder box
+                                  // because the ndot font subset has no space glyph (0x20).
+                                  lv_label_set_text_fmt(ui_BrewScreen_targetDuration, "%d:%02d", minutes, seconds);
                               }
                           },
                           &targetDuration, &targetVolume, &brewVolumetric);
@@ -963,7 +1045,8 @@ void DefaultUI::setupReactive() {
                                   const double secondsDouble = grindDuration / 1000.0;
                                   const auto minutes = static_cast<int>(secondsDouble / 60.0);
                                   const auto seconds = static_cast<int>(secondsDouble) % 60;
-                                  lv_label_set_text_fmt(ui_GrindScreen_targetDuration, "%2d:%02d", minutes, seconds);
+                                  // CAR-327: %d (not %2d) — see brew duration above.
+                                  lv_label_set_text_fmt(ui_GrindScreen_targetDuration, "%d:%02d", minutes, seconds);
                               }
                           },
                           &grindDuration, &grindVolume, &volumetricMode);
@@ -990,18 +1073,9 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
                           [=]() { _ui_flag_modify(ui_GrindScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN, volumetricAvailable); },
                           &volumetricAvailable);
-    effect_mgr.use_effect([=] { return currentScreen == ui_SimpleProcessScreen; },
-                          [=]() {
-                              if (mode == MODE_STEAM) {
-                                  _ui_flag_modify(ui_SimpleProcessScreen_goButton, LV_OBJ_FLAG_HIDDEN, active);
-                                  lv_imgbtn_set_src(ui_SimpleProcessScreen_goButton, LV_IMGBTN_STATE_RELEASED, nullptr,
-                                                    &ui_img_691326438, nullptr);
-                              } else {
-                                  lv_imgbtn_set_src(ui_SimpleProcessScreen_goButton, LV_IMGBTN_STATE_RELEASED, nullptr,
-                                                    active ? &ui_img_1456692430 : &ui_img_445946954, nullptr);
-                              }
-                          },
-                          &active, &mode);
+    // CAR-292: SimpleProcessScreen retired. Steam/water goButton visibility
+    // and graphics were the legacy affordance; ui_StatusScreen conveys
+    // active state via the arc, READY pill, and progress bar instead.
     effect_mgr.use_effect([=] { return currentScreen == ui_GrindScreen; },
                           [=]() {
                               lv_imgbtn_set_src(ui_GrindScreen_startButton, LV_IMGBTN_STATE_RELEASED, nullptr,
@@ -1013,6 +1087,17 @@ void DefaultUI::setupReactive() {
                               lv_label_set_text(ui_BrewScreen_profileName, selectedProfile.label.c_str());
                               lv_label_set_text(ui_BrewScreen_Label1,
                                                 selectedBean.isEmpty() ? "PROFILE READY" : buildContextLine("Bean", selectedBean).c_str());
+                              // CAR-330 M1: the CAR-301 ratio sub-line text was
+                              // computed here every profile/target change, but the
+                              // uic_BrewScreen_ratio_sub widget is permanently
+                              // hidden in every BrewScreen sub-state (see the
+                              // brewScreenState effect below). The computation drove
+                              // a widget nobody renders, so it was dead — removed.
+                              // If a future ticket re-surfaces the ratio breakdown,
+                              // restore the volumetric/time formatting (maxBar across
+                              // BREW phases, live targetDuration/targetVolume) here
+                              // and re-add the targetDuration/targetVolume/
+                              // brewVolumetric dependencies below.
                           },
                           &selectedProfileId, &selectedBean);
 
@@ -1027,7 +1112,8 @@ void DefaultUI::setupReactive() {
 
                 const auto minutes = static_cast<int>(favoritedProfiles[currentProfileIdx].getTotalDuration() / 60.0 - 0.5);
                 const auto seconds = static_cast<int>(favoritedProfiles[currentProfileIdx].getTotalDuration()) % 60;
-                lv_label_set_text_fmt(ui_ProfileScreen_targetDuration2, "%2d:%02d", minutes, seconds);
+                // CAR-327: %d (not %2d) — see brew duration above.
+                lv_label_set_text_fmt(ui_ProfileScreen_targetDuration2, "%d:%02d", minutes, seconds);
                 lv_label_set_text_fmt(ui_ProfileScreen_targetTemp2, "%d°C",
                                       static_cast<int>(favoritedProfiles[currentProfileIdx].temperature));
                 unsigned int phaseCount = favoritedProfiles[currentProfileIdx].getPhaseCount();
@@ -1063,11 +1149,22 @@ void DefaultUI::setupReactive() {
         },
         &selectedProfileId, &profileLoaded, &selectedBean);
 
-    // Show/hide grind button based on SmartGrind setting or Alt Relay function
-    effect_mgr.use_effect([=] { return currentScreen == ui_MenuScreen; },
+    // Show/hide grind button based on SmartGrind setting or Alt Relay function.
+    // CAR-316: when no grinder is available, the bottom-right (4th) grid slot
+    // shows a Settings tile and the floating top-right gear is hidden; when a
+    // grinder is available, keep the Grind tile + floating gear (original
+    // behavior). Driven from this same effect so it tracks the setting live.
+    effect_mgr.use_effect([=] { return currentScreen == ui_ModeScreen; },
                           [=]() {
-                              grindAvailable ? lv_obj_clear_flag(ui_MenuScreen_grindBtn, LV_OBJ_FLAG_HIDDEN)
-                                             : lv_obj_add_flag(ui_MenuScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                              if (grindAvailable) {
+                                  lv_obj_clear_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_add_flag(ui_ModeScreen_settingsTile, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_clear_flag(ui_ModeScreen_settingsButton, LV_OBJ_FLAG_HIDDEN);
+                              } else {
+                                  lv_obj_add_flag(ui_ModeScreen_grindBtn, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_clear_flag(ui_ModeScreen_settingsTile, LV_OBJ_FLAG_HIDDEN);
+                                  lv_obj_add_flag(ui_ModeScreen_settingsButton, LV_OBJ_FLAG_HIDDEN);
+                              }
                           },
                           &grindAvailable);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
@@ -1100,39 +1197,225 @@ void DefaultUI::setupReactive() {
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
+            const bool settings = brewScreenState == BrewScreenState::Settings;
+            // CAR-330 M3: hoist the repeated isRoundDisplay() calls in this effect.
+            const bool round = isRoundDisplay();
+            // CAR-315: the CAR-301 chat2 hero numeral / status pill / ratio sub
+            // were never toggled with the sub-state, so in the Settings (+/-
+            // editor) sub-state they bled through behind the steppers, and in
+            // the landing (Brew) sub-state they stacked on top of profileInfo,
+            // modeSwitch and START SHOT. Treat the two sub-states as distinct
+            // coherent layouts (strategy A): show the hero readout only in the
+            // landing state, hide it while editing, and re-anchor the landing
+            // widgets so nothing overlaps the 135px-tall hero numeral.
+            if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value))
+                _ui_flag_modify(uic_BrewScreen_hero_value, LV_OBJ_FLAG_HIDDEN, !settings);
+            if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit))
+                _ui_flag_modify(uic_BrewScreen_hero_unit, LV_OBJ_FLAG_HIDDEN, !settings);
+            if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill))
+                _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !settings);
+            // ratio sub-line only adds value once a profile/target is in view;
+            // keep it hidden in both sub-states to avoid crowding the hero in
+            // landing and the steppers in Settings (CAR-315). The status pill
+            // and dials ring already convey live state.
+            //
+            // NOTE (PR #151 review M2): this is the DELIBERATE end state for the
+            // CAR-301 ratio_sub widget — it is intentionally dead UI in every
+            // BrewScreen sub-state, not a bug. The widget + its handle are kept
+            // so a future ticket can re-surface a ratio breakdown ("18 -> 36 ·
+            // 1:2 · 9 BAR") without re-adding the layout scaffolding. Do not
+            // "restore" its visibility without a design decision behind it.
+            if (uic_BrewScreen_ratio_sub != nullptr && lv_obj_is_valid(uic_BrewScreen_ratio_sub))
+                lv_obj_add_flag(uic_BrewScreen_ratio_sub, LV_OBJ_FLAG_HIDDEN);
+
             _ui_flag_modify(ui_BrewScreen_adjustments, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_acceptButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_saveButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_saveAsNewButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Settings);
             _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Brew);
             _ui_flag_modify(ui_BrewScreen_profileInfo, LV_OBJ_FLAG_HIDDEN, brewScreenState == BrewScreenState::Brew);
+            // PR #153 review (Codex P1 #3353255295 / P2 #3355129176): the weight/
+            // mode chip is NOT part of the round brew-landing design (chat2
+            // BrewReady: hero → pill → ratio → START SHOT → chip bar, no weight
+            // chip). The old landing reparented it to center+60 where its 180x50
+            // body overlapped the START SHOT button / HEATING pill at BOTTOM_MID
+            // -104 and intercepted their taps. On round, show it ONLY in Settings
+            // AND only when volumetric is available (predicate true => REMOVE
+            // HIDDEN => shown); the Brew/Profile landing sub-states hide it.
+            // PR #153 review (Codex P2 #3356478651): the volumetricAvailable guard
+            // is required here too — without it, Settings on a scaleless round
+            // machine shows a nonfunctional "-" chip that is still long-pressable
+            // and fires onVolumetricHold() tare commands. Rectangular keeps the
+            // original Brew+volumetric gate.
             _ui_flag_modify(ui_BrewScreen_modeSwitch, LV_OBJ_FLAG_HIDDEN,
-                            brewScreenState == BrewScreenState::Brew && volumetricAvailable);
+                            round
+                                ? (brewScreenState == BrewScreenState::Settings && volumetricAvailable)
+                                : (brewScreenState == BrewScreenState::Brew && volumetricAvailable));
             if (volumetricAvailable) {
                 lv_img_set_src(ui_BrewScreen_volumetricButton, bluetoothScales ? &ui_img_1424216268 : &ui_img_flowmeter_png);
             }
+
+            // CAR-315: round-display landing-state layout. Stack everything in
+            // the margins above/below the centered hero numeral so the profile
+            // selector, status pill, weight chip and START SHOT never collide.
+            // Panel is the 372×372 round circle (CENTER-relative coords). The
+            // rectangular path keeps the original SquareLine positions (AC #8).
+            if (round && !settings) {
+                // CAR-318: while the boiler is still heating, the live status
+                // pill ("HEATING") sits at the BOTTOM (clear of the profile
+                // selector) and START SHOT is hidden — you can't pull a shot
+                // until the machine is at temperature. Once isTemperatureStable
+                // flips true, hide the pill and reveal START SHOT in the same
+                // bottom slot. (isTemperatureStable resets to false on any
+                // setpoint change, so the pill returns if the target moves.)
+                // _ui_flag_modify polarity: see the canonical note at the top of
+                // setupReactive(). To SHOW the pill while heating, pass !atTarget.
+                const bool atTarget = isTemperatureStable;
+                if (uic_BrewScreen_status_pill != nullptr && lv_obj_is_valid(uic_BrewScreen_status_pill)) {
+                    // CAR-319: lifted above the bottom mode-chip pill bar (which
+                    // sits at BOTTOM_MID y=-34, ~56px tall).
+                    // CAR-322: at -104 the pill top (~+42 in the 372 panel)
+                    // collided with the bottom of the ndot_150 hero numeral
+                    // (line_height 135 @ CENTER -14 => bottom ~+54). Dropped to
+                    // -64 so it sits centered in the gap between the hero and the
+                    // mode-chip bar, clearing both.
+                    // CAR-328: hero grew to ndot_180, so its bottom dropped ~15px.
+                    // Move the pill down to -52 to restore the clearance gap.
+                    lv_obj_align(uic_BrewScreen_status_pill, LV_ALIGN_BOTTOM_MID, 0, -52);
+                    _ui_flag_modify(uic_BrewScreen_status_pill, LV_OBJ_FLAG_HIDDEN, !atTarget);
+                }
+                // CAR-323: hide the dials cluster's tempText on the round brew
+                // landing. ui_comp_dials places it at CENTER (-50, -205) ≈ top-
+                // center of the 480px panel, directly behind the LV_OPA_50
+                // profileInfo chip (TOP_MID y=50). Since CAR-301 made the centered
+                // ndot_150 hero numeral the prominent temp readout, this old "%d°C"
+                // label is redundant here — and the half-transparent chip let it
+                // bleed through as an unreadable number behind the profile name.
+                // The dials ring (tempGauge) is left untouched; only the text hides.
+                if (uic_BrewScreen_dials_tempText != nullptr && lv_obj_is_valid(uic_BrewScreen_dials_tempText))
+                    lv_obj_add_flag(uic_BrewScreen_dials_tempText, LV_OBJ_FLAG_HIDDEN);
+                // Single-row profile selector — hide the tall "Selected profile"
+                // caption and bean-context label so the pill stays compact and
+                // clears the hero numeral.
+                if (lv_obj_is_valid(ui_BrewScreen_Label1))
+                    lv_obj_add_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
+                    lv_obj_add_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_height(ui_BrewScreen_profileInfo, 56);
+                // CAR-328: lift the profile pill up a touch (50 -> 36) to open more
+                // vertical room for the enlarged hero numeral below it.
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 36);
+                // Hero temperature numeral, centered.
+                if (uic_BrewScreen_hero_value != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_value)) {
+                    // CAR-328: oversize the heating-landing hero so the live temp
+                    // reads big across the center. Created at ndot_150 in
+                    // ui_BrewScreen.c; bumped to ndot_180 here. CAR-330 (I2): the
+                    // round brew-landing hero is ndot_180 throughout — this block
+                    // covers BOTH the heating and at-target sub-states, so the
+                    // hero font is committed to ndot_180 with no else-reset. The
+                    // separate brew timer / steam / water heroes are unrelated and
+                    // keep their own ndot_150. The "°" unit suffix stays ndot_60
+                    // (it carries the 0xB0 degree glyph; ndot_120 is digits-only)
+                    // and is re-anchored for the taller hero. The at-target layout
+                    // (hero center -26, START SHOT -70, status pill -52) was already
+                    // tuned for ndot_180, so no geometry change is needed here.
+                    lv_obj_set_style_text_font(uic_BrewScreen_hero_value, &ndot_180, 0);
+                    // CAR-328 (review pullrequestreview-4441977312 P2): the ndot_180
+                    // hero has ~162px line height. Centered at -10 its bottom reached
+                    // ~+71 in the 372 panel, which overlapped the at-target START SHOT
+                    // button (BOTTOM_MID -104 => top ~+26). Raise the hero center to
+                    // -26 so its bottom sits at ~+55, and drop START SHOT to -70 (top
+                    // ~+60) so the two never share the band. This also widens the
+                    // heating-state gap to the HEATING pill (top ~+94).
+                    // CAR-358: at -26 the ndot_180 hero bottom (~+55 in the 372
+                    // panel) sat only ~5px above the at-target START SHOT button
+                    // (BOTTOM_MID -70 => top ~+60) — close enough that the dot-
+                    // matrix descenders visually touched the pill. Raise the hero
+                    // center to -40 (bottom ~+41) to open a clean ~19px gap above
+                    // START SHOT, and keep clearance to the heating HEATING pill
+                    // (BOTTOM_MID -52 => top ~+92).
+                    lv_obj_align(uic_BrewScreen_hero_value, LV_ALIGN_CENTER, -20, -40);
+                    if (uic_BrewScreen_hero_unit != nullptr && lv_obj_is_valid(uic_BrewScreen_hero_unit)) {
+                        lv_obj_align_to(uic_BrewScreen_hero_unit, uic_BrewScreen_hero_value,
+                                        LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -16);
+                    }
+                }
+                // PR #153 review: the weight/mode chip is hidden on the round
+                // landing (see the modeSwitch gate above), so there is nothing to
+                // reparent/position here anymore — the design's middle stack is
+                // hero → pill → ratio → START SHOT, with no weight chip. The
+                // Settings branch reparents modeSwitch back to controlContainer.
+                // CAR-328 (review pullrequestreview-4441977312 P2): dropped from
+                // -104 to -70 so the at-target START SHOT button (top ~+60) clears
+                // the bottom of the enlarged ndot_180 hero (bottom ~+55).
+                lv_obj_align(ui_BrewScreen_startButton, LV_ALIGN_BOTTOM_MID, 0, -70);
+                // CAR-318 (PR #153 review 4424398936 P1/P2): the START SHOT
+                // button and the HEATING status pill swap mutually-exclusively on
+                // atTarget at the same BOTTOM_MID slot, so they never overlap.
+                // The button passes atTarget (shown only at-target); the pill
+                // above does the inverse (!atTarget) — see the _ui_flag_modify
+                // polarity note at the top of setupReactive(). Hiding the button
+                // while heating means it can no longer paint over the pill or sit
+                // as an enabled-looking control whose click silently no-ops.
+                _ui_flag_modify(ui_BrewScreen_startButton, LV_OBJ_FLAG_HIDDEN, atTarget);
+            } else if (round && settings) {
+                // CAR-315 (PR #151 review I1/I2/M1): the landing block above
+                // performs one-way geometry mutations (profileInfo height/anchor,
+                // modeSwitch reparent, Label1/brewContextLabel hidden). Brew
+                // <-> Settings toggles do NOT rebuild the screen (changeBrewScreenMode
+                // only flips the signal + rerender), so without a symmetric reset
+                // the Settings editor inherits the compacted landing geometry.
+                // Restore the screen_init defaults so the editor sub-state renders
+                // as designed.
+                //
+                // profileInfo: screen_init sets 292x100 @ TOP_MID y=80 specifically
+                // so the chip lands correctly when un-hidden in Settings
+                // (ui_BrewScreen.c:399-405, CAR-301 review C1).
+                lv_obj_set_height(ui_BrewScreen_profileInfo, 100);
+                lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 80);
+                // Re-show the "Selected profile" caption + bean-context label that
+                // the landing block compacts away (M1).
+                if (lv_obj_is_valid(ui_BrewScreen_Label1))
+                    lv_obj_clear_flag(ui_BrewScreen_Label1, LV_OBJ_FLAG_HIDDEN);
+                // CAR-323: the landing block hides the dials tempText (it bled
+                // through the profileInfo chip). Restore it here for symmetry so
+                // the editor sub-state inherits the screen_init default visibility.
+                if (uic_BrewScreen_dials_tempText != nullptr && lv_obj_is_valid(uic_BrewScreen_dials_tempText))
+                    lv_obj_clear_flag(uic_BrewScreen_dials_tempText, LV_OBJ_FLAG_HIDDEN);
+                if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel))
+                    lv_obj_clear_flag(brewContextLabel, LV_OBJ_FLAG_HIDDEN);
+                // modeSwitch: reparent back to its controlContainer flex home so it
+                // flows in the editor's control column (I2). Restore the original
+                // child order (modeSwitch first, then adjustments) — reparenting
+                // appends as the last child, so move it back to index 0.
+                if (lv_obj_is_valid(ui_BrewScreen_modeSwitch) &&
+                    lv_obj_get_parent(ui_BrewScreen_modeSwitch) != ui_BrewScreen_controlContainer) {
+                    lv_obj_set_parent(ui_BrewScreen_modeSwitch, ui_BrewScreen_controlContainer);
+                    lv_obj_move_to_index(ui_BrewScreen_modeSwitch, 0);
+                }
+            }
         },
-        &brewScreenState, &volumetricAvailable, &bluetoothScales);
+        &brewScreenState, &volumetricAvailable, &bluetoothScales, &isTemperatureStable);
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR,
-                                                   profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR_OPA,
-                                                   profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR,
-                                                   profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
-            ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
-                                                   LV_STYLE_IMG_RECOLOR_OPA,
-                                                   profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
+            // CAR-325: saveButton is now a text pill ("SAVE"), not an icon button.
+            // Drive the profileDirty cue by recoloring the label text instead of
+            // the (removed) image recolor: bright white when there are unsaved
+            // edits, muted when the profile is clean. saveAsNewButton stays a
+            // fixed light-on-gold accent pill and needs no dirty cue.
+            if (uic_BrewScreen_save_label && lv_obj_is_valid(uic_BrewScreen_save_label)) {
+                ui_object_set_themeable_style_property(uic_BrewScreen_save_label, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                                       LV_STYLE_TEXT_COLOR,
+                                                       profileDirty ? _ui_theme_color_NiceWhite : _ui_theme_color_SemiDark);
+                ui_object_set_themeable_style_property(uic_BrewScreen_save_label, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                                       LV_STYLE_TEXT_OPA,
+                                                       profileDirty ? _ui_theme_alpha_NiceWhite : _ui_theme_alpha_SemiDark);
+            }
         },
         &brewScreenState, &profileDirty);
     effect_mgr.use_effect([=] { return currentScreen == ui_StandbyScreen; },
-                          [=]() { lv_img_set_src(ui_StandbyScreen_logo, christmasMode ? &ui_img_1510335 : &ui_img_logo_png); },
-                          &christmasMode);
+                          [=]() { lv_img_set_src(ui_StandbyScreen_logo, &ui_img_logo_png); });
 }
 
 void DefaultUI::handleScreenChange() {
@@ -1160,21 +1443,23 @@ void DefaultUI::handleScreenChange() {
 
         _ui_screen_change(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0, targetScreenInit);
         resetCustomScreenHandles();
+#ifndef GAGGIMATE_SIM // outgoing screen is already freed by its SCREEN_UNLOADED cb; second del is a UAF the host allocator
+                      // catches
         lv_obj_del(current);
+#endif
         rerender = true;
     }
 }
 
 void DefaultUI::resetCustomScreenHandles() {
-    standbyContextLabel = nullptr;
     statusBeanLabel = nullptr;
     profileBeanLabel = nullptr;
     grindBeanLabel = nullptr;
-    menuBrewLabel = nullptr;
-    menuSteamLabel = nullptr;
-    menuWaterLabel = nullptr;
-    menuGrindLabel = nullptr;
     brewContextLabel = nullptr;
+    // CAR-319: the chip bar lives on ui_BrewScreen and is destroyed with it on
+    // screen change; null the handles so ensureBrewModeChips() rebuilds on re-entry.
+    brewModeChips = nullptr;
+    brewModeChip[0] = brewModeChip[1] = brewModeChip[2] = brewModeChip[3] = nullptr;
 }
 
 bool DefaultUI::isRoundDisplay() const {
@@ -1187,28 +1472,36 @@ bool DefaultUI::isRoundDisplay() const {
     return width == height && width >= 400;
 }
 
-void DefaultUI::ensureStandbyContextLabel() {
-    if (lv_scr_act() != ui_StandbyScreen || !lv_obj_is_valid(ui_StandbyScreen) || standbyContextLabel != nullptr) {
-        return;
-    }
-
-    standbyContextLabel = lv_label_create(ui_StandbyScreen);
-    lv_obj_set_width(standbyContextLabel, 360);
-    lv_label_set_long_mode(standbyContextLabel, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(standbyContextLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_align(standbyContextLabel, LV_ALIGN_BOTTOM_MID, 0, -32);
-}
-
 void DefaultUI::ensureStatusBeanLabel() {
-    if (lv_scr_act() != ui_StatusScreen || !lv_obj_is_valid(ui_StatusScreen_contentPanel2) || statusBeanLabel != nullptr) {
+    // CAR-278: status screen rebuilt — bean label is anchored to the screen
+    // root (ui_StatusScreen). Visibility/positioning is owned by
+    // updateStatusScreen() so the label tracks the current mode (brew/steam/water).
+    if (lv_scr_act() != ui_StatusScreen || !lv_obj_is_valid(ui_StatusScreen) || statusBeanLabel != nullptr) {
         return;
     }
 
-    statusBeanLabel = lv_label_create(ui_StatusScreen_contentPanel2);
+    statusBeanLabel = lv_label_create(ui_StatusScreen);
     lv_obj_set_width(statusBeanLabel, 240);
-    lv_obj_align_to(statusBeanLabel, ui_StatusScreen_phaseLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
-    lv_label_set_long_mode(statusBeanLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_align(statusBeanLabel, LV_ALIGN_TOP_MID, 0, 92);
+    lv_label_set_long_mode(statusBeanLabel, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(statusBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
+
+    // CAR-278 review-comment 4585899391, finding #5: chip-style theming is
+    // static (GM_* tokens never change at runtime), so apply it once here
+    // instead of every applyScreenVisualLanguage() pass. The label is a
+    // Nothing-theme chip styled with GM_* tokens, not the legacy
+    // DisplayPalette — the rest of the screen uses gm_theme tokens and
+    // styleChip() would clash.
+    lv_obj_set_style_bg_color(statusBeanLabel, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(statusBeanLabel, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(statusBeanLabel, GM_CONTENT, 0);
+    lv_obj_set_style_text_font(statusBeanLabel, &spacemono_14, 0);
+    lv_obj_set_style_radius(statusBeanLabel, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(statusBeanLabel, 12, 0);
+    lv_obj_set_style_pad_right(statusBeanLabel, 12, 0);
+    lv_obj_set_style_pad_top(statusBeanLabel, 4, 0);
+    lv_obj_set_style_pad_bottom(statusBeanLabel, 4, 0);
 }
 
 void DefaultUI::ensureProfileBeanLabel() {
@@ -1235,24 +1528,10 @@ void DefaultUI::ensureGrindBeanLabel() {
     lv_obj_set_style_text_align(grindBeanLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
-void DefaultUI::ensureMenuActionLabels() {
-    if (lv_scr_act() != ui_MenuScreen || !lv_obj_is_valid(ui_MenuScreen_contentPanel1)) {
-        return;
-    }
-
-    if (menuBrewLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_btnBrew)) {
-        menuBrewLabel = lv_label_create(ui_MenuScreen_btnBrew);
-    }
-    if (menuSteamLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_btnSteam)) {
-        menuSteamLabel = lv_label_create(ui_MenuScreen_btnSteam);
-    }
-    if (menuWaterLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_waterBtn)) {
-        menuWaterLabel = lv_label_create(ui_MenuScreen_waterBtn);
-    }
-    if (menuGrindLabel == nullptr && lv_obj_is_valid(ui_MenuScreen_grindBtn)) {
-        menuGrindLabel = lv_label_create(ui_MenuScreen_grindBtn);
-    }
-}
+// CAR-308: ensureMenuActionLabels() removed. The rebuilt ui_ModeScreen
+// creates its tile labels inline in ui_ModeScreen_screen_init (via the
+// build_mode_tile() helper) instead of having DefaultUI lazily attach
+// them on every applyScreenPalette() pass.
 
 void DefaultUI::ensureBrewContextLabel() {
     if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen_profileInfo) || brewContextLabel != nullptr) {
@@ -1265,52 +1544,91 @@ void DefaultUI::ensureBrewContextLabel() {
     lv_obj_set_style_text_align(brewContextLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
+// CAR-319: bottom mode-chip pill bar on the round BrewScreen landing view,
+// matching the Claude Design handoff (chat2 "Brew Screen Heating State" +
+// Build Spec mode-chip bar). Four round 44px chips — power/cup/steam/drop — in
+// a rounded translucent container pinned BOTTOM_MID y=-34. Cup (index 1) is the
+// active brew chip (filled GM_RED). Tapping a chip switches machine mode via the
+// same handlers the ModeScreen launcher uses. Built once, lazily, idempotent.
+void DefaultUI::brewModeChipCb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    // The chip index is stashed in the event user-data at build time.
+    const int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    switch (idx) {
+    case 0:
+        onStandby(e); // power → standby
+        break;
+    case 1:
+        break; // cup → already on the brew screen, no-op
+    case 2:
+        onSteamScreen(e); // steam mode
+        break;
+    case 3:
+        onWaterScreen(e); // water mode
+        break;
+    default:
+        break;
+    }
+}
+
+void DefaultUI::ensureBrewModeChips() {
+    if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen) || brewModeChips != nullptr) {
+        return;
+    }
+
+    // CAR-320: build the bar through the shared gm_chip_bar() builder so there is
+    // ONE icon-render path for every screen. Previously this method hand-rolled a
+    // duplicate chip loop; the lv_obj_center(ic) icon-hiding bug was fixed here but
+    // lived on in gm_chip_bar (icons vanished on Steam/Water/Standby). Delegating
+    // removes the duplication. gm_chip_bar() lights chip index 1 (cup) with the
+    // accent and exposes the chips via gm_h.chips[]; we then apply the BrewScreen
+    // pill-container styling and wire tap navigation on top.
+    brewModeChips = gm_chip_bar(ui_BrewScreen, 1 /* cup */, GM_RED);
+    lv_obj_align(brewModeChips, LV_ALIGN_BOTTOM_MID, 0, -34);
+    // Filled translucent pill container (gm-chips): bg ~rgba(255,255,255,0.10),
+    // faint border. gm_chip_bar() leaves the bar bg transparent with a 10% border,
+    // which suits Standby/Status; the BrewScreen landing wants the visible pill.
+    lv_obj_set_style_bg_color(brewModeChips, GM_CONTENT, 0);
+    lv_obj_set_style_bg_opa(brewModeChips, LV_OPA_10, 0);
+    lv_obj_set_style_border_color(brewModeChips, GM_FAINT, 0);
+    lv_obj_set_style_border_opa(brewModeChips, LV_OPA_60, 0);
+
+    // Capture the chip handles (gm_h.chips[] is shared scratch state, valid until
+    // the next screen builds its own bar) and wire BrewScreen tap navigation:
+    // power->standby, cup->no-op, steam->steam mode, drop->water mode.
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *chip = gm_h.chips[i];
+        brewModeChip[i] = chip;
+        if (chip != nullptr && lv_obj_is_valid(chip)) {
+            lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(chip, brewModeChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        }
+    }
+}
+
 void DefaultUI::applyScreenVisualLanguage() {
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     const int resolvedThemeMode = resolveDisplayThemeMode(controller->getSettings().getThemeMode(), amoledPanel);
     const DisplayPalette palette = makeDisplayPalette(resolvedThemeMode, amoledPanel);
     lv_obj_t *activeScreen = lv_scr_act();
     const bool roundDisplay = isRoundDisplay();
-    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller};
+    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
+                                        isTemperatureStable != 0};
     const RingVisual ringVisual = buildRingVisual(palette, ringContext);
 
     styleScreenBase(activeScreen, palette, roundDisplay);
 
     if (activeScreen == ui_BrewScreen) {
+        // CAR-293: BrewScreen self-styles via gm_ui builders + gm_theme tokens.
+        // We only need to: (a) drive the ring overlay, (b) update the kicker text
+        // to match ringVisual, (c) refresh the bean context label, and (d) hand
+        // the palette to the screen so it can recolor on UI_THEME_LIGHT.
         ensureBrewContextLabel();
-        stylePanel(ui_BrewScreen_contentPanel4, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        stylePanel(ui_BrewScreen_profileInfo, palette, OPA_200, 28);
-        stylePanel(ui_BrewScreen_modeSwitch, palette, OPA_220, 22);
-        stylePanel(ui_BrewScreen_tempContainer, palette, OPA_210, 22);
-        stylePanel(ui_BrewScreen_targetContainer, palette, OPA_210, 22);
-        styleHeadline(ui_BrewScreen_mainLabel3, palette, true);
-        styleSecondary(ui_BrewScreen_Label1, palette);
-        styleHeadline(ui_BrewScreen_profileName, palette, true);
         applyProcessRing(uic_BrewScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_BrewScreen_profileName, palette, &ndot_24);
-        styleMetricValue(ui_BrewScreen_weightLabel, palette, &ndot_24);
-        styleMetricValue(ui_BrewScreen_targetTemp, palette, &ndot_24);
-        styleMetricValue(ui_BrewScreen_targetDuration, palette, &ndot_24);
-        styleIconButton(ui_BrewScreen_ImgButton5, palette, palette.textPrimary);
-        styleIconButton(ui_BrewScreen_startButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_profileSelectBtn, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_settingsButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_downTempButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_upTempButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_downDurationButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_upDurationButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_byTimeButton, palette, palette.accent);
-        styleIconButton(ui_BrewScreen_saveButton, palette, palette.textMuted);
-        styleIconButton(ui_BrewScreen_acceptButton, palette, palette.success);
-        styleIconButton(ui_BrewScreen_saveAsNewButton, palette, palette.warning);
-        if (lv_obj_is_valid(ui_BrewScreen_Image5)) {
-            lv_obj_set_style_img_recolor(ui_BrewScreen_Image5, palette.warning, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image5, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_BrewScreen_Image4)) {
-            lv_obj_set_style_img_recolor(ui_BrewScreen_Image4, palette.accent, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_BrewScreen_Image4, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
+        ui_BrewScreen_apply_palette(palette.textPrimary, palette.textMuted,
+                                    palette.surface, palette.accent, ringVisual.tone);
         if (lv_obj_is_valid(ui_BrewScreen_mainLabel3)) {
             lv_label_set_text(ui_BrewScreen_mainLabel3, ringVisual.title);
             lv_obj_set_style_text_color(ui_BrewScreen_mainLabel3, ringVisual.tone, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1322,109 +1640,49 @@ void DefaultUI::applyScreenVisualLanguage() {
             styleSecondary(brewContextLabel, palette);
         }
         if (roundDisplay) {
+            // Round-display content panel is the round 372x372 circle; the screen
+            // sets a 360x360 default for flat displays, so bump it here.
             lv_obj_set_size(ui_BrewScreen_contentPanel4, 372, 372);
             lv_obj_align(ui_BrewScreen_contentPanel4, LV_ALIGN_CENTER, 0, 4);
-            lv_obj_set_size(ui_BrewScreen_profileInfo, 292, 112);
-            lv_obj_align(ui_BrewScreen_profileInfo, LV_ALIGN_TOP_MID, 0, 96);
-            lv_obj_set_size(ui_BrewScreen_Container3, 252, 42);
-            lv_obj_set_style_pad_column(ui_BrewScreen_Container3, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_width(ui_BrewScreen_Label1, 252);
-            lv_obj_set_width(ui_BrewScreen_profileName, 160);
-            lv_obj_set_size(ui_BrewScreen_modeSwitch, 180, 52);
-            lv_obj_align(ui_BrewScreen_modeSwitch, LV_ALIGN_TOP_MID, 0, 68);
-            lv_obj_align(ui_BrewScreen_mainLabel3, LV_ALIGN_TOP_MID, 0, 34);
-            alignFooterAction(ui_BrewScreen_startButton, palette, palette.accent, -18, 74);
-            lv_obj_align(ui_BrewScreen_controlContainer, LV_ALIGN_CENTER, 0, 18);
-            lv_obj_set_size(ui_BrewScreen_controlContainer, 300, 214);
-            lv_obj_set_style_pad_row(ui_BrewScreen_controlContainer, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_size(ui_BrewScreen_adjustments, 300, 122);
-            lv_obj_set_style_pad_row(ui_BrewScreen_adjustments, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_BrewScreen_adjustments, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_size(ui_BrewScreen_tempContainer, 254, 54);
-            lv_obj_set_size(ui_BrewScreen_targetContainer, 254, 54);
-            lv_obj_set_style_pad_all(ui_BrewScreen_tempContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_all(ui_BrewScreen_targetContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            alignTopBackButton(ui_BrewScreen_ImgButton5, palette, palette.textPrimary);
-            lv_obj_align(ui_BrewScreen_profileSelectBtn, LV_ALIGN_LEFT_MID, 18, 0);
-            lv_obj_align(ui_BrewScreen_settingsButton, LV_ALIGN_RIGHT_MID, -18, 0);
-            styleRoundIconButton(ui_BrewScreen_profileSelectBtn, palette, palette.accent, 42);
-            styleRoundIconButton(ui_BrewScreen_settingsButton, palette, palette.textMuted, 42);
-            styleRoundIconButton(ui_BrewScreen_downTempButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_BrewScreen_upTempButton, palette, palette.accent, 48);
-            styleRoundIconButton(ui_BrewScreen_downDurationButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_BrewScreen_upDurationButton, palette, palette.accent, 48);
-            styleRoundIconButton(ui_BrewScreen_byTimeButton, palette, palette.accent, 48);
-            alignMetricPair(ui_BrewScreen_Image5, ui_BrewScreen_targetTemp, -10, 0, palette.warning, palette);
-            alignMetricPair(ui_BrewScreen_Image4, ui_BrewScreen_targetDuration, -10, 0, palette.accent, palette);
-            lv_obj_align(ui_BrewScreen_downTempButton, LV_ALIGN_CENTER, -104, 0);
-            lv_obj_align(ui_BrewScreen_upTempButton, LV_ALIGN_CENTER, 104, 0);
-            lv_obj_align(ui_BrewScreen_downDurationButton, LV_ALIGN_CENTER, -104, 0);
-            lv_obj_align(ui_BrewScreen_upDurationButton, LV_ALIGN_CENTER, 104, 0);
-            lv_obj_align(ui_BrewScreen_byTimeButton, LV_ALIGN_CENTER, 104, 0);
-            lv_obj_align(ui_BrewScreen_saveButton, LV_ALIGN_BOTTOM_MID, -78, -32);
-            lv_obj_align(ui_BrewScreen_acceptButton, LV_ALIGN_BOTTOM_MID, 0, -18);
-            lv_obj_align(ui_BrewScreen_saveAsNewButton, LV_ALIGN_BOTTOM_MID, 78, -32);
-            styleRoundIconButton(ui_BrewScreen_saveButton, palette, palette.textMuted, 52);
-            styleRoundIconButton(ui_BrewScreen_acceptButton, palette, palette.success, 64, true);
-            styleRoundIconButton(ui_BrewScreen_saveAsNewButton, palette, palette.warning, 52);
-            if (brewContextLabel != nullptr) {
+            // CAR-319: the design replaces the top-left back/menu button with the
+            // bottom mode-chip pill bar (power chip = standby). Hide the back
+            // button on round; navigation now lives in the chip bar. (Kept alive,
+            // not deleted, so its event/ext-click-area references stay valid.)
+            if (lv_obj_is_valid(ui_BrewScreen_ImgButton5)) {
+                lv_obj_add_flag(ui_BrewScreen_ImgButton5, LV_OBJ_FLAG_HIDDEN);
+            }
+            ensureBrewModeChips();
+            // CAR-319 (Codex P1): the mode-chip pill bar is a screen-root child
+            // anchored BOTTOM_MID — the same area as the Settings footer
+            // (saveButton/acceptButton/saveAsNewButton). In the Settings
+            // sub-state it would render above those controls and its clickable
+            // chips would intercept their touches, so the user couldn't save,
+            // accept, or cancel a profile edit. The footer buttons are hidden
+            // outside the landing state (lines ~1190-1193); mirror that here so
+            // the chip bar only shows on the Brew landing sub-state.
+            // PR #153 review 4424457425 P1: predicate must be inverted. Pass
+            // (state != Settings) so the chip bar shows on the Brew landing and
+            // hides in Settings — see the _ui_flag_modify polarity note at the
+            // top of setupReactive().
+            if (brewModeChips != nullptr && lv_obj_is_valid(brewModeChips)) {
+                _ui_flag_modify(brewModeChips, LV_OBJ_FLAG_HIDDEN,
+                                brewScreenState != BrewScreenState::Settings);
+            }
+            // brewContextLabel is parented to ui_BrewScreen_profileInfo by
+            // ensureBrewContextLabel(); align it relative to Container3 on round.
+            if (brewContextLabel != nullptr && lv_obj_is_valid(brewContextLabel)) {
                 lv_obj_set_width(brewContextLabel, 238);
                 lv_obj_align_to(brewContextLabel, ui_BrewScreen_Container3, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
             }
         }
     } else if (activeScreen == ui_StatusScreen) {
-        stylePanel(ui_StatusScreen_contentPanel2, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleHeadline(ui_StatusScreen_phaseLabel, palette, true);
-        styleChip(ui_StatusScreen_stepLabel, palette, active ? palette.success : palette.warning, true);
-        styleHeadline(ui_StatusScreen_currentDuration, palette, true);
-        styleSecondary(ui_StatusScreen_targetDuration, palette);
-        styleSecondary(ui_StatusScreen_brewLabel, palette);
-        styleSecondary(ui_StatusScreen_targetTemp, palette);
-        applyProcessRing(uic_StatusScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_StatusScreen_currentDuration, palette, &ndot_34);
-        styleMetricValue(ui_StatusScreen_brewVolume, palette, &ndot_24);
-        styleIconButton(ui_StatusScreen_ImgButton8, palette, palette.textPrimary);
-        styleIconButton(ui_StatusScreen_pauseButton, palette, active ? palette.danger : palette.success);
-        styleMetricIcon(ui_StatusScreen_Image7, palette.warning);
-        styleMetricIcon(ui_StatusScreen_Image8, palette.accent);
-        if (lv_obj_is_valid(ui_StatusScreen_barContainer)) {
-            stylePanel(ui_StatusScreen_barContainer, palette, OPA_200, 999);
-            lv_obj_set_style_pad_left(ui_StatusScreen_barContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_right(ui_StatusScreen_barContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_top(ui_StatusScreen_barContainer, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_bottom(ui_StatusScreen_barContainer, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_StatusScreen_brewBar)) {
-            lv_obj_set_style_radius(ui_StatusScreen_brewBar, 999, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_radius(ui_StatusScreen_brewBar, 999, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-        }
+        // CAR-278: status screen styles itself via gm_ui builders + gm_theme tokens.
+        // The ensureStatusBeanLabel() call here is intentionally a no-op trigger:
+        // bean label visibility/text is owned by updateStatusScreen() per mode.
+        // Per review-comment 4585899391 finding #5, the chip styling is applied
+        // once inside ensureStatusBeanLabel() (GM_* tokens are static), so
+        // there is no per-call style work to do here.
         ensureStatusBeanLabel();
-        if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
-            styleChip(statusBeanLabel, palette, palette.accent, true);
-        }
-        if (roundDisplay) {
-            lv_obj_set_size(ui_StatusScreen_contentPanel2, 372, 372);
-            lv_obj_align(ui_StatusScreen_contentPanel2, LV_ALIGN_CENTER, 0, 4);
-            alignTopBackButton(ui_StatusScreen_ImgButton8, palette, palette.textPrimary);
-            alignMetricPair(ui_StatusScreen_Image7, ui_StatusScreen_targetTemp, -58, -132, palette.warning, palette);
-            alignMetricPair(ui_StatusScreen_Image8, ui_StatusScreen_targetDuration, 64, -132, palette.accent, palette);
-            styleFixedLabel(ui_StatusScreen_stepLabel, 178, 34, &ndot_18, active ? palette.success : palette.warning);
-            styleFixedLabel(ui_StatusScreen_phaseLabel, 254, 32, &ndot_24, palette.textPrimary);
-            lv_obj_align(ui_StatusScreen_stepLabel, LV_ALIGN_TOP_MID, 0, 84);
-            lv_obj_align(ui_StatusScreen_phaseLabel, LV_ALIGN_TOP_MID, 0, 124);
-            if (statusBeanLabel != nullptr) {
-                lv_obj_set_size(statusBeanLabel, 236, 34);
-                lv_obj_align_to(statusBeanLabel, ui_StatusScreen_phaseLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-            }
-            lv_obj_align(ui_StatusScreen_currentDuration, LV_ALIGN_CENTER, 0, 44);
-            lv_obj_set_style_text_font(ui_StatusScreen_currentDuration, &ndot_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_align(ui_StatusScreen_barContainer, LV_ALIGN_BOTTOM_MID, 0, -72);
-            lv_obj_set_size(ui_StatusScreen_barContainer, 240, 22);
-            lv_obj_align(ui_StatusScreen_labelContainer, LV_ALIGN_BOTTOM_MID, 0, -42);
-            lv_obj_set_size(ui_StatusScreen_labelContainer, 240, 18);
-            lv_obj_align(ui_StatusScreen_brewVolume, LV_ALIGN_BOTTOM_MID, 0, -104);
-            alignFooterAction(ui_StatusScreen_pauseButton, palette, active ? palette.danger : palette.success);
-        }
     } else if (activeScreen == ui_ProfileScreen) {
         stylePanel(ui_ProfileScreen_contentPanel, palette, OPA_55, 44);
         styleHeadline(ui_ProfileScreen_mainLabel, palette, false);
@@ -1437,7 +1695,10 @@ void DefaultUI::applyScreenVisualLanguage() {
         styleIconButton(ui_ProfileScreen_chooseButton, palette, palette.success);
         applyProcessRing(uic_ProfileScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
         styleMetricValue(ui_ProfileScreen_profileName, palette, &ndot_24);
-        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &ndot_24);
+        // CAR-327: targetTemp2 shows "NN°C" — ndot_24 has no 0xB0 (degree) glyph
+        // and ndot_28's degree is a chunky dot-matrix block. grotesk_16 carries a
+        // clean vector degree (matches the standby screen's working temp sub-line).
+        styleMetricValue(ui_ProfileScreen_targetTemp2, palette, &grotesk_16);
         styleMetricValue(ui_ProfileScreen_targetDuration2, palette, &ndot_24);
         if (lv_obj_is_valid(ui_ProfileScreen_Chart1)) {
             stylePanel(ui_ProfileScreen_Chart1, palette, OPA_190, 20);
@@ -1464,7 +1725,11 @@ void DefaultUI::applyScreenVisualLanguage() {
                 lv_obj_set_size(profileBeanLabel, 232, 34);
                 lv_obj_align_to(profileBeanLabel, ui_ProfileScreen_profileName, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
             }
-            alignMetricPair(ui_ProfileScreen_tempIcon, ui_ProfileScreen_targetTemp2, -58, -42, palette.warning, palette);
+            // CAR-327: temp pair shows "NN°C" — ndot_24 (alignMetricPair's
+            // default) has no degree glyph (0xB0) so it boxed. grotesk_16 carries
+            // a clean vector degree (same font as the working brew target editor).
+            alignMetricPair(ui_ProfileScreen_tempIcon, ui_ProfileScreen_targetTemp2, -58, -42, palette.warning, palette,
+                            &grotesk_16);
             alignMetricPair(ui_ProfileScreen_targetIcon, ui_ProfileScreen_targetDuration2, 64, -42, palette.accent, palette);
             lv_obj_set_size(ui_ProfileScreen_simpleContent, 232, 92);
             lv_obj_align(ui_ProfileScreen_simpleContent, LV_ALIGN_CENTER, 0, 56);
@@ -1479,19 +1744,15 @@ void DefaultUI::applyScreenVisualLanguage() {
             alignFooterAction(ui_ProfileScreen_chooseButton, palette, palette.success);
         }
     } else if (activeScreen == ui_GrindScreen) {
-        stylePanel(ui_GrindScreen_contentPanel7, palette, OPA_55, 44);
-        styleHeadline(ui_GrindScreen_mainLabel7, palette, true);
-        styleSecondary(ui_GrindScreen_targetDuration, palette);
-        applyProcessRing(uic_GrindScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_GrindScreen_targetDuration, palette, &ndot_24);
-        styleIconButton(ui_GrindScreen_ImgButton2, palette, palette.textPrimary);
-        styleIconButton(ui_GrindScreen_startButton, palette, palette.accent);
-        styleIconButton(ui_GrindScreen_downDurationButton, palette, palette.textMuted);
-        styleIconButton(ui_GrindScreen_upDurationButton, palette, palette.accent);
-        stylePanel(ui_GrindScreen_targetContainer, palette, OPA_210, 22);
-        stylePanel(ui_GrindScreen_modeSwitch, palette, OPA_220, 22);
-        styleMetricIcon(ui_GrindScreen_targetSymbol, palette.accent);
+        // CAR-294: GrindScreen self-styles via gm_ui builders + gm_theme tokens.
+        // We only need to: (a) drive the ring overlay, (b) update the kicker
+        // text/tone (GRIND vs GRINDING with palette.grind), (c) refresh the
+        // bean chip, and (d) hand the palette to the screen so it can recolor
+        // on UI_THEME_LIGHT.
         ensureGrindBeanLabel();
+        applyProcessRing(uic_GrindScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
+        ui_GrindScreen_apply_palette(palette.textPrimary, palette.textMuted,
+                                     palette.surface, palette.accent, palette.grind);
         if (grindBeanLabel != nullptr && lv_obj_is_valid(grindBeanLabel)) {
             styleChip(grindBeanLabel, palette, palette.accent, true);
         }
@@ -1501,6 +1762,8 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_set_style_text_color(ui_GrindScreen_mainLabel7, palette.grind, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         if (roundDisplay) {
+            // Round-display layout overrides — the screen ships a 360x360 flat
+            // default; bump to the 372 round circle and re-anchor children.
             lv_obj_set_size(ui_GrindScreen_contentPanel7, 372, 372);
             lv_obj_align(ui_GrindScreen_contentPanel7, LV_ALIGN_CENTER, 0, 4);
             alignTopBackButton(ui_GrindScreen_ImgButton2, palette, palette.textPrimary);
@@ -1514,130 +1777,94 @@ void DefaultUI::applyScreenVisualLanguage() {
             lv_obj_align(ui_GrindScreen_modeSwitch, LV_ALIGN_TOP_MID, 0, 104);
             lv_obj_set_size(ui_GrindScreen_weightLabel, 104, 28);
             lv_obj_set_style_text_font(ui_GrindScreen_weightLabel, &ndot_24, LV_PART_MAIN | LV_STATE_DEFAULT);
+            // Round-display target container: drop down/up buttons to the
+            // legacy left/right anchors used pre-CAR-294 so the round layout
+            // keeps the wider feel. Symbol stays paired with the duration.
             lv_obj_set_size(ui_GrindScreen_targetContainer, 254, 54);
             lv_obj_align(ui_GrindScreen_targetContainer, LV_ALIGN_CENTER, 0, 32);
             lv_obj_set_style_pad_all(ui_GrindScreen_targetContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
             alignMetricPair(ui_GrindScreen_targetSymbol, ui_GrindScreen_targetDuration, -10, 0, palette.accent, palette);
-            styleRoundIconButton(ui_GrindScreen_downDurationButton, palette, palette.textMuted, 48);
-            styleRoundIconButton(ui_GrindScreen_upDurationButton, palette, palette.accent, 48);
+            // Round-display: keep the gs_glyph_btn() flat-circle styling
+            // (filled GM_SURFACE / GM_BLUE, no border, no shadow) — do NOT
+            // call styleRoundIconButton() here. The legacy lv_imgbtn versions
+            // of these buttons used PNG glyphs that styleRoundIconButton()
+            // recolored via lv_obj_set_style_img_recolor(); the new lv_btn
+            // containers carry an inner lv_label glyph instead, so those
+            // recolor calls are no-ops AND styleGlassButton (called inside
+            // styleRoundIconButton) overrides the clean Nothing-theme
+            // styling with a translucent gradient + border that erases the
+            // up button's filled accent identity. Resize directly to the
+            // round-display 48px so the layout still feels wide.
+            // Mirrors BrewScreen's round-display branch (DefaultUI.cpp:1291-1303).
+            lv_obj_set_size(ui_GrindScreen_downDurationButton, 48, 48);
+            lv_obj_set_size(ui_GrindScreen_upDurationButton, 48, 48);
             lv_obj_align(ui_GrindScreen_downDurationButton, LV_ALIGN_CENTER, -104, 0);
             lv_obj_align(ui_GrindScreen_upDurationButton, LV_ALIGN_CENTER, 104, 0);
             alignFooterAction(ui_GrindScreen_startButton, palette, palette.accent);
         }
+    } else if (activeScreen == ui_ModeScreen) {
+        // CAR-308: Nothing-theme mode launcher styles itself via gm_* builders
+        // in ui_ModeScreen_screen_init; tile palette, standby pill, and kicker
+        // are all built with GM_* tokens directly in the screen module.
+        //
+        // CAR-312: the top-corner settings button is built flat in the screen
+        // module (a bare recolored lv_imgbtn glyph), which reads inconsistent
+        // against the other Nothing-theme corner buttons. Give it the round
+        // glass fill + icon recolor here, mirroring the ui_MenuScreen_backButton
+        // treatment below (same lv_imgbtn idiom, same 44px size).
+        //
+        // CAR-312 (Codex review): this launcher is *dark-only by design* — the
+        // branch below repaints the screen bg back to GM_BG even on
+        // UI_THEME_LIGHT non-AMOLED panels. Styling the button with the
+        // user-resolved `palette` would, on light theme, render a near-white
+        // glass disc (palette.surfaceStrong ≈ 0xFAFAFA) with a black icon
+        // (palette.textPrimary) sitting on the dark Nothing canvas — exactly the
+        // styling inconsistency this fix is meant to remove. Use a fixed dark
+        // palette + the GM_CONTENT mono tone the launcher already uses for its
+        // icons, so the button matches regardless of the user's theme setting.
+        // Placement is unchanged: the button already sits in the top corner
+        // (LV_ALIGN_TOP_RIGHT in the screen module), well clear of the
+        // "SELECT MODE" kicker — the CAR-308 rebuild removed the old top dial
+        // labels CAR-312 called out, so there is no longer anything to crowd.
+        if (lv_obj_is_valid(ui_ModeScreen_settingsButton)) {
+            const DisplayPalette darkPalette = makeDisplayPalette(UI_THEME_DEFAULT, false);
+            styleRoundIconButton(ui_ModeScreen_settingsButton, darkPalette, GM_CONTENT, 44);
+        }
+        //
+        // CAR-308 P2 #1 (Codex review): the launcher is *dark-only by design*
+        // — tiles use white@10% bg + GM_FAINT borders, icons are
+        // accent-recolored against a black canvas, and the standby pill +
+        // kicker resolve mono labels in GM_MUTED. There is no light-theme
+        // palette equivalent (the design handoff is single-theme), and the
+        // legacy styleMenuTile() retint machinery was deliberately removed
+        // when the screen was rebuilt. styleScreenBase() above repaints the
+        // screen bg to palette.surface, which on UI_THEME_LIGHT (non-AMOLED
+        // panels) is near-white — that makes the white@10% tiles vanish into
+        // the background. Restore GM_BG here so the launcher always renders
+        // on the dark Nothing canvas regardless of the user's theme setting.
+        // Mirrors the StandbyScreen pattern (also dark-only by design).
+        lv_obj_set_style_bg_color(activeScreen, GM_BG, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_grad_color(activeScreen, GM_BG, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(activeScreen, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     } else if (activeScreen == ui_MenuScreen) {
-        ensureMenuActionLabels();
-        stylePanel(ui_MenuScreen_contentPanel1, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleIconButton(ui_MenuScreen_standbyButton, palette, palette.textPrimary);
-        styleMenuTile(ui_MenuScreen_btnBrew, palette, palette.accent);
-        styleMenuTile(ui_MenuScreen_btnSteam, palette, palette.accentCool);
-        styleMenuTile(ui_MenuScreen_waterBtn, palette, palette.water);
-        styleMenuTile(ui_MenuScreen_grindBtn, palette, palette.grind);
-        if (menuBrewLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_btnBrew, menuBrewLabel, "BREW", palette.accent);
+        // CAR-279: Quick-settings list is built from gm_make_screen + GM_*
+        // tokens (dark-themed) in ui_MenuScreen.c. styleScreenBase() above
+        // repaints the screen background to palette.surfaceBase, so on
+        // UI_THEME_LIGHT the row text/icons would be near-white on near-white
+        // without an explicit palette pass. Recolor the back button (round)
+        // and delegate row/kicker/stepper recolor to the screen module.
+        if (lv_obj_is_valid(ui_MenuScreen_backButton)) {
+            styleRoundIconButton(ui_MenuScreen_backButton, palette, palette.textPrimary, 44);
         }
-        if (menuSteamLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_btnSteam, menuSteamLabel, "STEAM", palette.accentCool);
-        }
-        if (menuWaterLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_waterBtn, menuWaterLabel, "WATER", palette.water);
-        }
-        if (menuGrindLabel != nullptr) {
-            setButtonLabel(ui_MenuScreen_grindBtn, menuGrindLabel, "GRIND", palette.grind);
-        }
-        if (roundDisplay) {
-            lv_obj_set_size(ui_MenuScreen_contentPanel1, 366, 366);
-            lv_obj_set_layout(ui_MenuScreen_contentPanel1, 0);
-            lv_obj_set_style_pad_all(ui_MenuScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_row(ui_MenuScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_MenuScreen_contentPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_align(ui_MenuScreen_contentPanel1, LV_ALIGN_CENTER, 0, 2);
-            lv_obj_set_size(ui_MenuScreen_btnBrew, 106, 106);
-            lv_obj_set_size(ui_MenuScreen_btnSteam, 106, 106);
-            lv_obj_set_size(ui_MenuScreen_waterBtn, 106, 106);
-            lv_obj_set_size(ui_MenuScreen_grindBtn, 106, 106);
-            lv_obj_align(ui_MenuScreen_btnBrew, LV_ALIGN_CENTER, -62, -58);
-            lv_obj_align(ui_MenuScreen_btnSteam, LV_ALIGN_CENTER, 62, -58);
-            lv_obj_align(ui_MenuScreen_waterBtn, LV_ALIGN_CENTER, -62, 66);
-            lv_obj_align(ui_MenuScreen_grindBtn, LV_ALIGN_CENTER, 62, 66);
-            lv_obj_align(ui_MenuScreen_standbyButton, LV_ALIGN_BOTTOM_MID, 0, -22);
-            styleRoundIconButton(ui_MenuScreen_standbyButton, palette, palette.textPrimary, 76, true);
-            lv_obj_move_foreground(ui_MenuScreen_standbyButton);
-        }
-    } else if (activeScreen == ui_SimpleProcessScreen) {
-        stylePanel(ui_SimpleProcessScreen_contentPanel5, palette, roundDisplay ? OPA_45 : OPA_55, roundDisplay ? 180 : 44);
-        styleHeadline(ui_SimpleProcessScreen_mainLabel5, palette, true);
-        applyProcessRing(uic_SimpleProcessScreen_dials_tempGauge, palette, ringVisual, roundDisplay);
-        styleMetricValue(ui_SimpleProcessScreen_targetTemp, palette, roundDisplay ? &ndot_34 : &ndot_24);
-        styleIconButton(ui_SimpleProcessScreen_ImgButton6, palette, palette.textPrimary);
-        styleIconButton(ui_SimpleProcessScreen_downTempButton, palette, palette.textMuted);
-        styleIconButton(ui_SimpleProcessScreen_upTempButton, palette, palette.accent);
-        styleIconButton(ui_SimpleProcessScreen_goButton, palette, mode == MODE_STEAM ? palette.accentCool : palette.water);
-        if (lv_obj_is_valid(ui_SimpleProcessScreen_Image9)) {
-            lv_obj_set_style_img_recolor(ui_SimpleProcessScreen_Image9, mode == MODE_STEAM ? palette.accentCool : palette.water,
-                                         LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_SimpleProcessScreen_Image9, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_SimpleProcessScreen_mainLabel5)) {
-            lv_label_set_text(ui_SimpleProcessScreen_mainLabel5, ringVisual.title);
-            lv_obj_set_style_text_color(ui_SimpleProcessScreen_mainLabel5, ringVisual.tone, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_font(ui_SimpleProcessScreen_mainLabel5, &ndot_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (roundDisplay) {
-            lv_obj_set_size(ui_SimpleProcessScreen_contentPanel5, 372, 372);
-            lv_obj_align(ui_SimpleProcessScreen_contentPanel5, LV_ALIGN_CENTER, 0, 4);
-            alignTopBackButton(ui_SimpleProcessScreen_ImgButton6, palette, palette.textPrimary);
-            styleFixedLabel(ui_SimpleProcessScreen_mainLabel5, 220, 32, &ndot_24, ringVisual.tone);
-            lv_obj_align(ui_SimpleProcessScreen_mainLabel5, LV_ALIGN_TOP_MID, 0, 42);
-            alignMetricPair(ui_SimpleProcessScreen_Image9, ui_SimpleProcessScreen_targetTemp, -10, 18,
-                            mode == MODE_STEAM ? palette.accentCool : palette.water, palette);
-            styleRoundIconButton(ui_SimpleProcessScreen_downTempButton, palette, palette.textMuted, 54);
-            styleRoundIconButton(ui_SimpleProcessScreen_upTempButton, palette, palette.accent, 54);
-            lv_obj_align(ui_SimpleProcessScreen_downTempButton, LV_ALIGN_CENTER, -108, 18);
-            lv_obj_align(ui_SimpleProcessScreen_upTempButton, LV_ALIGN_CENTER, 108, 18);
-            alignFooterAction(ui_SimpleProcessScreen_goButton, palette, mode == MODE_STEAM ? palette.accentCool : palette.water);
-        }
+        ui_MenuScreen_apply_palette(palette.textPrimary, palette.textMuted, palette.surface, palette.accent);
     } else if (activeScreen == ui_StandbyScreen) {
-        ensureStandbyContextLabel();
-        if (lv_obj_is_valid(ui_StandbyScreen_time)) {
-            styleMetricValue(ui_StandbyScreen_time, palette, &ndot_34);
-            lv_obj_set_style_text_letter_space(ui_StandbyScreen_time, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_StandbyScreen_statusContainer)) {
-            stylePanel(ui_StandbyScreen_statusContainer, palette, OPA_185, 999);
-            lv_obj_set_style_pad_left(ui_StandbyScreen_statusContainer, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_right(ui_StandbyScreen_statusContainer, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_top(ui_StandbyScreen_statusContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_bottom(ui_StandbyScreen_statusContainer, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_column(ui_StandbyScreen_statusContainer, 18, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (standbyContextLabel != nullptr && lv_obj_is_valid(standbyContextLabel)) {
-            styleChip(standbyContextLabel, palette, palette.accent, true);
-        }
-        if (lv_obj_is_valid(ui_StandbyScreen_logo)) {
-            lv_obj_set_style_img_recolor(ui_StandbyScreen_logo, palette.textPrimary, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_logo, LV_OPA_90, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (lv_obj_is_valid(ui_StandbyScreen_mainLabel)) {
-            lv_label_set_text(ui_StandbyScreen_mainLabel, "Touch to wake");
-            styleSecondary(ui_StandbyScreen_mainLabel, palette);
-            lv_obj_set_style_text_font(ui_StandbyScreen_mainLabel, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        if (roundDisplay) {
-            lv_obj_align(ui_StandbyScreen_statusContainer, LV_ALIGN_TOP_MID, 0, 24);
-            lv_obj_set_size(ui_StandbyScreen_statusContainer, 180, 36);
-            lv_obj_align(ui_StandbyScreen_time, LV_ALIGN_TOP_MID, 0, 84);
-            lv_img_set_zoom(ui_StandbyScreen_logo, 150);
-            lv_obj_align(ui_StandbyScreen_logo, LV_ALIGN_CENTER, 0, -8);
-            lv_obj_align(ui_StandbyScreen_mainLabel, LV_ALIGN_BOTTOM_MID, 0, -52);
-            if (standbyContextLabel != nullptr) {
-                lv_obj_align(standbyContextLabel, LV_ALIGN_BOTTOM_MID, 0, -92);
-            }
-        }
+        // Nothing-theme standby (CAR-277) styles itself via the gm_* builders in
+        // ui_StandbyScreen_screen_init; nothing to restyle here. The kicker text
+        // and clock/wifi/bt are driven by the standby effect + updateStandbyScreen().
     }
 }
 
 void DefaultUI::updateStandbyScreen() {
-    ensureStandbyContextLabel();
     if (standbyEnterTime > 0) {
         const Settings &settings = controller->getSettings();
         const unsigned long now = millis();
@@ -1646,146 +1873,309 @@ void DefaultUI::updateStandbyScreen() {
         }
     }
 
-    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning && !waitingForController &&
-        initialized) {
+    // CAR-304: WiFi+NTP are independent of controller BLE pairing — keep the
+    // hero clock visible while waitingForController so the kicker
+    // "WAITING FOR CONTROLLER" doesn't leave a blank space where time should
+    // be. Other gates (error/updating/autotuning/AP/no-WiFi) still suppress
+    // the clock because those states genuinely invalidate it.
+    // CAR-306: also drop the `initialized` gate. `initialized` is only set
+    // true on `controller:bluetooth:connect`, so on a cold boot with WiFi/NTP
+    // up but no controller yet paired, the clock would stay hidden — exactly
+    // the case CAR-304 was meant to cover. Pairing state is conveyed by the
+    // kicker label and the BT icon recolor, not the clock.
+    if (!apActive && WiFi.status() == WL_CONNECTED && !updateActive && !error && !autotuning) {
         time_t now;
         struct tm timeinfo;
 
         localtime_r(&now, &timeinfo);
-        // allocate enough space for both 12h/24h time formats
         if (getLocalTime(&timeinfo, 500)) {
-            char time[9];
             Settings &settings = controller->getSettings();
-            const char *format = settings.isClock24hFormat() ? "%H:%M" : "%I:%M %p";
-            strftime(time, sizeof(time), format, &timeinfo);
-            lv_label_set_text(ui_StandbyScreen_time, time);
-            lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            const bool is24h = settings.isClock24hFormat();
+            const int hour = is24h ? timeinfo.tm_hour : ((timeinfo.tm_hour % 12 == 0) ? 12 : timeinfo.tm_hour % 12);
+            if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+                lv_label_set_text_fmt(ui_StandbyScreen_time, "%02d:#D71921 %02d#", hour, timeinfo.tm_min);
+                lv_obj_clear_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            }
 
-            christmasMode = (timeinfo.tm_mon == 11 && timeinfo.tm_mday < 27) || (timeinfo.tm_mon == 0 && timeinfo.tm_mday < 6);
+            // ndot_120 only covers digits+colon; drive the AM/PM suffix separately
+            if (lv_obj_is_valid(gm_h.ampm)) {
+                if (!is24h) {
+                    char ampm[3]; // "AM\0" / "PM\0"
+                    strftime(ampm, sizeof(ampm), "%p", &timeinfo);
+                    lv_label_set_text(gm_h.ampm, ampm);
+                    lv_obj_clear_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+        } else {
+            // WiFi up but NTP hasn't synced yet — getLocalTime() returns false.
+            // Without this branch the clock would keep its prior text (often the
+            // screen-init "--:--"), which renders as missing-glyph rectangles in
+            // ndot_120. Hide it like the no-WiFi path does. (CAR-299)
+            if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+                lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (lv_obj_is_valid(gm_h.ampm)) {
+                lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     } else {
-        lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
-    }
-    controller->getClientController()->isConnected() ? lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN)
-                                                     : lv_obj_add_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
-    !apActive &&WiFi.status() == WL_CONNECTED ? lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN)
-                                              : lv_obj_add_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
-
-    if (standbyContextLabel != nullptr) {
-        const String standbyContext = buildContextLine(selectedProfile.label.isEmpty() ? "Ready" : selectedProfile.label, selectedBean);
-        lv_label_set_text(standbyContextLabel, standbyContext.c_str());
-        if (selectedProfile.label.isEmpty() && selectedBean.isEmpty()) {
-            lv_obj_add_flag(standbyContextLabel, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_clear_flag(standbyContextLabel, LV_OBJ_FLAG_HIDDEN);
+        // ndot_120 only covers 0x30-0x3A (digits + colon); dashes in "--:--"
+        // render as LVGL missing-glyph rectangles. Hide the clock instead and
+        // let the kicker label convey state (CAR-299).
+        if (lv_obj_is_valid(ui_StandbyScreen_time)) {
+            lv_obj_add_flag(ui_StandbyScreen_time, LV_OBJ_FLAG_HIDDEN);
         }
+        if (lv_obj_is_valid(gm_h.ampm)) {
+            lv_obj_add_flag(gm_h.ampm, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    // WiFi/BT icons always visible — color indicates connection state.
+    lv_obj_set_style_img_recolor(ui_StandbyScreen_wifiIcon,
+        (!apActive && WiFi.status() == WL_CONNECTED) ? GM_CONTENT : GM_MUTED, 0);
+    lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_wifiIcon, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(ui_StandbyScreen_wifiIcon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_img_recolor(ui_StandbyScreen_bluetoothIcon,
+        controller->getClientController()->isConnected() ? GM_CONTENT : GM_MUTED, 0);
+    lv_obj_set_style_img_recolor_opa(ui_StandbyScreen_bluetoothIcon, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(ui_StandbyScreen_bluetoothIcon, LV_OBJ_FLAG_HIDDEN);
+
+    // Temperature sub-line (Nothing theme): "<current>° / <target>°C".
+    // CAR-303: Controller::getTargetTemp() returns 0 in MODE_STANDBY by
+    // design (no active process), so targetTemp would always be 0 here and
+    // the line fell through to "--". Fall back to the active brew profile's
+    // setpoint — that's what wakeup will heat the boiler to.
+    // Only render live values when the BLE controller is connected; otherwise
+    // currentTemp is the stale initial sensor value (refreshed only by BLE
+    // callbacks) and the profile-setpoint fallback would mislead (e.g.
+    // "0° / 93°C" while the kicker says WAITING FOR CONTROLLER).
+    if (lv_obj_is_valid(gm_h.standby_temp)) {
+        bool ctrlConnected = controller->getClientController()->isConnected();
+        int displayTarget = targetTemp;
+        if (displayTarget <= 0) {
+            displayTarget = static_cast<int>(profileManager->getSelectedProfile().temperature);
+        }
+        if (ctrlConnected && displayTarget > 0) {
+            lv_label_set_text_fmt(gm_h.standby_temp, "%d\xC2\xB0 / %d\xC2\xB0\x43", currentTemp, displayTarget);
+        } else {
+            lv_label_set_text(gm_h.standby_temp, "--");
+        }
+    }
+}
+
+// CAR-308 P2 #2 (Codex review): shared status-bar clock formatter. Called
+// from updateStatusScreen() and from loop() for every screen that owns a
+// gm_status_bar() and points gm_h.status_time at its own clock label
+// (StatusScreen, BrewScreen, GrindScreen, ModeScreen). NULL/invalid handle
+// is a no-op so callers never have to guard. Format and gating mirror the
+// pre-CAR-308 inline block from updateStatusScreen().
+void DefaultUI::updateStatusBarClock() {
+    if (gm_h.status_time == nullptr || !lv_obj_is_valid(gm_h.status_time)) {
+        return;
+    }
+    // CAR-315: gm_status_bar() seeds the label with a "--:--" placeholder in
+    // spacemono_14 and hides it until a real time is available. Mirror the
+    // CAR-299 StandbyScreen handling: only show the clock once NTP has given us
+    // a plausible time (epoch past 2021), otherwise keep it hidden so the
+    // placeholder never renders as missing-glyph rectangles on any screen.
+    time_t nowEpoch = time(nullptr);
+    struct tm timeinfo;
+    if (nowEpoch > 1609459200 && localtime_r(&nowEpoch, &timeinfo) != nullptr) {
+        char buf[8];
+        strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+        lv_label_set_text(gm_h.status_time, buf);
+        lv_obj_clear_flag(gm_h.status_time, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(gm_h.status_time, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
 void DefaultUI::updateStatusScreen() {
+    // CAR-278: status screen rebuilt in the Nothing theme. Single screen
+    // with three modes — brew (red), steam (gold), water (blue) — driven by
+    // gm_status_apply_mode(). All widgets we touch live on `gm_h`.
+    if (lv_scr_act() != ui_StatusScreen) {
+        return;
+    }
+
     ensureStatusBeanLabel();
-    
-    // Use thread-safe snapshot to avoid use-after-free race conditions
+
+    // Status bar clock — matches the standby pattern. Shared with ModeScreen
+    // (and any other screen that owns a gm_status_bar() and wires
+    // gm_h.status_time on init) via the updateStatusBarClock() helper.
+    updateStatusBarClock();
+
+    // Mode-driven defaults. Pull a fresh process snapshot once.
     ProcessSnapshot proc = controller->getProcessSnapshot();
-    
-    if (!proc.exists || !proc.isBrew) {
-        return;
-    }
+    int arcPct = 0;
+    int barPct = 0;
 
-    // Validate phase index
-    if (proc.phaseIndex >= proc.phaseCount) {
-        ESP_LOGE("DefaultUI", "Process phaseIndex out of bounds: %u >= %zu", proc.phaseIndex, proc.phaseCount);
-        return;
-    }
-
-    unsigned long now = millis();
-    if (!proc.isActive && proc.finished > 0) {
-        now = proc.finished;
-    }
-
-    lv_label_set_text(ui_StatusScreen_stepLabel, proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "BREW" : "INFUSION");
-    String phaseText = "Finished";
-    if (proc.isActive) {
-        phaseText = proc.phaseName;
-    } else if (controller->getSettings().isDelayAdjust() && !proc.isComplete) {
-        phaseText = "Calibrating...";
-    }
-    lv_label_set_text(ui_StatusScreen_phaseLabel, phaseText.c_str());
-    if (statusBeanLabel != nullptr) {
-        if (selectedBean.isEmpty()) {
-            lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_clear_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(statusBeanLabel, "Bean • %s", selectedBean.c_str());
+    auto setHero = [&](const char *value, const char *unit) {
+        if (gm_h.hero != nullptr && lv_obj_is_valid(gm_h.hero)) {
+            lv_label_set_text(gm_h.hero, value);
         }
-    }
+        if (gm_h.hero_unit != nullptr && lv_obj_is_valid(gm_h.hero_unit)) {
+            lv_label_set_text(gm_h.hero_unit, unit);
+            // lv_obj_align_to is one-shot in LVGL v8; re-anchor the unit suffix
+            // every frame so it tracks the hero label's changing text width.
+            if (gm_h.hero != nullptr && lv_obj_is_valid(gm_h.hero)) {
+                lv_obj_align_to(gm_h.hero_unit, gm_h.hero, LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -10);
+            }
+        }
+    };
 
-    // Add bounds check for processStarted timestamp
-    if (proc.started > 0 && now >= proc.started) {
-        const unsigned long processDuration = now - proc.started;
-        const double processSecondsDouble = processDuration / 1000.0;
-        const auto processMinutes = static_cast<int>(processSecondsDouble / 60.0);
-        const auto processSeconds = static_cast<int>(processSecondsDouble) % 60;
-        lv_label_set_text_fmt(ui_StatusScreen_currentDuration, "%2d:%02d", processMinutes, processSeconds);
-    } else {
-        lv_label_set_text_fmt(ui_StatusScreen_currentDuration, "00:00");
-    }
+    auto setKicker = [&](const char *txt) {
+        if (gm_h.kicker != nullptr && lv_obj_is_valid(gm_h.kicker)) {
+            lv_label_set_text(gm_h.kicker, txt);
+        }
+    };
 
-    if (proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget) {
-        lv_bar_set_value(ui_StatusScreen_brewBar, proc.currentVolume * 10.0, LV_ANIM_OFF);
-        lv_bar_set_range(ui_StatusScreen_brewBar, 0, proc.volumetricTargetValue * 10.0 + 1.0);
-        lv_label_set_text_fmt(ui_StatusScreen_brewLabel, "%.1f / %.1fg", proc.currentVolume, proc.volumetricTargetValue);
-    } else {
-        // Add bounds check for currentPhaseStarted timestamp
-        if (proc.currentPhaseStarted > 0 && now >= proc.currentPhaseStarted) {
+    // setStatus() removed (CAR-278 review #1): gm_h.status_label is owned by
+    // ui_StandbyScreen (assigned in its _screen_init, NULLed in _screen_destroy)
+    // and is not visible from the Status screen. Active-vs-idle on the Status
+    // screen is conveyed by the kicker, READY pill, and progress bar
+    // (mode-dependent). Do not write to gm_h.status_label from this path.
+
+    if (mode == MODE_BREW) {
+        // Hero is brew elapsed time (m:ss); the unit slot stays as 's'.
+        unsigned long now = millis();
+        if (proc.exists && !proc.isActive && proc.finished > 0) {
+            now = proc.finished;
+        }
+        unsigned long elapsedMs = 0;
+        if (proc.exists && proc.started > 0 && now >= proc.started) {
+            elapsedMs = now - proc.started;
+        }
+        const auto elapsedSecs = static_cast<int>(elapsedMs / 1000);
+        const int mm = elapsedSecs / 60;
+        const int ss = elapsedSecs % 60;
+        char heroBuf[16];
+        snprintf(heroBuf, sizeof(heroBuf), "%d:%02d", mm, ss);
+        setHero(heroBuf, "s");
+
+        // Kicker: phase name, falling back to BREW.
+        if (proc.exists && proc.isActive && proc.phaseName[0] != '\0') {
+            String phaseUpper = String(proc.phaseName);
+            phaseUpper.toUpperCase();
+            setKicker(phaseUpper.c_str());
+        } else if (proc.exists && !proc.isActive && proc.finished > 0) {
+            setKicker("FINISHED");
+        } else {
+            setKicker("BREW");
+        }
+
+        // Metric row: WEIGHT / TEMP / PRESS / FLOW (flow shows '--').
+        if (gm_h.m_weight != nullptr && lv_obj_is_valid(gm_h.m_weight)) {
+            lv_label_set_text_fmt(gm_h.m_weight, "%.1fg",
+                                  proc.exists ? proc.currentVolume : 0.0);
+        }
+        if (gm_h.m_temp != nullptr && lv_obj_is_valid(gm_h.m_temp)) {
+            lv_label_set_text_fmt(gm_h.m_temp, "%d\xC2\xB0", currentTemp);
+        }
+        if (gm_h.m_press != nullptr && lv_obj_is_valid(gm_h.m_press)) {
+            lv_label_set_text_fmt(gm_h.m_press, "%.1f", pressure);
+        }
+        if (gm_h.m_flow != nullptr && lv_obj_is_valid(gm_h.m_flow)) {
+            // ProcessSnapshot has no flow rate field; show placeholder.
+            lv_label_set_text(gm_h.m_flow, "--");
+        }
+
+        // CAR-300: brew uses linear bar (not arc) for dose/phase progress.
+        // Prefer volumetric fill, else phase elapsed time, else stay at 0.
+        if (proc.exists && proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
+            proc.volumetricTargetValue > 0.0) {
+            barPct = static_cast<int>((proc.currentVolume / proc.volumetricTargetValue) * 100.0);
+        } else if (proc.exists && proc.currentPhaseStarted > 0 && now >= proc.currentPhaseStarted &&
+                   proc.phaseDuration > 0) {
             const unsigned long progress = now - proc.currentPhaseStarted;
-            lv_bar_set_value(ui_StatusScreen_brewBar, progress, LV_ANIM_OFF);
-            lv_bar_set_range(ui_StatusScreen_brewBar, 0, std::max(static_cast<int>(proc.phaseDuration), 1));
-            lv_label_set_text_fmt(ui_StatusScreen_brewLabel, "%d / %ds", progress / 1000, proc.phaseDuration / 1000);
+            barPct = static_cast<int>((progress * 100UL) / proc.phaseDuration);
+        }
+    } else if (mode == MODE_STEAM) {
+        // Hero is current temp; READY pill appears when stable.
+        char heroBuf[16];
+        snprintf(heroBuf, sizeof(heroBuf), "%d", currentTemp);
+        setHero(heroBuf, "\xC2\xB0");
+        setKicker("STEAM");
+
+        if (gm_h.m_temp != nullptr && lv_obj_is_valid(gm_h.m_temp)) {
+            lv_label_set_text_fmt(gm_h.m_temp, "%d\xC2\xB0", targetTemp);
+        }
+
+        // Arc tracks heat-up progress toward target. Cap at 99 until the
+        // temperature stability flag fires so the arc cannot read full while
+        // the READY pill is still hidden during thermal overshoot
+        // (review-comment 4585899391, finding #2).
+        if (targetTemp > 0) {
+            arcPct = static_cast<int>((static_cast<float>(currentTemp) / targetTemp) * 100.0f);
+            if (!isTemperatureStable && arcPct > 99) {
+                arcPct = 99;
+            }
+        }
+        // bar_pct >= 100 toggles the READY pill in gm_status_apply_mode.
+        barPct = isTemperatureStable ? 100 : 0;
+    } else if (mode == MODE_WATER) {
+        // Hero is water dispensed (g); horizontal bar shows progress.
+        const double dispensed = proc.exists ? proc.currentVolume : 0.0;
+        char heroBuf[16];
+        snprintf(heroBuf, sizeof(heroBuf), "%.0f", dispensed);
+        setHero(heroBuf, "g");
+        setKicker("WATER");
+
+        const double target =
+            proc.exists && proc.hasVolumetricTarget && proc.volumetricTargetValue > 0.0
+                ? proc.volumetricTargetValue
+                : 0.0;
+        if (gm_h.w_target != nullptr && lv_obj_is_valid(gm_h.w_target)) {
+            if (target > 0.0) {
+                lv_label_set_text_fmt(gm_h.w_target, "%.0fg", target);
+            } else {
+                lv_label_set_text(gm_h.w_target, "--");
+            }
+        }
+        if (gm_h.w_temp != nullptr && lv_obj_is_valid(gm_h.w_temp)) {
+            lv_label_set_text_fmt(gm_h.w_temp, "%d\xC2\xB0", currentTemp);
+        }
+        if (gm_h.w_flow != nullptr && lv_obj_is_valid(gm_h.w_flow)) {
+            lv_label_set_text(gm_h.w_flow, "--");
+        }
+
+        if (target > 0.0) {
+            barPct = static_cast<int>((dispensed / target) * 100.0);
+        }
+    } else {
+        // Fallback (shouldn't hit on this screen): zero everything.
+        setHero("--", "");
+        setKicker("");
+    }
+
+    // CAR-300: context label always shows in brew mode (profile · pressure).
+    // When a bean is selected, append it after the profile/pressure line.
+    if (statusBeanLabel != nullptr && lv_obj_is_valid(statusBeanLabel)) {
+        if (mode == MODE_BREW) {
+            lv_obj_clear_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
+            if (!selectedBean.isEmpty()) {
+                lv_label_set_text_fmt(statusBeanLabel, "%s · %.1f bar · %s",
+                                      selectedProfile.label.c_str(), pressure,
+                                      selectedBean.c_str());
+            } else {
+                lv_label_set_text_fmt(statusBeanLabel, "%s · %.1f bar",
+                                      selectedProfile.label.c_str(), pressure);
+            }
         } else {
-            lv_bar_set_value(ui_StatusScreen_brewBar, 0, LV_ANIM_OFF);
-            lv_bar_set_range(ui_StatusScreen_brewBar, 0, 1);
-            lv_label_set_text(ui_StatusScreen_brewLabel, "0s");
+            lv_obj_add_flag(statusBeanLabel, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
-    if (proc.target == ProcessTarget::TIME) {
-        const double targetSecondsDouble = proc.totalDuration / 1000.0;
-        const auto targetMinutes = static_cast<int>(targetSecondsDouble / 60.0);
-        const auto targetSeconds = static_cast<int>(targetSecondsDouble) % 60;
-        lv_label_set_text_fmt(ui_StatusScreen_targetDuration, "%2d:%02d", targetMinutes, targetSeconds);
-    } else {
-        lv_label_set_text_fmt(ui_StatusScreen_targetDuration, "%.1fg", proc.brewVolume);
-    }
-    lv_img_set_src(ui_StatusScreen_Image8,
-                   proc.target == ProcessTarget::TIME ? &ui_img_360122106 : &ui_img_1424216268);
-
-    if (proc.isAdvancedPump) {
-        const double percentage = 1.0 - static_cast<double>(proc.pumpPressure) / static_cast<double>(pressureScaling);
-        adjustTarget(uic_StatusScreen_dials_pressureTarget, percentage, -62.0, 124.0);
-    } else {
-        const double percentage = 1.0 - 0.5;
-        adjustTarget(uic_StatusScreen_dials_pressureTarget, percentage, -62.0, 124.0);
-    }
-
-    // Brew finished adjustments - use snapshot state only to avoid TOCTOU race
-    if (proc.isActive) {
-        lv_obj_add_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        if (proc.target == ProcessTarget::VOLUMETRIC) {
-            lv_obj_clear_flag(ui_StatusScreen_brewVolume, LV_OBJ_FLAG_HIDDEN);
-        }
-        lv_obj_add_flag(ui_StatusScreen_barContainer, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(ui_StatusScreen_labelContainer, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text_fmt(ui_StatusScreen_brewVolume, "%.1lfg", proc.currentVolume);
-        lv_imgbtn_set_src(ui_StatusScreen_pauseButton, LV_IMGBTN_STATE_RELEASED, nullptr, &ui_img_631115820, nullptr);
-    }
+    // Drive widget visibility + accent retint per mode.
+    gm_status_apply_mode(mode, arcPct, barPct);
 }
 
 void DefaultUI::adjustDials(lv_obj_t *dials) {
-    const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), AmoledDisplayDriver::getInstance() == panelDriver);
+    const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), GM_PANEL_IS_AMOLED(panelDriver));
     const bool roundDisplay = isRoundDisplay();
-    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller};
+    const RingVisualContext ringContext{mode, currentTemp, targetTemp, active != 0, grindActive != 0, controller,
+                                        isTemperatureStable != 0};
     const RingVisual ringVisual = buildRingVisual(palette, ringContext);
     lv_obj_t *tempGauge = ui_comp_get_child(dials, UI_COMP_DIALS_TEMPGAUGE);
     lv_obj_t *tempText = ui_comp_get_child(dials, UI_COMP_DIALS_TEMPTEXT);
@@ -1854,16 +2244,18 @@ inline void DefaultUI::adjustTempTarget(lv_obj_t *dials) {
 
 void DefaultUI::applyTheme() {
     const Settings &settings = controller->getSettings();
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     int newThemeMode = resolveDisplayThemeMode(settings.getThemeMode(), amoledPanel);
 
     if (newThemeMode != currentThemeMode) {
         currentThemeMode = newThemeMode;
         ui_theme_set(currentThemeMode);
 
+#ifndef GAGGIMATE_SIM // amoledPanel is always false in the sim; the override lives in the device-only LV_Helper
         if (amoledPanel && currentThemeMode == UI_THEME_DEFAULT) {
             enable_amoled_black_theme_override(lv_disp_get_default());
         }
+#endif
     }
 }
 
@@ -1898,7 +2290,7 @@ void DefaultUI::ensureAutoSteamButton() {
     if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen))
         return;
 
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), amoledPanel);
 
     if (autoSteamBtn == nullptr || !lv_obj_is_valid(autoSteamBtn)) {
@@ -1946,7 +2338,7 @@ void DefaultUI::ensureBeanSelectButton() {
     if (lv_scr_act() != ui_BrewScreen || !lv_obj_is_valid(ui_BrewScreen) || beanSelectBtn != nullptr)
         return;
 
-    const bool amoledPanel = AmoledDisplayDriver::getInstance() == panelDriver;
+    const bool amoledPanel = GM_PANEL_IS_AMOLED(panelDriver);
     const DisplayPalette palette = makeDisplayPalette(controller->getSettings().getThemeMode(), amoledPanel);
 
     beanSelectBtn = lv_btn_create(ui_BrewScreen);

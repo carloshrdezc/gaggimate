@@ -1,8 +1,10 @@
 #ifndef SHOTHISTORYPLUGIN_H
 #define SHOTHISTORYPLUGIN_H
 
+#include "PostStopGracePolicy.h"
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
+#include <atomic>
 #include <display/core/Plugin.h>
 #include <display/core/utils.h>
 #include <display/models/shot_log_format.h>
@@ -10,12 +12,16 @@
 #include <freertos/semphr.h>
 
 constexpr size_t SHOT_HISTORY_INTERVAL = 100;
-constexpr size_t MIN_FREE_SPACE_BYTES = 500 * 1024;         // 500 KB reserved free space
-constexpr unsigned long EXTENDED_RECORDING_DURATION = 3000; // 3 seconds
-constexpr unsigned long WEIGHT_STABILIZATION_TIME = 1000;   // 1 second
-constexpr float WEIGHT_STABILIZATION_THRESHOLD = 0.1f;      // 0.1g threshold
-constexpr int SHOT_ID_LENGTH = 6;                           // Shot ID padding length
-constexpr unsigned long STATE_MUTEX_TIMEOUT_MS = 100;       // Mutex timeout for state access
+constexpr size_t MIN_FREE_SPACE_BYTES = 500 * 1024; // 500 KB reserved free space
+// PRO-248: hard cap for the post-stop extended-recording / weight-settle window.
+// Defined as POST_STOP_GRACE_DURATION_MS (single source of truth) so this window
+// and BLEScalePlugin's scale-alive grace cap share one constant. The meaningful
+// value-pin (POST_STOP_GRACE_DURATION_MS == 10000) lives in the host tests.
+constexpr unsigned long EXTENDED_RECORDING_DURATION = POST_STOP_GRACE_DURATION_MS;
+constexpr unsigned long WEIGHT_STABILIZATION_TIME = 1000; // 1 second
+constexpr float WEIGHT_STABILIZATION_THRESHOLD = 0.1f;    // 0.1g threshold
+constexpr int SHOT_ID_LENGTH = 6;                         // Shot ID padding length
+constexpr unsigned long STATE_MUTEX_TIMEOUT_MS = 100;     // Mutex timeout for state access
 
 class ShotHistoryPlugin : public Plugin {
   public:
@@ -39,10 +45,29 @@ class ShotHistoryPlugin : public Plugin {
     // Get current shot ID for WebUIPlugin status updates
     String getCurrentShotId() const { return currentId; }
     // Check if a shot is currently being recorded
-    bool isRecording() const { return recording; }
+    bool isRecording() const { return recording.load(std::memory_order_relaxed); }
+    // Check if the post-stop extended-recording / weight-settle window is active.
+    // Used by the UI to hold the auto-steam transition until the final shot yield
+    // has been captured (PRO-223). Returns false when no settle window is running
+    // (e.g. no BLE scale), so callers must not block indefinitely on it.
+    bool isExtendedRecording() const { return extendedRecording.load(std::memory_order_relaxed); }
 
   private:
     // Index helper functions
+    // PRO-277: all four /h/index.bin entry points (appendToIndex, updateIndexMetadata,
+    // markIndexDeleted, rebuildIndex) are reached from MULTIPLE tasks — the ShotHistory
+    // loopTask (record() -> createEarlyIndexEntry / appendCompletedShotToIndex), the
+    // WebUI request task (handleRequest -> updateIndexMetadata / markIndexDeleted), and
+    // the dedicated async-rebuild task. They each did their own fs->open(.."r+") with no
+    // serialization, so concurrent opens of the same file corrupted/lost writes and the
+    // post-shot metadata update could not find a freshly-appended entry. indexMutex
+    // serializes the whole body of each; the public methods take it and delegate to the
+    // *Locked() implementations below. These never call each other, so a non-recursive
+    // mutex is deadlock-free.
+    bool appendToIndexLocked(const ShotIndexEntry &entry);
+    void updateIndexMetadataLocked(uint32_t shotId, uint8_t rating, uint16_t volume);
+    void markIndexDeletedLocked(uint32_t shotId);
+    void rebuildIndexLocked();
     bool readIndexHeader(File &indexFile, ShotIndexHeader &header);
     int findEntryPosition(File &indexFile, const ShotIndexHeader &header, uint32_t shotId);
     bool readEntryAtPosition(File &indexFile, size_t position, ShotIndexEntry &entry);
@@ -58,12 +83,15 @@ class ShotHistoryPlugin : public Plugin {
     // Phase 1 refactoring: extracted helper methods from record()
     bool openLogFileIfNeeded();
     void initializeHeader();
-    ShotLogSample createSample();
-    void updateBluetoothFlow();
+    // PRO-277: createSample / updateBluetoothFlow take the telemetry snapshot
+    // captured under stateMutex in record(), so the file-building work runs
+    // lock-free and can no longer block the event callbacks.
+    ShotLogSample createSample(float bluetoothWeight, float estimatedWeight, float temperature, float puckResistance);
+    void updateBluetoothFlow(float bluetoothWeight);
     bool writeSampleToBuffer(const ShotLogSample &sample);
     void checkEarlyIndexCreation();
-    void closeLogFile();
-    void patchHeaderWithFinalData();
+    void closeLogFile(float finalBluetoothWeight);
+    void patchHeaderWithFinalData(float finalBluetoothWeight);
     bool isShotTooShort() const;
     void handleFailedShot();
     void handleCompletedShot();
@@ -80,7 +108,7 @@ class ShotHistoryPlugin : public Plugin {
 
     Controller *controller = nullptr;
     PluginManager *pluginManager = nullptr;
-    FS *fs = &SPIFFS;
+    FS *fs = &LittleFS;
     String currentId = "";
     bool isFileOpen = false;
     File currentFile;
@@ -89,8 +117,12 @@ class ShotHistoryPlugin : public Plugin {
     uint8_t ioBuffer[4096];
     size_t ioBufferPos = 0; // bytes used
 
-    bool recording = false;
-    bool extendedRecording = false;
+    // Set from the controller task (core 1, via startRecording()/endRecording() under stateMutex) and
+    // cleared from the ShotHistory loopTask (core 0, in record()). Read lock-free cross-task via
+    // isRecording()/isExtendedRecording(); std::atomic gives a correct, self-documenting cross-core flag
+    // (relaxed ordering — a single independent bool, no dependent data published alongside it).
+    std::atomic<bool> recording{false};
+    std::atomic<bool> extendedRecording{false};
     bool indexEntryCreated = false;     // Track if early index entry was created
     bool shotStartedVolumetric = false; // Track initial volumetric mode
     unsigned long shotStart = 0;
@@ -114,6 +146,9 @@ class ShotHistoryPlugin : public Plugin {
 
     xTaskHandle taskHandle;
     SemaphoreHandle_t stateMutex = nullptr; // Protects shared state accessed by record()
+    // PRO-277: serializes every operation on /h/index.bin across the loopTask,
+    // the WebUI request task, and the async-rebuild task (see *Locked helpers above).
+    SemaphoreHandle_t indexMutex = nullptr;
     bool flushBuffer();
     static void loopTask(void *arg);
 };

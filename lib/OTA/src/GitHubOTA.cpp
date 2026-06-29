@@ -23,7 +23,9 @@ GitHubOTA::GitHubOTA(const String &display_version, const String &controller_ver
     _progress_callback = progress_callback;
 
     Updater.rebootOnUpdate(false);
-    _wifi_client.setCACertBundle(x509_crt_imported_bundle_bin_start);
+    // PRO-293: core 3.x setCACertBundle() requires an explicit size argument.
+    _wifi_client.setCACertBundle(x509_crt_imported_bundle_bin_start,
+                                 x509_crt_imported_bundle_bin_end - x509_crt_imported_bundle_bin_start);
 
     Updater.onStart(update_started);
     Updater.onEnd(update_finished);
@@ -95,12 +97,12 @@ bool GitHubOTA::isUpdateAvailable(bool controller) const {
     return update_required(_latest_version, _version);
 }
 
-bool GitHubOTA::update(bool controller, bool display) {
+bool GitHubOTA::update(bool controller, bool display, bool force) {
     const char *TAG = "update";
 
     bool updateExecuted = false;
 
-    if (controller && update_required(_latest_version, _controller_version)) {
+    if (controller && (force || update_required(_latest_version, _controller_version))) {
         ESP_LOGI(TAG, "Controller update is required, running firmware update.");
         this->phase = PHASE_CONTROLLER_FW;
         this->_phase_callback(PHASE_CONTROLLER_FW);
@@ -112,7 +114,7 @@ bool GitHubOTA::update(bool controller, bool display) {
         updateExecuted = true;
     }
 
-    if (display && update_required(_latest_version, _version)) {
+    if (display && (force || update_required(_latest_version, _version))) {
         ESP_LOGI(TAG, "Update is required, running firmware update.");
         this->phase = PHASE_DISPLAY_FW;
         this->_phase_callback(PHASE_DISPLAY_FW);
@@ -123,15 +125,9 @@ bool GitHubOTA::update(bool controller, bool display) {
             return false;
         }
 
-        this->phase = PHASE_DISPLAY_FS;
-        this->_phase_callback(PHASE_DISPLAY_FS);
-        result = update_filesystem(_latest_url + _filesystem_name);
-
-        if (result != HTTP_UPDATE_OK) {
-            ESP_LOGE(TAG, "Filesystem Update failed: %s\n", Updater.getLastErrorString().c_str());
-            return false;
-        }
-
+        // The web UI now ships inside the firmware app image (GM-106), so there is no separate filesystem image to
+        // flash. OTA stays a single, rollback-protected app image and the LittleFS partition (profiles + shot history)
+        // is left untouched across updates. The filesystem image is only used for fresh USB installs.
         ESP_LOGI(TAG, "Update successful. Restarting...\n");
         this->phase = PHASE_FINISHED;
         this->_phase_callback(PHASE_FINISHED);
@@ -157,15 +153,6 @@ HTTPUpdateResult GitHubOTA::update_firmware(const String &url) {
 
     auto result = Updater.update(_wifi_client, url);
 
-    print_update_result(Updater, result, TAG);
-    return result;
-}
-
-HTTPUpdateResult GitHubOTA::update_filesystem(const String &url) {
-    const char *TAG = "update_filesystem";
-    ESP_LOGI(TAG, "Download URL: %s\n", url.c_str());
-
-    auto result = Updater.updateSpiffs(_wifi_client, url);
     print_update_result(Updater, result, TAG);
     return result;
 }

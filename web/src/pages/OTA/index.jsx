@@ -2,11 +2,12 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'p
 import { memo } from 'preact/compat';
 import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
+import { MigrationWarningBanner } from '../../components/MigrationWarningBanner.jsx';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
-import { updateOtaChannel } from './otaLogic.js';
+import { updateOtaChannel, canFlashTaggedRelease, canUpdateOnAcknowledgedChannel } from './otaLogic.js';
 
 // Constants
 const REBUILD_STATUS = {
@@ -110,9 +111,10 @@ const UpdateProgressView = ({ phase, progress }) => (
   </div>
 );
 
-const SystemInfoCard = ({ formData, onChannelChange }) => {
+const SystemInfoCard = ({ formData, pendingChannel, onChannelChange }) => {
   const {
     channel = 'latest',
+    availableVersions = [],
     hardware,
     controllerVersion,
     controllerUpdateAvailable,
@@ -126,6 +128,15 @@ const SystemInfoCard = ({ formData, onChannelChange }) => {
     sdUsed,
     sdUsedPct,
   } = formData;
+
+  // The dropdown reflects the user's pending choice. When the device
+  // acknowledges the saved channel, the parent syncs `pendingChannel` back
+  // to formData.channel and the two are equal again.
+  const selectedChannel = pendingChannel ?? channel;
+  const isUnsavedTagSelection =
+    typeof selectedChannel === 'string' &&
+    selectedChannel.startsWith('tag:') &&
+    selectedChannel !== channel;
 
   const rssi = machine.value?.status?.rssi ?? -100;
 
@@ -154,10 +165,26 @@ const SystemInfoCard = ({ formData, onChannelChange }) => {
           <label htmlFor='channel' className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
             Update Channel
           </label>
-          <select id='channel' name='channel' className='nd-input' value={channel} onChange={onChannelChange}>
-            <option value='latest'>Stable</option>
+          <select id='channel' name='channel' className='nd-input' value={selectedChannel} onChange={onChannelChange}>
+            <option value='latest'>Stable (latest)</option>
+            {availableVersions.map(v => (
+              <option key={v} value={`tag:${v}`}>
+                v{v}
+              </option>
+            ))}
+            <option value='beta'>Beta (master)</option>
             <option value='nightly'>Nightly</option>
           </select>
+          {isUnsavedTagSelection && (
+            <span className='font-nd-mono text-[12px] text-[var(--color-warning,#d4a843)]'>
+              Click "Save & Refresh" to apply the new channel. The flash buttons stay disabled until the device confirms it has resolved the release URL for this tag.
+            </span>
+          )}
+          {!isUnsavedTagSelection && channel.startsWith('tag:') && (
+            <span className='font-nd-mono text-[12px] text-[var(--color-warning,#d4a843)]'>
+              Pinned to a specific tag. Re-flash and downgrade are allowed; the upgrade-available indicator is bypassed.
+            </span>
+          )}
         </div>
 
         <div className='flex flex-col gap-2'>
@@ -291,13 +318,65 @@ const ActionButtonsSection = memo(
   ({
     submitting,
     formData,
+    pendingChannel,
     onUpdate,
     downloadSupportData,
     onHistoryRebuild,
     rebuilding,
     rebuilt,
     rebuildProgress,
-  }) => (
+  }) => {
+    // When the user pinned a specific stable tag *and* the device has
+    // confirmed the channel + resolved its release URL, force-enable the
+    // flash buttons regardless of `*UpdateAvailable` flags. The firmware's
+    // upgrade-only guard is bypassed too — re-flash and downgrade both work.
+    //
+    // Until the device confirms (status is still "Checking..." or hasn't
+    // reported the matching tag yet), keep the buttons disabled — flashing
+    // with force=true against a stale `_latest_url` would download the wrong
+    // firmware.
+    const tagFlashReady = canFlashTaggedRelease({ formData, pendingChannel });
+    const channelAcknowledged = canUpdateOnAcknowledgedChannel({ formData, pendingChannel });
+    const isTagPinned = typeof formData.channel === 'string' && formData.channel.startsWith('tag:');
+    // Three-way enable logic for Update Display / Update Controller:
+    //   - Acknowledged channel is `tag:*`           -> ONLY enable when
+    //                                                   `tagFlashReady` (the
+    //                                                   strict gate). NEVER
+    //                                                   fall back to the
+    //                                                   `*UpdateAvailable`
+    //                                                   flags here — those
+    //                                                   may still hold a
+    //                                                   stale `true` from
+    //                                                   the previous
+    //                                                   channel's check, and
+    //                                                   the firmware loop()
+    //                                                   passes force=true
+    //                                                   for any tag:*
+    //                                                   channel, which would
+    //                                                   download from the
+    //                                                   old `_latest_url`.
+    //   - Channel still pending an unsaved Save     -> hard-disable.
+    //   - Channel is `latest`/`nightly`, no pending -> follow the device's
+    //                                                   `*UpdateAvailable`
+    //                                                   flag.
+    let displayDisabled;
+    let controllerDisabled;
+    if (isTagPinned) {
+      // Tag-pinned path: tagFlashReady or nothing.
+      displayDisabled = !tagFlashReady;
+      controllerDisabled = !tagFlashReady;
+    } else if (!channelAcknowledged) {
+      // Unsaved channel change: hard-disable until Save & Refresh runs.
+      displayDisabled = true;
+      controllerDisabled = true;
+    } else {
+      // Normal latest/nightly path: trust the device's per-target flag.
+      displayDisabled = !formData.displayUpdateAvailable;
+      controllerDisabled = !formData.controllerUpdateAvailable;
+    }
+    const displayLabel = isTagPinned ? 'Flash Display' : 'Update Display';
+    const controllerLabel = isTagPinned ? 'Flash Controller' : 'Update Controller';
+    return (
     <div className='pt-4'>
       <div className='flex flex-col flex-wrap gap-2 sm:flex-row'>
         <ActionButton type='submit' variant='primary' disabled={submitting}>
@@ -307,19 +386,19 @@ const ActionButtonsSection = memo(
         <ActionButton
           type='submit'
           variant='secondary'
-          disabled={!formData.displayUpdateAvailable || submitting}
+          disabled={displayDisabled || submitting}
           onClick={() => onUpdate('display')}
         >
-          Update Display
+          {displayLabel}
         </ActionButton>
 
         <ActionButton
           type='submit'
           variant='secondary'
-          disabled={!formData.controllerUpdateAvailable || submitting}
+          disabled={controllerDisabled || submitting}
           onClick={() => onUpdate('controller')}
         >
-          Update Controller
+          {controllerLabel}
         </ActionButton>
 
         <ActionButton variant='outline' onClick={downloadSupportData}>
@@ -336,13 +415,17 @@ const ActionButtonsSection = memo(
 
       {rebuilding && <RebuildProgressBar rebuildProgress={rebuildProgress} />}
     </div>
-  ),
+    );
+  },
   (prevProps, nextProps) => {
     // Custom comparison for performance optimization
     return (
       prevProps.submitting === nextProps.submitting &&
+      prevProps.formData.channel === nextProps.formData.channel &&
+      prevProps.formData.status === nextProps.formData.status &&
       prevProps.formData.displayUpdateAvailable === nextProps.formData.displayUpdateAvailable &&
       prevProps.formData.controllerUpdateAvailable === nextProps.formData.controllerUpdateAvailable &&
+      prevProps.pendingChannel === nextProps.pendingChannel &&
       prevProps.rebuilding === nextProps.rebuilding &&
       prevProps.rebuilt === nextProps.rebuilt &&
       prevProps.rebuildProgress.current === nextProps.rebuildProgress.current &&
@@ -357,6 +440,11 @@ export function OTA() {
   const [isLoading, setIsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({});
+  // The dropdown's pending selection. Diverges from formData.channel only
+  // between the user picking a value and the device acknowledging it via
+  // res:ota-settings — that's the window where flashing with force=true
+  // would target a stale `_latest_url`, so the buttons stay disabled.
+  const [pendingChannel, setPendingChannel] = useState(undefined);
   const [phase, setPhase] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -384,6 +472,11 @@ export function OTA() {
   useEffect(() => {
     const otaSettingsListener = apiService.on('res:ota-settings', msg => {
       setFormData(msg);
+      // Sync the pending dropdown selection to whatever the device just
+      // acknowledged. Anything the user typed locally before this arrived
+      // gets dropped — that's intentional: the device is the source of
+      // truth for "what channel will the next OTA fetch hit".
+      setPendingChannel(msg?.channel);
       setIsLoading(false);
       setSubmitting(false);
     });
@@ -422,7 +515,11 @@ export function OTA() {
 
   const onChannelChange = useCallback(e => {
     const channel = e.currentTarget.value;
-    setFormData(currentFormData => updateOtaChannel(currentFormData, channel));
+    // Only update the pending selection. formData (device-confirmed state)
+    // is left alone until res:ota-settings echoes the new value back. We
+    // still normalize via updateOtaChannel so unexpected dropdown values
+    // can't leak into the websocket payload on submit.
+    setPendingChannel(updateOtaChannel({}, channel).channel);
   }, []);
 
   const onSubmit = useCallback(
@@ -476,14 +573,17 @@ export function OTA() {
         </p>
       </div>
 
+      <MigrationWarningBanner />
+
       <form key='ota' method='post' action='/api/ota' ref={formRef} onSubmit={onSubmit}>
         <div className='flex flex-col gap-4'>
-          <SystemInfoCard formData={formData} onChannelChange={onChannelChange} />
+          <SystemInfoCard formData={formData} pendingChannel={pendingChannel} onChannelChange={onChannelChange} />
         </div>
 
         <ActionButtonsSection
           submitting={submitting}
           formData={formData}
+          pendingChannel={pendingChannel}
           onUpdate={onUpdate}
           downloadSupportData={downloadSupportData}
           onHistoryRebuild={onHistoryRebuild}

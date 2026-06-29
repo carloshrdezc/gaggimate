@@ -66,6 +66,36 @@ extern lv_obj_t *uic_BrewScreen_dials_pressureTarget;
 extern lv_obj_t *uic_BrewScreen_dials_pressureText;
 extern lv_obj_t *uic_BrewScreen_dials_tempText;
 
+// CAR-301 (review C2/C3): hero numeral, °-suffix, and ratio sub-line in the
+// chat2 brew-idle redesign. DefaultUI drives these via use_effect:
+//   - hero_value/hero_unit ← currentTemp (mirrors uic_BrewScreen_dials_tempText
+//     for the now-prominent hero numeral)
+//   - ratio_sub ← selectedProfile target volume + duration + max brew pressure
+extern lv_obj_t *uic_BrewScreen_hero_value;
+extern lv_obj_t *uic_BrewScreen_hero_unit;
+extern lv_obj_t *uic_BrewScreen_ratio_sub;
+// CAR-315: status pill container (wraps ui_BrewScreen_mainLabel3). Exported so
+// DefaultUI can toggle/anchor it per BrewScreenState sub-state.
+extern lv_obj_t *uic_BrewScreen_status_pill;
+
+// CAR-325: text labels inside the Settings-footer Save / Save-as-New buttons
+// (the buttons are now text pills, not icon buttons). Exported so DefaultUI's
+// profileDirty effect can recolor the SAVE label text (white when dirty, muted
+// when clean) instead of recoloring an image that no longer exists.
+extern lv_obj_t *uic_BrewScreen_save_label;
+// CAR-330: the SAVE-AS label is intentionally a fixed pill with no dirty cue
+// (CAR-327 made it neutral-gray, matching SAVE when clean), so DefaultUI never
+// recolours it. The handle was exported but never consumed (dead public API) —
+// removed. The widget is still created/styled in ui_BrewScreen.c as a
+// file-local label.
+
+// CAR-293: Nothing-theme palette pass. DefaultUI's applyScreenVisualLanguage
+// calls this to recolor tracked themable children for UI_THEME_LIGHT support
+// (the dark default GM_* tokens go invisible against a light bg).
+extern void ui_BrewScreen_apply_palette(lv_color_t text, lv_color_t muted,
+                                        lv_color_t buttonSurface, lv_color_t accent,
+                                        lv_color_t kickerTone);
+
 #ifdef __cplusplus
 } /*extern "C"*/
 #endif

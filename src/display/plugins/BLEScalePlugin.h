@@ -1,6 +1,12 @@
 #ifndef BLESCALEPLUGIN_H
 #define BLESCALEPLUGIN_H
+#include "../config/features.h"
 #include "../core/Plugin.h"
+#include "../core/constants.h"
+#include "PostStopGracePolicy.h"
+
+#if GAGGIMATE_ENABLE_BLE_SCALE
+
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 
@@ -8,6 +14,24 @@ void on_ble_measurement(float value);
 
 constexpr unsigned long UPDATE_INTERVAL_MS = 1000;
 constexpr unsigned int RECONNECTION_TRIES = 15;
+
+// PRO-248: Hard-cap for the steam scale-alive grace window. NOTE: this window is
+// NOT where the last drips are actually captured — that happens earlier, while
+// the machine is still in MODE_BREW. On the normal auto-steam path DefaultUI::loop()
+// holds `pendingAutoSteam` until ShotHistory.isExtendedRecording() is already
+// false, and only THEN calls setMode(MODE_STEAM). The MODE_BREW scanning mode
+// keeps the scale connected and the BLUETOOTH source latched, so the final drops
+// land in the shot yield during that hold. By the time STEAM is entered and the
+// grace window below is armed, the recording window is already closed.
+//
+// Given that, the grace window here behaves as a prompt-teardown safety net:
+// loop() tears the scale down as soon as isExtendedRecording() reads false (which
+// is normally immediate at STEAM entry) instead of waiting the full grace, and
+// only falls back to this hard cap if some path enters STEAM with a recording
+// window still open. Deriving from POST_STOP_GRACE_DURATION_MS keeps that cap in
+// step with the extended-recording cap. All other transitions out of a scanning
+// mode disconnect immediately (no grace).
+constexpr unsigned long STEAM_SCALE_GRACE_PERIOD_MS = POST_STOP_GRACE_DURATION_MS;
 
 class BLEScalePlugin : public Plugin {
   public:
@@ -50,6 +74,12 @@ class BLEScalePlugin : public Plugin {
     void update();
     void onProcessStart() const;
 
+    // Teardown shared by the immediate mode-change disconnect path and the
+    // steam grace-window expiry in loop(): stop processing, drop the scale
+    // connection and halt async scanning. Call sites keep their own ESP_LOGI
+    // context so the reason for the teardown stays distinct in the logs.
+    void tearDownScale();
+
     void establishConnection();
 
     bool active = false;
@@ -58,6 +88,15 @@ class BLEScalePlugin : public Plugin {
 
     unsigned long lastUpdate = 0;
     unsigned int reconnectionTries = 0;
+
+    // Previous controller mode, tracked so the mode-change handler (which only
+    // receives the NEW mode) can detect a scanning-mode -> STEAM transition.
+    int previousMode = MODE_STANDBY;
+    // STEAM grace window: when set, a teardown of the scale is pending until
+    // steamGraceDeadline (millis()) elapses, giving the scale time to catch the
+    // final drips after a shot before disconnecting.
+    bool steamDisconnectPending = false;
+    unsigned long steamGraceDeadline = 0;
 
     // Rate limiting for callbacks
     mutable unsigned long lastMeasurementTime = 0;
@@ -69,6 +108,45 @@ class BLEScalePlugin : public Plugin {
     RemoteScalesScanner *scanner = nullptr;
     std::unique_ptr<RemoteScales> scale = nullptr;
 };
+
+#else // GAGGIMATE_ENABLE_BLE_SCALE
+
+#include <string>
+
+// BLE scale compiled out (CAR-382). We deliberately avoid including the
+// `esp-arduino-ble-scales` headers (remote_scales.h, scale drivers) so the
+// PlatformIO Library Dependency Finder drops that whole library from the build
+// — that is where the flash savings come from.
+//
+// A lightweight stub `BLEScalePlugin` keeps the public symbols that code OUTSIDE
+// this plugin references (e.g. `BLEScales.tare()` in the SquareLine-generated
+// `ui_events.cpp`, which must not be edited) linkable as no-ops. Methods whose
+// signatures depend on RemoteScales types (`getDiscoveredScales()`,
+// `connect()`, `scan()`) are intentionally omitted here; their only callers
+// live in WebUIPlugin.cpp and are guarded with the same flag.
+//
+// Volumetric measurement is unaffected: it is fed through
+// Controller::onVolumetricMeasurement() and its flow-estimation source
+// (VolumetricMeasurementSource::FLOW_ESTIMATION, wired in Controller.cpp), which
+// never reference this plugin. With the BLE scale gated out, the scale simply
+// never pushes a BLUETOOTH-source measurement and the existing flow-estimation
+// fallback / BLUETOOTH_GRACE_PERIOD_MS source-switching keeps working.
+
+class BLEScalePlugin : public Plugin {
+  public:
+    void setup(Controller * /*controller*/, PluginManager * /*pluginManager*/) override {}
+    void loop() override {}
+
+    void disconnect() {}
+    bool isConnected() { return false; }
+    std::string getName() { return ""; }
+    std::string getUUID() { return ""; }
+    int getRSSI() { return 0; }
+    void tare() const {}
+    float getLastWeight() const { return 0.0f; }
+};
+
+#endif // GAGGIMATE_ENABLE_BLE_SCALE
 
 extern BLEScalePlugin BLEScales;
 

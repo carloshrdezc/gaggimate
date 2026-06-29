@@ -19,12 +19,12 @@ import { computed } from '@preact/signals';
 import { Spinner } from '../../components/Spinner.jsx';
 import Card from '../../components/Card.jsx';
 import {
-  getProfileImportConflicts,
-  parseProfileImportText,
-  planProfileImports,
-  serializeProfileForExport,
-  serializeProfilesForExport,
-} from './profileTransfer.js';
+  buildExportPayload,
+  formatRestoreSummary,
+  aggregateImportFiles,
+  formatFileAggregateWarning,
+  runRestore,
+} from './migrationTransfer.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp';
@@ -47,14 +47,6 @@ import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
 import { faScaleBalanced } from '@fortawesome/free-solid-svg-icons/faScaleBalanced';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { buildStatisticsProfileHref } from '../Statistics/utils/statisticsRoute.js';
-import { BeanSelectionModal } from './BeanSelectionModal.jsx';
-import {
-  clearCurrentBeanSelection,
-  getLastBeanSelectionForProfile,
-  listBeans,
-  migrateLegacyBeansToDevice,
-  recordBeanSelection,
-} from '../../utils/beanManager.js';
 
 Chart.register(
   LineController,
@@ -102,7 +94,10 @@ function ProfileCard({
   }, [data.favorite, unfavoriteDisabled, favoriteDisabled, onUnfavorite, onFavorite, data.id]);
 
   const onDownload = useCallback(() => {
-    const profileData = serializeProfileForExport(data);
+    // Keep `id` in the export so a re-imported profile remains addressable
+    // (deletable/selectable/favoritable) on the device. Only `selected` and
+    // `favorite` are device-local state and must not be exported.
+    const { selected, favorite, ...profileData } = data;
     const filename = `profile-${data.id}.json`;
     const prepared = prepareDownload(filename);
 
@@ -486,9 +481,6 @@ function SimpleStep({ phase, type, duration, targets }) {
 export function ProfileList() {
   const apiService = useContext(ApiServiceContext);
   const [profiles, setProfiles] = useState([]);
-  const [beans, setBeans] = useState([]);
-  const [beanSelectionProfile, setBeanSelectionProfile] = useState(null);
-  const [selectedBeanId, setSelectedBeanId] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('extraction');
@@ -502,36 +494,6 @@ export function ProfileList() {
       setActiveTab('extraction');
     }
   }, [hasUtilityProfiles]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBeans = async () => {
-      try {
-        // Use migrateLegacyBeansToDevice's return value directly — it already
-        // returns the final list, so a second listBeans() call is redundant and
-        // would trigger an extra req:beans:list that can cause duplicate rescues.
-        const loadedBeans = await migrateLegacyBeansToDevice(apiService);
-        if (!cancelled) {
-          setBeans(loadedBeans.filter(bean => !bean.archived));
-        }
-      } catch (error) {
-        console.error('Failed to load beans:', error);
-      }
-    };
-
-    loadBeans();
-
-    const handleBeansChanged = () => {
-      loadBeans();
-    };
-
-    window.addEventListener('beans-library-changed', handleBeansChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('beans-library-changed', handleBeansChanged);
-    };
-  }, [apiService]);
 
   const loadProfiles = async () => {
     try {
@@ -716,8 +678,36 @@ export function ProfileList() {
     [apiService, profiles],
   );
 
-  const onExport = useCallback(() => {
-    const exportedProfiles = serializeProfilesForExport(profiles);
+  const onExport = useCallback(async () => {
+    // Re-fetch the authoritative device list at export time rather than
+    // serializing the component's `profiles` state, which can lag the device
+    // (initial load in flight, a mid-session reconnect, a save that hasn't
+    // round-tripped yet). Exporting stale/partial state would silently
+    // under-capture the backup the user is about to rely on across a reformat
+    // (PRO-218 P2-3). onUpload already fetches req:profiles:list for the same
+    // authoritative-state reason.
+    let deviceProfiles;
+    try {
+      const response = await apiService.request({ tp: 'req:profiles:list' });
+      deviceProfiles = response?.profiles ?? [];
+    } catch (error) {
+      console.error('Failed to fetch profiles for export:', error);
+      alert(`Profile export failed: could not read profiles from the device (${error.message}).`);
+      return;
+    }
+
+    // Keep `id` so re-imported profiles stay addressable on the device.
+    // Only strip device-local state (`selected`/`favorite`). See
+    // migrationTransfer.js for the SPIFFS->LittleFS migration round-trip.
+    const exportedProfiles = buildExportPayload(deviceProfiles);
+
+    // Guard against exporting an empty list: writing an empty profiles.json
+    // silently produces a useless backup the user may rely on. Warn and skip
+    // the download instead (PRO-218 P3 / P2-3).
+    if (exportedProfiles.length === 0) {
+      alert('No profiles to export yet. Wait for the profile list to load and try again.');
+      return;
+    }
 
     const download = prepareDownload('profiles.json');
     try {
@@ -727,40 +717,21 @@ export function ProfileList() {
       console.error('Failed to export profiles:', error);
       alert(`Profile export failed: ${error.message}`);
     }
-  }, [profiles]);
+  }, [apiService]);
 
   const completeProfileSelect = useCallback(
-    async (profile, beanId = '') => {
+    async profile => {
       if (!profile) return;
 
       setLoading(true);
       try {
         await apiService.request({ tp: 'req:profiles:select', id: profile.id });
-
-        let selectedBeanName = '';
-        if (beanId) {
-          const selectedBean = (await listBeans(apiService)).find(bean => bean.id === beanId);
-          if (selectedBean) {
-            selectedBeanName = selectedBean.name;
-            recordBeanSelection({
-              profileId: profile.id,
-              profileLabel: profile.label,
-              bean: selectedBean,
-            });
-          }
-        } else {
-          clearCurrentBeanSelection();
-        }
-
-        apiService.send({ tp: 'req:beans:select', name: selectedBeanName });
       } catch (err) {
         console.error('Failed to select profile:', err);
         alert(`Failed to select profile: ${err.message}`);
       }
 
       await loadProfiles();
-      setBeanSelectionProfile(null);
-      setSelectedBeanId('');
     },
     [apiService],
   );
@@ -770,72 +741,155 @@ export function ProfileList() {
       const profile = profiles.find(entry => entry.id === id);
       if (!profile) return;
 
-      const availableBeans = (await listBeans(apiService)).filter(bean => !bean.archived);
-      setBeans(availableBeans);
-
-      if (availableBeans.length === 0) {
-        await completeProfileSelect(profile);
-        return;
-      }
-
-      const lastBeanSelection = getLastBeanSelectionForProfile(profile);
-      setSelectedBeanId(lastBeanSelection?.beanId || availableBeans[0]?.id || '');
-      setBeanSelectionProfile(profile);
+      await completeProfileSelect(profile);
     },
-    [apiService, profiles, completeProfileSelect],
+    [profiles, completeProfileSelect],
   );
 
-  const onUpload = function (evt) {
-    if (evt.target.files.length) {
-      const file = evt.target.files[0];
-      const reader = new FileReader();
-      reader.onload = async e => {
-        const result = e.target.result;
-        if (typeof result === 'string') {
-          setLoading(true);
-          try {
-            const { profiles: importedProfiles } = parseProfileImportText(result);
-            const conflicts = getProfileImportConflicts(importedProfiles, profiles);
-            const conflictLabels = conflicts
-              .slice(0, 5)
-              .map(conflict => `• ${conflict.imported.label}`)
-              .join('\n');
-            const conflictLabelSuffix = conflicts.length > 5 ? '\n• …' : '';
-            const overwriteConflicts =
-              conflicts.length > 0
-                ? window.confirm(
-                    `Found ${conflicts.length} duplicate profile name${conflicts.length === 1 ? '' : 's'}:\n\n${conflictLabels}${conflictLabelSuffix}\n\nOK = replace matching profiles\nCancel = keep both and rename the imported copies`,
-                  )
-                : false;
-            const profilesToSave = planProfileImports(importedProfiles, profiles, {
-              mode: overwriteConflicts ? 'overwrite' : 'rename',
-            });
+  // Adapters wiring the shared importProfiles() orchestrator (migrationTransfer.js)
+  // onto the real WebSocket. The SAME importProfiles function is exercised by the
+  // round-trip tests via a device simulator, so green tests prove the shipped
+  // restore algorithm rather than a hand-copied duplicate (PRO-218 P1-2).
+  //
+  // The id-collision / filename-stem contract and the "saveProfile must echo the
+  // stored id" requirement are documented in migrationTransfer.js (PRO-218 P3-4 —
+  // single pointer, no restatement, to avoid drift).
+  const importAdapters = useMemo(
+    () => ({
+      listProfiles: async () => {
+        const response = await apiService.request({ tp: 'req:profiles:list' });
+        return response?.profiles ?? [];
+      },
+      // request() rejects on a built-in 5s timeout and immediately on socket
+      // close, so a hung restore surfaces as a per-item failure naming the
+      // profile rather than hanging forever (PRO-218 P1-4).
+      saveProfile: async profile => {
+        const response = await apiService.request({ tp: 'req:profiles:save', profile });
+        return response?.profile ?? {};
+      },
+    }),
+    [apiService],
+  );
 
-            for (const profile of profilesToSave) {
-              await apiService.request({ tp: 'req:profiles:save', profile });
-            }
-          } catch (err) {
-            console.error('Failed to import profiles:', err);
-            alert(`Failed to import profiles: ${err.message}`);
-          }
-          await loadProfiles();
+  // Run the shared restore orchestrator over a parsed batch, surface a whole-picture
+  // summary (P2-A: profiles AND files dropped, in one final message), and offer to
+  // retry only the failed subset (PRO-218 P1-1).
+  //
+  // The interaction loop (abort/confirm/proceed/retry/give-up) lives in the tested
+  // runRestore() seam in migrationTransfer.js (PRO-218 P2-B). This wrapper only wires
+  // the React side: loading state, window.alert/confirm, and a between-retries device
+  // refetch. The retry cap (MAX_RESTORE_RETRIES) is enforced inside runRestore so a
+  // hung transport can't trap the user in an endless confirm() cycle (NEW-4/NEW-6).
+  const restoreProfiles = useCallback(
+    async (importedProfiles, fileContext) => {
+      setLoading(true);
+      try {
+        await runRestore({
+          adapters: importAdapters,
+          importedProfiles,
+          fileContext,
+          alert: message => alert(message),
+          confirm: message => confirm(message),
+          onBeforeRetry: () => loadProfiles(),
+        });
+      } finally {
+        await loadProfiles();
+      }
+    },
+    [importAdapters],
+  );
+
+  const onUpload = useCallback(
+    async evt => {
+      const files = Array.from(evt.target.files ?? []);
+      if (files.length === 0) return;
+
+      // A backup may have been saved as several per-profile files; restore ALL of
+      // them, not just files[0] (PRO-218 P1-3). Read each file, then aggregate
+      // through the tested aggregateImportFiles() seam, which preserves the
+      // per-FILE outcome so a corrupt/unreadable file in a multi-select can never
+      // be silently dropped (PRO-218 NEW-1/NEW-2).
+      const fileTexts = await Promise.all(
+        files.map(
+          file =>
+            new Promise(resolve => {
+              const reader = new FileReader();
+              reader.onload = e =>
+                resolve({
+                  name: file.name,
+                  text: typeof e.target.result === 'string' ? e.target.result : null,
+                });
+              reader.onerror = () => resolve({ name: file.name, text: null });
+              reader.readAsText(file);
+            }),
+        ),
+      );
+
+      const aggregate = aggregateImportFiles(fileTexts);
+
+      // Every selected file that could not be read or parsed to zero profiles is
+      // reported BY NAME — never silently filtered out (PRO-218 NEW-1). The count
+      // is measured against files SELECTED, not profiles parsed, so a dropped file
+      // is always visible.
+      if (aggregate.failedFiles.length > 0) {
+        if (aggregate.profiles.length === 0) {
+          // Nothing parsed at all: this is the corrupt-file abort. Surface the
+          // distinct corrupt-file error and ABORT before loadProfiles() repaints
+          // the Default-only list (PRO-218 P0-1).
+          alert(
+            `${formatRestoreSummary({ total: 0, savedCount: 0, failed: [] })}\n\n${formatFileAggregateWarning(aggregate)}`,
+          );
+          evt.target.value = '';
+          return;
         }
-      };
-      reader.readAsText(file);
-    }
-  };
+        // Some files were good, some failed. Report the failed ones prominently
+        // and let the user decide whether to import the survivors or abort to
+        // re-check the failed backups first.
+        const proceed = confirm(
+          `${formatFileAggregateWarning(aggregate)}\n\n` +
+            `Import the ${aggregate.profiles.length} profile(s) from the ${aggregate.okCount} ` +
+            `readable file(s) anyway? Cancel to re-check the failed file(s) first.`,
+        );
+        if (!proceed) {
+          evt.target.value = '';
+          return;
+        }
+      }
+
+      // Pass the per-FILE outcome into the restore so the FINAL summary reflects
+      // the whole picture — profiles restored AND any files that were dropped — in
+      // one message, rather than reading as an unqualified "Restored N of N" over
+      // just the survivors (PRO-218 P2-A).
+      await restoreProfiles(aggregate.profiles, {
+        selectedFiles: aggregate.selectedCount,
+        okFiles: aggregate.okCount,
+        failedFiles: aggregate.failedFiles,
+      });
+      // Reset the input so re-selecting the same file fires onChange again.
+      evt.target.value = '';
+    },
+    [restoreProfiles],
+  );
 
   const onClear = useCallback(async () => {
     setLoading(true);
-    try {
-      for (const p of profiles) {
-        if (!p.selected) {
-          await apiService.request({ tp: 'req:profiles:delete', id: p.id });
-        }
+    // Per-item try/catch so one failed delete doesn't strand the rest with no
+    // feedback (PRO-218 P2-5, same non-atomic pattern as the restore loop). Each
+    // failure is collected and surfaced by label; the loop continues.
+    const failed = [];
+    let deleted = 0;
+    const toDelete = profiles.filter(p => !p.selected);
+    for (const p of toDelete) {
+      try {
+        await apiService.request({ tp: 'req:profiles:delete', id: p.id });
+        deleted += 1;
+      } catch (err) {
+        console.error('Failed to delete profile:', p.label || p.id, err);
+        failed.push(p.label || p.id || 'unknown');
       }
-    } catch (err) {
-      console.error('Failed to clear profiles:', err);
-      alert(`Failed to clear profiles: ${err.message}`);
+    }
+    if (failed.length > 0) {
+      alert(`Deleted ${deleted} of ${toDelete.length} profiles — failed: ${failed.join(', ')}.`);
     }
     await loadProfiles();
   }, [profiles, apiService]);
@@ -876,7 +930,7 @@ export function ProfileList() {
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <label className='nd-action-btn cursor-pointer' title='Import Profiles' htmlFor='profileImport'>
+          <label className='nd-action-btn cursor-pointer' title='Import Profiles'>
             <FontAwesomeIcon icon={faFileImport} />
           </label>
           <input
@@ -884,6 +938,7 @@ export function ProfileList() {
             className='hidden'
             id='profileImport'
             type='file'
+            multiple
             accept='.json,application/json'
           />
           <ConfirmButton
@@ -961,20 +1016,6 @@ export function ProfileList() {
             ))}
         </div>
       </Card>
-
-      <BeanSelectionModal
-        open={!!beanSelectionProfile}
-        profile={beanSelectionProfile}
-        beans={beans}
-        selectedBeanId={selectedBeanId}
-        onBeanChange={setSelectedBeanId}
-        onClose={() => {
-          setBeanSelectionProfile(null);
-          setSelectedBeanId('');
-        }}
-        onSkip={() => completeProfileSelect(beanSelectionProfile)}
-        onConfirm={() => completeProfileSelect(beanSelectionProfile, selectedBeanId)}
-      />
     </div>
   );
 }

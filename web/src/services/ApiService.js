@@ -20,6 +20,10 @@ export class WebSocketDisconnectedError extends Error {
 // safety net for a server that opened the socket but never responds.
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
+// Default brew dose (grams) used to seed the pre-connection status object.
+// Matches the firmware default (Settings.h: doseGrams = 18.0).
+const DEFAULT_DOSE_GRAMS = 18;
+
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;
 
@@ -187,7 +191,13 @@ export default class ApiService {
       const entry = this._pendingRequests.get(message.rid);
       this._pendingRequests.delete(message.rid);
       clearTimeout(entry.timeoutId);
-      entry.resolve(message);
+      // Surface in-band errors as a rejection so callers' try/catch fire instead
+      // of treating a firmware failure (e.g. "Delete failed") as success.
+      if (message.error) {
+        entry.reject(new Error(message.error));
+      } else {
+        entry.resolve(message);
+      }
       // Note: we deliberately fall through so listeners still observe the
       // response (some screens listen on res:* in addition to using request()).
     }
@@ -220,6 +230,9 @@ export default class ApiService {
    * Send a request frame and resolve with the matching response.
    *
    * Rejects with:
+   * - `Error(message.error)` if the response carries a truthy in-band `error`
+   *   field (e.g. firmware "Delete failed" / "Invalid profile id"), so callers
+   *   see failures via their try/catch rather than a success-shaped response.
    * - `WebSocketDisconnectedError` if the socket closes/errors before the
    *   response arrives (no waiting for the timeout).
    * - `Error('Request <tp> timed out')` if no response arrives within
@@ -298,7 +311,7 @@ export default class ApiService {
       currentTemperature: message.ct,
       targetTemperature: message.tt,
       currentPressure: message.pr,
-      targetPressure: message.pt,
+      targetPressure: message.pt ?? null,
       targetFlow: message.tf ?? null,
       targetWeight: message.tw || 0,
       activeTargetWeight: (message?.process?.a && message.tw) || 0,
@@ -310,6 +323,12 @@ export default class ApiService {
       brewTarget: !!message.bt,
       brewTargetDuration: message.btd || 0,
       brewTargetVolume: message.btv || 0,
+      allowYieldOverride: !!message.ayo,
+      // PRO-226: device-authoritative auto-steam (as: 0/1) and brew dose (dg: float).
+      autoSteamEnabled: !!message.as,
+      // Legacy (pre-PRO-225) firmware doesn't send `dg`; emit null so the
+      // consumer falls back to its localStorage cache instead of clobbering it.
+      doseGrams: Number.isFinite(message.dg) ? message.dg : null,
       volumetricAvailable: message.bta || false,
       grindTargetDuration: message.gtd || 0,
       grindTargetVolume: message.gtv || 0,
@@ -362,6 +381,9 @@ export const machine = signal({
     selectedBean: '',
     brewTargetDuration: 0,
     brewTargetVolume: 0,
+    allowYieldOverride: false,
+    autoSteamEnabled: false,
+    doseGrams: DEFAULT_DOSE_GRAMS,
     grindTargetDuration: 0,
     grindTargetVolume: 0,
     grindTarget: 0,

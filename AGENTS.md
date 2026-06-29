@@ -7,7 +7,7 @@ This file provides guidance to agents when working with code in this repository.
 **Every task — feature, bug, refactor, chore, brainstorm, research, doc update, investigation — gets a Linear issue. No exceptions.** Use the Linear skill for all tooling decisions; this section defines project-specific rules.
 
 ### Defaults
-- **Team**: the workspace's only team (key `CAR`) — use it without asking.
+- **Team**: coding work lives under team `PRO` (key `PRO`) — use it without asking. (Migration 2026-06: coding issues moved from team `CAR` to team `PRO`; the old `CAR` team now holds personal/non-coding issues only. Historical `CAR-NNN` citations below are preserved as provenance.)
 - **Project**: match by name to the GitHub repo. The default project for this repo is `gaggimate`. Resolution rules:
   1. Look for an exact case-insensitive match on the GitHub repo name (`gaggimate`).
   2. If no exact match, pick the closest existing project by name (e.g. `Gaggimate`, `gaggimate-firmware`).
@@ -39,10 +39,10 @@ The agent must drive the issue through these Linear states as work progresses. N
 Always include Linear magic words in the PR description so the link is automatic:
 
 ```
-Fixes CAR-123
+Fixes PRO-123
 ```
 
-(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref CAR-123` for related-but-not-closed issues.
+(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref PRO-123` for related-but-not-closed issues.
 
 ### Workflow Per Task
 
@@ -63,9 +63,32 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 
 **Dual-platform project**: ESP32 firmware (PlatformIO) + Preact web UI (Vite)
 - Firmware: `pio run -e display` (display with UI) or `pio run -e display-headless` (no UI)
-- Web UI must be built BEFORE firmware SPIFFS: `cd web && npm ci && npm run build` then run `scripts/build_spiffs.sh`
-- Web assets are gzipped and placed in `data/w/` directory for SPIFFS filesystem
+- Web UI is embedded into the display/headless app image: run `scripts/build_webui.sh` (it runs `npm ci && npm run build` in `web/`, then gzips + packs the bundle into `src/display/webassets/`) before `pio run -e display`. The pre-hook stubs an empty bundle so a bare `pio run -e display` still links without a web build.
+- The fresh-install filesystem image holds only seed profiles (`data/p`); the web UI no longer ships in `data/w`.
 - Version auto-generated from git tags via `scripts/auto_firmware_version.py` into `src/version.h`
+
+### CI gates (PRs to dev-master) — run these locally before pushing (CAR-341)
+
+`.github/workflows/ci.yml` runs on every PR to `dev-master`; reproduce it locally with:
+
+```sh
+cd web && npm ci && npm run build && cd ..          # web build
+pio run -e display                                  # firmware (-Wall -Wextra, no -Werror)
+pio test -e native                                  # host unit tests
+pio test -e native-sanitize                         # host tests under ASan + UBSan (findings fail CI)
+pio check -e display    --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"   # GATING cppcheck
+pio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"                       # GATING cppcheck
+pio run -e native -t compiledb                       # compile DB for clang-tidy
+clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
+```
+
+- cppcheck is GATING (the display step lost its old `continue-on-error`).
+- clang-tidy (`.clang-tidy`: `bugprone-*` + `cppcoreguidelines-*`) is scoped to
+  hand-written logic via the native compile DB; generated UI (`src/display/ui/**`)
+  and vendored drivers (`src/display/drivers/**`) are excluded.
+- `[env:native-sanitize]` mirrors `[env:native]` plus `-fsanitize=address,undefined`.
+- C++ standard is **gnu++20** (PRO-294, enabled by the PRO-293 pioarduino Arduino-esp32 3.x / gcc 14.2.0 platform bump; see `docs/cpp-standard-spike.md`). Keep firmware + native envs in lockstep on `gnu++20`.
+- See `CONTRIBUTING.md` "Continuous Integration & Local Checks" for full details.
 
 ## Code Formatting
 
@@ -95,9 +118,39 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 
 **Extended profiles use adaptive transitions**: Phase transitions can be `"instant"`, `"linear"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"` with optional `adaptive` flag (0 or 1).
 
+**When to make persistence firmware-authoritative (CAR-371 / CAR-372)**: Several
+web stores (`beanManager.js`, `grinderManager.js`) persist to the device over the
+WebSocket *and* mirror into `localStorage` for instant offline availability. The
+recurring bug class is the **client trying to predict the device's merge** (dedup,
+sort, cap/eviction) and trying to decide what is/isn't already synced with a
+one-shot global flag. Rule of thumb for any device-shared store:
+
+- **Make the firmware authoritative** when the data is **shared across clients**
+  (and the device's own display), the device is the **natural source of truth**,
+  and/or the merge is **non-trivial** (capped list, dedup, server-assigned
+  ids/timestamps). The client should *send writes and trust the canonical list the
+  device returns* — never model eviction/sort/dedup itself. This is what
+  `grinderManager.js` does post-CAR-371: a `*-pending` set of genuinely-unsynced
+  offline writes, drained in one batch on the next connected call; the device
+  returns the canonical list and the pending set is cleared on success, retried on
+  failure. `req:beans:save` / `req:grinders:save` already echo the saved record and
+  the device owns the sort (`BeanManager::listBeans` sort, `GrinderManager` cap).
+- **Keep it client-local** when the data is **per-browser UX history** with no
+  cross-client meaning: theme (`themeManager.js`), dashboard layout
+  (`dashboardManager.js`), the IndexedDB shot archive, and the bean
+  **selection-event log** (`gaggimate-bean-selection-events` /
+  `gaggimate-active-bean-selection`). These intentionally never sync to the device.
+- **Anti-pattern to avoid**: a one-shot migration flag gated on
+  `deviceList.length === 0` (the bean migration's original shape). It strands
+  localStorage records when the device already has *some* data and never retries
+  offline writes. Prefer a per-record pending set drained every connected call.
+
+See `grinderManager.js` for the reference implementation; CAR-373 tracks bringing
+beans onto the same model.
+
 ## Testing
 
-**No test framework configured**: `test/` directory exists but contains only PlatformIO boilerplate. No unit tests currently implemented.
+**Unity host tests on the `native` env**: `test/` holds Unity test suites for pure/host-testable logic (e.g. `test_shot_index_metadata`, `test_extended_recording_policy`, `test_profile_validation`, `test_event_system`, `test_volumetric_target`, `test_ble_scale_scan_policy`, `test_diag_log_tee`). Run them with `pio test -e native` (and `pio test -e native-sanitize` under ASan/UBSan — both are gating CI legs). FreeRTOS-level concurrency and on-device behavior are not unit-tested; prefer extracting pure policy logic into a header so it can be host-tested.
 
 ## Local Libraries
 

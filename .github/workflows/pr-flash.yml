@@ -4,8 +4,12 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-# Workflow-level permissions are read-only by default. The `publish` job below
-# narrows to the elevated permissions it actually needs, scoped to that job.
+# This workflow only builds and uploads the PR firmware as a GitHub Actions
+# artifact (see the "Upload PR artifacts" step), so read-only is all it needs.
+# PRO-250: the former `publish` job that mirrored the firmware to a pr-<N>/
+# subdir on the gh-pages branch was removed — it accumulated one dir per PR
+# forever and nothing consumed that Pages URL. The artifact on the PR checks
+# page is the firmware's home.
 permissions:
   contents: read
 
@@ -17,7 +21,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-tags: true
           fetch-depth: 0
@@ -32,7 +36,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -43,8 +47,11 @@ jobs:
           mkdir -p out
           git tag -d nightly 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
+      # The web UI is embedded into the display app image (PRO-215), so
+      # build_webui.sh must run before the display pio build; it also stages
+      # data/p (seed profiles) for the fresh-install filesystem image below.
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build controller
         run: |
           pio run -e controller
@@ -60,37 +67,13 @@ jobs:
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
       - name: Upload PR artifacts
-        # Always available on the PR's checks page, including for fork PRs
-        # where the publish job below is skipped.
+        # Always available on the PR's checks page, including for fork PRs.
+        # This is the firmware's home now that the gh-pages publish job is gone
+        # (PRO-250).
         uses: actions/upload-artifact@v4
         with:
           name: pr-${{ github.event.pull_request.number }}-firmware
           path: ./out
           retention-days: 14
-
-  publish:
-    # Only same-repo PRs run this job. Fork PRs get a read-only GITHUB_TOKEN
-    # so the gh-pages push would fail anyway; skipping makes that explicit
-    # and avoids declaring write permissions we can't actually use.
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-    continue-on-error: true
-    steps:
-      - name: Download PR artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: pr-${{ github.event.pull_request.number }}-firmware
-          path: ./out
-      - name: Deploy to GitHub Pages subdirectory
-        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out
-          destination_dir: pr-${{ github.event.pull_request.number }}
-          publish_branch: gh-pages

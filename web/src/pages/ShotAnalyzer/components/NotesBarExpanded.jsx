@@ -14,6 +14,9 @@ import {
   getAnalyzerSurfaceTriggerClasses,
   getAnalyzerTextButtonClasses,
 } from './analyzerControlStyles';
+import { formatTenPointRating } from '../../../utils/ratings.js';
+import { RatingStars } from '../../../components/RatingStars.jsx';
+import { RatingNumberInput } from '../../../components/RatingNumberInput.jsx';
 
 const tasteOptions = [
   { value: 'bitter', label: 'Bitter' },
@@ -47,25 +50,27 @@ export function NotesBarExpanded({
     };
   };
 
-  // Render stars (editable in edit mode)
-  const renderStars = () => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <button
-          key={i}
-          type='button'
-          disabled={!isEditing}
-          onClick={() => isEditing && onInputChange('rating', i)}
-          className={`text-xl ${i <= notes.rating ? 'text-yellow-400' : 'text-base-content/20'} ${
-            isEditing ? 'cursor-pointer hover:text-yellow-300' : 'cursor-default'
-          }`}
-        >
-          ★
-        </button>,
-      );
-    }
-    return <div className='flex gap-0.5'>{stars}</div>;
+  // Render a 0-10 rating control. Edit mode uses the shared RatingNumberInput
+  // (PRO-299): it holds the raw string while typing and normalizes + commits on
+  // blur, so decimals like "7.5" survive entry instead of collapsing to "75".
+  // Backward compat: option A — legacy Analyzer entries were stored on a 1-5
+  // scale and are now read as low 0-10 scores (no migration).
+  const renderRating = () => {
+    return (
+      <div className='flex items-center gap-2'>
+        <RatingStars rating={notes.rating} />
+        {isEditing ? (
+          <RatingNumberInput
+            className={`${inputCls} w-20`}
+            value={notes.rating}
+            ariaLabel='Shot rating (0-10)'
+            onCommit={rating => onInputChange('rating', rating)}
+          />
+        ) : (
+          <span className='text-sm font-medium'>{formatTenPointRating(notes.rating)}</span>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -78,7 +83,7 @@ export function NotesBarExpanded({
             <div className='grid grid-cols-2 gap-4'>
               <div>
                 <div className={`${labelCls} mb-1.5`}>Rating</div>
-                {renderStars()}
+                {renderRating()}
               </div>
               <div>
                 <div className={`${labelCls} mb-1.5`}>Balance / Taste</div>

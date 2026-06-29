@@ -73,11 +73,17 @@ class Settings {
     String getMdnsName() const { return mdnsName; }
     bool isHomekit() const { return homekit; }
     bool isVolumetricTarget() const { return volumetricTarget; }
+    bool isAllowYieldOverride() const { return allowYieldOverride; }
+    bool isAutoSteamEnabled() const { return autoSteamEnabled; }
+    double getDoseGrams() const { return doseGrams; }
     String getOTAChannel() const { return otaChannel; }
     String getSavedScale() const { return savedScale; }
     bool isBoilerFillActive() const { return boilerFillActive; }
     int getStartupFillTime() const { return startupFillTime; }
     int getSteamFillTime() const { return steamFillTime; }
+    // PRO-266: when true, DiagnosticLogPlugin tees ESP_LOG output over UDP on the
+    // LAN for tether-free serial capture. Default false → zero hot-path cost.
+    bool getDiagnosticLogEnabled() const { return diagnosticLogEnabled; }
     bool isSmartGrindActive() const { return smartGrindActive; }
     int getSmartGrindMode() const { return smartGrindMode; }
     String getSmartGrindIp() const { return smartGrindIp; }
@@ -146,12 +152,16 @@ class Settings {
     void setMdnsName(const String &mdnsName);
     void setHomekit(bool homekit);
     void setVolumetricTarget(bool volumetric_target);
+    void setAllowYieldOverride(bool allow_yield_override);
+    void setAutoSteamEnabled(bool auto_steam_enabled);
+    void setDoseGrams(double dose_grams);
     void setOTAChannel(const String &otaChannel);
     void setSavedScale(const String &savedScale);
     void setBoilerFillActive(bool boiler_fill_active);
     void setStartupFillTime(int startup_fill_time);
     void setSteamFillTime(int steam_fill_time);
     void setSmartGrindActive(bool smart_grind_active);
+    void setDiagnosticLogEnabled(bool diagnostic_log_enabled);
     void setSmartGrindIp(String smart_grind_ip);
     void setSmartGrindMode(int smart_grind_mode);
     void setHomeAssistant(bool homeAssistant);
@@ -215,10 +225,14 @@ class Settings {
     String savedScale = "";
     bool homekit = false;
     bool volumetricTarget = false;
+    bool allowYieldOverride = false;
+    bool autoSteamEnabled = false;
+    double doseGrams = 18.0;
     bool boilerFillActive = false;
     int startupFillTime = 0;
     int steamFillTime = 0;
     bool smartGrindActive = false;
+    bool diagnosticLogEnabled = false;
     bool smartGrindToggle = false;
     int smartGrindMode = 0;
     String smartGrindIp = "";
@@ -267,7 +281,7 @@ class Settings {
 
     void doSave();
     xTaskHandle taskHandle;
-    static void loopTask(void *arg);
+    [[noreturn]] static void loopTask(void *arg);
 };
 
 #endif // SETTINGS_H
