@@ -1,7 +1,8 @@
 # C++ standard modernization spike — CAR-340 slice 1
 
-**Status: C++20 bump is BLOCKED on the currently pinned toolchain. The firmware
-stays on `gnu++17`.**
+**Status: SUPERSEDED — C++20 is now ENABLED (see UPDATE below). Original slice-1
+finding: the C++20 bump was BLOCKED on the then-pinned toolchain and the firmware
+stayed on `gnu++17`.**
 
 > **UPDATE (PRO-294, post-PRO-293):** RESOLVED. PRO-293 landed the pioarduino
 > Arduino-esp32 3.x platform (release 55.03.39, xtensa gcc 14.2.0), satisfying

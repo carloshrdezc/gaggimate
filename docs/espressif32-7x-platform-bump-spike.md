@@ -1,9 +1,10 @@
 # Spike: espressif32 6.12 → 7.x platform bump (C++20 enabler) — PRO-257
 
-**Status: NO-GO on the official `platformio/espressif32` 7.x line as a C++20
-enabler. The C++20 prerequisite is an Arduino-core-3.x platform (the community
-`pioarduino` fork), NOT the official 7.x platform — which keeps the same
-gcc 8.4.0 Arduino toolchain as 6.12.0.**
+**Status: SUPERSEDED — see UPDATE below; C++20 is now ENABLED via the
+Arduino-core-3.x `pioarduino` path. Original finding: NO-GO on the official
+`platformio/espressif32` 7.x line as a C++20 enabler — the C++20 prerequisite is
+an Arduino-core-3.x platform (the community `pioarduino` fork), NOT the official
+7.x platform, which keeps the same gcc 8.4.0 Arduino toolchain as 6.12.0.**
 
 > **UPDATE (PRO-294, post-PRO-293):** The Arduino-core-3.x `pioarduino` platform
 > identified here as the real C++20 enabler was adopted in PRO-293 (step 5 of
