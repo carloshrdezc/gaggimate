@@ -79,9 +79,12 @@ platform `espressif32@55.3.39`, with PSRAM detected):
 | `esp32-s3-supermini` | `qio_qspi` | `qio` | `no_ota.csv` | ✅ resolves (keys identical shape) |
 
 `memory_type` / `psram_type` / `partitions` are all keys the Arduino-3.x platform still honors — no
-board JSON change is required for the flip. (The `no_ota.csv` 4 MB single-app partition for
-`esp32-s3-supermini` is supplied by the Espressif/Arduino platform, not this repo; the
-`display-headless-4m` CI leg already gates flash overflow against it.)
+board JSON change is required for the flip. (The `no_ota` single-app partition *scheme* for
+`esp32-s3-supermini` is selected by this repo's own board definition,
+`boards/esp32-s3-supermini.json:5` → `"partitions": "no_ota.csv"`; only the `no_ota.csv` byte
+layout — the actual partition sub-table sizes — ships with the Espressif/Arduino (pioarduino core
+3.x) platform package and is not vendored here, so a platform bump could change those sizes without
+any repo edit. That is why the `display-headless-4m` CI leg gates flash overflow against it.)
 
 ## LittleFS / webassets-embed pipeline (GM-90, GM-106)
 
