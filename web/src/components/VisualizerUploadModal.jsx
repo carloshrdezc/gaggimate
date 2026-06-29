@@ -88,8 +88,14 @@ export default function VisualizerUploadModal({
       backdropClassName='bg-opacity-50 bg-black'
     >
       <div className='p-6'>
+        {/* Dialog supplies the accessible name via its sr-only <h2 id={...}> + aria-labelledby
+            (PRO-180 review P3). We render the same text visibly here, but as a non-heading
+            element so screen-reader users don't hear the title twice and the panel doesn't
+            carry two headings for the same name. */}
         <div className='mb-4 flex items-center justify-between'>
-          <h3 className='text-lg font-semibold'>Upload to Visualizer.coffee</h3>
+          <span aria-hidden='true' className='text-lg font-semibold'>
+            Upload to Visualizer.coffee
+          </span>
           {!isUploading && (
             <button
               type='button'
