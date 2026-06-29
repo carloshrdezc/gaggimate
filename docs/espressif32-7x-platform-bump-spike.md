@@ -25,7 +25,7 @@ a newer GCC.**
 |---|---|
 | Does official `espressif32@7.0.1` ship a GCC that supports `-std=gnu++20`? | **No, not for `framework = arduino`.** 7.x still bundles **Arduino core v2.0.17 (IDF v4.4.7)** → the same **xtensa gcc 8.4.0** as 6.12.0. The "IDF toolchains v15.2.0 / gcc 14+" in the 7.0.0 notes apply to the **`framework = espidf`** path only. GaggiMate is `framework = arduino`. |
 | What is the 7.x release actually about? | Adding **ESP-IDF v6.0 / v6.0.1** support to the *ESP-IDF* framework. Arduino support is unchanged from the 6.x line. |
-| What is the real C++20 enabler? | A platform built on **Arduino-esp32 core 3.x** (IDF 5.1+, **gcc 13**). The official platform froze Arduino at 2.0.17; the maintained route is the community fork **`pioarduino/platform-espressif32`** (currently Arduino 3.3.9 / IDF 5.5.4 / gcc 13). |
+| What is the real C++20 enabler? | A platform built on **Arduino-esp32 core 3.x** (IDF 5.1+, **gcc 13**). The official platform froze Arduino at 2.0.17; the maintained route is the community fork **`pioarduino/platform-espressif32`** (currently Arduino 3.3.9 / IDF 5.5.4 / xtensa gcc 14.2.0). |
 | Recommendation | **Do NOT adopt official 7.x for C++20.** If C++20 (CAR-340) is the goal, the real change is migrating to a `pioarduino` Arduino-3.x platform — a large, library-fallout-heavy change that must be its own effort. Stay on `espressif32@6.12.0` / `gnu++17` until that is scheduled. |
 
 ## What the official 7.x platform actually ships
@@ -61,7 +61,7 @@ official PlatformIO platform froze Arduino at 2.0.17, the maintained way to get
 Arduino 3.x under PlatformIO is the community fork:
 
 ```ini
-; pioarduino fork — Arduino core 3.3.9 / IDF 5.5.4 / xtensa gcc 13
+; pioarduino fork — Arduino core 3.3.9 / IDF 5.5.4 / xtensa gcc 14.2.0 (crosstool-NG esp-14.2.0)
 platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.39/platform-espressif32.zip
 ```
 
@@ -147,7 +147,7 @@ its own tracked branch with the full CI matrix, not folded into unrelated work.
 
 - `platformio/platform-espressif32` releases (7.0.0 / 7.0.1 ship Arduino 2.0.17).
 - platform-espressif32#1225 — official platform discontinued advancing Arduino past 2.x.
-- `pioarduino/platform-espressif32` releases — Arduino 3.3.9 / IDF 5.5.4 / gcc 13 (tag 55.03.39).
+- `pioarduino/platform-espressif32` releases — Arduino 3.3.9 / IDF 5.5.4 / xtensa gcc 14.2.0 (tag 55.03.39).
 - espressif/crosstool-NG#48 — C++20 `<ranges>` available from Arduino-esp32 3.0.0 / IDF 5.1.
 - h2zero/NimBLE-Arduino#641 — NimBLE-Arduino 1.x incompatible with core 3.x / IDF 5.1.
 - Bodmer/TFT_eSPI#3329 — TFT_eSPI broken on Arduino-esp32 > 2.0.14 / 3.x (S3 boot crash).
