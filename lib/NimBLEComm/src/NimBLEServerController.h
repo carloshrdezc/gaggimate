@@ -65,12 +65,14 @@ class NimBLEServerController : public NimBLEServerCallbacks, public NimBLECharac
     void_callback_t tareCallback = nullptr;
     led_control_callback_t ledControlCallback = nullptr;
 
-    // BLEServerCallbacks overrides
-    void onConnect(NimBLEServer *pServer) override;
-    void onDisconnect(NimBLEServer *pServer) override;
+    // NimBLEServerCallbacks overrides (NimBLE 2.x: connection callbacks gained a
+    // NimBLEConnInfo& param; onDisconnect also gained an int reason). PRO-290.
+    void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override;
+    void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override;
 
-    // BLECharacteristicCallbacks overrides
-    void onWrite(NimBLECharacteristic *pCharacteristic) override;
+    // NimBLECharacteristicCallbacks override (NimBLE 2.x: onWrite gained a
+    // NimBLEConnInfo& param; body unchanged). PRO-290.
+    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
 
     BLE_OTA_DFU ota_dfu_ble;
 
