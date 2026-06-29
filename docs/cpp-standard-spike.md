@@ -3,6 +3,13 @@
 **Status: C++20 bump is BLOCKED on the currently pinned toolchain. The firmware
 stays on `gnu++17`.**
 
+> **UPDATE (PRO-294, post-PRO-293):** RESOLVED. PRO-293 landed the pioarduino
+> Arduino-esp32 3.x platform (release 55.03.39, xtensa gcc 14.2.0), satisfying
+> the "what would unblock C++20" prerequisite below. PRO-294 (step 6 of PRO-288)
+> flipped the firmware + native envs from `-std=gnu++17` to `-std=gnu++20`
+> (`c++20`/`gnu++20`) and greened the full CI matrix. C++20 is now **ENABLED**.
+> The blocked analysis below is preserved as the slice-1 record.
+
 This document records the result of the toolchain spike that gates the rest of
 CAR-340 ("Modernize firmware to C++20/23 + RAII", a multi-PR effort). Slice 1
 asked: *confirm whether the `-std=gnu++17` build flag can move to

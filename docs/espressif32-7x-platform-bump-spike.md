@@ -5,6 +5,13 @@ enabler. The C++20 prerequisite is an Arduino-core-3.x platform (the community
 `pioarduino` fork), NOT the official 7.x platform — which keeps the same
 gcc 8.4.0 Arduino toolchain as 6.12.0.**
 
+> **UPDATE (PRO-294, post-PRO-293):** The Arduino-core-3.x `pioarduino` platform
+> identified here as the real C++20 enabler was adopted in PRO-293 (step 5 of
+> PRO-288; release 55.03.39, xtensa gcc 14.2.0). On top of it, PRO-294 (step 6)
+> flipped `-std=gnu++17` → `-std=gnu++20` on the firmware + native envs with the
+> full CI matrix green. C++20 is now **ENABLED**. The NO-GO finding below still
+> stands for the *official* 7.x line — it was never the path taken.
+
 This spike investigated bumping `platform = espressif32@6.12.0` to the 7.x line
 to unlock C++20, coordinating with the CAR-340 C++ standard work
 (`docs/cpp-standard-spike.md`). The headline finding overturns the issue's
