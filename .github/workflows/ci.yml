@@ -117,9 +117,10 @@ jobs:
       - name: Install PlatformIO Core
         run: pip install platformio==6.1.19
       # PRO-316: compile the 4MB-flash headless target on every PR. [env:display-headless-4m]
-      # The no_ota single ~2,097,152 B app slot comes from the esp32-s3-supermini board's
-      # bundled partition table (shipped in the board package), not from this env or
-      # platformio.ini. It links today at ~99.7% flash (~7 KB headroom). Without this leg,
+      # The no_ota single ~2,097,152 B app slot is selected by this repo's own board
+      # definition (boards/esp32-s3-supermini.json -> "partitions": "no_ota.csv"); only the
+      # CSV byte layout ships with the Espressif/Arduino platform. It is not set by this env
+      # or platformio.ini. It links today at ~99.7% flash (~7 KB headroom). Without this leg,
       # a future change that adds a few KB would silently push it over the partition limit
       # with nothing in CI to catch it.
       # PlatformIO's linker exits non-zero on a region overflow, so a plain `pio run` fails
