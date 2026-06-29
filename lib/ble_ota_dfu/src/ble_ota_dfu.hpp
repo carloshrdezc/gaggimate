@@ -56,8 +56,9 @@ public:
 
   uint16_t write_binary(fs::FS *file_system, const char *path, uint8_t *data,
                         uint16_t length, bool keep_open = true);
-  void onNotify(BLECharacteristic *pCharacteristic) override;
-  void onWrite(BLECharacteristic *pCharacteristic) override;
+  // NimBLE 2.x: onNotify override removed (the callback no longer exists in
+  // NimBLECharacteristicCallbacks); onWrite gained a NimBLEConnInfo&. PRO-290.
+  void onWrite(BLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
 };
 
 class BLE_OTA_DFU {
