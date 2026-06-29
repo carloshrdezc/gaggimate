@@ -47,8 +47,17 @@ jobs:
           mkdir -p upload/display
           mkdir -p upload/headless
           mkdir -p upload/controller
+          # `beta` and `nightly` are MOVING tags (re-pointed on every release) and
+          # must never anchor the version string: if git describe resolves to one,
+          # out/version.txt becomes e.g. `beta-NNN-g<sha>`, which semver-parses to
+          # 0.0.0 (the token has no digits) so a 2.0.x device treats the nightly as
+          # OLDER and refuses the OTA update (PRO-321). Delete BOTH local tags AND
+          # pass --exclude for each (belt-and-suspenders) so describe falls back to
+          # the real release tag (e.g. 2.0.14-...). Mirrors build-beta.yml and
+          # scripts/auto_firmware_version.py.
           git tag -d nightly 2>/dev/null || true
-          git describe --tags --dirty > out/version.txt
+          git tag -d beta 2>/dev/null || true
+          git describe --tags --dirty --exclude nightly --exclude beta > out/version.txt
       - name: Build Web
         run: ./scripts/build_spiffs.sh
       - name: Build controller
