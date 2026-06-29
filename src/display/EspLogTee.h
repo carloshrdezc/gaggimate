@@ -12,7 +12,7 @@
 //
 // WHY NOT just define -DUSE_ESP_IDF_LOG: that flag rewrites the *bare* log_x
 // macros (log_i/log_e/...) to reference a `TAG` symbol that vendored libraries
-// (SensorLib, TFT_eSPI, GFX) AND our own panel drivers
+// (SensorLib, GFX) AND our own panel drivers
 // (drivers/LilyGo-T-RGB/LilyGo_RGBPanel.cpp, drivers/Waveshare/WavesharePanel.cpp)
 // don't define when they call `log_i("...")` directly -> "'TAG' was not declared
 // in this scope" compile errors across the tree. Confirmed by building with the
