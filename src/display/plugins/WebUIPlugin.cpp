@@ -20,6 +20,7 @@
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ChangeModeDeferPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
+#include <display/plugins/WsReassemblyPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
 #include <string>
 #include <unordered_map>
@@ -1191,6 +1192,22 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     }
 
     auto &buf = rxBuffers[cid];
+
+    // PRO-350: bound the reassembled total. The 64 KiB check above gates only
+    // the optimistic reserve(); the append() below is what actually grows the
+    // buffer. Without this guard a client declaring a huge info->len, or
+    // streaming many continuation fragments, grows rxBuffers[cid] without bound
+    // until allocation fails (bad_alloc / abort). Refuse on exceed: drop the
+    // buffer, close the client with a protocol-error code, and stop accumulating
+    // — never append past the cap. (Real-display analog of the sim PRO-209
+    // single-frame cap; here the cap bounds the cumulative reassembled total.)
+    if (wsReassemblyWouldExceed(buf.size(), len, info->len)) {
+        buf.clear();
+        rxBuffers.erase(cid);
+        client->close(1009); // 1009 = message too big
+        return;
+    }
+
     buf.append(reinterpret_cast<const char *>(data), len);
     const bool isFinal = info->final && (info->index + len) == info->len;
 
