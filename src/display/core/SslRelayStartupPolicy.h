@@ -16,7 +16,7 @@
 // starves, producing `SSL - Memory allocation failed (-32512)` while the
 // combined "free heap" still looks healthy. This is the same legacy
 // anti-pattern PRO-334 migrated the OTA-TLS check away from (see HeapDiag.h:11
-// and kOtaCheckInternalDramFloorBytes in WebUIPlugin.h).
+// and kOtaCheckInternalDramFloorBytes in OtaCheckPolicy.h).
 //
 // The fix gates the SSL relay startup on the largest contiguous internal-DRAM
 // block (gmInternalLargestBlock()) instead of the combined pool. This header

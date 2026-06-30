@@ -49,6 +49,19 @@
 // guaranteed to starve forever. It attempts on the escalated cadence, and a
 // single successful attempt replaces the deferred status with a real result.
 
+// PREFERRED (fast-path) largest contiguous internal-DRAM block (bytes) required
+// to RUN the OTA HTTPS version-check immediately on the normal cadence (PRO-334).
+// The mbedTLS handshake's in/out content buffers are a large transient internal
+// allocation (the source of `SSL - Memory allocation failed (-32512)` under
+// HomeKit + BLE + WiFi + mDNS); at or above this floor the healthy fast path
+// runs every interval, below it the recoverable backoff above applies. Sized
+// well above the SD-read floor since a TLS handshake needs tens of KB contiguous;
+// tuned alongside the reduced mbedTLS content-len build flags (see platformio.ini,
+// display_common). This is the single source of truth for the floor — the caller
+// (WebUIPlugin) passes this symbol into otaCheckDecision() rather than restating
+// the value (mirrors kSslRelayInternalDramFloorBytes in SslRelayStartupPolicy.h).
+constexpr size_t kOtaCheckInternalDramFloorBytes = 48 * 1024;
+
 // Absolute-minimum largest contiguous internal-DRAM block (bytes) below which we
 // NEVER drive the OTA mbedTLS handshake, even on an escalated attempt. This is
 // the hard OOM guard (PRO-334's -32512 protection): the handshake's transient
