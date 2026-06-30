@@ -22,13 +22,12 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-// Convenience: realistic constants matching the production call. The preferred
-// floor (kOtaCheckInternalDramFloorBytes, 48 KB) is defined in WebUIPlugin.h,
-// which pulls Arduino/ESPAsyncWebServer headers and so cannot be included in the
-// host test; the policy takes the floor as an argument, so we restate the 48 KB
-// value here to mirror what the firmware passes. The OOM guard and cadence come
-// from OtaCheckPolicy.h (the single source of truth for the policy's own knobs).
-static constexpr size_t kPreferred = 48 * 1024;                                    // == kOtaCheckInternalDramFloorBytes
+// Convenience: realistic constants matching the production call. All knobs come
+// from OtaCheckPolicy.h — the single source of truth — including the PREFERRED
+// fast-path floor (kOtaCheckInternalDramFloorBytes, 48 KB), so this test can no
+// longer drift from the firmware value. The policy takes the floors + cadences
+// as arguments; we forward the real symbols, exactly as WebUIPlugin does.
+static constexpr size_t kPreferred = kOtaCheckInternalDramFloorBytes;              // 48 KB
 static constexpr size_t kAbsMin = kOtaCheckAbsoluteMinInternalDramBytes;           // 40 KB
 static constexpr unsigned long kNormal = 5UL * 60UL * 1000UL;                       // UPDATE_CHECK_INTERVAL
 static constexpr unsigned long kEscalated = kOtaCheckEscalatedRetryIntervalMs;      // 1 hour

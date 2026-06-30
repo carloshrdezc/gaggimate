@@ -11,6 +11,7 @@
 
 #include "../core/constants.h"
 #include "GitHubOTA.h"
+#include "OtaCheckPolicy.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -23,15 +24,9 @@ constexpr size_t CLEANUP_PERIOD = 5 * 1000;
 constexpr size_t STATUS_PERIOD = 500;
 constexpr size_t DNS_PERIOD = 10;
 
-// PRO-334: minimum internal-DRAM largest-free-block required before running the
-// OTA HTTPS version-check. The mbedTLS handshake's in/out content buffers are a
-// large transient internal allocation (the source of the `SSL - Memory
-// allocation failed (-32512)` reported under HomeKit). Below this floor the
-// loop-task check is deferred to the next interval rather than retry-storming a
-// starving allocator. Sized well above the SD-read floor since a TLS handshake
-// needs tens of KB contiguous; tuned alongside the reduced mbedTLS content-len
-// build flags (see platformio.ini, display_common).
-constexpr size_t kOtaCheckInternalDramFloorBytes = 48 * 1024;
+// The OTA-check PREFERRED internal-DRAM floor (kOtaCheckInternalDramFloorBytes)
+// is defined in OtaCheckPolicy.h (single source of truth, host-includable),
+// included above. WebUIPlugin.cpp passes it into otaCheckDecision().
 
 const String LOCAL_URL = "http://4.4.4.1/";
 const String RELEASE_URL = "https://github.com/carloshrdezc/gaggimate/releases/";
