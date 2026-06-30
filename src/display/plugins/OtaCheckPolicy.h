@@ -57,7 +57,7 @@
 // 48 KB preferred floor (so escalated attempts have room to act) yet still leaves
 // enough contiguous internal DRAM that a real attempt has a fighting chance to
 // complete rather than certainly OOM. Below 40 KB we always defer.
-constexpr size_t kOtaCheckAbsoluteMinInternalDramBytes = 40 * 1024;
+constexpr size_t kOtaCheckAbsoluteMinInternalDramBytes = static_cast<size_t>(40) * 1024;
 
 // Escalated retry cadence (ms) for the below-preferred-floor forward-progress
 // attempt. Much longer than the normal UPDATE_CHECK_INTERVAL so a memory-pinned
