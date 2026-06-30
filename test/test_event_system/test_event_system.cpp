@@ -254,6 +254,42 @@ void test_register_during_dispatch_uses_snapshot(void) {
     TEST_ASSERT_EQUAL_INT(1, added);
 }
 
+// PRO-333 review (P2 task-context fix): the SoftAP-fallback watchdog runs on the
+// Arduino main loop task, but WebUIPlugin::start()/stop() must never run
+// synchronously from the watchdog (they carry AsyncTCP task affinity not covered
+// by the ws/relay mutexes). The fix tags the watchdog-originated
+// controller:wifi:connect trigger with an extra `deferred=1` key so the
+// WebUIPlugin handler latches a pendingApRearm flag (drained on the loop task)
+// instead of calling start() inline; the other two trigger sites omit the key.
+// This pins the discriminator contract the fix relies on: a multi-key event
+// round-trips both ints, and an absent `deferred` reads as 0 (the inline-start
+// path), so a future change that drops the key silently reverts the deferral.
+void test_wifi_connect_deferred_discriminator_contract(void) {
+    PluginManager manager;
+    int seenAp = -1;
+    int seenDeferred = -1;
+    manager.on("controller:wifi:connect", [&](Event &e) {
+        seenAp = e.getInt("AP");
+        seenDeferred = e.getInt("deferred");
+    });
+
+    // Watchdog-originated AP re-arm: both keys present, deferred path.
+    Event apRearm;
+    apRearm.id = "controller:wifi:connect";
+    apRearm.setInt("AP", 1);
+    apRearm.setInt("deferred", 1);
+    manager.trigger(apRearm);
+    TEST_ASSERT_EQUAL_INT(1, seenAp);
+    TEST_ASSERT_EQUAL_INT(1, seenDeferred);
+
+    // Normal connect (setupWifi / STA_GOT_IP): no `deferred` key, so the handler's
+    // getInt("deferred") returns 0 and start() runs inline as before.
+    Event normal = manager.trigger("controller:wifi:connect", "AP", 0);
+    TEST_ASSERT_EQUAL_INT(0, seenAp);
+    TEST_ASSERT_EQUAL_INT(0, seenDeferred);
+    TEST_ASSERT_EQUAL_INT(0, normal.getInt("deferred")); // absent key defaults to 0
+}
+
 static int runEventSystemTests() {
     UNITY_BEGIN();
     RUN_TEST(test_typed_event_data_round_trips);
@@ -269,6 +305,7 @@ static int runEventSystemTests() {
     RUN_TEST(test_throwing_callback_does_not_leak_dispatch_depth);
     RUN_TEST(test_stop_propagation_with_reentrant_trigger);
     RUN_TEST(test_register_during_dispatch_uses_snapshot);
+    RUN_TEST(test_wifi_connect_deferred_discriminator_contract);
     return UNITY_END();
 }
 

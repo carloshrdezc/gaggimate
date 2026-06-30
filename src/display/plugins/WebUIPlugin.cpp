@@ -101,6 +101,20 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         "display-firmware.bin", "display-filesystem.bin", "board-firmware.bin");
     pluginManager->on("controller:wifi:connect", [this](Event const &event) {
         apMode = event.getInt("AP");
+        // PRO-333: the SoftAP-fallback watchdog fires this event from the Arduino
+        // main loop task (Controller::loop() -> wifiWatchdog()), unlike the normal
+        // connect events (setupWifi on the setup task, the STA_GOT_IP handler on the
+        // arduino_events WiFi-event task). Calling start() inline here would run
+        // server.begin()/end(), ws.closeAll() and startRelay() on the loop task,
+        // adding a task affinity the AsyncTCP/AsyncWebServer side is not guarded for
+        // and violating the documented start()/stop() task-context invariant. The
+        // watchdog tags its trigger with `deferred=1`; for that case just raise the
+        // latch and let loop() invoke start() from its deferred-intent context. The
+        // captive-portal UI still comes up — one loop tick later, on the loop task.
+        if (event.getInt("deferred")) {
+            pendingApRearm = true;
+            return;
+        }
         start();
     });
     pluginManager->on("controller:wifi:disconnect", [this](Event const &) { stop(); });
@@ -325,6 +339,22 @@ void WebUIPlugin::loop() {
         }
     }
 
+    // Drain the deferred SoftAP-re-arm intent posted by the WiFi watchdog
+    // (PRO-333). The watchdog's OPEN_SOFTAP branch runs on this same loop task but
+    // tags its connect event `deferred=1` so the handler only latches here instead
+    // of calling start() synchronously from inside wifiWatchdog(). Draining it here
+    // keeps every start() invocation on the loop task's deferred-intent context,
+    // matching pendingOtaStart above. apMode was already set by the connect handler
+    // before this flag was raised, so start() opens the captive-portal DNS path.
+    //
+    // ORDERING: kept above the `if (!serverRunning) return;` guard below so the AP
+    // re-arm still runs after a prior stop() left serverRunning false (the watchdog
+    // fires precisely when the STA link dropped, which may have torn the server
+    // down via controller:wifi:disconnect).
+    if (pendingApRearm) {
+        pendingApRearm = false;
+        start();
+    }
     if (!serverRunning) {
         return;
     }

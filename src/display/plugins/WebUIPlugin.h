@@ -130,6 +130,18 @@ class WebUIPlugin : public Plugin {
     // onto the loop task before the update runs, exactly like the release-URL handoff.
     String pendingUpdateComponent = ""; // guarded by otaIntentMutex
     volatile bool pendingOtaStart = false;
+    // Deferred SoftAP-re-arm intent (PRO-333). The watchdog's OPEN_SOFTAP branch
+    // runs on the Arduino main loop task (Controller::loop() -> wifiWatchdog()),
+    // NOT the arduino_events WiFi-event task that the normal connect events use.
+    // start()/stop() (server.begin()/end(), ws.closeAll(), startRelay()) carry
+    // AsyncTCP/AsyncWebServer task affinity that the wsMutex/relayLifecycleMutex
+    // do NOT cover, and the documented invariant is that start()/stop() never run
+    // synchronously from the watchdog. So the watchdog-originated connect event
+    // (carrying `deferred=1`) only raises this flag; loop() drains it and calls
+    // start() from its own deferred-intent draining context, exactly like
+    // pendingOtaStart / pendingModeChange. A plain volatile bool is sufficient:
+    // it is only ever set true by the connect handler and cleared by loop().
+    volatile bool pendingApRearm = false;
     AsyncWebServer server;
     // INVARIANT (PRO-313): every access to `ws` that walks or mutates its
     // internal client list MUST hold `wsMutex` for the duration of the call.
