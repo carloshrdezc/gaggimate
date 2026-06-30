@@ -28,9 +28,7 @@ void tearDown(void) {}
 // --- 1. drop-when-no-buffer gate (shouldSendUdpLogLine) -----------------------
 
 // Plenty of internal DRAM: send is attempted (normal operation, tee broadcasts).
-void test_send_when_well_above_floor(void) {
-    TEST_ASSERT_TRUE(shouldSendUdpLogLine(kUdpLogTeeInternalDramFloorBytes * 16));
-}
+void test_send_when_well_above_floor(void) { TEST_ASSERT_TRUE(shouldSendUdpLogLine(kUdpLogTeeInternalDramFloorBytes * 16)); }
 
 // Exactly at the floor the send is attempted (>= boundary acts) so a device
 // sitting right on the threshold still streams logs rather than going dark.
