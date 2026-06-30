@@ -12,6 +12,14 @@
 #endif
 
 namespace {
+// PRO-349: forward declaration so the boot-time enumeration / id-migration
+// scans below can route their SD reads through the SAME bounded, ENOMEM-aware,
+// size-capped helper that loadProfile() uses (defined later in this anon
+// namespace). Before PRO-349 these scans streamed deserializeJson() straight
+// off an open SD File handle with no internal-DRAM pre-flight gate and no size
+// cap -- the exact pattern PRO-334 fixed for loadProfile().
+bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson);
+
 String filenameStem(const String &name) {
     String stem = name;
     int slash = stem.lastIndexOf('/');
@@ -31,29 +39,56 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
         return migrations;
     }
 
-    File file = root.openNextFile();
-    while (file) {
-        String name = file.name();
-        if (name.endsWith(".json")) {
-            JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, file);
-            if (!err) {
-                JsonObject obj = doc.as<JsonObject>();
-                const String rawId = obj["id"] | "";
-                Profile profile{};
-                if (parseProfile(obj, profile)) {
-                    if (profile.id.isEmpty()) {
-                        profile.id = filenameStem(name);
-                    }
-                    if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
-                        std::find_if(migrations.begin(), migrations.end(),
-                                     [&](const auto &migration) { return migration.first == rawId; }) == migrations.end()) {
-                        migrations.emplace_back(rawId, profile.id);
-                    }
+    // PRO-349: enumerate the candidate filenames first, then read each through
+    // readProfileFileBounded() below. The previous implementation streamed
+    // deserializeJson() straight off the live openNextFile() handle with no
+    // internal-DRAM pre-flight gate and no size cap; at boot (HomeSpan/BLE/WiFi/
+    // mDNS all initializing) the internal DMA pool is most contended, so that
+    // ungated stream is the exact ENOMEM-spin pattern PRO-334 fixed. File::name()
+    // returns the bare basename on the ESP32 FS backends, so rebuild the
+    // directory-qualified path (as remintUnsafeProfileIds()/profilePath() do)
+    // before re-opening for the bounded read.
+    std::vector<String> names;
+    {
+        File file = root.openNextFile();
+        while (file) {
+            String name = file.name();
+            if (name.endsWith(".json")) {
+                names.push_back(name);
+            }
+            file = root.openNextFile();
+        }
+    }
+
+    for (const String &name : names) {
+        const String stem = filenameStem(name);
+        const String path = dir + "/" + stem + ".json";
+        String json;
+        if (!readProfileFileBounded(fs, path, json)) {
+            // Gate-closed (internal DRAM below floor), oversized/corrupt, or a
+            // transient read failure -> skip this entry rather than parse a
+            // partial/unbounded buffer. Mirrors loadProfile()'s graceful
+            // degradation; a missed id-migration on a starved boot is recoverable
+            // on the next (healthier) boot, a wedged async/boot task is not.
+            continue;
+        }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, json);
+        if (!err) {
+            JsonObject obj = doc.as<JsonObject>();
+            const String rawId = obj["id"] | "";
+            Profile profile{};
+            if (parseProfile(obj, profile)) {
+                if (profile.id.isEmpty()) {
+                    profile.id = filenameStem(name);
+                }
+                if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
+                    std::find_if(migrations.begin(), migrations.end(),
+                                 [&](const auto &migration) { return migration.first == rawId; }) == migrations.end()) {
+                    migrations.emplace_back(rawId, profile.id);
                 }
             }
         }
-        file = root.openNextFile();
     }
 
     return migrations;
@@ -114,14 +149,18 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         Profile profile{};
         bool parsed = false;
         {
-            File file = fs->open(oldPath, "r");
-            if (!file) {
-                ESP_LOGW("ProfileManager", "Remint: failed to open %s for read; skipping", oldPath.c_str());
+            // PRO-349: route the remint read through the bounded, ENOMEM-aware,
+            // size-capped helper instead of streaming deserializeJson() off the
+            // open handle. A gate-closed/oversized/transient-failure read returns
+            // false; skip this entry (it is retried on the next, healthier boot)
+            // rather than thrash the starving allocator at boot time.
+            String json;
+            if (!readProfileFileBounded(fs, oldPath, json)) {
+                ESP_LOGW("ProfileManager", "Remint: bounded read of %s refused/failed; skipping", oldPath.c_str());
                 continue;
             }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, file);
-            file.close();
+            DeserializationError err = deserializeJson(doc, json);
             if (err) {
                 ESP_LOGW("ProfileManager", "Remint: failed to parse %s (%s); skipping", oldPath.c_str(), err.c_str());
                 continue;
@@ -243,30 +282,49 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
         return String();
     }
 
-    File file = root.openNextFile();
-    while (file) {
-        String name = file.name();
-        if (name.endsWith(".json")) {
-            JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, file);
-            if (!err) {
-                JsonObject obj = doc.as<JsonObject>();
-                Profile profile{};
-                if (parseProfile(obj, profile)) {
-                    String stem = filenameStem(name);
-                    // Resolve the addressable id the same way loadProfile() and
-                    // remintUnsafeProfileIds() do: in-file id wins, else a safe
-                    // filename stem. Shared helper keeps the rule in one place.
-                    if (profile.id.isEmpty()) {
-                        profile.id = resolveAddressableProfileId(profile.id, stem);
-                    }
-                    if (profile.id == id) {
-                        return stem;
-                    }
+    // PRO-349: enumerate filenames first, then read each through the bounded,
+    // ENOMEM-aware, size-capped helper (as collectProfileIdMigrations() does)
+    // instead of streaming deserializeJson() off the live directory handle. The
+    // canonical directory-qualified path is rebuilt from the stem because
+    // File::name() returns the bare basename on the ESP32 FS backends.
+    std::vector<String> names;
+    {
+        File file = root.openNextFile();
+        while (file) {
+            String name = file.name();
+            if (name.endsWith(".json")) {
+                names.push_back(name);
+            }
+            file = root.openNextFile();
+        }
+    }
+
+    for (const String &name : names) {
+        String stem = filenameStem(name);
+        const String path = dir + "/" + stem + ".json";
+        String json;
+        if (!readProfileFileBounded(fs, path, json)) {
+            // Gate-closed/oversized/transient -> skip; a missed match degrades to
+            // "not found" (the caller's existing miss path), never a wedge.
+            continue;
+        }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, json);
+        if (!err) {
+            JsonObject obj = doc.as<JsonObject>();
+            Profile profile{};
+            if (parseProfile(obj, profile)) {
+                // Resolve the addressable id the same way loadProfile() and
+                // remintUnsafeProfileIds() do: in-file id wins, else a safe
+                // filename stem. Shared helper keeps the rule in one place.
+                if (profile.id.isEmpty()) {
+                    profile.id = resolveAddressableProfileId(profile.id, stem);
+                }
+                if (profile.id == id) {
+                    return stem;
                 }
             }
         }
-        file = root.openNextFile();
     }
 
     return String();
@@ -341,9 +399,13 @@ bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson) {
         String json;
         bool readOk = false;
         // A profile JSON is small; read the whole file into memory in one bounded
-        // pass instead of a streaming parse off the handle. reserve()+read keeps
-        // the SD access to a single bounded loop with a definite end.
-        if (size > 0 && size <= kProfileMaxFileBytes && json.reserve(size + 1)) {
+        // pass instead of a streaming parse off the handle. The size cap
+        // (sdReadSizeDecision) is the shared bound every boot-time profile read
+        // uses (PRO-349): an oversized/corrupt file is refused rather than forcing
+        // a large internal allocation, an empty file is a failed read.
+        // reserve()+read keeps the SD access to a single bounded loop with a
+        // definite end.
+        if (sdReadSizeDecision(size) == SdReadSizeDecision::kRead && json.reserve(size + 1)) {
             size_t total = 0;
             uint8_t buf[512];
             readOk = true;
