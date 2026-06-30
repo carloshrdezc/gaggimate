@@ -1021,6 +1021,10 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         controller->raiseGrindTarget();
     } else if (msgType == "req:lower-grind-target") {
         controller->lowerGrindTarget();
+    } else if (msgType == "req:raise-brew-target") {
+        controller->raiseBrewTarget();
+    } else if (msgType == "req:lower-brew-target") {
+        controller->lowerBrewTarget();
     } else if (msgType == "req:manual:update") {
         if (controller->getMode() != MODE_MANUAL || !controller->isManualAvailable())
             return;
