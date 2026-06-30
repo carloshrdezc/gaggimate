@@ -31,6 +31,15 @@ What this script does (each step maps to a bug -- see docs/boot-smoke-test-spike
   4. On ANY assertion miss, exit non-zero. The captured serial is always
      written to an artifact file for post-mortem.
 
+Exit codes:
+  0  PASS       -- every check that ran passed (an explicit
+                  --skip-settings-roundtrip opt-out still counts as PASS).
+  1  FAIL       -- one or more assertions missed.
+  2  INCOMPLETE -- boot checks passed but the PRO-331 settings round-trip was
+                  skipped because --base-url was not provided. NOT a full green
+                  run: the most important regression gate never executed. Pass
+                  --base-url (or --skip-settings-roundtrip to opt out explicitly).
+
 Serial capture ordering: the board is reset only AFTER the serial port is
 open (esptool runs with --after no_reset, then capture_serial pulses reset via
 _pulse_reset once the port is open), so the earliest boot output -- including
@@ -117,6 +126,10 @@ def _ok(msg):
 
 def _fail(msg):
     print(f"\u274c {msg}")
+
+
+def _warn(msg):
+    print(f"\u26a0\ufe0f  WARNING: {msg}")
 
 
 def _section(title):
@@ -535,12 +548,19 @@ def main(argv=None):
     all_failures += boot_failures
 
     # --- Step 3: settings round-trip (PRO-331) ---
+    # roundtrip_incomplete tracks the IMPLICIT skip (no --base-url and no explicit
+    # --skip-settings-roundtrip). In that case the PRO-331 gate never ran, so a
+    # clean boot must NOT be reported as a full PASS -- see the verdict block.
+    roundtrip_incomplete = False
     if args.skip_settings_roundtrip:
         _info("Skipping settings round-trip (--skip-settings-roundtrip).")
     elif not args.base_url:
-        _info(
-            "No --base-url given; skipping settings round-trip. "
-            "Pass --base-url http://<board-ip> to exercise the PRO-331 gate."
+        roundtrip_incomplete = True
+        _warn(
+            "No --base-url given; the PRO-331 settings round-trip did NOT run. "
+            "This is the most important regression gate -- the result below is "
+            "therefore NOT a full pass. Pass --base-url http://<board-ip> to "
+            "exercise it, or --skip-settings-roundtrip to intentionally opt out."
         )
     else:
         _section("Step 3/3: settings round-trip (PRO-331)")
@@ -557,10 +577,24 @@ def main(argv=None):
         all_failures += rt_failures
 
     # --- Verdict ---
+    # Three outcomes, with distinct exit codes so CI/automation can tell them apart:
+    #   1 = FAIL       (one or more assertions missed)
+    #   2 = INCOMPLETE (boot checks passed, but the PRO-331 round-trip was skipped
+    #                   because --base-url was not provided -- NOT a full green run)
+    #   0 = PASS       (all checks that ran passed; an explicit --skip-settings-roundtrip
+    #                   opt-out is intentional and still counts as PASS)
     _section("RESULT")
     if all_failures:
         print(f"FAIL: {len(all_failures)} assertion(s) missed. See {args.artifact}.")
         return 1
+    if roundtrip_incomplete:
+        print(
+            "INCOMPLETE: boot checks passed, but the PRO-331 settings round-trip was "
+            "SKIPPED because --base-url was not provided. This is NOT a full green run "
+            "-- the most important regression gate did not execute. Pass "
+            "--base-url http://<board-ip> to exercise it (exit code 2)."
+        )
+        return 2
     print(f"PASS: boot smoke-test green. Artifact: {args.artifact}")
     return 0
 
