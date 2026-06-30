@@ -29,9 +29,9 @@ class MQTTPlugin : public Plugin {
     // PRO-348 deferral state. The controller:wifi:connect handler must do no
     // blocking work on the arduino_events WiFi task, so it only latches intent
     // here (when not already connected) and returns; loop() consumes the latch.
-    bool wantConnect = false;      // pending connect intent latch
-    bool beginInitialized = false; // client.begin() issued once per session
-    int connectAttempts = 0;       // non-blocking attempts spent on current latch
+    volatile bool wantConnect = false;      // pending connect intent latch
+    volatile bool beginInitialized = false; // client.begin() issued once per session
+    volatile int connectAttempts = 0;       // non-blocking attempts spent on current latch
     Controller *pendingController = nullptr;
 
     float lastTemperature = 0;
