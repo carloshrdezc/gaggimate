@@ -2,8 +2,8 @@
 #ifndef BEANMANAGER_H
 #define BEANMANAGER_H
 
-#include <FS.h>
 #include <ArduinoJson.h>
+#include <FS.h>
 #include <ctime>
 #include <display/core/utils.h>
 #include <optional>
@@ -73,7 +73,8 @@ inline bool parseBean(const JsonObject &obj, BeanEntry &bean) {
     const unsigned long horizonMax = ntpValid ? static_cast<unsigned long>(nowTime) + ONE_YEAR_SECONDS : 0UL;
 
     auto isCorrupt = [&](unsigned long ts) {
-        if (ts < LEGACY_TIMESTAMP_MIN) return true;
+        if (ts < LEGACY_TIMESTAMP_MIN)
+            return true;
         return horizonMax != 0 && ts > horizonMax;
     };
     if (bean.createdAt != 0 && isCorrupt(bean.createdAt)) {

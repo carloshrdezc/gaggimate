@@ -84,9 +84,8 @@ class BrewProcess : public Process {
         // unhealthy mid-shot (volumetricAvailable false), restore the duration
         // cap so the phase still advances on time, bounded as before by
         // BREW_SAFETY_DURATION_MS, rather than running to that safety ceiling.
-        bool suppressDurationForVolumetric =
-            target == ProcessTarget::VOLUMETRIC && volumetricAvailable &&
-            static_cast<int>(phaseIndex) == profile.indexOfFinalVolumetricPhase();
+        bool suppressDurationForVolumetric = target == ProcessTarget::VOLUMETRIC && volumetricAvailable &&
+                                             static_cast<int>(phaseIndex) == profile.indexOfFinalVolumetricPhase();
         return currentPhase.isFinished(target == ProcessTarget::VOLUMETRIC, volume, timeInPhase, currentFlow, currentPressure,
                                        waterPumped, suppressDurationForVolumetric);
     }
