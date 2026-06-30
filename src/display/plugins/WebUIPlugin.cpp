@@ -10,6 +10,7 @@
 #include <display/core/process/GrindProcess.h>
 #include <display/core/utils.h>
 #include <display/models/profile.h>
+#include <display/plugins/OtaCheckPolicy.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
 #include <esp_partition.h>
@@ -404,25 +405,48 @@ void WebUIPlugin::loop() {
         updateOTAStatus("Checking...");
     }
     const unsigned long now = millis();
-    if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
-        // PRO-334: the OTA HTTPS version-check drives an mbedTLS handshake whose
-        // in/out content buffers are a large TRANSIENT internal-DRAM allocation.
-        // With HomeKit + BLE + WiFi + mDNS up, internal DRAM can be too tight for
-        // it, producing `SSL - Memory allocation failed (-32512)`. Gate the check
-        // on internal-DRAM headroom: when below the floor, DEFER (don't run it,
-        // don't reset lastUpdateCheck) so it simply retries next interval instead
-        // of retry-storming a starving allocator. lastUpdateCheck is only advanced
-        // when we actually run a check, so deferral never silently drops it.
-        if (gmInternalLargestBlock() >= kOtaCheckInternalDramFloorBytes) {
-            GM_LOG_INTERNAL_DRAM("before OTA TLS check");
-            ota->checkForUpdates();
-            GM_LOG_INTERNAL_DRAM("after OTA TLS check");
-            pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
-            lastUpdateCheck = now;
-            updateOTAStatus(ota->getCurrentVersion());
-        } else {
-            ESP_LOGW("WebUIPlugin", "Deferring OTA check: internal DRAM below floor (largest block=%u B < %u B)",
-                     static_cast<unsigned>(gmInternalLargestBlock()), static_cast<unsigned>(kOtaCheckInternalDramFloorBytes));
+    // PRO-345: decide run/defer/skip via the host-testable OtaCheckPolicy (single
+    // source of truth for the floors + cadences). PRO-334 gated the OTA HTTPS
+    // version-check on internal-DRAM headroom because the mbedTLS handshake's
+    // transient internal allocation can -32512 under HomeKit + BLE + WiFi + mDNS.
+    // But on this hardware that normal steady state sits BELOW the 48 KB floor, so
+    // the old "defer every interval, never advance lastUpdateCheck" path starved
+    // forever: the UI stuck at "Checking..." with no update ever offered.
+    //
+    // The policy keeps the fast path (>= preferred floor -> run every interval)
+    // AND makes the defer RECOVERABLE: below the floor it still attempts on a
+    // longer escalated cadence, as long as the largest block clears a hard
+    // absolute-minimum floor (the OOM guard preserving PRO-334's -32512
+    // protection). When it returns Defer we surface a truthful, distinct status
+    // instead of leaving the UI at "Checking...". A successful Run replaces that
+    // status with the real result (criterion 2). lastUpdateCheck is advanced only
+    // on an actual Run, so the escalated timer keeps maturing across defers.
+    const size_t largestBlock = gmInternalLargestBlock();
+    const OtaCheckDecision decision =
+        otaCheckDecision(largestBlock, now, lastUpdateCheck, UPDATE_CHECK_INTERVAL, kOtaCheckEscalatedRetryIntervalMs,
+                         kOtaCheckInternalDramFloorBytes, kOtaCheckAbsoluteMinInternalDramBytes);
+    if (decision == OtaCheckDecision::Run) {
+        GM_LOG_INTERNAL_DRAM("before OTA TLS check");
+        ota->checkForUpdates();
+        GM_LOG_INTERNAL_DRAM("after OTA TLS check");
+        pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
+        lastUpdateCheck = now;
+        lastOtaDeferNotice = 0; // a real result replaces any prior deferred status
+        updateOTAStatus(ota->getCurrentVersion());
+    } else if (decision == OtaCheckDecision::Defer) {
+        // Below the preferred floor and not yet time for an escalated attempt (or
+        // below the OOM guard): do NOT drive the handshake. Surface a truthful
+        // status so the UI no longer hangs at "Checking..." — it will be replaced
+        // by the real result on the next successful (escalated) Run. lastUpdateCheck
+        // is intentionally NOT advanced (keeps the escalated timer maturing), so we
+        // throttle the broadcast to at most once per interval rather than every loop.
+        if (lastOtaDeferNotice == 0 || now - lastOtaDeferNotice > UPDATE_CHECK_INTERVAL) {
+            lastOtaDeferNotice = now;
+            ESP_LOGW(
+                "WebUIPlugin",
+                "Deferring OTA check: internal DRAM below floor (largest block=%u B < %u B); will retry on escalated cadence",
+                static_cast<unsigned>(largestBlock), static_cast<unsigned>(kOtaCheckInternalDramFloorBytes));
+            updateOTAStatus("Update check deferred — low memory");
         }
     }
     // PRO-313: reading the WS client list (even .empty()) races with the
