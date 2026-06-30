@@ -120,6 +120,10 @@ class AsyncWebSocketClient {
     uint32_t id() const { return _id; }
     int fd() const { return _fd; }
     void setCloseClientOnQueueFull(bool) {}
+    // PRO-350: WebUIPlugin closes a client that overruns the WS reassembly cap.
+    // The sim server is loopback-only and never drives that abuse path, so this
+    // is a no-op shim matching ESPAsyncWebServer's close(code, message) surface.
+    void close(uint16_t = 0, const char * = nullptr) {}
     void text(AsyncWebSocketMessageBuffer *buffer);
     void text(const String &message);
 
