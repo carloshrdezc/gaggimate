@@ -2,7 +2,6 @@
 #define SDREADRETRYPOLICY_H
 
 #include <cstddef>
-#include <cstdint>
 
 // PRO-334: bounded, ENOMEM-aware policy for the async profile-load SD read.
 //
