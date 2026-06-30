@@ -530,7 +530,23 @@ bool ProfileManager::saveProfile(Profile &profile) {
         // collision and mint a fresh id rather than risk an overwrite. The
         // normal (sufficient-DRAM) path is unchanged: the gate is true, this
         // branch is skipped, and the read-based check runs as before.
+        //
+        // PRO-344 (Ref PRO-341, PR #333, finding #1): below the floor this
+        // branch fires for EVERY existing-id save, including the common safe
+        // case of editing your own profile (stem == in-file id, no real
+        // collision). Without the read it is refusing, the gate cannot tell a
+        // safe in-place edit from a dangerous mismatched-stem collision, so it
+        // conservatively mints a fresh id, sets isNew = true, and the tail
+        // auto-favorites it. The net effect: a safe in-place edit is converted
+        // into a renamed, auto-favorited duplicate and the ORIGINAL file is
+        // left untouched. That is the unavoidable price of failing safe, and an
+        // accepted tradeoff -- the "normal-path unchanged" guarantee therefore
+        // holds only AT/ABOVE the floor.
         if (!shouldAttemptSdRead(gmInternalLargestBlock())) {
+            // Log BEFORE overwriting profile.id so %s prints the ORIGINAL id
+            // the user was trying to save (the diagnostically useful value).
+            ESP_LOGW("ProfileManager", "saveProfile: internal DRAM below floor; failing safe to a fresh id for %s",
+                     profile.id.c_str());
             profile.id = generateShortID();
             isNew = true;
         } else {
