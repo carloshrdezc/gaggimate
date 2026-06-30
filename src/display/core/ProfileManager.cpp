@@ -1,5 +1,6 @@
 #include "ProfileManager.h"
 #include "HeapDiag.h"
+#include "ProfileEnumeration.h"
 #include "SdReadRetryPolicy.h"
 #include <ArduinoJson.h>
 
@@ -19,18 +20,6 @@ namespace {
 // off an open SD File handle with no internal-DRAM pre-flight gate and no size
 // cap -- the exact pattern PRO-334 fixed for loadProfile().
 bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson);
-
-String filenameStem(const String &name) {
-    String stem = name;
-    int slash = stem.lastIndexOf('/');
-    if (slash >= 0) {
-        stem = stem.substring(slash + 1);
-    }
-    if (stem.endsWith(".json")) {
-        stem = stem.substring(0, stem.length() - 5);
-    }
-    return stem;
-}
 
 std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, const String &dir) {
     std::vector<std::pair<String, String>> migrations;
@@ -62,7 +51,7 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
 
     for (const String &name : names) {
         const String stem = filenameStem(name);
-        const String path = dir + "/" + stem + ".json";
+        const String path = reconstructProfilePath(dir, name);
         String json;
         if (!readProfileFileBounded(fs, path, json)) {
             // Gate-closed (internal DRAM below floor), oversized/corrupt, or a
@@ -144,7 +133,7 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         // the real file. (The directory-listing scanners read from the live
         // openNextFile() handle and never re-open by name, which is why only
         // this rewrite-and-rename pass needs the canonical form.)
-        const String oldPath = dir + "/" + stem + ".json";
+        const String oldPath = reconstructProfilePath(dir, name);
         String rawId;
         Profile profile{};
         bool parsed = false;
@@ -301,7 +290,7 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
 
     for (const String &name : names) {
         String stem = filenameStem(name);
-        const String path = dir + "/" + stem + ".json";
+        const String path = reconstructProfilePath(dir, name);
         String json;
         if (!readProfileFileBounded(fs, path, json)) {
             // Gate-closed/oversized/transient -> skip; a missed match degrades to
@@ -502,10 +491,13 @@ std::vector<String> ProfileManager::listProfiles() {
     File file = root.openNextFile();
     while (file) {
         String name = file.name();
-        if (name.endsWith(".json")) {
-            int start = name.lastIndexOf('/') + 1;
-            int end = name.lastIndexOf('.');
-            uuids.push_back(name.substring(start, end));
+        if (isProfileFilename(name)) {
+            // PRO-354: use the shared pure stem extractor instead of an inline
+            // lastIndexOf('/')/lastIndexOf('.') substring. For a ".json" entry
+            // both yield the same value (strip the directory, drop the trailing
+            // ".json"), so listing behavior is unchanged; routing through the
+            // one helper keeps every directory scanner on a single definition.
+            uuids.push_back(filenameStem(name));
         }
         file = root.openNextFile();
     }
