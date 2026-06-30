@@ -198,6 +198,14 @@ class Controller {
     void setupInfos();
     void setupWifi();
 
+    // PRO-333: bring up the SoftAP fallback (factored out of setupWifi so the
+    // watchdog can re-open it when a previously-good STA connection is lost).
+    void startSoftAp();
+    // PRO-333: per-loop watchdog. When STA is the configured mode but the link
+    // has been down past the grace/fallback windows, re-assert STA and, failing
+    // that, open SoftAP so the user is never locked out of the web UI.
+    void wifiWatchdog();
+
     // Functional methods
     void updateControl();
     // Whether the active process drives a real pump pressure/flow target
@@ -255,6 +263,18 @@ class Controller {
     bool screenReady = false;
     bool waitingForController = false;
     unsigned long connectStartTime = 0;
+
+    // PRO-333: WiFi STA recovery / SoftAP-fallback watchdog state.
+    // staConfigured: STA credentials were present at setup (we own a STA to
+    //   babysit). staConnectedOnce: the STA reached WL_CONNECTED at least once
+    //   (so a later drop is a *lost* link, not a never-connected one).
+    // staDownSince: millis() when the link was first observed down (0 while up).
+    // lastWifiWatchdog: throttle so the watchdog runs at most once per interval.
+    bool staConfigured = false;
+    bool staConnectedOnce = false;
+    unsigned long staDownSince = 0;
+    unsigned long lastWifiWatchdog = 0;
+    static const unsigned long WIFI_WATCHDOG_INTERVAL_MS = 2000;
     bool volumetricOverride = false;
     bool processCompleted = false;
     bool steamReady = false;

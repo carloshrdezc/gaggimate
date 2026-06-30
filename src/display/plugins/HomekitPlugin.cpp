@@ -90,6 +90,26 @@ void HomekitPlugin::initializeHomekit() {
         return;
     }
 
+    // PRO-333: Controller::setupWifi() is the single owner of the WiFi STA
+    // (WiFi.mode/begin + auto-reconnect + the SoftAP-fallback watchdog). HomeSpan
+    // must NOT also drive the radio. Under Arduino-esp32 3.x / IDF 5.x, HomeSpan's
+    // poll loop (Span::pollTask, HomeSpan.cpp:227-233) re-issues WiFi.begin() on
+    // the STA whenever its own `connected` counter looks even -- which tears down
+    // Controller's live association (ASSOC_LEAVE) and then fails to re-auth
+    // (AUTH_EXPIRE/AUTH_FAIL) in a permanent loop the moment the HAP server starts,
+    // exactly the reported on-device symptom.
+    //
+    // setWifiBegin() overrides the function HomeSpan calls in place of WiFi.begin()
+    // (HomeSpan.h:470, default `[](s,p){WiFi.begin(s,p);}`). Installing a no-op
+    // means HomeSpan never touches the radio: it still tracks WiFi state from
+    // Arduino events and starts/advertises/serves the HAP server, but Controller
+    // remains the sole entity that ever calls WiFi.begin()/mode(). Credentials are
+    // still handed over so HomeSpan stays on its STA path (a non-empty SSID skips
+    // its own auto-AP-config branch, HomeSpan.cpp:207); they now only feed the
+    // neutralized wifiBegin, so they have no radio side effects. HomeSpan's init()
+    // sets WiFi.setAutoReconnect(false) early in boot, so dropped-STA recovery is
+    // owned entirely by Controller::wifiWatchdog() (explicit reconnect -> SoftAP).
+    homeSpan.setWifiBegin([](const char *, const char *) {}); // PRO-333: HomeSpan never drives the radio
     homeSpan.setHostNameSuffix("");
     homeSpan.setPortNum(HOMESPAN_PORT);
     homeSpan.setWifiCredentials(wifiSsid.c_str(), wifiPassword.c_str());

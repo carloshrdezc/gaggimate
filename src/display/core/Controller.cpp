@@ -6,7 +6,6 @@
 #include "comms.pb.h"
 #include "pb_decode.h"
 #endif
-#include "esp_sntp.h"
 #ifndef GAGGIMATE_SIM
 // PRO-330: esp_wifi_set_ps() — enforce WiFi modem-sleep before BLE controller
 // init so WiFi/BLE software coexistence can enable (device-only; the sim stubs
@@ -19,6 +18,7 @@
 #include <display/config.h>
 #include <display/config/features.h>
 #include <display/core/StandbyTransitionPolicy.h>
+#include <display/core/WiFiFallbackPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -328,11 +328,30 @@ void Controller::setupInfos() {
 }
 
 void Controller::setupWifi() {
-    if (settings.getWifiSsid() != "" && settings.getWifiPassword() != "") {
+    staConfigured = settings.getWifiSsid() != "" && settings.getWifiPassword() != "";
+    if (staConfigured) {
         WiFi.setHostname(settings.getMdnsName().c_str());
         WiFi.mode(WIFI_STA);
         WiFi.setAutoReconnect(true);
         WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        // PRO-335 P2-2: register the WiFi event handlers UNCONDITIONALLY, before
+        // WiFi.begin(), instead of inside the connect-success branch below. The old
+        // placement meant that if the initial connect loop timed out (so we fell
+        // through to SoftAP) but Arduino auto-reconnect later associated, the
+        // STA_GOT_IP / STA_DISCONNECTED handlers were never installed, so
+        // controller:wifi:connect / :disconnect never fired and the plugins
+        // (mDNS / MQTT / DiagLog / WebUI relay) never (re)armed. Registering here
+        // also backs the PRO-333 SoftAP-fallback watchdog, which relies on these
+        // connect/disconnect transitions being observed for the whole STA lifetime.
+        WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger("controller:wifi:connect", "AP", 0); },
+                     WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+        WiFi.onEvent(
+            [this](WiFiEvent_t, WiFiEventInfo_t info) {
+                ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
+                         WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
+                pluginManager->trigger("controller:wifi:disconnect");
+            },
+            WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
         WiFi.begin(settings.getWifiSsid(), settings.getWifiPassword());
         WiFi.setTxPower(WIFI_POWER_19_5dBm);
         for (int attempts = 0; attempts < WIFI_CONNECT_ATTEMPTS; attempts++) {
@@ -346,21 +365,17 @@ void Controller::setupWifi() {
         if (WiFi.status() == WL_CONNECTED) {
             ESP_LOGI(LOG_TAG, "Connected to %s with IP address %s", settings.getWifiSsid().c_str(),
                      WiFi.localIP().toString().c_str());
-            WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger("controller:wifi:connect", "AP", 0); },
-                         WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
-            WiFi.onEvent(
-                [this](WiFiEvent_t, WiFiEventInfo_t info) {
-                    ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
-                             WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
-                    pluginManager->trigger("controller:wifi:disconnect");
-                },
-                WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+            staConnectedOnce = true;
+            staDownSince = 0;
+            // PRO-335 P1-1: configTzTime() already starts SNTP (via
+            // esp_netif_sntp_init). The previous manual sntp_set_sync_mode() +
+            // sntp_setservername() + sntp_init() trio re-initialized an
+            // already-initialized SNTP service, which asserts/abort()s on IDF 5.x
+            // ("SNTP already initialized") on every successful WiFi connect. Rely
+            // on configTzTime() alone (default sync mode is fine).
             configTzTime(resolve_timezone(settings.getTimezone()), NTP_SERVER);
             setenv("TZ", resolve_timezone(settings.getTimezone()), 1);
             tzset();
-            sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
-            sntp_setservername(0, NTP_SERVER);
-            sntp_init();
         } else {
             WiFi.disconnect(true, true);
             ESP_LOGI(LOG_TAG, "Timed out while connecting to WiFi");
@@ -368,12 +383,7 @@ void Controller::setupWifi() {
         }
     }
     if (WiFi.status() != WL_CONNECTED) {
-        isApConnection = true;
-        WiFi.mode(WIFI_AP);
-        WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_IP, WIFI_SUBNET_MASK);
-        WiFi.softAP(WIFI_AP_SSID);
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);
-        ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
+        startSoftAp();
     }
 
     pluginManager->on("ota:update:start", [this](Event const &) { this->updating = true; });
@@ -382,11 +392,91 @@ void Controller::setupWifi() {
     pluginManager->trigger("controller:wifi:connect", "AP", isApConnection ? 1 : 0);
 }
 
+// PRO-333: factored out of setupWifi() so wifiWatchdog() can re-open the SoftAP
+// when a previously-good STA connection is lost. Idempotent enough to call from
+// the watchdog: switching to WIFI_AP tears down the (already dead) STA cleanly.
+void Controller::startSoftAp() {
+    isApConnection = true;
+    staDownSince = 0; // AP is the reachable surface now; stop the STA-down clock.
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_IP, WIFI_SUBNET_MASK);
+    WiFi.softAP(WIFI_AP_SSID);
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
+}
+
+// PRO-333: WiFi STA recovery / SoftAP-fallback watchdog.
+//
+// setupWifi() only falls back to SoftAP if the *initial* connect fails. Once a
+// STA connection succeeds it is never re-checked, so a later sustained STA loss
+// (the HomeKit/HomeSpan ASSOC_LEAVE -> AUTH_EXPIRE loop, a router reboot, going
+// out of range) leaves the device stranded: off the LAN and never on its own
+// SoftAP. This watchdog runs each loop tick and, for a STA-configured device
+// that is NOT already in AP mode, tracks how long the link has been down and:
+//   - within the grace window: does nothing (Arduino auto-reconnect heals blips)
+//   - past grace: re-asserts STA ownership with an explicit reconnect
+//   - past the fallback window: opens SoftAP so the user is never locked out
+//
+// The pure decision lives in WiFiFallbackPolicy.h (host-tested); this method
+// only owns the timing bookkeeping and the WiFi side effects.
+void Controller::wifiWatchdog() {
+    // Only babysit a configured STA, and only once it has actually connected at
+    // least once (a never-connected STA is handled by setupWifi's AP fallback).
+    if (!staConfigured || !staConnectedOnce || isApConnection) {
+        return;
+    }
+
+    const unsigned long now = millis();
+    if (now - lastWifiWatchdog < WIFI_WATCHDOG_INTERVAL_MS) {
+        return;
+    }
+    lastWifiWatchdog = now;
+
+    const bool connected = WiFi.status() == WL_CONNECTED;
+    if (connected) {
+        staDownSince = 0;
+        return;
+    }
+
+    // Link is down. Start (or continue) the down-clock.
+    if (staDownSince == 0) {
+        staDownSince = now;
+    }
+    const unsigned long downForMs = now - staDownSince;
+
+    switch (wifiWatchdogAction(connected, isApConnection, staConfigured, downForMs, WIFI_WATCHDOG_GRACE_MS,
+                               WIFI_WATCHDOG_FALLBACK_MS)) {
+    case WiFiWatchdogAction::RECONNECT:
+        ESP_LOGW(LOG_TAG, "WiFi STA down %lums, re-asserting connection to %s", downForMs, settings.getWifiSsid().c_str());
+        // Re-own the radio with an explicit reconnect. This matters when HomeKit
+        // is enabled: HomeSpan's init() calls WiFi.setAutoReconnect(false) (it
+        // expects to manage reconnects itself), and the PRO-333 fix neutralizes
+        // HomeSpan's WiFi.begin() via setWifiBegin(), so nothing else re-associates
+        // a dropped STA. reconnect() re-issues the association with our configured
+        // credentials intact.
+        WiFi.reconnect();
+        break;
+    case WiFiWatchdogAction::OPEN_SOFTAP:
+        ESP_LOGW(LOG_TAG, "WiFi STA down %lums, falling back to SoftAP so the web UI stays reachable", downForMs);
+        startSoftAp();
+        pluginManager->trigger("controller:wifi:connect", "AP", 1);
+        break;
+    case WiFiWatchdogAction::NONE:
+        break;
+    }
+}
+
 void Controller::loop() {
     pluginManager->loop();
 
     if (screenReady) {
         connect();
+    }
+
+    // PRO-333: babysit the STA link so a sustained loss re-asserts STA and
+    // ultimately falls back to SoftAP instead of leaving the user locked out.
+    if (initialized) {
+        wifiWatchdog();
     }
 
     unsigned long now = millis();
