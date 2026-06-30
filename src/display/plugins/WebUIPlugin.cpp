@@ -897,6 +897,9 @@ void WebUIPlugin::startRelay() {
     relayEnabled = true;
     ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %u B)", host.c_str(), port, path.c_str(),
              static_cast<unsigned>(esp_get_free_heap_size()));
+    // PRO-352: combined free heap above is misleading for the SSL relay task (PRO-334); also log the
+    // internal-DRAM headroom that DMA/TLS handshake allocations actually draw from.
+    GM_LOG_INTERNAL_DRAM("relay start");
 }
 
 void WebUIPlugin::stopRelay() {
