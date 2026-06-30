@@ -38,8 +38,20 @@ std::vector<String> cleanProfileIds(std::vector<String> ids, const char *context
 }
 } // namespace
 
-Settings::Settings() {
-    preferences.begin(PREFERENCES_KEY, true);
+Settings::Settings() = default;
+
+void Settings::load() {
+    // PRO-331: open the namespace READ-WRITE (readOnly=false), not read-only.
+    // On Arduino-esp32 3.x / IDF 5.x a read-only begin() FAILS (returns false)
+    // when the namespace does not exist yet, and a failed begin() makes every
+    // getX() silently return the supplied default. Opening read-write creates
+    // the namespace on first boot instead of failing, so subsequent reads see
+    // persisted values. We also check the return value and log a failure rather
+    // than swallowing it. load() runs from Controller::setup() (after the
+    // Arduino core has initialized NVS), so this can no longer race nvs init.
+    if (!preferences.begin(PREFERENCES_KEY, false)) {
+        ESP_LOGE("Settings", "Failed to open NVS namespace '%s' for read; settings will use defaults this boot", PREFERENCES_KEY);
+    }
     startupMode = preferences.getInt("sm", MODE_STANDBY);
     targetSteamTemp = preferences.getInt("ts", 145);
     targetWaterTemp = preferences.getInt("tw", 80);
