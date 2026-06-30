@@ -769,6 +769,27 @@ void WebUIPlugin::setupServer() {
                                                               /*mutexIsRecursive=*/false),
                               "WS broadcast sends under a non-recursive wsMutex: inline close-on-queue-full would "
                               "re-enter the disconnect handler and self-deadlock (PRO-357)");
+                // The library DEFAULT is closeWhenFull == true (AsyncWebSocket.h),
+                // so the safe behaviour the comment+static_assert describe is NOT
+                // the field's default state — it must be established explicitly on
+                // every client. Without this runtime call a full TX queue would
+                // still inline-close and re-open PRO-357. The static_assert above
+                // is only a compile-time check of the policy predicate; it has
+                // zero effect on closeWhenFull and cannot substitute for this
+                // setter. Keep this call in lockstep with the predicate.
+                client->setCloseClientOnQueueFull(false);
+                // Anchor the invariant to the ACTUAL client configuration so a
+                // future deletion/regression of the setter above is caught at the
+                // real call site (the host test pins the pure predicate; this pins
+                // the runtime field). willCloseClientOnQueueFull() must report the
+                // same "safe" decision the predicate encodes.
+                if (client->willCloseClientOnQueueFull() != wsInlineCloseOnQueueFullIsSafe(/*sendsUnderSerializationLock=*/true,
+                                                                                           /*mutexIsRecursive=*/false)) {
+                    ESP_LOGE("WebUIPlugin",
+                             "PRO-357 invariant broken: WS client inline close-on-queue-full is %d but the broadcast "
+                             "path requires it disabled; a full TX queue would self-deadlock wsMutex",
+                             client->willCloseClientOnQueueFull());
+                }
                 SemaphoreGuard lock(wsMutex);
                 ESP_LOGI("WebUIPlugin", "WebSocket client connected (%d open connections)", server->getClients().size());
             } else if (type == WS_EVT_DISCONNECT) {

@@ -119,7 +119,8 @@ class AsyncWebSocketClient {
     AsyncWebSocketClient(uint32_t id, int fd) : _id(id), _fd(fd) {}
     uint32_t id() const { return _id; }
     int fd() const { return _fd; }
-    void setCloseClientOnQueueFull(bool) {}
+    void setCloseClientOnQueueFull(bool close) { _closeWhenFull = close; }
+    bool willCloseClientOnQueueFull() const { return _closeWhenFull; }
     // PRO-350: WebUIPlugin closes a client that overruns the WS reassembly cap.
     // The sim server is loopback-only and never drives that abuse path, so this
     // is a no-op shim matching ESPAsyncWebServer's close(code, message) surface.
@@ -130,6 +131,10 @@ class AsyncWebSocketClient {
   private:
     uint32_t _id;
     int _fd;
+    // PRO-357: mirror ESPAsyncWebServer's closeWhenFull default (true) so the
+    // runtime invariant check in WebUIPlugin's WS_EVT_CONNECT branch exercises
+    // the same set-then-verify path under display-sim as on hardware.
+    bool _closeWhenFull = true;
 };
 
 using AwsEventHandler =

@@ -27,6 +27,21 @@ void tearDown(void) {}
 // This is the exact (sendsUnderSerializationLock=true, mutexIsRecursive=false)
 // case that WebUIPlugin is in. The inline close is UNSAFE and must stay off.
 // This pins the production decision so a regression flips this assertion.
+//
+// PRO-357 (review-anchored): this predicate only models the DECISION. The
+// production safety net has two further parts that this test deliberately
+// references so a future deletion is caught at the right layer:
+//   1. WebUIPlugin's WS_EVT_CONNECT branch calls
+//      client->setCloseClientOnQueueFull(false) to actually establish
+//      closeWhenFull == false (the library default is TRUE, so the comment +
+//      static_assert alone do NOT establish the safe state).
+//   2. The same branch then asserts the runtime field matches this predicate
+//      via client->willCloseClientOnQueueFull(), so deleting the setter trips a
+//      runtime ESP_LOGE at the real call site (and, under display-sim, exercises
+//      the same set-then-verify path the sim shim now models).
+// Keep this predicate's result in lockstep with that runtime call: the value
+// the setter establishes (false == "do not inline-close") is exactly the value
+// this predicate returns for the WebUIPlugin configuration.
 void test_webuiplugin_config_inline_close_unsafe(void) {
     TEST_ASSERT_FALSE(wsInlineCloseOnQueueFullIsSafe(/*sendsUnderSerializationLock=*/true,
                                                      /*mutexIsRecursive=*/false));
