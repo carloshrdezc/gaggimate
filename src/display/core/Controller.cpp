@@ -507,7 +507,21 @@ void Controller::wifiWatchdog() {
     case WiFiWatchdogAction::OPEN_SOFTAP:
         ESP_LOGW(LOG_TAG, "WiFi STA down %lums, falling back to SoftAP so the web UI stays reachable", downForMs);
         startSoftAp();
-        pluginManager->trigger("controller:wifi:connect", "AP", 1);
+        {
+            // PRO-333: this runs on the Arduino main loop task (Controller::loop()
+            // -> wifiWatchdog()), unlike the other controller:wifi:connect triggers
+            // (setupWifi on the setup task, the STA_GOT_IP handler on the
+            // arduino_events WiFi-event task). WebUIPlugin::start()/stop() carry
+            // AsyncTCP task affinity and a documented "never run synchronously from
+            // the watchdog" invariant, so tag this trigger `deferred=1`: WebUIPlugin
+            // latches it and runs start() from its own loop()-task deferred-intent
+            // drain instead of inline on this synchronous trigger path.
+            Event apRearm;
+            apRearm.id = "controller:wifi:connect";
+            apRearm.setInt("AP", 1);
+            apRearm.setInt("deferred", 1);
+            pluginManager->trigger(apRearm);
+        }
         break;
     case WiFiWatchdogAction::NONE:
         break;
