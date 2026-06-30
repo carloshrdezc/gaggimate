@@ -1,7 +1,8 @@
 #include "HomekitPlugin.h"
-#include "../core/Controller.h"
-#include "../core/constants.h"
 #include "../../version.h"
+#include "../core/Controller.h"
+#include "../core/HeapDiag.h"
+#include "../core/constants.h"
 #include <cmath>
 #include <utility>
 
@@ -22,9 +23,8 @@ HomekitAccessory::HomekitAccessory(change_callback_t callback)
 
 boolean HomekitAccessory::update() {
     const bool stateChanged = targetState->updated() && targetState->getVal() != targetState->getNewVal();
-    const bool temperatureChanged =
-        targetTemperature->updated() &&
-        std::fabs(targetTemperature->getVal<float>() - targetTemperature->getNewVal<float>()) > 0.01f;
+    const bool temperatureChanged = targetTemperature->updated() &&
+                                    std::fabs(targetTemperature->getVal<float>() - targetTemperature->getNewVal<float>()) > 0.01f;
 
     if (stateChanged) {
         state->setVal(targetState->getNewVal(), true);
@@ -113,6 +113,9 @@ void HomekitPlugin::initializeHomekit() {
     homeSpan.setHostNameSuffix("");
     homeSpan.setPortNum(HOMESPAN_PORT);
     homeSpan.setWifiCredentials(wifiSsid.c_str(), wifiPassword.c_str());
+    // PRO-334: HomeSpan/HAP is the largest internal-DRAM consumer in this stack.
+    // Bracket its bring-up so the per-component cost is visible on serial.
+    GM_LOG_INTERNAL_DRAM("before HomeSpan begin");
     homeSpan.begin(Category::Thermostats, DEVICE_NAME, this->controller->getSettings().getMdnsName().c_str());
 
     spanAccessory = new SpanAccessory();
@@ -130,6 +133,7 @@ void HomekitPlugin::initializeHomekit() {
     syncAccessoryState();
     homeSpan.autoPoll();
     homekitInitialized = true;
+    GM_LOG_INTERNAL_DRAM("after HomeSpan init");
 }
 
 void HomekitPlugin::setup(Controller *controller, PluginManager *pluginManager) {

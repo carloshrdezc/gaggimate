@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 #include <display/core/Controller.h>
 #include <display/core/GrinderManager.h>
+#include <display/core/HeapDiag.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -46,8 +47,13 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) { host = hostPort; port = 443; }
-        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
+        if (colonIdx < 0) {
+            host = hostPort;
+            port = 443;
+        } else {
+            host = hostPort.substring(0, colonIdx);
+            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
+        }
         return true;
     }
     if (url.startsWith("ws://")) {
@@ -57,8 +63,13 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) { host = hostPort; port = 80; }
-        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
+        if (colonIdx < 0) {
+            host = hostPort;
+            port = 80;
+        } else {
+            host = hostPort.substring(0, colonIdx);
+            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
+        }
         return true;
     }
     return false;
@@ -88,8 +99,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
-        BUILD_GIT_VERSION, controller->getSystemInfo().version,
-        resolveReleaseUrl(controller->getSettings().getOTAChannel()),
+        BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
             pluginManager->trigger("ota:update:phase", "phase", phase);
             updateOTAProgress(phase, 0);
@@ -317,20 +327,16 @@ void WebUIPlugin::loop() {
             // stored does not. Treat them as equal so legacy tags still flash.
             // Cover both directions in case a future resolver path keeps the
             // `v` and the channel string drops it.
-            const bool match = resolved == pinned ||
-                               (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
+            const bool match = resolved == pinned || (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
                                (resolved.startsWith("v") && resolved.substring(1) == pinned);
             if (!match) {
-                ESP_LOGE("WebUIPlugin",
-                         "Refusing forced OTA: pinned tag %s but resolved %s",
-                         pinned.c_str(), resolved.c_str());
+                ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s", pinned.c_str(), resolved.c_str());
                 tagResolved = false;
             }
         }
         bool updateSucceeded = false;
         if (tagResolved) {
-            updateSucceeded =
-                ota->update(updateComponent != "display", updateComponent != "controller", force);
+            updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
         }
         pluginManager->trigger("ota:update:end");
         updating = false;
@@ -397,10 +403,25 @@ void WebUIPlugin::loop() {
     }
     const unsigned long now = millis();
     if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
-        ota->checkForUpdates();
-        pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
-        lastUpdateCheck = now;
-        updateOTAStatus(ota->getCurrentVersion());
+        // PRO-334: the OTA HTTPS version-check drives an mbedTLS handshake whose
+        // in/out content buffers are a large TRANSIENT internal-DRAM allocation.
+        // With HomeKit + BLE + WiFi + mDNS up, internal DRAM can be too tight for
+        // it, producing `SSL - Memory allocation failed (-32512)`. Gate the check
+        // on internal-DRAM headroom: when below the floor, DEFER (don't run it,
+        // don't reset lastUpdateCheck) so it simply retries next interval instead
+        // of retry-storming a starving allocator. lastUpdateCheck is only advanced
+        // when we actually run a check, so deferral never silently drops it.
+        if (gmInternalLargestBlock() >= kOtaCheckInternalDramFloorBytes) {
+            GM_LOG_INTERNAL_DRAM("before OTA TLS check");
+            ota->checkForUpdates();
+            GM_LOG_INTERNAL_DRAM("after OTA TLS check");
+            pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
+            lastUpdateCheck = now;
+            updateOTAStatus(ota->getCurrentVersion());
+        } else {
+            ESP_LOGW("WebUIPlugin", "Deferring OTA check: internal DRAM below floor (largest block=%u B < %u B)",
+                     static_cast<unsigned>(gmInternalLargestBlock()), static_cast<unsigned>(kOtaCheckInternalDramFloorBytes));
+        }
     }
     // PRO-313: reading the WS client list (even .empty()) races with the
     // AsyncTCP task's connect/disconnect mutation, so snapshot it under wsMutex.
@@ -472,7 +493,7 @@ void WebUIPlugin::loop() {
         // BLE scale compiled out (CAR-382): always report disconnected / zero
         // weight. Volumetric still works via flow estimation; that value flows
         // through the process snapshot, not these BLE-specific status fields.
-        doc["cw"] = 0; // current bluetooth weight
+        doc["cw"] = 0;     // current bluetooth weight
         doc["bc"] = false; // bluetooth scale connected status
 #endif
 
@@ -494,8 +515,8 @@ void WebUIPlugin::loop() {
                 pObj["s"] = proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "brew" : "infusion";
                 pObj["l"] = proc.isActive ? proc.phaseName.c_str() : "Finished";
                 pObj["e"] = ts - proc.started;
-                const bool isVolumetric = proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
-                                          controller->isVolumetricAvailable();
+                const bool isVolumetric =
+                    proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget && controller->isVolumetricAvailable();
                 pObj["tt"] = isVolumetric ? "volumetric" : "time";
                 if (isVolumetric) {
                     pObj["pt"] = proc.volumetricTargetValue;
@@ -527,7 +548,7 @@ void WebUIPlugin::loop() {
                 pObj["tt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? "flow" : "pressure";
                 pObj["pt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? proc.manualFlow : proc.manualPressure;
                 pObj["pp"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? controller->getCurrentPumpFlow()
-                                                                          : controller->getCurrentPressure();
+                                                                         : controller->getCurrentPressure();
             }
         }
 
@@ -697,8 +718,7 @@ void WebUIPlugin::setupServer() {
             } else if (type == WS_EVT_DISCONNECT) {
                 {
                     SemaphoreGuard lock(wsMutex);
-                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)",
-                             server->getClients().size());
+                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
             } else if (type == WS_EVT_DATA) {
@@ -772,7 +792,8 @@ void WebUIPlugin::startRelay() {
     SemaphoreGuard lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
-    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
+    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled())
+        return;
 
     bool useSSL;
     String host, basePath;
@@ -818,27 +839,26 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/")
-        ? "/connect?token=" + relayToken + "&role=device"
-        : basePath + "/connect?token=" + relayToken + "&role=device";
+    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?token=" + relayToken + "&role=device"
+                                                          : basePath + "/connect?token=" + relayToken + "&role=device";
 
     relayWs.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
         switch (type) {
-            case WStype_CONNECTED:
-                relayConnected = true;
-                ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
-                break;
-            case WStype_DISCONNECTED:
-                relayConnected = false;
-                ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
-                break;
-            case WStype_TEXT: {
-                String msg = String((char *)payload, length);
-                processWebSocketMessage(RELAY_CLIENT_ID, msg);
-                break;
-            }
-            default:
-                break;
+        case WStype_CONNECTED:
+            relayConnected = true;
+            ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
+            break;
+        case WStype_DISCONNECTED:
+            relayConnected = false;
+            ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
+            break;
+        case WStype_TEXT: {
+            String msg = String((char *)payload, length);
+            processWebSocketMessage(RELAY_CLIENT_ID, msg);
+            break;
+        }
+        default:
+            break;
         }
     });
 
@@ -885,7 +905,8 @@ void WebUIPlugin::stopRelay() {
     // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
     // (yields the CPU) and is strictly bounded.
     SemaphoreGuard lock(relayLifecycleMutex);
-    if (!relayEnabled) return;
+    if (!relayEnabled)
+        return;
     relayEnabled = false;
     relayConnected = false;
     if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
@@ -940,7 +961,8 @@ void WebUIPlugin::broadcastAll(const String &msg) {
 }
 
 void WebUIPlugin::broadcastRelayMsg(const String &msg) {
-    if (!relayEnabled || relayMutex == nullptr) return;
+    if (!relayEnabled || relayMutex == nullptr)
+        return;
     if (xSemaphoreTake(relayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         if (relayOutBuffer.size() < 64) {
             relayOutBuffer.push_back(msg);
@@ -974,12 +996,12 @@ void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
 }
 
 void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) {
-    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s",
-             clientId == RELAY_CLIENT_ID ? "relay" : "local",
+    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s", clientId == RELAY_CLIENT_ID ? "relay" : "local",
              (int)msg.length(), msg.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, msg.c_str());
-    if (err) return;
+    if (err)
+        return;
 
     String msgType = doc["tp"].as<String>();
     if (msgType.startsWith("req:profiles:")) {
@@ -1032,11 +1054,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         JsonVariantConst pressureValue = doc["pressure"];
         JsonVariantConst flowValue = doc["flow"];
         JsonVariantConst temperatureValue = doc["temperature"];
-        float pressure = pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>()
-                                                                              : controller->getManualPressure();
+        float pressure =
+            pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>() : controller->getManualPressure();
         float flow = flowValue.is<float>() || flowValue.is<int>() ? flowValue.as<float>() : controller->getManualFlow();
         int temperature = temperatureValue.is<int>() || temperatureValue.is<float>() ? temperatureValue.as<int>()
-                                                                                    : controller->getManualTemperature();
+                                                                                     : controller->getManualTemperature();
         controller->updateManualTargets(targetType, pressure, flow, temperature);
     } else if (msgType == "req:change-mode") {
         if (doc["mode"].is<uint8_t>()) {
@@ -1133,7 +1155,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:history:rebuild") {
         JsonDocument resp;
         resp["tp"] = "res:history:rebuild";
-        if (doc["rid"].is<const char *>()) resp["rid"] = doc["rid"];
+        if (doc["rid"].is<const char *>())
+            resp["rid"] = doc["rid"];
         resp["msg"] = "Rebuild started";
         sendResponse(clientId, resp);
         ShotHistory.startAsyncRebuild();
@@ -1202,8 +1225,10 @@ static String resolveReleaseUrl(const String &channel) {
 // to "latest" so a malformed websocket payload can never poison the stored
 // setting.
 static String normalizeChannel(const String &channel) {
-    if (channel == "beta") return "beta";
-    if (channel == "nightly") return "nightly";
+    if (channel == "beta")
+        return "beta";
+    if (channel == "nightly")
+        return "nightly";
     if (channel.startsWith("tag:")) {
         const String tag = channel.substring(4);
         for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
@@ -1308,6 +1333,10 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
             sendResponse(clientId, response);
             return;
         }
+        // PRO-334: log internal-DRAM headroom right before the SD-backed profile
+        // read that runs on this (AsyncTCP) task — the read that used to wedge
+        // the task into a WDT reboot when the internal pool was exhausted.
+        GM_LOG_INTERNAL_DRAM("before req:profiles:load SD read");
         Profile profile;
         if (profileManager->loadProfile(id, profile)) {
             auto obj = response["profile"].to<JsonObject>();
@@ -1562,7 +1591,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
             if (request->hasArg("altRelayFunction"))
                 settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
-            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") && request->arg("autowakeupEnabled").length() > 0);
+            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") &&
+                                           request->arg("autowakeupEnabled").length() > 0);
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
                 String schedulesStr = request->arg("autowakeupSchedules");

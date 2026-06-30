@@ -20,6 +20,7 @@
 #include "esp_sntp.h"
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/HeapDiag.h>
 #include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/WiFiFallbackPolicy.h>
 #include <display/core/constants.h>
@@ -191,6 +192,9 @@ void Controller::connect() {
 
     updateLastAction();
     initialized = true;
+    // PRO-334: report internal DMA-capable DRAM headroom at end of setup() so the
+    // baseline floor (with WiFi/BLE/HomeKit/mDNS coming up) is visible on serial.
+    GM_LOG_INTERNAL_DRAM("setup() end");
 }
 
 #ifndef GAGGIMATE_HEADLESS

@@ -1,8 +1,10 @@
 #include "DiagnosticLogPlugin.h"
 #include "../core/Controller.h"
 #include "../core/Event.h"
+#include "../core/HeapDiag.h"
 #include "../core/PluginManager.h"
 #include "DiagLogFormat.h"
+#include "UdpLogTeePolicy.h"
 #include <SD_MMC.h>
 #include <WiFi.h>
 #include <cstdarg>
@@ -210,10 +212,50 @@ void DiagnosticLogPlugin::drainTask(void *arg) {
 
             if (WiFi.status() != WL_CONNECTED)
                 continue; // network gone; drop UDP quietly until it returns
+
+            // PRO-334: drop-when-no-buffer. The datagram send needs an lwIP pbuf
+            // (and, after a socket teardown, a fresh UDP socket) from the small
+            // INTERNAL DMA-capable DRAM pool — the same pool lwIP/mDNS and the
+            // async web server starve from under HomeKit + BLE + WiFi + mDNS.
+            // Below the floor we DROP the line rather than poke sendto() and feed
+            // the ENOMEM spiral that makes the web UI unreachable. The SD sink
+            // above already captured it, so nothing is truly lost. This is the
+            // reserved internal-DRAM floor the issue asks for: the best-effort
+            // debug tee yields the pool to the network stack under pressure.
+            if (!shouldSendUdpLogLine(gmInternalLargestBlock())) {
+                continue;
+            }
+
             IPAddress broadcast = ~WiFi.subnetMask() | WiFi.localIP();
-            self->udp.beginPacket(broadcast, UDP_PORT);
-            self->udp.write(reinterpret_cast<const uint8_t *>(line.text), line.len);
-            self->udp.endPacket();
+            // Check every step's return so a failed/half-built packet is never
+            // followed by a write()/endPacket() on a packet that was never
+            // begun, and a failed send is accounted for (not silently ignored).
+            bool sendOk = false;
+            if (self->udp.beginPacket(broadcast, UDP_PORT) == 1) {
+                self->udp.write(reinterpret_cast<const uint8_t *>(line.text), line.len);
+                // endPacket() returns 1 on success, 0 when sendto() fails (ENOMEM
+                // under internal-DRAM pressure is errno 12). WiFiUDP keeps its
+                // 1460 B tx_buffer + socket across calls, so a failed send does
+                // not leak that buffer; we additionally avoid driving the failure
+                // log on every dropped packet (which would re-enter this tee and
+                // self-amplify) by rate-limiting it below.
+                sendOk = (self->udp.endPacket() == 1);
+            }
+
+            if (sendOk) {
+                self->udpSendFailures = 0;
+            } else {
+                // PRO-334: rate-limit the failure diagnostic HARD. The framework's
+                // own "could not send data" log AND any ESP_LOGW here both route
+                // back through this tee, so logging per dropped packet forms a
+                // self-amplifying storm. Surface the first failure (observable on
+                // serial/SD), then at most one line per kUdpSendFailureLogEvery.
+                ++self->udpSendFailures;
+                if (shouldLogUdpSendFailure(self->udpSendFailures)) {
+                    ESP_LOGW(LOG_TAG, "UDP log send failing (internal-DRAM ENOMEM?); dropping lines (failure #%lu)",
+                             self->udpSendFailures);
+                }
+            }
         }
     }
 }
