@@ -22,6 +22,7 @@
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ChangeModeDeferPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
+#include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
 #include <string>
@@ -738,7 +739,36 @@ void WebUIPlugin::setupServer() {
             // app-side walk is the complete fix this library permits without
             // forking it. See the invariant at the `ws` declaration.
             if (type == WS_EVT_CONNECT) {
-                client->setCloseClientOnQueueFull(true);
+                // PRO-357: do NOT enable setCloseClientOnQueueFull(true). With it
+                // enabled, AsyncWebSocketClient::_queueMessage() reacts to a full
+                // TX queue by calling _client->close() INLINE, synchronously, on
+                // whatever task is sending — which (per ESPAsyncWebServer v3.9.1)
+                // drives ~AsyncWebSocketClient() -> _handleEvent(WS_EVT_DISCONNECT)
+                // right here in this same onEvent handler. When the send is
+                // loopTask's broadcastAll() -> ws.textAll() (which holds wsMutex),
+                // that inline disconnect branch RE-TAKES the non-recursive wsMutex
+                // on the same task -> self-deadlock; the AsyncTCP task then blocks
+                // forever on wsMutex too and the Task Watchdog reboots the board
+                // (PRO-357 coredump: "Task watchdog got triggered ... async_tcp").
+                // Leaving it false makes a full queue DROP the new frame (queue is
+                // hard-capped at WS_MAX_QUEUED_MESSAGES, so no unbounded growth)
+                // instead of force-closing; the periodic evt:status heartbeat
+                // resends fresh state on the next tick, and a genuinely dead
+                // connection is still reaped by AsyncTCP's own _onTimeout->close()
+                // (which runs on the AsyncTCP task, NOT under a held wsMutex). The
+                // explicit abuse-close on the WS_EVT_DATA reassembly-cap path
+                // (handleWebSocketData -> client->close(1009)) is unaffected and
+                // still runs. See broadcastAll() and the `ws` invariant.
+                //
+                // Pin the decision (PRO-357): broadcastAll() sends under wsMutex
+                // and wsMutex is non-recursive, so the library's inline close is
+                // NOT safe to enable here. If a future change makes the send
+                // lock-free or the mutex recursive, this assert documents what
+                // must be re-evaluated before re-enabling setCloseClientOnQueueFull.
+                static_assert(!wsInlineCloseOnQueueFullIsSafe(/*sendsUnderSerializationLock=*/true,
+                                                              /*mutexIsRecursive=*/false),
+                              "WS broadcast sends under a non-recursive wsMutex: inline close-on-queue-full would "
+                              "re-enter the disconnect handler and self-deadlock (PRO-357)");
                 SemaphoreGuard lock(wsMutex);
                 ESP_LOGI("WebUIPlugin", "WebSocket client connected (%d open connections)", server->getClients().size());
             } else if (type == WS_EVT_DISCONNECT) {
@@ -990,6 +1020,22 @@ void WebUIPlugin::broadcastAll(const String &msg) {
     // PRO-313: textAll() walks the client list; serialize against the AsyncTCP
     // task's connect/disconnect mutation. The lock is released before
     // broadcastRelayMsg() (which takes relayMutex) so the two locks never nest.
+    //
+    // PRO-357: holding wsMutex across ws.textAll() is only safe because the WS
+    // client has setCloseClientOnQueueFull DISABLED (see WS_EVT_CONNECT). With it
+    // enabled, a client whose TX queue is full during this textAll() walk would be
+    // closed INLINE by the library, synchronously firing WS_EVT_DISCONNECT on this
+    // same (loop) task while wsMutex is held — and that handler re-takes the
+    // non-recursive wsMutex -> self-deadlock -> AsyncTCP starvation -> Task
+    // Watchdog reboot. Disabling the inline close (frames are dropped on a
+    // hard-capped queue instead) removes the re-entrancy, so the textAll() send
+    // can stay inside the wsMutex critical section that PRO-313 requires for the
+    // list walk. We deliberately do NOT try to "snapshot clients under the lock,
+    // send outside it" here: with ESPAsyncWebServer v3.9.1 a per-client send
+    // outside the lock either re-walks _clients unserialized (re-opening the
+    // PRO-313 corruption) or holds raw AsyncWebSocketClient* across the unlocked
+    // window where the AsyncTCP task can erase+free that std::list node
+    // (use-after-free). Removing the inline close at the source is the safe fix.
     {
         SemaphoreGuard lock(wsMutex);
         ws.textAll(msg);
