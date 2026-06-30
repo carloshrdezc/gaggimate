@@ -27,20 +27,23 @@ BLEScalePlugin BLEScales;
 BLEScalePlugin::BLEScalePlugin() = default;
 
 BLEScalePlugin::~BLEScalePlugin() {
-    // Disable active flag first to stop processing
+    // Disable active flag first so onMeasurement() short-circuits immediately.
     active = false;
 
-    // Give any running callbacks time to complete
-    delay(100);
+    // PRO-351: tear down in the right order with a real handshake instead of a
+    // blind delay(). Stop async scanning FIRST so the scanner (a NimBLEScanCallbacks)
+    // stops dispatching onResult callbacks, then disconnect() — which drops the
+    // scale connection and bounded-waits for any in-flight weight callback to
+    // drain before freeing the scale object. A fixed sleep is a timing
+    // assumption, not a lifetime guarantee; the drain wait observes the actual
+    // "no callback in flight" condition (see waitForCallbacksToDrain).
+    if (scanner != nullptr) {
+        scanner->stopAsyncScan();
+    }
 
-    // Ensure proper cleanup
     disconnect();
 
     if (scanner != nullptr) {
-        // Stop scanning first
-        scanner->stopAsyncScan();
-        // Give it time to actually stop
-        delay(50);
         delete scanner;
         scanner = nullptr;
     }
@@ -94,7 +97,11 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
         steamGraceDeadline = 0;
         active = false;
         disconnect();
-        scanner->stopAsyncScan();
+        // PRO-351: scanner can be null on the std::nothrow OOM path (setup at
+        // :76-78 logs-but-does-not-abort), so guard like the sibling call sites.
+        if (scanner != nullptr) {
+            scanner->stopAsyncScan();
+        }
     });
     manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
     manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
@@ -253,18 +260,48 @@ void BLEScalePlugin::scan() const {
 
 void BLEScalePlugin::disconnect() {
     if (scale != nullptr) {
-        // Add small delay to let any pending callbacks complete
-        delay(50);
+        // PRO-351: order matters for the cross-task lifetime handshake.
+        // 1. active=false was already set by the teardown caller, so any callback
+        //    that started before the flag flipped is the only one that can still
+        //    be touching `scale`. Wait (bounded) for it to drain.
+        waitForCallbacksToDrain();
 
-        // Check if scale is still valid before calling disconnect
+        // 2. Now that no weight callback is in flight, it is safe to disconnect
+        //    and free the scale.
         if (scale) {
             scale->disconnect();
         }
 
+        // 3. `scale` is a std::unique_ptr<RemoteScales> (see header): assigning
+        //    nullptr runs the deleter, which calls ~RemoteScales() ->
+        //    clientCleanup() and frees the object. The plugin OWNS the scale
+        //    (RemoteScalesFactory::create() returns a unique_ptr by value, moved
+        //    into this member in establishConnection()), so no explicit delete is
+        //    needed and adding one would be a double-free. Resetting the
+        //    smart pointer here IS the deallocation.
         scale = nullptr;
         uuid = "";
         doConnect = false;
         reconnectionTries = 0;
+    }
+}
+
+void BLEScalePlugin::waitForCallbacksToDrain() {
+    // PRO-351: bounded wait for any in-flight NimBLE weight callback to finish.
+    // Replaces the old blind delay(50): a fixed sleep is a timing assumption,
+    // this observes the actual "no callback in flight" flag. The hard cap
+    // guarantees teardown can never hang on a wedged callback task — if the flag
+    // is still set at the deadline we proceed anyway (no worse than the old
+    // unconditional sleep, and the active=false short-circuit limits the window).
+    constexpr unsigned long CALLBACK_DRAIN_TIMEOUT_MS = 100;
+    const unsigned long deadline = millis() + CALLBACK_DRAIN_TIMEOUT_MS;
+    while (callbackInFlight.load(std::memory_order_acquire)) {
+        if ((long)(millis() - deadline) >= 0) {
+            ESP_LOGW("BLEScalePlugin", "Callback drain timed out after %lums, proceeding with teardown",
+                     CALLBACK_DRAIN_TIMEOUT_MS);
+            break;
+        }
+        delay(1);
     }
 }
 
@@ -336,7 +373,14 @@ void BLEScalePlugin::establishConnection() {
                 if (xPortInIsrContext()) {
                     return;
                 }
+                // PRO-351: mark the callback in flight for the duration of the
+                // measurement so a concurrent teardown (waitForCallbacksToDrain)
+                // doesn't free the scale out from under this NimBLE-host-task
+                // callback. The flag is on the global BLEScales instance because
+                // this is a plain function-pointer callback (cannot capture this).
+                BLEScales.markCallbackInFlight(true);
                 BLEScales.onMeasurement(weight);
+                BLEScales.markCallbackInFlight(false);
             });
 
             bool connectResult = scale->connect();
