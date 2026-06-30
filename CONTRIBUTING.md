@@ -119,6 +119,52 @@ Notes:
 - A working host C/C++ toolchain is required for `pio test -e native*` and the
   clang-tidy compile DB (e.g. `build-essential` + `clang-tidy` on Linux).
 
+## Pre-nightly on-device boot smoke-test (HIL)
+
+The CI gates above are **compile-only**, and the desktop simulator
+(`[env:display-sim]`, `platform = native`) stubs the hardware / IDF / NVS layers.
+Neither boots the firmware on real silicon, so neither can see boot-time,
+runtime, or NVS-init regressions. Three such regressions (PRO-329 static-init
+ADC abort, PRO-330 NimBLE `esp_bt_controller_init` panic, PRO-331 settings reset
+on every boot) shipped to nightly while building perfectly clean. The full
+analysis is in `docs/boot-smoke-test-spike.md` (PRO-332).
+
+The interim gate is a manual boot smoke-test: `scripts/boot_smoke_test.py`. It
+flashes the reference board (LilyGo-T-RGB), captures ~20 s of boot serial, and
+asserts the boot is healthy (no panic, BLE init survives, webserver comes up, no
+boot loop, and settings persist across a reboot).
+
+**When to run it (mandatory):**
+- **Before tagging / publishing a nightly.**
+- On any PR that touches **firmware** (`src/display/**`, `src/controller/**`),
+  the **platform / framework pin**, or a **library pin** (`lib_deps`,
+  `platformio.ini`) — i.e. anything that can change what the firmware does at
+  boot. Pure web-UI / docs / host-test changes do not need it.
+
+**How to run it** (on the maintainer's machine with the board wired):
+```sh
+pio run -e display                                   # produce the flash images
+python3 scripts/boot_smoke_test.py --base-url http://<board-ip>
+# Common variants:
+python3 scripts/boot_smoke_test.py --help            # all options (works with no board)
+python3 scripts/boot_smoke_test.py --no-flash        # board already flashed
+python3 scripts/boot_smoke_test.py --skip-settings-roundtrip
+```
+
+**How to read the result:**
+- **Exit code 0 / `RESULT: PASS`** — boot is healthy; safe to proceed.
+- **Exit code 1 / `RESULT: FAIL`** — one or more assertions missed; the failing
+  assertion names the bug class it maps to (e.g. a `LoadProhibited` hit points
+  at the PRO-330 class; a failed settings round-trip points at PRO-331). **Do
+  not tag the nightly.**
+- The full captured boot serial is always saved to the artifact file
+  (`boot_smoke_serial.log` by default, plus `*.roundtrip` for the second boot) —
+  attach it to the issue / PR when reporting a failure.
+
+The script is pure offline tooling (`--help` and import work with no board and
+without `pyserial`/`esptool`/`requests`), so CI can lint it but never flashes
+hardware. Running it against the physical board is a human acceptance step.
+
 ## Pull Requests
 
 - Keep PRs focused and describe the motivation behind your change.
