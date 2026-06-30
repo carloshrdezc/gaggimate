@@ -24,10 +24,22 @@ What this script does (each step maps to a bug -- see docs/boot-smoke-test-spike
        * Reaches the BLE-init marker and continues past it without a panic   (PRO-330)
        * Reaches steady-state markers ("Started webserver")                  (liveness)
        * No boot loop: the ROM reset banner "ESP-ROM:esp32s3" appears once   (PRO-329 loop form)
-  3. Settings round-trip: write a known value via POST /api/settings, reboot,
-     read it back via GET /api/settings, assert read == written              (PRO-331)
+  3. Settings round-trip: read current mainBrightness via GET /api/settings,
+     write a DIFFERENT valid value via POST /api/settings (form-encoded, the
+     way the web UI submits), reboot, read it back via GET /api/settings, and
+     assert read == written                                                  (PRO-331)
   4. On ANY assertion miss, exit non-zero. The captured serial is always
      written to an artifact file for post-mortem.
+
+Serial capture ordering: the board is reset only AFTER the serial port is
+open (esptool runs with --after no_reset, then capture_serial pulses reset via
+_pulse_reset once the port is open), so the earliest boot output -- including
+the ESP-ROM:esp32s3 banner the boot loop assertion counts -- is guaranteed to
+land inside the capture window rather than being lost before pyserial opens the
+port. The same open-then-reset ordering is used for the round-trip reboot. The
+boot-loop banner assertion is softened when no reset is triggered (--no-flash
+without --reset-on-capture) because an already-booted board emits no fresh ROM
+banner.
 
 OFFLINE-SAFE: this module imports cleanly and `--help` works with NO board
 attached and WITHOUT pyserial/esptool/requests installed -- those third-party
@@ -164,7 +176,7 @@ def flash_board(port, baud, regions):
         "--before",
         "default_reset",
         "--after",
-        "hard_reset",
+        "no_reset",
         "write_flash",
         "-z",
         "--flash_mode",
@@ -194,10 +206,32 @@ def flash_board(port, baud, regions):
     return True
 
 
-def capture_serial(port, baud, seconds, artifact_path):
+def _pulse_reset(ser):
+    """Pulse the board's EN line low via DTR/RTS on an already-open serial port.
+
+    This is the classic ESP32 auto-reset sequence. NOTE: auto-reset over DTR/RTS
+    is board/adapter-dependent -- some LilyGo-T-RGB / native-USB-CDC (ACM)
+    setups do not expose the classic EN/BOOT strapping over the CDC ACM
+    interface, so this pulse may be a no-op there. On such boards use the
+    --no-flash manual-reset fallback (physically tap the reset button during the
+    capture window) instead of relying on this pulse.
+    """
+    ser.setDTR(False)
+    ser.setRTS(True)
+    time.sleep(0.1)
+    ser.setRTS(False)
+    time.sleep(0.1)
+
+
+def capture_serial(port, baud, seconds, artifact_path, reset_on_open=False):
     """Capture serial output for `seconds` and return the captured text.
 
     Always writes what was captured to `artifact_path` (even on partial capture).
+
+    When `reset_on_open` is True the board's reset line is pulsed AFTER the port
+    is open, so the earliest boot output (the ESP-ROM:esp32s3 banner that
+    assert_boot_healthy counts) is guaranteed to fall inside the capture window
+    rather than being lost in the race between reset and the port opening.
     """
     # Deferred import: keeps --help / py_compile working without pyserial.
     try:
@@ -211,6 +245,9 @@ def capture_serial(port, baud, seconds, artifact_path):
     chunks = []
     try:
         with serial.Serial(port, baud, timeout=0.2) as ser:
+            if reset_on_open:
+                _info("Port open; pulsing reset to capture the boot from the start...")
+                _pulse_reset(ser)
             deadline = time.monotonic() + seconds
             while time.monotonic() < deadline:
                 data = ser.read(4096)
@@ -223,8 +260,15 @@ def capture_serial(port, baud, seconds, artifact_path):
     return text
 
 
-def assert_boot_healthy(serial_text):
-    """Assert the captured boot serial is healthy. Returns a list of failures."""
+def assert_boot_healthy(serial_text, expect_reset_banner=True):
+    """Assert the captured boot serial is healthy. Returns a list of failures.
+
+    `expect_reset_banner` controls the ROM-reset-banner check: when True (the
+    board was reset during this capture) exactly one banner is required and
+    zero/many are failures. When False (no reset was triggered -- e.g. a
+    --no-flash capture of an already-booted board) a missing banner is NOT a
+    failure, but more than one is still flagged as a boot loop.
+    """
     failures = []
 
     # PRO-329 / PRO-330: no panic signatures.
@@ -249,10 +293,12 @@ def assert_boot_healthy(serial_text):
     # PRO-329 (loop form): exactly one ROM reset banner in the window.
     reset_count = len(re.findall(re.escape(ROM_RESET_BANNER), serial_text))
     if reset_count == 0:
-        failures.append(
-            f"ROM reset banner {ROM_RESET_BANNER!r} not seen at all "
-            "(serial capture may have missed the boot -- power-cycle and retry)"
-        )
+        if expect_reset_banner:
+            failures.append(
+                f"ROM reset banner {ROM_RESET_BANNER!r} not seen at all "
+                "(serial capture may have missed the boot -- power-cycle and retry)"
+            )
+        # else: no reset was triggered (already-booted board); absence is expected.
     elif reset_count > 1:
         failures.append(
             f"boot loop detected: {reset_count} ROM resets in the capture window "
@@ -265,9 +311,15 @@ def assert_boot_healthy(serial_text):
 def settings_roundtrip(base_url, port, baud, capture_seconds, artifact_path, timeout):
     """PRO-331 gate: write a setting, reboot, read it back, assert it survived.
 
-    Writes a known value via POST /api/settings, hard-resets the board, waits for
-    it to come back, then reads GET /api/settings and asserts the value persisted.
-    Returns a list of failures (empty == pass).
+    Reads the current mainBrightness via GET /api/settings, writes a DIFFERENT
+    valid value via POST /api/settings (form-encoded, exactly how the web UI
+    submits the settings form -- the route has no JSON body parser, so the
+    handler only sees fields via request->arg(), which is populated from query
+    params / form bodies, NOT from a raw JSON body), hard-resets the board, waits
+    for it to come back, then reads GET /api/settings and asserts the value
+    persisted. The post-reboot boot serial is captured and asserted healthy too
+    (it is the most important boot for PRO-331). Returns a list of failures
+    (empty == pass).
     """
     # Deferred import: keeps --help / py_compile working without requests.
     try:
@@ -281,30 +333,53 @@ def settings_roundtrip(base_url, port, baud, capture_seconds, artifact_path, tim
     settings_url = base_url.rstrip("/") + "/api/settings"
     failures = []
 
-    # A boot-safe, non-destructive numeric setting to round-trip. Display
-    # brightness is persisted and harmless to toggle. We pick a sentinel value
-    # distinct from the likely default and assert it survives a reboot.
-    sentinel_key = "brightness"
-    sentinel_value = 42
+    # mainBrightness is a real, persisted, boot-safe display-brightness setting
+    # (0-255) read back verbatim in the GET response. We read the current value
+    # and write a DIFFERENT valid sentinel so the round-trip actually proves
+    # persistence (writing the value it already has would pass trivially).
+    sentinel_key = "mainBrightness"
+    primary_sentinel = 42
+    alt_sentinel = 200  # used if the board already happens to hold primary_sentinel
 
     try:
         _info(f"GET  {settings_url} (read baseline)")
         before = requests.get(settings_url, timeout=timeout).json()
         original = before.get(sentinel_key)
 
-        _info(f"POST {settings_url} {{{sentinel_key}: {sentinel_value}}}")
-        requests.post(settings_url, json={sentinel_key: sentinel_value}, timeout=timeout).raise_for_status()
+        # Choose a sentinel that differs from the current value so the read-back
+        # comparison genuinely proves the new value persisted.
+        try:
+            original_int = int(original)
+        except (TypeError, ValueError):
+            original_int = None
+        sentinel_value = alt_sentinel if original_int == primary_sentinel else primary_sentinel
+
+        # Form-encoded body (Content-Type: application/x-www-form-urlencoded).
+        # requests sends `data=` as a form body, which AsyncWebServer parses into
+        # request->arg(); a `json=` body would be ignored by handleSettings.
+        _info(f"POST {settings_url} (form) {{{sentinel_key}: {sentinel_value}}}")
+        requests.post(
+            settings_url, data={sentinel_key: sentinel_value}, timeout=timeout
+        ).raise_for_status()
     except Exception as exc:  # network / HTTP / JSON failure
         return [f"settings round-trip could not write the sentinel: {exc}"]
 
     # Reboot and recapture so a fresh NVS read happens (this is the PRO-331 path).
-    _info("Rebooting board to force a fresh NVS read...")
+    # capture_serial opens the port FIRST, then pulses reset, so the boot is
+    # captured from the ROM banner onward without a race.
+    _info("Rebooting board (reset after port open) to force a fresh NVS read...")
     try:
-        reboot_board(port, baud)
-    except Exception as exc:
-        failures.append(f"could not reboot board for round-trip: {exc}")
+        roundtrip_serial = capture_serial(
+            port, baud, capture_seconds, artifact_path + ".roundtrip", reset_on_open=True
+        )
+    except RuntimeError as exc:
+        failures.append(f"could not capture round-trip reboot serial: {exc}")
         return failures
-    capture_serial(port, baud, capture_seconds, artifact_path + ".roundtrip")
+
+    # The post-reboot boot is the most important one for PRO-331: assert it is
+    # healthy too (a reset was triggered, so the ROM banner is expected).
+    for f in assert_boot_healthy(roundtrip_serial, expect_reset_banner=True):
+        failures.append(f"post-reboot boot (round-trip): {f}")
 
     # Wait for the network to come back, then read the value back.
     read_back = None
@@ -321,31 +396,21 @@ def settings_roundtrip(base_url, port, baud, capture_seconds, artifact_path, tim
         failures.append(
             "settings round-trip: board did not respond to GET /api/settings after reboot"
         )
-    elif read_back != sentinel_value:
-        failures.append(
-            f"settings round-trip FAILED (PRO-331 regression): wrote {sentinel_key}="
-            f"{sentinel_value}, read back {read_back!r} after reboot "
-            f"(was {original!r} before) -- NVS did not persist the value"
-        )
     else:
-        _ok(f"settings round-trip: {sentinel_key}={sentinel_value} survived reboot")
+        try:
+            read_back_int = int(read_back)
+        except (TypeError, ValueError):
+            read_back_int = None
+        if read_back_int != sentinel_value:
+            failures.append(
+                f"settings round-trip FAILED (PRO-331 regression): wrote {sentinel_key}="
+                f"{sentinel_value}, read back {read_back!r} after reboot "
+                f"(was {original!r} before) -- NVS did not persist the value"
+            )
+        else:
+            _ok(f"settings round-trip: {sentinel_key}={sentinel_value} survived reboot")
 
     return failures
-
-
-def reboot_board(port, baud):
-    """Hard-reset the board over the serial DTR/RTS lines (no re-flash)."""
-    try:
-        import serial
-    except ImportError:
-        raise RuntimeError("pyserial is not installed (needed to reboot the board)")
-    with serial.Serial(port, baud) as ser:
-        # Classic esp32 auto-reset: pulse EN low via DTR/RTS.
-        ser.setDTR(False)
-        ser.setRTS(True)
-        time.sleep(0.1)
-        ser.setRTS(False)
-        time.sleep(0.1)
 
 
 def build_arg_parser():
@@ -385,6 +450,16 @@ def build_arg_parser():
         "--no-flash",
         action="store_true",
         help="Skip flashing (board already has the image under test)",
+    )
+    parser.add_argument(
+        "--reset-on-capture",
+        action="store_true",
+        help=(
+            "Pulse the board reset at the start of the boot capture even on a "
+            "--no-flash run (so the ROM banner / boot is captured and the "
+            "boot-loop assertion stays active). Ignored without --no-flash "
+            "since a flashed board is always reset for capture."
+        ),
     )
     parser.add_argument(
         "--skip-settings-roundtrip",
@@ -429,16 +504,30 @@ def main(argv=None):
 
     # --- Step 2: capture boot serial + assert healthy ---
     _section("Step 2/3: capture boot serial + assert healthy")
+    # esptool runs with --after no_reset, so a flashed board is reset HERE (after
+    # the port is open) to capture the boot from the ROM banner. A --no-flash run
+    # captures an already-booted board and does NOT reset unless --reset-on-capture
+    # is passed; in that case the ROM banner is not expected and the boot-loop
+    # banner assertion is softened accordingly.
+    did_reset = (not args.no_flash) or args.reset_on_capture
+    if args.no_flash and not did_reset:
+        _info(
+            "No reset will be triggered (--no-flash without --reset-on-capture); "
+            "capturing the already-booted board. The ROM-banner check is softened "
+            "-- pass --reset-on-capture (or tap reset during the window) to exercise "
+            "the boot-loop assertion."
+        )
     try:
         serial_text = capture_serial(
-            args.port, args.baud, args.capture_seconds, args.artifact
+            args.port, args.baud, args.capture_seconds, args.artifact,
+            reset_on_open=did_reset,
         )
     except RuntimeError as exc:
         _fail(str(exc))
         print("\nRESULT: FAIL (serial capture step)")
         return 1
 
-    boot_failures = assert_boot_healthy(serial_text)
+    boot_failures = assert_boot_healthy(serial_text, expect_reset_banner=did_reset)
     if boot_failures:
         for f in boot_failures:
             _fail(f)
