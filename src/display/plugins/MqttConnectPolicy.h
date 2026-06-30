@@ -83,8 +83,7 @@ static_assert(shouldLatchMqttConnect(/*clientConnected=*/false), "PRO-348: not c
 static_assert(!shouldLatchMqttConnect(/*clientConnected=*/true), "PRO-348: already connected -> skip (idempotency guard)");
 
 // loop() state machine (maxAttempts = 5 mirrors MQTT_CONNECTION_RETRIES):
-static_assert(mqttLoopAction(/*want=*/false, /*conn=*/false, 0, 5) == MqttLoopAction::None,
-              "PRO-348: no latch -> no work");
+static_assert(mqttLoopAction(/*want=*/false, /*conn=*/false, 0, 5) == MqttLoopAction::None, "PRO-348: no latch -> no work");
 static_assert(mqttLoopAction(/*want=*/false, /*conn=*/true, 0, 5) == MqttLoopAction::None,
               "PRO-348: no latch -> no work even if connected");
 static_assert(mqttLoopAction(/*want=*/true, /*conn=*/true, 0, 5) == MqttLoopAction::PublishDiscoveryAndClear,
