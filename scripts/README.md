@@ -82,3 +82,37 @@ xtensa-esp32s3-elf-gdb .pio/build/display/firmware.elf
 (gdb) info locals
 (gdb) print variable_name
 ```
+
+## Pre-nightly Boot Smoke-test (HIL)
+
+### `boot_smoke_test.py`
+
+Manual on-device boot gate (approach B from `docs/boot-smoke-test-spike.md`,
+PRO-332). CI is compile-only and the desktop simulator stubs the hardware / IDF /
+NVS layers, so neither catches boot/runtime/NVS regressions — only a real boot
+does. Run this on the reference LilyGo-T-RGB **before tagging a nightly** and on
+any firmware / platform / lib-pin PR.
+
+**What it asserts:**
+- esptool flash of bootloader + partitions + boot_app0 + firmware, every region
+  reporting `Hash of data verified` (flash integrity).
+- ~20 s of boot serial with no panic (`Guru Meditation` / `LoadProhibited` /
+  `abort()`), BLE init reached and survived, `Started webserver` seen, and
+  exactly one ROM reset (no boot loop) — catches PRO-329 and PRO-330.
+- Settings round-trip: write a known value via `POST /api/settings`, reboot, read
+  it back via `GET /api/settings`, assert it persisted — catches PRO-331.
+
+Fails with a non-zero exit on any assertion miss and always saves the captured
+serial to an artifact file.
+
+**Usage:**
+```bash
+pio run -e display                                   # produce the flash images first
+python3 scripts/boot_smoke_test.py --base-url http://<board-ip>
+python3 scripts/boot_smoke_test.py --help            # all options (works with no board)
+```
+
+Pure offline tooling: `--help` and import work with no board attached and without
+`pyserial` / `esptool` / `requests` installed (those are deferred imports used
+only on the hardware path). See `CONTRIBUTING.md` "Pre-nightly on-device boot
+smoke-test (HIL)" for when it is mandatory and how to read the result.
