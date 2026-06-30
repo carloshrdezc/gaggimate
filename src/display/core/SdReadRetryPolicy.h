@@ -69,4 +69,29 @@ constexpr unsigned long nextSdReadBackoffMs(int attempt) {
     return static_cast<unsigned long>(attempt) * 10UL;
 }
 
+// PRO-349: outcome of the single-pass size-cap decision shared by every
+// boot-time profile SD read. Splitting the decision out of the FS-coupled
+// read loop lets [env:native] unit-test the cap logic without an ESP32/SD/FS
+// backend (the read loop itself is a thin chunked copy over an fs::File).
+enum class SdReadSizeDecision {
+    kRead,     // 0 < size <= cap: read the whole (small) file in one bounded pass.
+    kEmpty,    // size == 0: nothing to read (treat as a failed/absent read).
+    kTooLarge, // size > cap: refuse rather than force a large internal allocation.
+};
+
+// Decide, from a file's reported size, whether a profile read should proceed.
+// PURE: no FS/Arduino deps so it links and runs in [env:native]. This is the
+// size cap that every boot-time profile reader (loadProfile + the enumeration
+// / id-migration scans) shares, so a corrupt/huge file can never force a large
+// internal allocation on the memory-starved boot/async path.
+constexpr SdReadSizeDecision sdReadSizeDecision(size_t fileSize) {
+    if (fileSize == 0) {
+        return SdReadSizeDecision::kEmpty;
+    }
+    if (fileSize > kProfileMaxFileBytes) {
+        return SdReadSizeDecision::kTooLarge;
+    }
+    return SdReadSizeDecision::kRead;
+}
+
 #endif // SDREADRETRYPOLICY_H
