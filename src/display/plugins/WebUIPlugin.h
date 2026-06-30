@@ -216,6 +216,14 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
+    // PRO-345: throttles the "deferred — low memory" status broadcast. When the
+    // OTA check is deferred, lastUpdateCheck is intentionally NOT advanced (so the
+    // escalated forward-progress timer keeps maturing), which would otherwise make
+    // the defer branch re-fire — and re-broadcast — every loop pass. This stamps
+    // the last defer notice so we push the status at most once per UPDATE_CHECK_
+    // INTERVAL instead of flooding every WS client each loop. 0 = no notice sent
+    // yet; reset to 0 on any actual Run so a fresh defer is surfaced promptly.
+    unsigned long lastOtaDeferNotice = 0;
     unsigned long lastStatus = 0;
     unsigned long lastCleanup = 0;
     unsigned long lastDns = 0;
