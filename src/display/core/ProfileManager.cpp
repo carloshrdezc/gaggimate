@@ -1,9 +1,15 @@
 #include "ProfileManager.h"
+#include "HeapDiag.h"
+#include "SdReadRetryPolicy.h"
 #include <ArduinoJson.h>
 
 #include <algorithm>
 
 #include <utility>
+
+#if !defined(GAGGIMATE_SIM)
+#include <Arduino.h> // delay()
+#endif
 
 namespace {
 String filenameStem(const String &name) {
@@ -265,6 +271,93 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
 
     return String();
 }
+
+// PRO-334: Fail-safe profile read for the async-task path.
+//
+// loadProfile() runs INLINE ON THE AsyncTCP task for `req:profiles:load`. The
+// previous implementation streamed deserializeJson() directly off the open SD
+// File handle. Under internal-DRAM exhaustion sdmmc_read_sectors fails with
+// ESP_ERR_NO_MEM (0x101) and a streaming parse keeps requesting bytes, so the
+// async_tcp task never pets its watchdog -> task-WDT abort -> reboot (the
+// reboot-on-Brew symptom).
+//
+// This helper makes the read BOUNDED and ENOMEM-aware:
+//   1. Pre-flight gate on internal-DRAM largest-block (shouldAttemptSdRead):
+//      below the floor we don't even poke the starving sdmmc allocator -- we
+//      return false so the caller surfaces a clean error to the client.
+//   2. Read the whole (small) profile file into an in-memory String with a
+//      STRICTLY BOUNDED retry schedule (kSdReadMaxAttempts, short capped
+//      backoffs that yield the CPU so the watchdog is pet), then parse the
+//      buffer. A transient failure becomes a clean `false`, never a spin.
+//
+// Returns true and fills `outJson` on success; false on a refused/failed read.
+bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson) {
+    // Pre-flight: refuse the DMA-backed read when internal DRAM is below the
+    // floor rather than thrash the allocator on the async task.
+    if (!shouldAttemptSdRead(gmInternalLargestBlock())) {
+        ESP_LOGW("ProfileManager", "Skipping SD read of %s: internal DRAM below floor (largest block=%u B < %u B)", path.c_str(),
+                 static_cast<unsigned>(gmInternalLargestBlock()), static_cast<unsigned>(kSdReadInternalDramFloorBytes));
+        return false;
+    }
+
+    for (int attempt = 0; attempt < kSdReadMaxAttempts; ++attempt) {
+        if (attempt > 0) {
+            const unsigned long backoff = nextSdReadBackoffMs(attempt);
+#if !defined(GAGGIMATE_SIM)
+            // vTaskDelay-backed delay() yields the CPU so the async_tcp task
+            // watchdog is pet between bounded retries.
+            if (backoff > 0) {
+                delay(backoff);
+            }
+#else
+            (void)backoff;
+#endif
+        }
+
+        File file = fs->open(path, "r");
+        if (!file) {
+            // open() failing is usually "no such file" (a genuine not-found),
+            // but can also be a transient FS/DMA error under pressure. Retry
+            // within the bounded budget; the final attempt's false is the clean
+            // give-up.
+            continue;
+        }
+
+        const size_t size = file.size();
+        String json;
+        bool readOk = false;
+        // A profile JSON is small; read the whole file into memory in one bounded
+        // pass instead of a streaming parse off the handle. reserve()+read keeps
+        // the SD access to a single bounded loop with a definite end.
+        if (size > 0 && size <= kProfileMaxFileBytes && json.reserve(size + 1)) {
+            size_t total = 0;
+            uint8_t buf[512];
+            readOk = true;
+            while (total < size) {
+                const size_t want = (size - total) < sizeof(buf) ? (size - total) : sizeof(buf);
+                const int got = file.read(buf, want);
+                if (got <= 0) {
+                    // Short/failed read (ENOMEM on the sdmmc DMA buffer surfaces
+                    // here). Abandon this attempt and let the bounded retry loop
+                    // decide; never spin on a zero-progress read.
+                    readOk = false;
+                    break;
+                }
+                json.concat(reinterpret_cast<const char *>(buf), static_cast<unsigned int>(got));
+                total += static_cast<size_t>(got);
+            }
+            readOk = readOk && (total == size);
+        }
+        file.close();
+
+        if (readOk) {
+            outJson = std::move(json);
+            return true;
+        }
+        ESP_LOGW("ProfileManager", "SD read of %s failed (attempt %d/%d)", path.c_str(), attempt + 1, kSdReadMaxAttempts);
+    }
+    return false;
+}
 } // namespace
 
 ProfileManager::ProfileManager(fs::FS *fs, String dir, Settings &settings, PluginManager *plugin_manager)
@@ -358,13 +451,20 @@ std::vector<String> ProfileManager::listProfiles() {
 }
 
 bool ProfileManager::loadProfile(const String &uuid, Profile &outProfile) {
-    File file = _fs->open(profilePath(uuid), "r");
-    if (!file)
+    // PRO-334: read via the bounded, ENOMEM-aware helper instead of streaming
+    // deserializeJson() off the open File handle. loadProfile() runs on the
+    // AsyncTCP task for req:profiles:load / req:profiles:list; a streaming parse
+    // under internal-DRAM exhaustion could spin the async task into a task-WDT
+    // reboot. The helper pre-flight-gates on internal-DRAM headroom and bounds
+    // the read+retries, returning a clean false (surfaced to the client as
+    // "Profile not found") rather than ever hanging the task.
+    String json;
+    if (!readProfileFileBounded(_fs, profilePath(uuid), json)) {
         return false;
+    }
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, file);
-    file.close();
+    DeserializationError err = deserializeJson(doc, json);
     if (err)
         return false;
 
