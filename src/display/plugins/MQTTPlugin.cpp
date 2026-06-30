@@ -52,8 +52,15 @@ void MQTTPlugin::loop() {
         return;
     case MqttLoopAction::AttemptConnect:
         // Single non-blocking attempt this tick; retries spread across ticks.
-        connectAttempts++;
-        connect(pendingController);
+        // PRO-348: pendingController is a non-volatile pointer published by the
+        // WiFi event task before the volatile wantConnect latch; volatile gives
+        // no cross-core release barrier on the ESP32-S3, so the loop task can
+        // observe wantConnect==true while pendingController is still nullptr.
+        // Guard mirrors the PublishDiscoveryAndClear branch above.
+        if (pendingController != nullptr) {
+            connectAttempts++;
+            connect(pendingController);
+        }
         return;
     case MqttLoopAction::GiveUpAndClear:
         // Budget exhausted (mirrors the original loop's give-up after
