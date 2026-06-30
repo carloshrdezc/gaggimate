@@ -290,6 +290,20 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
 //      backoffs that yield the CPU so the watchdog is pet), then parse the
 //      buffer. A transient failure becomes a clean `false`, never a spin.
 //
+// RESIDUAL RISK (PRO-342): the WDT-reboot rationale above is SPECIFIC TO THE
+// ASYNC_TCP PATH. The very same pre-flight gate is also reached via
+// loadProfile()/loadSelectedProfile() invoked on the DISPLAY-LOOP (UI) task
+// (e.g. DefaultUI.cpp profile-load call sites), which pets a DIFFERENT
+// watchdog. On that path the gate does NOT prevent a reboot -- there was no
+// async-task WDT abort to prevent -- so under internal-DRAM pressure it instead
+// degrades to a SPURIOUSLY FAILED PROFILE LOAD: the helper returns false and
+// the UI surfaces a "not found"/load failure (degraded UX, no crash) even
+// though the profile is present on disk. This is an accepted tradeoff: a clean
+// failed load beats thrashing the starving allocator, but the failure mode on
+// the loop-task path is a missed load, not the WDT reboot the async-path
+// rationale describes. No behavior change is intended here; this note only
+// documents the cross-path behavior.
+//
 // Returns true and fills `outJson` on success; false on a refused/failed read.
 bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson) {
     // Pre-flight: refuse the DMA-backed read when internal DRAM is below the
@@ -573,6 +587,11 @@ void ProfileManager::selectProfile(const String &uuid) {
 
 Profile &ProfileManager::getSelectedProfile() { return selectedProfile; }
 
+// NOTE (PRO-342): loadSelectedProfile()/loadProfile() are also invoked on the
+// DISPLAY-LOOP (UI) task (see DefaultUI.cpp call sites), not just AsyncTCP. The
+// shared internal-DRAM pre-flight gate in readProfileFileBounded() degrades to
+// a failed profile load (not the async-path WDT reboot) under memory pressure
+// here -- see the residual-risk note on that helper above.
 bool ProfileManager::loadSelectedProfile(Profile &outProfile) { return loadProfile(_settings.getSelectedProfile(), outProfile); }
 
 std::vector<String> ProfileManager::getFavoritedProfiles(bool validate) {
