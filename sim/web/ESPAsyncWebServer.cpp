@@ -759,6 +759,24 @@ void AsyncWebServer::handleWsFrames(Conn &c) {
                 len = (len << 8) | p[2 + i];
             off = 10;
         }
+
+        // Cap the decoded payload length before any size arithmetic or allocation.
+        // The 16-bit (126) and especially the 64-bit (127) extended-length paths read an
+        // attacker-controlled length straight off the wire. Without this cap, a huge `len`
+        // (near UINT64_MAX) makes `off + len` wrap around to a small value, the buffering
+        // guard below passes, and we then do `std::vector<uint8_t> payload(len)` -> bad_alloc
+        // /abort and out-of-bounds reads. This is a loopback-only host/sim dev tool whose real
+        // WebSocket traffic is small JSON control messages, so 8 MiB is far larger than any
+        // legitimate frame while keeping the allocation bounded. An oversized frame is a
+        // protocol violation, so we close the connection cleanly instead of allocating.
+        constexpr uint64_t kMaxWsFrameLen = 8ull * 1024 * 1024;
+        if (len > kMaxWsFrameLen) {
+            uint8_t close[] = {0x03, 0xea}; // 1002 = protocol error
+            sendWsFrame(c.fd, 0x8, close, 2);
+            b.clear();
+            return;
+        }
+
         uint8_t mask[4] = {0, 0, 0, 0};
         if (masked) {
             if (b.size() < off + 4)
@@ -766,7 +784,9 @@ void AsyncWebServer::handleWsFrames(Conn &c) {
             memcpy(mask, p + off, 4);
             off += 4;
         }
-        if (b.size() < off + len)
+        // Overflow-safe wait-for-more-data guard: `len` is capped above, but compute the
+        // comparison without forming `off + len` so we never rely on it not wrapping.
+        if (b.size() < off || len > b.size() - off)
             return; // wait for full payload
 
         std::vector<uint8_t> payload(len);
