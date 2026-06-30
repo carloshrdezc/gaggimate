@@ -5,6 +5,7 @@
 #include <display/core/GrinderManager.h>
 #include <display/core/HeapDiag.h>
 #include <display/core/ProfileManager.h>
+#include <display/core/SslRelayStartupPolicy.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
 #include <display/core/utils.h>
@@ -863,10 +864,17 @@ void WebUIPlugin::startRelay() {
         }
     });
 
-    // SSL heap usage can reach 50 KB; bail early rather than destabilize the device.
-    if (useSSL && esp_get_free_heap_size() < 60000) {
-        ESP_LOGW("WebUIPlugin", "Insufficient heap (%u B) for SSL relay — skipping",
-                 static_cast<unsigned>(esp_get_free_heap_size()));
+    // PRO-347: gate the SSL relay startup on INTERNAL DMA-capable DRAM, not the
+    // combined heap. esp_get_free_heap_size() is PSRAM-dominated and almost
+    // always passes a <60000 check even when the small internal pool — which the
+    // beginSSL() mbedTLS handshake (~50 KB) draws from — is exhausted, yielding
+    // `SSL - Memory allocation failed (-32512)`. Mirror the PRO-334 OTA-TLS
+    // precedent: refuse when the largest contiguous internal block is below the
+    // floor. Only the SSL path is gated; the non-SSL relayWs.begin() path below
+    // is unaffected.
+    if (useSSL && !sslRelayDramSufficient(gmInternalLargestBlock(), kSslRelayInternalDramFloorBytes)) {
+        ESP_LOGW("WebUIPlugin", "Skipping SSL relay: internal DRAM below floor (largest block=%u B < %u B)",
+                 static_cast<unsigned>(gmInternalLargestBlock()), static_cast<unsigned>(kSslRelayInternalDramFloorBytes));
         return;
     }
 
