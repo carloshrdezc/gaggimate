@@ -519,10 +519,26 @@ bool ProfileManager::saveProfile(Profile &profile) {
     // collision; mint a fresh id instead. A matching id is a legitimate in-place
     // edit and is left untouched.
     if (!isNew && profileExists(profile.id)) {
-        Profile existing{};
-        if (loadProfile(profile.id, existing) && existing.id != profile.id) {
+        // PRO-341 (Ref PRO-334, PR #330, finding #1): loadProfile() now sits
+        // behind the internal-DRAM pre-flight gate (readProfileFileBounded,
+        // shouldAttemptSdRead). Below the floor it returns false for a MEMORY
+        // reason, which is indistinguishable from "not found" at this call
+        // site. If we let that false short-circuit the collision check, the
+        // guard is silently skipped and the open("w") below could clobber an
+        // unrelated (legacy mismatched-stem) profile. Fail safe instead: when
+        // the gate would refuse the read, treat it exactly like a detected
+        // collision and mint a fresh id rather than risk an overwrite. The
+        // normal (sufficient-DRAM) path is unchanged: the gate is true, this
+        // branch is skipped, and the read-based check runs as before.
+        if (!shouldAttemptSdRead(gmInternalLargestBlock())) {
             profile.id = generateShortID();
             isNew = true;
+        } else {
+            Profile existing{};
+            if (loadProfile(profile.id, existing) && existing.id != profile.id) {
+                profile.id = generateShortID();
+                isNew = true;
+            }
         }
     }
 
