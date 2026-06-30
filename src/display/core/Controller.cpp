@@ -239,6 +239,9 @@ void Controller::setupBluetooth() {
         if (initialized) {
             pluginManager->trigger("controller:bluetooth:disconnect");
             waitingForController = true;
+            // Restart the grace clock so the next scan/reconnect attempt gets a
+            // full CONTROLLER_WAITING_TIMEOUT_MS window (PRO-3).
+            connectStartTime = millis();
             setMode(MODE_STANDBY);
         }
     });
@@ -553,6 +556,9 @@ void Controller::loop() {
 
     if (clientController.isReadyForConnection() && clientController.connectToServer()) {
         waitingForController = false;
+        // Reset the grace clock so a subsequent disconnect measures from the
+        // moment of (re)connection, not from original boot (PRO-3).
+        connectStartTime = millis();
         setupInfos();
         ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f", settings.getPressureScaling());
         setPressureScale();
