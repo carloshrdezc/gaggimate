@@ -7,6 +7,12 @@
 #include "pb_decode.h"
 #endif
 #include "esp_sntp.h"
+#ifndef GAGGIMATE_SIM
+// PRO-330: esp_wifi_set_ps() — enforce WiFi modem-sleep before BLE controller
+// init so WiFi/BLE software coexistence can enable (device-only; the sim stubs
+// BLE and has no coexistence path).
+#include <esp_wifi.h>
+#endif
 #include <SD_MMC.h>
 #include <LittleFS.h>
 #include <ctime>
@@ -198,6 +204,25 @@ void Controller::setupPanel() {
 #endif
 
 void Controller::setupBluetooth() {
+#ifndef GAGGIMATE_SIM
+    // PRO-330: connect() brings WiFi up (setupWifi()) immediately before this BLE
+    // init. On the Arduino-esp32 3.x / IDF 5.x platform (PRO-293), the BT
+    // controller's software-coexistence bring-up (coex_enable, reached from
+    // esp_bt_controller_init/enable) ABORTS unless WiFi modem-sleep is enabled
+    // (WIFI_PS_MIN_MODEM) — IDF logs "Should enable WiFi modem sleep when both
+    // WiFi and Bluetooth are enabled" and the controller faults during its own
+    // failed-init cleanup (LoadProhibited in btdm_controller_deinit_internal ->
+    // uxListRemove). See NimBLE-Arduino#437 / espressif/esp-idf#9595.
+    //
+    // The Arduino WiFi.setSleep() path only applies esp_wifi_set_ps() on the
+    // STA-start event, so the AP-fallback case (WiFi.softAP("GaggiMate"), the
+    // common no-credentials path) never sets it and coexistence aborts. Force
+    // the coexistence-required power-save mode directly here, after WiFi is up
+    // and right before the BT controller initializes, covering STA and AP alike.
+    // This was implicit on the old IDF 4.4 platform (where v156 ran); IDF 5.x
+    // enforces it, which is why the NimBLE 1.x->2.x + platform bump regressed it.
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+#endif
     clientController.initClient();
     clientController.registerDisconnectCallback([this]() {
         if (initialized) {
