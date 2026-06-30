@@ -765,6 +765,7 @@ void WebUIPlugin::start() {
         ESP_LOGI("WebUIPlugin", "Started catchall DNS for captive portal");
     }
     lastUpdateCheck = 0;
+    lastOtaDeferNotice = 0; // PRO-345: allow a fresh defer notice on the forced recheck
     serverRunning = true;
     startRelay();
 }
@@ -1303,6 +1304,10 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     // force-recheck sentinel where a stale read merely delays the next check by one
     // interval. So it is safe to set directly here rather than via a deferred flag.
     lastUpdateCheck = 0;
+    // PRO-345: same single-atomic-word / force-recheck-sentinel reasoning applies —
+    // clear the defer-notice throttle so a forced recheck that lands on Defer
+    // surfaces the truthful "deferred" status immediately rather than after one interval.
+    lastOtaDeferNotice = 0;
     // This handler runs on the AsyncTCP web-server task (local WS clients) or the
     // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
     // and owned by the loop task (CAR-178), so we must not call into it here.
