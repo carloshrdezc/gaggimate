@@ -521,6 +521,25 @@ static std::string urlDecode(const std::string &s) {
     return out;
 }
 
+// Reject any path containing a ".." parent-directory SEGMENT, to prevent
+// path traversal out of the WebUI document root (PRO-208). The URL path uses
+// '/' separators on every platform, so splitting on '/' is portable. A whole
+// segment equal to ".." is the attack; an embedded ".." inside an otherwise
+// normal filename (e.g. "foo..bar.js") is a legitimate asset and is allowed.
+static bool hasTraversalSegment(const std::string &p) {
+    size_t start = 0;
+    while (start <= p.size()) {
+        size_t slash = p.find('/', start);
+        size_t end = (slash == std::string::npos) ? p.size() : slash;
+        if (end - start == 2 && p.compare(start, 2, "..") == 0)
+            return true;
+        if (slash == std::string::npos)
+            break;
+        start = slash + 1;
+    }
+    return false;
+}
+
 // Parse a multipart/form-data body into name=value args (the WebUI posts settings
 // as FormData). File parts (with a filename) are skipped — the settings form has none.
 static void parseMultipart(const std::string &body, const std::string &boundary, std::map<std::string, std::string> &args) {
@@ -667,6 +686,13 @@ void AsyncWebServer::dispatch(Conn &c, AsyncWebServerRequest &req) {
     for (auto &s : _static) {
         if (path.rfind(s.uri, 0) == 0) { // prefix match
             std::string rel = path.substr(s.uri.size());
+            // Path-traversal guard (PRO-208): refuse any ".." path segment so a
+            // request like "/../../etc/hosts" cannot escape the document root.
+            // Check the raw relative path and a defensive percent-decode of it
+            // (the served path is computed from the raw `rel` below; the decode
+            // here only hardens the check should the path ever be decoded).
+            if (hasTraversalSegment(rel) || hasTraversalSegment(urlDecode(rel)))
+                break; // fall through to the _notFound / 404 handler
             // Join s.path + rel with exactly one '/' separator.
             std::string file = s.path;
             if (!rel.empty()) {
