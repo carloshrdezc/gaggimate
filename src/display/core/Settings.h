@@ -6,8 +6,8 @@
 #include <Preferences.h>
 #include <display/core/constants.h>
 #include <display/core/utils.h>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #define PREFERENCES_KEY "controller"
 
