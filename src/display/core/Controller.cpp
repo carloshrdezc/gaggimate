@@ -63,6 +63,14 @@
 const String LOG_TAG = F("Controller");
 
 void Controller::setup() {
+    // PRO-331: load persisted settings from NVS now, NOT in the Settings
+    // constructor. Settings is a member of the global `controller`, so its
+    // constructor runs during C++ static-init — before the Arduino core calls
+    // nvs_flash_init(). Reading NVS that early fails on Arduino-esp32 3.x and
+    // every value silently falls back to its default (WiFi never connects).
+    // setup() runs after nvs init, so the read here succeeds.
+    settings.load();
+
     mode = settings.getStartupMode();
     
     // Initialize process mutex for thread-safe access

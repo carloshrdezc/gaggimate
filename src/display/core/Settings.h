@@ -51,6 +51,16 @@ class Settings {
   public:
     Settings();
 
+    // Reads all persisted values from NVS into memory and starts the periodic
+    // save task. MUST be called from setup() (after the Arduino core has run
+    // nvs_flash_init()), NOT from the constructor: Controller (and therefore
+    // this Settings member) is a global constructed during C++ static-init,
+    // which runs before nvs_flash_init(). Reading NVS in the constructor races
+    // that init and, on Arduino-esp32 3.x / IDF 5.x, fails with
+    // "nvs_open failed: NOT_INITIALIZED" so every getX() returns its default
+    // (PRO-331).
+    void load();
+
     void batchUpdate(const SettingsCallback &callback);
     void save(bool noDelay = false);
 
