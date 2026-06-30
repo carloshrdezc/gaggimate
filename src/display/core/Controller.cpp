@@ -15,6 +15,9 @@
 #include <SD_MMC.h>
 #include <LittleFS.h>
 #include <ctime>
+// PRO-335: esp_sntp.h for sntp_set_sync_mode(). The sim provides a host shim
+// (sim/platform/esp_sntp.h) so this links in [env:display-sim] too.
+#include "esp_sntp.h"
 #include <display/config.h>
 #include <display/config/features.h>
 #include <display/core/StandbyTransitionPolicy.h>
@@ -343,8 +346,28 @@ void Controller::setupWifi() {
         // (mDNS / MQTT / DiagLog / WebUI relay) never (re)armed. Registering here
         // also backs the PRO-333 SoftAP-fallback watchdog, which relies on these
         // connect/disconnect transitions being observed for the whole STA lifetime.
-        WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger("controller:wifi:connect", "AP", 0); },
-                     WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+        WiFi.onEvent(
+            [this](WiFiEvent_t, WiFiEventInfo_t) {
+                // PRO-333: a STA association/IP completing here re-arms the
+                // watchdog. Without this, isApConnection is sticky: once a
+                // SoftAP fallback set it true (router reboot, outage, out of
+                // range, or the HomeKit ASSOC/AUTH loop) the wifiWatchdog()
+                // guard (!staConnectedOnce || isApConnection) returned early
+                // forever and the device stayed in AP mode until a manual
+                // reboot — even after the home network came back. STA_GOT_IP
+                // fires when the link is (re)established, so clear the AP flag,
+                // mark that we have connected at least once, and reset the
+                // down-clock. If we were AP-only, flip the radio back to STA so
+                // the device returns to the LAN automatically.
+                staConnectedOnce = true;
+                staDownSince = 0;
+                if (isApConnection) {
+                    isApConnection = false;
+                    WiFi.mode(WIFI_STA);
+                }
+                pluginManager->trigger("controller:wifi:connect", "AP", 0);
+            },
+            WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
         WiFi.onEvent(
             [this](WiFiEvent_t, WiFiEventInfo_t info) {
                 ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
@@ -371,8 +394,13 @@ void Controller::setupWifi() {
             // esp_netif_sntp_init). The previous manual sntp_set_sync_mode() +
             // sntp_setservername() + sntp_init() trio re-initialized an
             // already-initialized SNTP service, which asserts/abort()s on IDF 5.x
-            // ("SNTP already initialized") on every successful WiFi connect. Rely
-            // on configTzTime() alone (default sync mode is fine).
+            // ("SNTP already initialized") on every successful WiFi connect.
+            //
+            // SMOOTH sync (slew the clock instead of stepping it) was the
+            // intended behavior, so keep it — but set it BEFORE configTzTime().
+            // esp_netif_sntp_init() honors a pre-set sync mode, so setting it
+            // first avoids the post-init re-init abort while preserving SMOOTH.
+            sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
             configTzTime(resolve_timezone(settings.getTimezone()), NTP_SERVER);
             setenv("TZ", resolve_timezone(settings.getTimezone()), 1);
             tzset();
@@ -393,14 +421,29 @@ void Controller::setupWifi() {
 }
 
 // PRO-333: factored out of setupWifi() so wifiWatchdog() can re-open the SoftAP
-// when a previously-good STA connection is lost. Idempotent enough to call from
-// the watchdog: switching to WIFI_AP tears down the (already dead) STA cleanly.
+// when a previously-good STA connection is lost.
+//
+// When STA credentials are configured, fall back to WIFI_AP_STA (NOT AP-only):
+// keeping the STA interface alive lets Arduino auto-reconnect keep retrying the
+// home network in the background while the SoftAP serves the web UI. That is
+// what makes the router-reboot / out-of-range case auto-recover — when the home
+// network returns, the STA re-associates and the ARDUINO_EVENT_WIFI_STA_GOT_IP
+// handler (above) clears isApConnection and flips the radio back to WIFI_STA. In
+// AP-only mode the STA radio is off, STA_GOT_IP can never fire, and the device
+// would stay on its SoftAP forever (the sticky-isApConnection bug). With no
+// credentials there is no STA to keep alive, so use plain WIFI_AP.
 void Controller::startSoftAp() {
     isApConnection = true;
     staDownSince = 0; // AP is the reachable surface now; stop the STA-down clock.
-    WiFi.mode(WIFI_AP);
+    WiFi.mode(staConfigured ? WIFI_AP_STA : WIFI_AP);
     WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_IP, WIFI_SUBNET_MASK);
     WiFi.softAP(WIFI_AP_SSID);
+    if (staConfigured) {
+        // Keep the STA trying the home network in the background so a later
+        // recovery fires STA_GOT_IP and pulls us back onto the LAN. begin()
+        // here is harmless if a connect is already in flight.
+        WiFi.begin(settings.getWifiSsid(), settings.getWifiPassword());
+    }
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
     ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
 }
@@ -444,7 +487,12 @@ void Controller::wifiWatchdog() {
     }
     const unsigned long downForMs = now - staDownSince;
 
-    switch (wifiWatchdogAction(connected, isApConnection, staConfigured, downForMs, WIFI_WATCHDOG_GRACE_MS,
+    // `connected` is provably false here: the early return above bails when
+    // WiFi.status() == WL_CONNECTED, so the watchdog only reaches this point on
+    // a down link. Pass a literal false rather than `connected` so the call site
+    // does not imply a live runtime branch that cannot occur. The pure function
+    // keeps the parameter for host-test coverage of both values.
+    switch (wifiWatchdogAction(/*staConnected*/ false, isApConnection, staConfigured, downForMs, WIFI_WATCHDOG_GRACE_MS,
                                WIFI_WATCHDOG_FALLBACK_MS)) {
     case WiFiWatchdogAction::RECONNECT:
         ESP_LOGW(LOG_TAG, "WiFi STA down %lums, re-asserting connection to %s", downForMs, settings.getWifiSsid().c_str());

@@ -85,6 +85,56 @@ void test_down_well_past_fallback_opens_softap(void) {
                                                               WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
 }
 
+// PRO-333 re-arm gap (review P2): the sticky-isApConnection bug was that once a
+// SoftAP fallback set apMode=true, the watchdog self-disabled forever. The
+// Controller fix re-arms the watchdog on ARDUINO_EVENT_WIFI_STA_GOT_IP by
+// clearing isApConnection (apMode->false) and resetting the down-clock
+// (downForMs->0). These tests pin that the *policy* itself does not encode a
+// permanent disable: it is purely a function of the current apMode/downForMs
+// the Controller feeds it, so the exact re-arm transition the reviewer flagged
+// (initial-connect timeout -> SoftAP -> later STA association) is recoverable.
+
+// While in AP mode the policy is inert no matter how long the STA has been
+// "down" — the SoftAP is the reachable surface, so there is nothing to recover.
+// This is what makes the fallback stable; recovery comes from STA_GOT_IP
+// flipping apMode back to false (modeled by the next test), NOT from the policy.
+void test_ap_mode_is_noop_regardless_of_down_time(void) {
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::NONE),
+                          static_cast<int>(wifiWatchdogAction(false, /*apMode*/ true, true, WIFI_WATCHDOG_FALLBACK_MS * 10,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+}
+
+// The full sticky-isApConnection scenario, step by step, at the pure-policy
+// level. After the Controller re-arms (apMode=false, downForMs=0 from the
+// STA_GOT_IP handler), the watchdog is fully live again: a fresh sustained STA
+// loss progresses NONE -> RECONNECT -> OPEN_SOFTAP exactly as on first boot.
+// Before the P2 fix the watchdog never re-evaluated at all once apMode latched;
+// this asserts the decision contract that the Controller fix relies on.
+void test_rearm_after_softap_then_sta_recovery(void) {
+    // 1. Initial connect timed out, watchdog opened SoftAP: apMode latched true.
+    //    Policy is inert while the SoftAP serves the user.
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::NONE),
+                          static_cast<int>(wifiWatchdogAction(false, /*apMode*/ true, true, WIFI_WATCHDOG_FALLBACK_MS * 2,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+
+    // 2. The home network returns; STA associates and STA_GOT_IP fires. The
+    //    Controller clears isApConnection and zeroes the down-clock. While the
+    //    link is up the policy is NONE (re-armed but nothing to do).
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::NONE),
+                          static_cast<int>(wifiWatchdogAction(/*staConnected*/ true, /*apMode*/ false, true, 0,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+
+    // 3. A LATER sustained STA loss (apMode now false again) is acted on just
+    //    like the very first time: past grace -> RECONNECT, past fallback ->
+    //    OPEN_SOFTAP. The watchdog is provably NOT permanently self-disabled.
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::RECONNECT),
+                          static_cast<int>(wifiWatchdogAction(false, /*apMode*/ false, true, WIFI_WATCHDOG_GRACE_MS,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::OPEN_SOFTAP),
+                          static_cast<int>(wifiWatchdogAction(false, /*apMode*/ false, true, WIFI_WATCHDOG_FALLBACK_MS,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+}
+
 // The default thresholds must keep the invariant the static_assert pins: a
 // device can never be stuck off-LAN and off-AP longer than the fallback window,
 // and the reconnect attempt always precedes the AP fallback.
@@ -104,6 +154,8 @@ static int runWiFiFallbackPolicyTests() {
     RUN_TEST(test_down_just_before_fallback_reconnects);
     RUN_TEST(test_down_at_fallback_opens_softap);
     RUN_TEST(test_down_well_past_fallback_opens_softap);
+    RUN_TEST(test_ap_mode_is_noop_regardless_of_down_time);
+    RUN_TEST(test_rearm_after_softap_then_sta_recovery);
     RUN_TEST(test_default_thresholds_are_ordered);
     return UNITY_END();
 }
