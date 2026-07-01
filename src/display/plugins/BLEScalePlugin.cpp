@@ -369,7 +369,9 @@ void BLEScalePlugin::establishConnection() {
             });
 
             scale->setWeightUpdatedCallback([](float weight) {
-                // Skip measurement from ISR context to avoid FreeRTOS deadlocks
+                // Skip measurement from ISR context to avoid FreeRTOS deadlocks.
+                // Kept ABOVE the in-flight flag so an ISR-context call bails
+                // without ever raising it.
                 if (xPortInIsrContext()) {
                     return;
                 }
@@ -378,9 +380,46 @@ void BLEScalePlugin::establishConnection() {
                 // doesn't free the scale out from under this NimBLE-host-task
                 // callback. The flag is on the global BLEScales instance because
                 // this is a plain function-pointer callback (cannot capture this).
+                //
+                // PRO-353: clear the flag via an RAII guard so it is cleared on
+                // EVERY exit path. onMeasurement() routes into
+                // Controller::onVolumetricMeasurement() -> PluginManager::trigger()
+                // which invokes arbitrary registered handlers; if any of them (or
+                // onMeasurement itself) throws or early-returns, the guard's
+                // destructor still clears the flag, so teardown can never wedge on
+                // a stuck callbackInFlight.
+                //
+                // RESIDUAL-WINDOW CONSTRAINT (PRO-353): this flag fences ONLY the
+                // onMeasurement leg. It does NOT cover driver-frame state the scale
+                // driver may touch AFTER RemoteScales::setWeight() returns but still
+                // inside the same NimBLE-host-task notify frame (e.g. acaia's
+                // dataBuffer.erase(...) runs after the weight dispatch, outside this
+                // flagged window). A future scale driver whose notify handler reads
+                // or mutates more object state after setWeight() returns would grow
+                // that unprotected post-dispatch tail. The flag NARROWS the
+                // use-after-free window to the measurement leg; it does not close it.
+                //
+                // BACKSTOP (PRO-353, item 1): the residual post-setWeight tail is
+                // backstopped by NimBLE's own single-threaded host task on client
+                // teardown. BLEScalePlugin::disconnect() calls
+                // RemoteScales::disconnect() -> clientCleanup() ->
+                // NimBLEDevice::deleteClient(). With NimBLE-Arduino 2.x that sets
+                // deleteOnDisconnect and terminates the link; the client is not
+                // freed inline but from the BLE_GAP_EVENT_DISCONNECT handler, which
+                // runs ON the NimBLE host task — the SAME task that dispatches these
+                // notify/weight callbacks. So the free is serialized after any
+                // in-flight notify frame on that task returns; it cannot interleave
+                // with the driver's post-setWeight tail. We rely on that
+                // single-threaded-host-task ordering — NOT a full RemoteScales
+                // driver-dispatch-boundary deregistration handshake (scoped out of
+                // PR #337 as disproportionate for this plugin and high-regression on
+                // the vendored driver layer) — to bound the residual tail.
+                struct CallbackInFlightGuard {
+                    ~CallbackInFlightGuard() { BLEScales.markCallbackInFlight(false); }
+                };
                 BLEScales.markCallbackInFlight(true);
+                CallbackInFlightGuard guard;
                 BLEScales.onMeasurement(weight);
-                BLEScales.markCallbackInFlight(false);
             });
 
             bool connectResult = scale->connect();

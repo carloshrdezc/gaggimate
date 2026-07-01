@@ -81,6 +81,13 @@ class BLEScalePlugin : public Plugin {
     // body and cleared on exit, giving teardown a real "no callback in flight"
     // observation instead of a blind delay(). waitForCallbacksToDrain() spins on
     // it with a hard timeout so teardown can never hang on a stuck callback.
+    //
+    // PRO-353: this flag fences ONLY the onMeasurement leg, not driver-frame
+    // state a scale driver touches after RemoteScales::setWeight() returns in
+    // the same notify frame. It narrows — does not close — the teardown UAF
+    // window; the residual tail is backstopped by NimBLE's connection drain on
+    // client deletion. See the callback lambda in establishConnection() for the
+    // full rationale and the RAII guard that clears this on every exit path.
     void markCallbackInFlight(bool inFlight) { callbackInFlight.store(inFlight, std::memory_order_release); }
     void waitForCallbacksToDrain();
 
