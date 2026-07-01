@@ -21,6 +21,29 @@ struct DiagLogLine {
 vprintf_like_t DiagnosticLogPlugin::previousVprintf = nullptr;
 DiagnosticLogPlugin *DiagnosticLogPlugin::instance = nullptr;
 
+namespace {
+// previousVprintf is a vprintf_like_t (takes a va_list, not varargs). To echo an
+// already-formatted line we must NOT pass line.text as the format string (its
+// content may contain '%'); instead format the fixed "%s" against it. This tiny
+// varargs shim builds the va_list and hands it to previousVprintf, reproducing
+// the caller's line verbatim on UART. Runs only in drainTask (PRO-367).
+int echoToUart(vprintf_like_t sink, const char *text) {
+    if (sink == nullptr || text == nullptr)
+        return 0;
+    // Local varargs -> va_list bridge for the vprintf_like_t UART sink.
+    struct Bridge {
+        static int call(vprintf_like_t s, const char *fmt, ...) {
+            va_list ap;
+            va_start(ap, fmt);
+            int r = s(fmt, ap);
+            va_end(ap);
+            return r;
+        }
+    };
+    return Bridge::call(sink, "%s", text);
+}
+} // namespace
+
 // RAII guard for the install mutex. Takes the mutex on construction (if it
 // exists) and gives it back on destruction, so every return path out of
 // tryInstall() — the early guards, the OOM bailouts, and the normal completion —
@@ -166,44 +189,53 @@ void DiagnosticLogPlugin::enqueueProofOfLife() {
     xQueueSend(queue, &line, 0);
 }
 
-// Runs in the logging caller's task context. MUST be fast and non-blocking:
-// format into a stack buffer, push to the queue (drop on full), and ALWAYS chain
-// to the previous vprintf so UART output is preserved.
+// Runs in the logging caller's task context (often core-1: the brew control /
+// WiFi tasks). MUST be fast and non-blocking: format into a stack buffer and push
+// to the queue (drop on full). PRO-367: the UART echo (previousVprintf, a
+// SYNCHRONOUS blocking ets_printf transmit) was the dominant per-line hot-path
+// cost and lengthened core-1 critical sections enough to trip the 10 ms
+// processMutex takes on the volumetric stop path. It is now performed by
+// drainTask off the caller's task, so teeVprintf does only format+enqueue here.
 int DiagnosticLogPlugin::teeVprintf(const char *format, va_list args) {
     DiagnosticLogPlugin *self = instance;
 
-    // va_list is single-pass; copy before the first consumption so the UART
-    // chain below gets an untouched list.
-    va_list argsCopy;
-    va_copy(argsCopy, args);
-
-    int written = 0;
     if (self != nullptr && self->queue != nullptr) {
         DiagLogLine line;
         // Pure, host-testable format+truncation kernel (PRO-273; DiagLogFormat.h).
-        line.len = diaglog::formatLine(line.text, sizeof(line.text), format, argsCopy);
+        line.len = diaglog::formatLine(line.text, sizeof(line.text), format, args);
         if (line.len > 0) {
             // Non-blocking: drop the line rather than ever stall the caller.
+            // drainTask echoes line.text to UART + broadcasts UDP + appends SD.
             xQueueSend(self->queue, &line, 0);
         }
     }
-    va_end(argsCopy);
 
-    // Preserve UART output — never silently swallow the line.
-    if (previousVprintf != nullptr) {
-        written = previousVprintf(format, args);
-    }
-    return written;
+    // The actual UART transmit is deferred to drainTask (PRO-367); callers ignore
+    // vprintf's return, so report 0 written on the caller's task.
+    return 0;
 }
 
 void DiagnosticLogPlugin::drainTask(void *arg) {
     auto *self = static_cast<DiagnosticLogPlugin *>(arg);
     DiagLogLine line;
     for (;;) {
-        // Block until a line is queued — this is the ONLY place that touches the
-        // network or the SD card, and it runs off the logging hot path.
+        // Block until a line is queued — this task now owns ALL three sinks:
+        // UART echo (PRO-367, moved off the core-1 caller), UDP broadcast, and
+        // the SD append. Running off the logging hot path is the whole point.
         if (xQueueReceive(self->queue, &line, portMAX_DELAY) == pdTRUE) {
-            // Persistent SD sink first: this is the path that survives a WiFi/web
+            // UART echo FIRST so serial-over-USB observability is preserved (and
+            // is the sink most likely to survive a WiFi/SD freeze). line.text is
+            // the already-formatted, NUL-terminated line the caller emitted
+            // (including its trailing newline); "%s" reproduces it verbatim.
+            // PRO-367 tradeoff: the blocking UART transmit no longer runs on the
+            // core-1 logging caller, so a crash on core-1 mid-line may lose that
+            // last in-flight line from serial (it is still enqueued for UDP/SD).
+            // In exchange, ESP_LOG* on core-1 during a shot no longer lengthens
+            // the critical sections that were tripping the 10 ms volumetric take.
+            if (previousVprintf != nullptr)
+                echoToUart(previousVprintf, line.text);
+
+            // Persistent SD sink: this is the path that survives a WiFi/web
             // freeze or a power cycle, so it must run even when the LAN is gone.
             if (self->sdEnabled)
                 self->sdAppendLine(line.text, line.len);

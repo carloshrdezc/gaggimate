@@ -213,15 +213,22 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
                    ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
                }
            });
-    pm->on("controller:volumetric-measurement:bluetooth:change",
-           [this](Event const &event) {
-               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-                   currentBluetoothWeight = event.getFloat("value");
-                   xSemaphoreGive(stateMutex);
-               } else {
-                   ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
-               }
-           });
+    pm->on("controller:volumetric-measurement:bluetooth:change", [this](Event const &event) {
+        // PRO-367: coalesce-latest instead of drop-on-timeout so the recorded
+        // yield matches the settled weight. The scale weight is monotonic
+        // cumulative, so latch the freshest value and apply it (plus any value a
+        // prior timed-out take latched) on success.
+        bluetoothWeightCoalescer.latch(event.getFloat("value"));
+        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+            double latest = 0.0;
+            if (bluetoothWeightCoalescer.consumeInto(latest)) {
+                currentBluetoothWeight = static_cast<float>(latest);
+            }
+            xSemaphoreGive(stateMutex);
+        } else {
+            ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
+        }
+    });
     pm->on("boiler:currentTemperature:change", [this](Event const &event) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentTemperature = event.getFloat("value");

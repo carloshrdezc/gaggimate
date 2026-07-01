@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include <atomic>
 #include <display/core/Plugin.h>
+#include <display/core/VolumetricCoalescer.h>
 #include <display/core/utils.h>
 #include <display/models/shot_log_format.h>
 #include <freertos/FreeRTOS.h>
@@ -130,6 +131,12 @@ class ShotHistoryPlugin : public Plugin {
     unsigned long lastWeightChangeTime = 0;
     float currentTemperature = 0.0f;
     float currentBluetoothWeight = 0.0f;
+    // PRO-367: coalesce-latest for the bluetooth-weight recording handler. The
+    // handler takes stateMutex with a fail-fast timeout; on a failed take the old
+    // code DROPPED the weight, so the RECORDED yield could lag the settled weight.
+    // The scale weight is monotonic cumulative, so we latch the freshest value on
+    // a failed take and apply it on the next successful take instead of dropping.
+    volumetric::Coalescer bluetoothWeightCoalescer{};
     float lastStableWeight = 0.0f;
     float lastBluetoothWeight = 0.0f;
     float currentBluetoothFlow = 0.0f;

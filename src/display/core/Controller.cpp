@@ -1468,14 +1468,25 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         return;
     }
     
-    // Update volume with mutex protection for both currentProcess and lastProcess
+    // PRO-367: never lose the stop-critical measurement to a timed-out take.
+    // Latch the freshest value first (outside the lock). The scale weight is
+    // monotonic cumulative, so the newest value subsumes any earlier one.
+    volumetricCoalescer.latch(measurement);
+
+    // Update volume with mutex protection for both currentProcess and lastProcess.
+    // On a SUCCESSFUL take, apply the freshest latched value (which may be this
+    // measurement, or one coalesced from a prior take that timed out) so a
+    // previously-dropped weight is never lost. On a FAILED take we simply return:
+    // the value stays latched and the next successful take applies it.
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        double latest = measurement;
+        volumetricCoalescer.consumeInto(latest);
         if (currentProcess != nullptr) {
-            currentProcess->updateVolume(measurement);
+            currentProcess->updateVolume(latest);
         }
         // Also update lastProcess while holding mutex to prevent race with clear()
         if (lastProcess != nullptr && !lastProcess->isComplete()) {
-            lastProcess->updateVolume(measurement);
+            lastProcess->updateVolume(latest);
         }
         xSemaphoreGive(processMutex);
     }
