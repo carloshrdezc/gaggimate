@@ -47,3 +47,15 @@ sim_data/
 
 # Stray alternate build dir
 .pio-car340/
+
+# PRO-358: ESP-IDF/CMake build-model artifacts. Setting custom_sdkconfig (the
+# NimBLE-PSRAM fix on [env:display]) makes the pioarduino platform build the
+# project via the "Arduino as IDF component" model, which drops these generated
+# files at the project root. They are build outputs (regenerated every build),
+# never source — keep them out of git.
+/sdkconfig.defaults
+/sdkconfig.*
+/CMakeLists.txt
+/dependencies.lock
+/managed_components/
+/.dummy/
