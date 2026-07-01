@@ -11,6 +11,7 @@
 #include <display/core/utils.h>
 #include <display/models/profile.h>
 #include <display/plugins/OtaCheckPolicy.h>
+#include <display/plugins/PsramAllocator.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
 #include <esp_partition.h>
@@ -30,7 +31,19 @@
 #include <vector>
 #include <version.h>
 
-static std::unordered_map<uint32_t, std::string> rxBuffers;
+// PRO-358: the per-client WebSocket reassembly buffer holds decoded
+// application-layer control-message bytes (small JSON req:/res:/evt: messages,
+// profile saves at most a few KB). These bytes are CPU-accessed only — never a
+// DMA source/target — so the buffer's backing store is a safe candidate to
+// route OFF the scarce internal DMA-capable DRAM pool (MALLOC_CAP_INTERNAL) and
+// into external PSRAM (MALLOC_CAP_SPIRAM). Under HomeKit + BLE + WiFi + mDNS the
+// internal pool is what starves the OTA handshake below its 48 KB floor
+// (OtaCheckPolicy.h); moving this multi-KB-capable buffer to PSRAM reclaims that
+// internal headroom. PsramString == std::basic_string with a PSRAM-backed
+// allocator on the device; on host/sim it degrades to a plain std::string (see
+// PsramAllocator.h), so the reassembly logic is unchanged everywhere.
+using PsramString = std::basic_string<char, std::char_traits<char>, PsramAllocator<char>>;
+static std::unordered_map<uint32_t, PsramString> rxBuffers;
 static WebUIPlugin *g_webUIPlugin = nullptr;
 
 // Sentinel value emitted on /api/settings GET in place of any stored secret
@@ -1264,6 +1277,13 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     const uint32_t cid = client->id();
 
     if (info->index == 0) {
+        // PRO-358: log internal DMA-capable DRAM at the start of a reassembly so
+        // the on-hardware headroom delta from routing this buffer to PSRAM is
+        // serial-measurable. With rxBuffers backed by PsramAllocator the growth
+        // below draws from PSRAM, not the internal pool, so this figure should
+        // stay flat across large control messages (contrast the pre-PRO-358
+        // std::string, which pinned internal DRAM for the whole message).
+        GM_LOG_INTERNAL_DRAM("ws-reassembly:begin");
         auto &buf = rxBuffers[cid];
         buf.clear();
         if (info->len <= 64 * 1024) {
@@ -1296,6 +1316,10 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
             processWebSocketMessage(cid, String(buf.c_str(), buf.size()));
         }
         rxBuffers.erase(cid);
+        // PRO-358: after releasing the (PSRAM-backed) reassembly buffer, log the
+        // internal-DRAM figure again. Paired with ws-reassembly:begin this makes
+        // the reclaimed-internal-DRAM delta visible on the device serial.
+        GM_LOG_INTERNAL_DRAM("ws-reassembly:done");
     }
 }
 
