@@ -522,20 +522,24 @@ static std::string urlDecode(const std::string &s) {
 }
 
 // Reject any path containing a ".." parent-directory SEGMENT, to prevent
-// path traversal out of the WebUI document root (PRO-208). The URL path uses
-// '/' separators on every platform, so splitting on '/' is portable. A whole
-// segment equal to ".." is the attack; an embedded ".." inside an otherwise
-// normal filename (e.g. "foo..bar.js") is a legitimate asset and is allowed.
+// path traversal out of the WebUI document root (PRO-208). URL paths use '/'
+// separators on every platform, but a URL-supplied segment like "..\\x" would be
+// served verbatim and could traverse on a Windows host, where '\\' is also an OS
+// path separator. So BOTH '/' and '\\' are treated as segment separators here
+// (Windows-host hardening, Ref PRO-340 / PR #326 / PRO-208). A whole segment
+// equal to ".." (bounded by either separator or the string ends) is the attack;
+// an embedded ".." inside an otherwise normal filename (e.g. "foo..bar.js") is a
+// legitimate asset and is allowed.
 static bool hasTraversalSegment(const std::string &p) {
     size_t start = 0;
     while (start <= p.size()) {
-        size_t slash = p.find('/', start);
-        size_t end = (slash == std::string::npos) ? p.size() : slash;
+        size_t sep = p.find_first_of("/\\", start);
+        size_t end = (sep == std::string::npos) ? p.size() : sep;
         if (end - start == 2 && p.compare(start, 2, "..") == 0)
             return true;
-        if (slash == std::string::npos)
+        if (sep == std::string::npos)
             break;
-        start = slash + 1;
+        start = sep + 1;
     }
     return false;
 }
