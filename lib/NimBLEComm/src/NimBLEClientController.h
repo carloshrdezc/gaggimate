@@ -4,7 +4,7 @@
 #include "NimBLEComm.h"
 #include "cstring"
 
-class NimBLEClientController : public NimBLEScanCallbacks, NimBLEClientCallbacks {
+class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLEClientCallbacks {
   public:
     NimBLEClientController();
     void initClient();
@@ -79,14 +79,11 @@ class NimBLEClientController : public NimBLEScanCallbacks, NimBLEClientCallbacks
     int_callback_t tofMeasurementCallback = nullptr;
     void_callback_t disconnectCallback = nullptr;
 
-    // NimBLEScanCallbacks override (NimBLE 2.x: NimBLEAdvertisedDeviceCallbacks
-    // was replaced by NimBLEScanCallbacks; onResult now takes a const pointer).
-    // PRO-290.
-    void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override;
+    // BLEAdvertisedDeviceCallbacks override
+    void onResult(NimBLEAdvertisedDevice *advertisedDevice) override;
 
-    // NimBLEClientCallbacks override (NimBLE 2.x: onDisconnect gained an int
-    // reason parameter). PRO-290.
-    void onDisconnect(NimBLEClient *pClient, int reason) override;
+    // NimBLEClientCallbacks override
+    void onDisconnect(NimBLEClient *pServer) override;
 
     // Notification callback
     void notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length, bool isNotify) const;

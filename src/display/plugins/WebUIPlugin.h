@@ -11,7 +11,6 @@
 
 #include "../core/constants.h"
 #include "GitHubOTA.h"
-#include "OtaCheckPolicy.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -23,10 +22,6 @@ constexpr size_t UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 constexpr size_t CLEANUP_PERIOD = 5 * 1000;
 constexpr size_t STATUS_PERIOD = 500;
 constexpr size_t DNS_PERIOD = 10;
-
-// The OTA-check PREFERRED internal-DRAM floor (kOtaCheckInternalDramFloorBytes)
-// is defined in OtaCheckPolicy.h (single source of truth, host-includable),
-// included above. WebUIPlugin.cpp passes it into otaCheckDecision().
 
 const String LOCAL_URL = "http://4.4.4.1/";
 const String RELEASE_URL = "https://github.com/carloshrdezc/gaggimate/releases/";
@@ -124,7 +119,7 @@ class WebUIPlugin : public Plugin {
     // volatile handoffs (a missed-by-one-tick drain is harmless — loop() runs
     // every ~2 ms and re-checks every iteration).
     SemaphoreHandle_t otaIntentMutex = nullptr;
-    String pendingReleaseUrl = ""; // guarded by otaIntentMutex
+    String pendingReleaseUrl = "";        // guarded by otaIntentMutex
     volatile bool pendingReleaseUrlChange = false;
     volatile bool pendingOtaStatusPush = false;
     // Deferred OTA-start intent (CAR-377). handleOTAStart runs on the AsyncTCP /
@@ -135,18 +130,6 @@ class WebUIPlugin : public Plugin {
     // onto the loop task before the update runs, exactly like the release-URL handoff.
     String pendingUpdateComponent = ""; // guarded by otaIntentMutex
     volatile bool pendingOtaStart = false;
-    // Deferred SoftAP-re-arm intent (PRO-333). The watchdog's OPEN_SOFTAP branch
-    // runs on the Arduino main loop task (Controller::loop() -> wifiWatchdog()),
-    // NOT the arduino_events WiFi-event task that the normal connect events use.
-    // start()/stop() (server.begin()/end(), ws.closeAll(), startRelay()) carry
-    // AsyncTCP/AsyncWebServer task affinity that the wsMutex/relayLifecycleMutex
-    // do NOT cover, and the documented invariant is that start()/stop() never run
-    // synchronously from the watchdog. So the watchdog-originated connect event
-    // (carrying `deferred=1`) only raises this flag; loop() drains it and calls
-    // start() from its own deferred-intent draining context, exactly like
-    // pendingOtaStart / pendingModeChange. A plain volatile bool is sufficient:
-    // it is only ever set true by the connect handler and cleared by loop().
-    volatile bool pendingApRearm = false;
     AsyncWebServer server;
     // INVARIANT (PRO-313): every access to `ws` that walks or mutates its
     // internal client list MUST hold `wsMutex` for the duration of the call.
@@ -211,14 +194,6 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
-    // PRO-345: throttles the "deferred — low memory" status broadcast. When the
-    // OTA check is deferred, lastUpdateCheck is intentionally NOT advanced (so the
-    // escalated forward-progress timer keeps maturing), which would otherwise make
-    // the defer branch re-fire — and re-broadcast — every loop pass. This stamps
-    // the last defer notice so we push the status at most once per UPDATE_CHECK_
-    // INTERVAL instead of flooding every WS client each loop. 0 = no notice sent
-    // yet; reset to 0 on any actual Run so a fresh defer is surfaced promptly.
-    unsigned long lastOtaDeferNotice = 0;
     unsigned long lastStatus = 0;
     unsigned long lastCleanup = 0;
     unsigned long lastDns = 0;
@@ -273,8 +248,7 @@ class WebUIPlugin : public Plugin {
 
 // PRO-286: enforce at compile time the invariant the comment above documents — the
 // pendingModeChangeTarget default-0 initializer only reads as "standby" if MODE_STANDBY == 0.
-static_assert(
-    MODE_STANDBY == 0,
-    "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
+static_assert(MODE_STANDBY == 0,
+              "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
 
 #endif // WEBUIPLUGIN_H

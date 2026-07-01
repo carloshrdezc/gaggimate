@@ -93,12 +93,6 @@ class WiFiClass {
         return true;
     }
     bool begin(const String &ssid, const String &pass) { return begin(ssid.c_str(), pass.c_str()); }
-    bool reconnect() {
-        _status = WL_CONNECTED;
-        _ip = IPAddress(192, 168, 1, 123);
-        fireConnect();
-        return true;
-    }
     void setTxPower(wifi_power_t) {}
     wl_status_t status() { return _status; }
     IPAddress localIP() { return _ip; }

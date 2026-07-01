@@ -28,13 +28,7 @@ static const int MAX_SAFE_INT = (unsigned int)-1 >> 1;
  * ASCII code per each symbol in hexadecimal notation.
  */
 
-enum operators {
-    SYMBOL_GT = 0x3e,
-    SYMBOL_LT = 0x3c,
-    SYMBOL_EQ = 0x3d,
-    SYMBOL_TF = 0x7e,
-    SYMBOL_CF = 0x5e
-};
+enum operators { SYMBOL_GT = 0x3e, SYMBOL_LT = 0x3c, SYMBOL_EQ = 0x3d, SYMBOL_TF = 0x7e, SYMBOL_CF = 0x5e };
 
 /**
  * Private helpers
@@ -162,8 +156,7 @@ int semver_parse(const char *str, semver_t *ver) {
     res = semver_parse_version(buf, ver);
     free(buf);
 #if DEBUG > 0
-    printf("[debug] semver.c %s = %d.%d.%d, %s %s\n", str, ver->major,
-           ver->minor, ver->patch, ver->prerelease, ver->metadata);
+    printf("[debug] semver.c %s = %d.%d.%d, %s %s\n", str, ver->major, ver->minor, ver->patch, ver->prerelease, ver->metadata);
 #endif
     return res;
 }
@@ -278,9 +271,7 @@ static int compare_prerelease(char *x, char *y) {
     return *x ? 1 : (*y ? -1 : 0);
 }
 
-int semver_compare_prerelease(semver_t x, semver_t y) {
-    return compare_prerelease(x.prerelease, y.prerelease);
-}
+int semver_compare_prerelease(semver_t x, semver_t y) { return compare_prerelease(x.prerelease, y.prerelease); }
 
 /**
  * Performs a major, minor and patch binary comparison (x, y).
@@ -410,9 +401,7 @@ int semver_satisfies_caret(semver_t x, semver_t y) {
  * `0` - Cannot be satisfied
  */
 
-int semver_satisfies_patch(semver_t x, semver_t y) {
-    return x.major == y.major && x.minor == y.minor;
-}
+int semver_satisfies_patch(semver_t x, semver_t y) { return x.major == y.major && x.minor == y.minor; }
 
 /**
  * Checks if both versions can be satisfied
@@ -425,10 +414,8 @@ int semver_satisfies_patch(semver_t x, semver_t y) {
  * - `<=` - Lower or equal to
  * - `<`  - Lower than
  * - `>`  - Higher than
- * - `^`  - Caret comparison (see
- * https://docs.npmjs.com/misc/semver#caret-ranges-1-2-3-0-2-5-0-0-4)
- * - `~`  - Tilde comparison (see
- * https://docs.npmjs.com/misc/semver#tilde-ranges-1-2-3-1-2-1)
+ * - `^`  - Caret comparison (see https://docs.npmjs.com/misc/semver#caret-ranges-1-2-3-0-2-5-0-0-4)
+ * - `~`  - Tilde comparison (see https://docs.npmjs.com/misc/semver#tilde-ranges-1-2-3-1-2-1)
  *
  * Returns:
  *
@@ -549,9 +536,7 @@ static int has_valid_length(const char *s) { return strlen(s) <= MAX_SIZE; }
  * `0` - Invalid
  */
 
-int semver_is_valid(const char *s) {
-    return has_valid_length(s) && has_valid_chars(s, VALID_CHARS);
-}
+int semver_is_valid(const char *s) { return has_valid_length(s) && has_valid_chars(s, VALID_CHARS); }
 
 /**
  * Removes non-valid characters in the given string.

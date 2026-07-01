@@ -17,10 +17,6 @@ using phase_callback_t = std::function<void(uint8_t phase)>;
 using progress_callback_t = std::function<void(uint8_t phase, int progress)>;
 
 extern const uint8_t x509_crt_imported_bundle_bin_start[] asm("_binary_x509_crt_bundle_start");
-// PRO-293: Arduino-esp32 3.x changed NetworkClientSecure::setCACertBundle() to
-// require an explicit byte count (setCACertBundle(bundle, size)). Expose the
-// linker-provided end symbol so the size can be computed as (end - start).
-extern const uint8_t x509_crt_imported_bundle_bin_end[] asm("_binary_x509_crt_bundle_end");
 
 class GitHubOTA {
   public:

@@ -6,11 +6,11 @@
 #include "PluginManager.h"
 #include "Settings.h"
 #include <WiFi.h>
+#include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
-#include <freertos/semphr.h>
 
 // Thread-safe snapshot of process state for UI/plugins
 struct ProcessSnapshot {
@@ -20,7 +20,7 @@ struct ProcessSnapshot {
     int type = -1;
     unsigned long started = 0;
     unsigned long finished = 0;
-
+    
     // Brew-specific fields
     bool isBrew = false;
     uint8_t phaseIndex = 0;
@@ -37,7 +37,7 @@ struct ProcessSnapshot {
     float brewVolume = 0.0f;
     bool isAdvancedPump = false;
     float pumpPressure = 0.0f;
-
+    
     // Grind-specific fields
     bool isGrind = false;
     float grindVolume = 0.0f;
@@ -118,29 +118,25 @@ class Controller {
 
     void autotune(int testTime, int samples);
     void startProcess(Process *process);
-
+    
     // DEPRECATED: Direct pointer access is unsafe due to race conditions.
     // Use getProcessSnapshot() or other thread-safe accessor methods instead.
     // This method will be removed in a future version.
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
-    Process *getProcess() const {
-        return currentProcess;
-    }
-
+    Process *getProcess() const { return currentProcess; }
+    
     // DEPRECATED: Direct pointer access is unsafe due to race conditions.
     // Use getProcessSnapshot() or other thread-safe accessor methods instead.
     // This method will be removed in a future version.
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
-    Process *getLastProcess() const {
-        return lastProcess;
-    }
-
+    Process *getLastProcess() const { return lastProcess; }
+    
     // Thread-safe methods to get process info without exposing raw pointer
     int getProcessType() const;
     uint8_t getBrewProcessPhaseIndex() const;
     bool isBrewProcessVolumetric() const;
     bool isBrewProcessUtility() const;
-
+    
     // Thread-safe snapshot of current process state
     ProcessSnapshot getProcessSnapshot() const;
     Settings &getSettings() { return settings; }
@@ -202,14 +198,6 @@ class Controller {
     void setupInfos();
     void setupWifi();
 
-    // PRO-333: bring up the SoftAP fallback (factored out of setupWifi so the
-    // watchdog can re-open it when a previously-good STA connection is lost).
-    void startSoftAp();
-    // PRO-333: per-loop watchdog. When STA is the configured mode but the link
-    // has been down past the grace/fallback windows, re-assert STA and, failing
-    // that, open SoftAP so the user is never locked out of the web UI.
-    void wifiWatchdog();
-
     // Functional methods
     void updateControl();
     // Whether the active process drives a real pump pressure/flow target
@@ -267,18 +255,6 @@ class Controller {
     bool screenReady = false;
     bool waitingForController = false;
     unsigned long connectStartTime = 0;
-
-    // PRO-333: WiFi STA recovery / SoftAP-fallback watchdog state.
-    // staConfigured: STA credentials were present at setup (we own a STA to
-    //   babysit). staConnectedOnce: the STA reached WL_CONNECTED at least once
-    //   (so a later drop is a *lost* link, not a never-connected one).
-    // staDownSince: millis() when the link was first observed down (0 while up).
-    // lastWifiWatchdog: throttle so the watchdog runs at most once per interval.
-    bool staConfigured = false;
-    bool staConnectedOnce = false;
-    unsigned long staDownSince = 0;
-    unsigned long lastWifiWatchdog = 0;
-    static const unsigned long WIFI_WATCHDOG_INTERVAL_MS = 2000;
     bool volumetricOverride = false;
     bool processCompleted = false;
     bool steamReady = false;

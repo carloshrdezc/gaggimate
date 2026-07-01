@@ -141,13 +141,6 @@ class DiagnosticLogPlugin : public Plugin {
     size_t sdSinceFlush = 0; // lines appended since the last flush
     uint32_t sdLastFlushMs = 0;
 
-    // PRO-334: running count of consecutive failed UDP sends (drain-task-owned).
-    // Reset to 0 on any successful send. Used only to rate-limit the failure
-    // diagnostic (shouldLogUdpSendFailure) so a sustained internal-DRAM ENOMEM
-    // can't turn the tee into a self-amplifying log storm. Not a hard error
-    // counter — under-pressure lines are simply dropped (best-effort tee).
-    unsigned long udpSendFailures = 0;
-
     // The vprintf this plugin replaced. Called from the hook so UART output is
     // preserved. Captured from esp_log_set_vprintf()'s return value.
     static vprintf_like_t previousVprintf;

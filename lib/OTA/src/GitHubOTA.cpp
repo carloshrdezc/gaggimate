@@ -10,8 +10,7 @@
 GitHubOTA::GitHubOTA(const String &display_version, const String &controller_version, const String &release_url,
                      const phase_callback_t &phase_callback, const progress_callback_t &progress_callback,
                      const String &firmware_name, const String &filesystem_name, const String &controller_firmware_name) {
-    ESP_LOGV("GitHubOTA",
-             "GitHubOTA(display_version: %s, firmware_name: %s, filesystem_name: %s, controller_firmware_name: %s)\n",
+    ESP_LOGV("GitHubOTA", "GitHubOTA(display_version: %s, firmware_name: %s, filesystem_name: %s, controller_firmware_name: %s)\n",
              display_version.c_str(), firmware_name.c_str(), filesystem_name.c_str(), controller_firmware_name.c_str());
 
     _version = from_string(display_version.c_str());
@@ -24,9 +23,7 @@ GitHubOTA::GitHubOTA(const String &display_version, const String &controller_ver
     _progress_callback = progress_callback;
 
     Updater.rebootOnUpdate(false);
-    // PRO-293: core 3.x setCACertBundle() requires an explicit size argument.
-    _wifi_client.setCACertBundle(x509_crt_imported_bundle_bin_start,
-                                 x509_crt_imported_bundle_bin_end - x509_crt_imported_bundle_bin_start);
+    _wifi_client.setCACertBundle(x509_crt_imported_bundle_bin_start);
 
     Updater.onStart(update_started);
     Updater.onEnd(update_finished);

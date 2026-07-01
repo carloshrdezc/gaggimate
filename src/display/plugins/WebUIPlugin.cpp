@@ -3,15 +3,11 @@
 #include <LittleFS.h>
 #include <display/core/Controller.h>
 #include <display/core/GrinderManager.h>
-#include <display/core/HeapDiag.h>
 #include <display/core/ProfileManager.h>
-#include <display/core/SslRelayStartupPolicy.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
 #include <display/core/utils.h>
 #include <display/models/profile.h>
-#include <display/plugins/OtaCheckPolicy.h>
-#include <display/plugins/PsramAllocator.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
 #include <esp_partition.h>
@@ -31,19 +27,7 @@
 #include <vector>
 #include <version.h>
 
-// PRO-358: the per-client WebSocket reassembly buffer holds decoded
-// application-layer control-message bytes (small JSON req:/res:/evt: messages,
-// profile saves at most a few KB). These bytes are CPU-accessed only — never a
-// DMA source/target — so the buffer's backing store is a safe candidate to
-// route OFF the scarce internal DMA-capable DRAM pool (MALLOC_CAP_INTERNAL) and
-// into external PSRAM (MALLOC_CAP_SPIRAM). Under HomeKit + BLE + WiFi + mDNS the
-// internal pool is what starves the OTA handshake below its 48 KB floor
-// (OtaCheckPolicy.h); moving this multi-KB-capable buffer to PSRAM reclaims that
-// internal headroom. PsramString == std::basic_string with a PSRAM-backed
-// allocator on the device; on host/sim it degrades to a plain std::string (see
-// PsramAllocator.h), so the reassembly logic is unchanged everywhere.
-using PsramString = std::basic_string<char, std::char_traits<char>, PsramAllocator<char>>;
-static std::unordered_map<uint32_t, PsramString> rxBuffers;
+static std::unordered_map<uint32_t, std::string> rxBuffers;
 static WebUIPlugin *g_webUIPlugin = nullptr;
 
 // Sentinel value emitted on /api/settings GET in place of any stored secret
@@ -64,13 +48,8 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) {
-            host = hostPort;
-            port = 443;
-        } else {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
+        if (colonIdx < 0) { host = hostPort; port = 443; }
+        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
         return true;
     }
     if (url.startsWith("ws://")) {
@@ -80,13 +59,8 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) {
-            host = hostPort;
-            port = 80;
-        } else {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
+        if (colonIdx < 0) { host = hostPort; port = 80; }
+        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
         return true;
     }
     return false;
@@ -116,7 +90,8 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
-        BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
+        BUILD_GIT_VERSION, controller->getSystemInfo().version,
+        resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
             pluginManager->trigger("ota:update:phase", "phase", phase);
             updateOTAProgress(phase, 0);
@@ -128,20 +103,6 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         "display-firmware.bin", "display-filesystem.bin", "board-firmware.bin");
     pluginManager->on("controller:wifi:connect", [this](Event const &event) {
         apMode = event.getInt("AP");
-        // PRO-333: the SoftAP-fallback watchdog fires this event from the Arduino
-        // main loop task (Controller::loop() -> wifiWatchdog()), unlike the normal
-        // connect events (setupWifi on the setup task, the STA_GOT_IP handler on the
-        // arduino_events WiFi-event task). Calling start() inline here would run
-        // server.begin()/end(), ws.closeAll() and startRelay() on the loop task,
-        // adding a task affinity the AsyncTCP/AsyncWebServer side is not guarded for
-        // and violating the documented start()/stop() task-context invariant. The
-        // watchdog tags its trigger with `deferred=1`; for that case just raise the
-        // latch and let loop() invoke start() from its deferred-intent context. The
-        // captive-portal UI still comes up — one loop tick later, on the loop task.
-        if (event.getInt("deferred")) {
-            pendingApRearm = true;
-            return;
-        }
         start();
     });
     pluginManager->on("controller:wifi:disconnect", [this](Event const &) { stop(); });
@@ -344,16 +305,20 @@ void WebUIPlugin::loop() {
             // stored does not. Treat them as equal so legacy tags still flash.
             // Cover both directions in case a future resolver path keeps the
             // `v` and the channel string drops it.
-            const bool match = resolved == pinned || (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
+            const bool match = resolved == pinned ||
+                               (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
                                (resolved.startsWith("v") && resolved.substring(1) == pinned);
             if (!match) {
-                ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s", pinned.c_str(), resolved.c_str());
+                ESP_LOGE("WebUIPlugin",
+                         "Refusing forced OTA: pinned tag %s but resolved %s",
+                         pinned.c_str(), resolved.c_str());
                 tagResolved = false;
             }
         }
         bool updateSucceeded = false;
         if (tagResolved) {
-            updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
+            updateSucceeded =
+                ota->update(updateComponent != "display", updateComponent != "controller", force);
         }
         pluginManager->trigger("ota:update:end");
         updating = false;
@@ -362,22 +327,6 @@ void WebUIPlugin::loop() {
         }
     }
 
-    // Drain the deferred SoftAP-re-arm intent posted by the WiFi watchdog
-    // (PRO-333). The watchdog's OPEN_SOFTAP branch runs on this same loop task but
-    // tags its connect event `deferred=1` so the handler only latches here instead
-    // of calling start() synchronously from inside wifiWatchdog(). Draining it here
-    // keeps every start() invocation on the loop task's deferred-intent context,
-    // matching pendingOtaStart above. apMode was already set by the connect handler
-    // before this flag was raised, so start() opens the captive-portal DNS path.
-    //
-    // ORDERING: kept above the `if (!serverRunning) return;` guard below so the AP
-    // re-arm still runs after a prior stop() left serverRunning false (the watchdog
-    // fires precisely when the STA link dropped, which may have torn the server
-    // down via controller:wifi:disconnect).
-    if (pendingApRearm) {
-        pendingApRearm = false;
-        start();
-    }
     if (!serverRunning) {
         return;
     }
@@ -419,49 +368,11 @@ void WebUIPlugin::loop() {
         updateOTAStatus("Checking...");
     }
     const unsigned long now = millis();
-    // PRO-345: decide run/defer/skip via the host-testable OtaCheckPolicy (single
-    // source of truth for the floors + cadences). PRO-334 gated the OTA HTTPS
-    // version-check on internal-DRAM headroom because the mbedTLS handshake's
-    // transient internal allocation can -32512 under HomeKit + BLE + WiFi + mDNS.
-    // But on this hardware that normal steady state sits BELOW the 48 KB floor, so
-    // the old "defer every interval, never advance lastUpdateCheck" path starved
-    // forever: the UI stuck at "Checking..." with no update ever offered.
-    //
-    // The policy keeps the fast path (>= preferred floor -> run every interval)
-    // AND makes the defer RECOVERABLE: below the floor it still attempts on a
-    // longer escalated cadence, as long as the largest block clears a hard
-    // absolute-minimum floor (the OOM guard preserving PRO-334's -32512
-    // protection). When it returns Defer we surface a truthful, distinct status
-    // instead of leaving the UI at "Checking...". A successful Run replaces that
-    // status with the real result (criterion 2). lastUpdateCheck is advanced only
-    // on an actual Run, so the escalated timer keeps maturing across defers.
-    const size_t largestBlock = gmInternalLargestBlock();
-    const OtaCheckDecision decision =
-        otaCheckDecision(largestBlock, now, lastUpdateCheck, UPDATE_CHECK_INTERVAL, kOtaCheckEscalatedRetryIntervalMs,
-                         kOtaCheckInternalDramFloorBytes, kOtaCheckAbsoluteMinInternalDramBytes);
-    if (decision == OtaCheckDecision::Run) {
-        GM_LOG_INTERNAL_DRAM("before OTA TLS check");
+    if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
         ota->checkForUpdates();
-        GM_LOG_INTERNAL_DRAM("after OTA TLS check");
         pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
         lastUpdateCheck = now;
-        lastOtaDeferNotice = 0; // a real result replaces any prior deferred status
         updateOTAStatus(ota->getCurrentVersion());
-    } else if (decision == OtaCheckDecision::Defer) {
-        // Below the preferred floor and not yet time for an escalated attempt (or
-        // below the OOM guard): do NOT drive the handshake. Surface a truthful
-        // status so the UI no longer hangs at "Checking..." — it will be replaced
-        // by the real result on the next successful (escalated) Run. lastUpdateCheck
-        // is intentionally NOT advanced (keeps the escalated timer maturing), so we
-        // throttle the broadcast to at most once per interval rather than every loop.
-        if (lastOtaDeferNotice == 0 || now - lastOtaDeferNotice > UPDATE_CHECK_INTERVAL) {
-            lastOtaDeferNotice = now;
-            ESP_LOGW(
-                "WebUIPlugin",
-                "Deferring OTA check: internal DRAM below floor (largest block=%u B < %u B); will retry on escalated cadence",
-                static_cast<unsigned>(largestBlock), static_cast<unsigned>(kOtaCheckInternalDramFloorBytes));
-            updateOTAStatus("Update check deferred — low memory");
-        }
     }
     // PRO-313: reading the WS client list (even .empty()) races with the
     // AsyncTCP task's connect/disconnect mutation, so snapshot it under wsMutex.
@@ -533,7 +444,7 @@ void WebUIPlugin::loop() {
         // BLE scale compiled out (CAR-382): always report disconnected / zero
         // weight. Volumetric still works via flow estimation; that value flows
         // through the process snapshot, not these BLE-specific status fields.
-        doc["cw"] = 0;     // current bluetooth weight
+        doc["cw"] = 0; // current bluetooth weight
         doc["bc"] = false; // bluetooth scale connected status
 #endif
 
@@ -555,8 +466,8 @@ void WebUIPlugin::loop() {
                 pObj["s"] = proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "brew" : "infusion";
                 pObj["l"] = proc.isActive ? proc.phaseName.c_str() : "Finished";
                 pObj["e"] = ts - proc.started;
-                const bool isVolumetric =
-                    proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget && controller->isVolumetricAvailable();
+                const bool isVolumetric = proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
+                                          controller->isVolumetricAvailable();
                 pObj["tt"] = isVolumetric ? "volumetric" : "time";
                 if (isVolumetric) {
                     pObj["pt"] = proc.volumetricTargetValue;
@@ -588,7 +499,7 @@ void WebUIPlugin::loop() {
                 pObj["tt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? "flow" : "pressure";
                 pObj["pt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? proc.manualFlow : proc.manualPressure;
                 pObj["pp"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? controller->getCurrentPumpFlow()
-                                                                         : controller->getCurrentPressure();
+                                                                          : controller->getCurrentPressure();
             }
         }
 
@@ -752,12 +663,32 @@ void WebUIPlugin::setupServer() {
             // app-side walk is the complete fix this library permits without
             // forking it. See the invariant at the `ws` declaration.
             if (type == WS_EVT_CONNECT) {
-                // PRO-357: leave setCloseClientOnQueueFull(false). The library's
-                // inline close-on-queue-full would re-enter WS_EVT_DISCONNECT on the
-                // sending task and self-deadlock the non-recursive wsMutex held by
-                // broadcastAll() -> ws.textAll(). Full rationale (the coredump, the
-                // fix, and the safety predicate's params) lives in
-                // WsBroadcastClosePolicy.h.
+                // PRO-357: do NOT enable setCloseClientOnQueueFull(true). With it
+                // enabled, AsyncWebSocketClient::_queueMessage() reacts to a full
+                // TX queue by calling _client->close() INLINE, synchronously, on
+                // whatever task is sending — which (per ESPAsyncWebServer v3.9.1)
+                // drives ~AsyncWebSocketClient() -> _handleEvent(WS_EVT_DISCONNECT)
+                // right here in this same onEvent handler. When the send is
+                // loopTask's broadcastAll() -> ws.textAll() (which holds wsMutex),
+                // that inline disconnect branch RE-TAKES the non-recursive wsMutex
+                // on the same task -> self-deadlock; the AsyncTCP task then blocks
+                // forever on wsMutex too and the Task Watchdog reboots the board
+                // (PRO-357 coredump: "Task watchdog got triggered ... async_tcp").
+                // Leaving it false makes a full queue DROP the new frame (queue is
+                // hard-capped at WS_MAX_QUEUED_MESSAGES, so no unbounded growth)
+                // instead of force-closing; the periodic evt:status heartbeat
+                // resends fresh state on the next tick, and a genuinely dead
+                // connection is still reaped by AsyncTCP's own _onTimeout->close()
+                // (which runs on the AsyncTCP task, NOT under a held wsMutex). The
+                // explicit abuse-close on the WS_EVT_DATA reassembly-cap path
+                // (handleWebSocketData -> client->close(1009)) is unaffected and
+                // still runs. See broadcastAll() and the `ws` invariant.
+                //
+                // Pin the decision (PRO-357): broadcastAll() sends under wsMutex
+                // and wsMutex is non-recursive, so the library's inline close is
+                // NOT safe to enable here. If a future change makes the send
+                // lock-free or the mutex recursive, this assert documents what
+                // must be re-evaluated before re-enabling setCloseClientOnQueueFull.
                 static_assert(!wsInlineCloseOnQueueFullIsSafe(/*sendsUnderSerializationLock=*/true,
                                                               /*mutexIsRecursive=*/false),
                               "WS broadcast sends under a non-recursive wsMutex: inline close-on-queue-full would "
@@ -788,7 +719,8 @@ void WebUIPlugin::setupServer() {
             } else if (type == WS_EVT_DISCONNECT) {
                 {
                     SemaphoreGuard lock(wsMutex);
-                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
+                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)",
+                             server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
             } else if (type == WS_EVT_DATA) {
@@ -809,7 +741,6 @@ void WebUIPlugin::start() {
         ESP_LOGI("WebUIPlugin", "Started catchall DNS for captive portal");
     }
     lastUpdateCheck = 0;
-    lastOtaDeferNotice = 0; // PRO-345: allow a fresh defer notice on the forced recheck
     serverRunning = true;
     startRelay();
 }
@@ -863,8 +794,7 @@ void WebUIPlugin::startRelay() {
     SemaphoreGuard lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
-    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled())
-        return;
+    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
 
     bool useSSL;
     String host, basePath;
@@ -910,40 +840,34 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?token=" + relayToken + "&role=device"
-                                                          : basePath + "/connect?token=" + relayToken + "&role=device";
+    String path = (basePath.isEmpty() || basePath == "/")
+        ? "/connect?token=" + relayToken + "&role=device"
+        : basePath + "/connect?token=" + relayToken + "&role=device";
 
     relayWs.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
         switch (type) {
-        case WStype_CONNECTED:
-            relayConnected = true;
-            ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
-            break;
-        case WStype_DISCONNECTED:
-            relayConnected = false;
-            ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
-            break;
-        case WStype_TEXT: {
-            String msg = String((char *)payload, length);
-            processWebSocketMessage(RELAY_CLIENT_ID, msg);
-            break;
-        }
-        default:
-            break;
+            case WStype_CONNECTED:
+                relayConnected = true;
+                ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
+                break;
+            case WStype_DISCONNECTED:
+                relayConnected = false;
+                ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
+                break;
+            case WStype_TEXT: {
+                String msg = String((char *)payload, length);
+                processWebSocketMessage(RELAY_CLIENT_ID, msg);
+                break;
+            }
+            default:
+                break;
         }
     });
 
-    // PRO-347: gate the SSL relay startup on INTERNAL DMA-capable DRAM, not the
-    // combined heap. esp_get_free_heap_size() is PSRAM-dominated and almost
-    // always passes a <60000 check even when the small internal pool — which the
-    // beginSSL() mbedTLS handshake (~50 KB) draws from — is exhausted, yielding
-    // `SSL - Memory allocation failed (-32512)`. Mirror the PRO-334 OTA-TLS
-    // precedent: refuse when the largest contiguous internal block is below the
-    // floor. Only the SSL path is gated; the non-SSL relayWs.begin() path below
-    // is unaffected.
-    if (useSSL && !sslRelayDramSufficient(gmInternalLargestBlock(), kSslRelayInternalDramFloorBytes)) {
-        ESP_LOGW("WebUIPlugin", "Skipping SSL relay: internal DRAM below floor (largest block=%u B < %u B)",
-                 static_cast<unsigned>(gmInternalLargestBlock()), static_cast<unsigned>(kSslRelayInternalDramFloorBytes));
+    // SSL heap usage can reach 50 KB; bail early rather than destabilize the device.
+    if (useSSL && esp_get_free_heap_size() < 60000) {
+        ESP_LOGW("WebUIPlugin", "Insufficient heap (%u B) for SSL relay — skipping",
+                 static_cast<unsigned>(esp_get_free_heap_size()));
         return;
     }
 
@@ -975,9 +899,6 @@ void WebUIPlugin::startRelay() {
     relayEnabled = true;
     ESP_LOGI("WebUIPlugin", "Relay client started → %s:%d%s (free heap: %u B)", host.c_str(), port, path.c_str(),
              static_cast<unsigned>(esp_get_free_heap_size()));
-    // PRO-352: combined free heap above is misleading for the SSL relay task (PRO-334); also log the
-    // internal-DRAM headroom that DMA/TLS handshake allocations actually draw from.
-    GM_LOG_INTERNAL_DRAM("relay start");
 }
 
 void WebUIPlugin::stopRelay() {
@@ -986,8 +907,7 @@ void WebUIPlugin::stopRelay() {
     // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
     // (yields the CPU) and is strictly bounded.
     SemaphoreGuard lock(relayLifecycleMutex);
-    if (!relayEnabled)
-        return;
+    if (!relayEnabled) return;
     relayEnabled = false;
     relayConnected = false;
     if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
@@ -1058,8 +978,7 @@ void WebUIPlugin::broadcastAll(const String &msg) {
 }
 
 void WebUIPlugin::broadcastRelayMsg(const String &msg) {
-    if (!relayEnabled || relayMutex == nullptr)
-        return;
+    if (!relayEnabled || relayMutex == nullptr) return;
     if (xSemaphoreTake(relayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         if (relayOutBuffer.size() < 64) {
             relayOutBuffer.push_back(msg);
@@ -1093,12 +1012,12 @@ void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
 }
 
 void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) {
-    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s", clientId == RELAY_CLIENT_ID ? "relay" : "local",
+    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s",
+             clientId == RELAY_CLIENT_ID ? "relay" : "local",
              (int)msg.length(), msg.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, msg.c_str());
-    if (err)
-        return;
+    if (err) return;
 
     String msgType = doc["tp"].as<String>();
     if (msgType.startsWith("req:profiles:")) {
@@ -1155,11 +1074,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         JsonVariantConst pressureValue = doc["pressure"];
         JsonVariantConst flowValue = doc["flow"];
         JsonVariantConst temperatureValue = doc["temperature"];
-        float pressure =
-            pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>() : controller->getManualPressure();
+        float pressure = pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>()
+                                                                              : controller->getManualPressure();
         float flow = flowValue.is<float>() || flowValue.is<int>() ? flowValue.as<float>() : controller->getManualFlow();
         int temperature = temperatureValue.is<int>() || temperatureValue.is<float>() ? temperatureValue.as<int>()
-                                                                                     : controller->getManualTemperature();
+                                                                                    : controller->getManualTemperature();
         controller->updateManualTargets(targetType, pressure, flow, temperature);
     } else if (msgType == "req:change-mode") {
         if (doc["mode"].is<uint8_t>()) {
@@ -1256,8 +1175,7 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:history:rebuild") {
         JsonDocument resp;
         resp["tp"] = "res:history:rebuild";
-        if (doc["rid"].is<const char *>())
-            resp["rid"] = doc["rid"];
+        if (doc["rid"].is<const char *>()) resp["rid"] = doc["rid"];
         resp["msg"] = "Rebuild started";
         sendResponse(clientId, resp);
         ShotHistory.startAsyncRebuild();
@@ -1277,13 +1195,6 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     const uint32_t cid = client->id();
 
     if (info->index == 0) {
-        // PRO-358: log internal DMA-capable DRAM at the start of a reassembly so
-        // the on-hardware headroom delta from routing this buffer to PSRAM is
-        // serial-measurable. With rxBuffers backed by PsramAllocator the growth
-        // below draws from PSRAM, not the internal pool, so this figure should
-        // stay flat across large control messages (contrast the pre-PRO-358
-        // std::string, which pinned internal DRAM for the whole message).
-        GM_LOG_INTERNAL_DRAM("ws-reassembly:begin");
         auto &buf = rxBuffers[cid];
         buf.clear();
         if (info->len <= 64 * 1024) {
@@ -1316,10 +1227,6 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
             processWebSocketMessage(cid, String(buf.c_str(), buf.size()));
         }
         rxBuffers.erase(cid);
-        // PRO-358: after releasing the (PSRAM-backed) reassembly buffer, log the
-        // internal-DRAM figure again. Paired with ws-reassembly:begin this makes
-        // the reclaimed-internal-DRAM delta visible on the device serial.
-        GM_LOG_INTERNAL_DRAM("ws-reassembly:done");
     }
 }
 
@@ -1353,10 +1260,8 @@ static String resolveReleaseUrl(const String &channel) {
 // to "latest" so a malformed websocket payload can never poison the stored
 // setting.
 static String normalizeChannel(const String &channel) {
-    if (channel == "beta")
-        return "beta";
-    if (channel == "nightly")
-        return "nightly";
+    if (channel == "beta") return "beta";
+    if (channel == "nightly") return "nightly";
     if (channel.startsWith("tag:")) {
         const String tag = channel.substring(4);
         for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
@@ -1375,10 +1280,6 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     // force-recheck sentinel where a stale read merely delays the next check by one
     // interval. So it is safe to set directly here rather than via a deferred flag.
     lastUpdateCheck = 0;
-    // PRO-345: same single-atomic-word / force-recheck-sentinel reasoning applies —
-    // clear the defer-notice throttle so a forced recheck that lands on Defer
-    // surfaces the truthful "deferred" status immediately rather than after one interval.
-    lastOtaDeferNotice = 0;
     // This handler runs on the AsyncTCP web-server task (local WS clients) or the
     // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
     // and owned by the loop task (CAR-178), so we must not call into it here.
@@ -1465,10 +1366,6 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
             sendResponse(clientId, response);
             return;
         }
-        // PRO-334: log internal-DRAM headroom right before the SD-backed profile
-        // read that runs on this (AsyncTCP) task — the read that used to wedge
-        // the task into a WDT reboot when the internal pool was exhausted.
-        GM_LOG_INTERNAL_DRAM("before req:profiles:load SD read");
         Profile profile;
         if (profileManager->loadProfile(id, profile)) {
             auto obj = response["profile"].to<JsonObject>();
@@ -1723,8 +1620,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
             if (request->hasArg("altRelayFunction"))
                 settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
-            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") &&
-                                           request->arg("autowakeupEnabled").length() > 0);
+            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") && request->arg("autowakeupEnabled").length() > 0);
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
                 String schedulesStr = request->arg("autowakeupSchedules");

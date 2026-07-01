@@ -1,7 +1,7 @@
 #include "Amoled_DisplayPanel.h"
 #include "Arduino_GFX_Library.h"
 #include "pin_config.h"
-#include <display/drivers/common/AdcOneshot.h>
+#include <esp_adc_cal.h>
 
 Amoled_DisplayPanel::Amoled_DisplayPanel(AmoledHwConfig hw_config)
     : hwConfig(hw_config), displayBus(nullptr), display(nullptr), _touchDrv(nullptr), _wakeupMethod(WAKEUP_FROM_NONE),
@@ -192,7 +192,18 @@ uint16_t Amoled_DisplayPanel::getBattVoltage(void) {
     if (hwConfig.battery_voltage_adc_data == -1) {
         return 0;
     }
-    return adcOneshotReadBattMillivolts(hwConfig.battery_voltage_adc_data);
+    esp_adc_cal_characteristics_t adc_chars;
+    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+
+    const int number_of_samples = 20;
+    uint32_t sum = 0;
+    for (int i = 0; i < number_of_samples; i++) {
+        sum += analogRead(hwConfig.battery_voltage_adc_data);
+        delay(2);
+    }
+    sum = sum / number_of_samples;
+
+    return esp_adc_cal_raw_to_voltage(sum, &adc_chars) * 2;
 }
 
 void Amoled_DisplayPanel::pushColors(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t *data) {
@@ -279,9 +290,7 @@ bool Amoled_DisplayPanel::initDisplay(Amoled_Display_Panel_Color_Order colorOrde
 
     // required for correct GRAM initialization
     displayBus->writeCommand(CO5300_C_PTLON);
-    // PRO-293: GFX "GFX Library for Arduino" 1.6.x renamed the bare color macros
-    // (e.g. BLACK -> RGB565_BLACK). Use the prefixed name on core 3.x.
-    display->fillScreen(RGB565_BLACK);
+    display->fillScreen(BLACK);
 
     return success;
 }

@@ -70,10 +70,7 @@ bool ControllerOTA::downloadFile(WiFiClientSecure &wifi_client, const String &re
         return false;
     }
 
-    // PRO-293: core 3.x reorganized the network stack under NetworkClient;
-    // HTTPClient::getStreamPtr() now returns NetworkClient* (WiFiClient is a
-    // typedef of NetworkClient but is not in scope via <HTTPClient.h> alone).
-    NetworkClient *tcp = http.getStreamPtr();
+    WiFiClient *tcp = http.getStreamPtr();
     delay(100);
 
     if (tcp->peek() != FIRMWARE_MAGIC_HEADER) {

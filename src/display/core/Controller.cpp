@@ -6,23 +6,19 @@
 #include "comms.pb.h"
 #include "pb_decode.h"
 #endif
+#include "esp_sntp.h"
 #ifndef GAGGIMATE_SIM
 // PRO-330: esp_wifi_set_ps() — enforce WiFi modem-sleep before BLE controller
 // init so WiFi/BLE software coexistence can enable (device-only; the sim stubs
 // BLE and has no coexistence path).
 #include <esp_wifi.h>
 #endif
-#include <LittleFS.h>
 #include <SD_MMC.h>
+#include <LittleFS.h>
 #include <ctime>
-// PRO-335: esp_sntp.h for sntp_set_sync_mode(). The sim provides a host shim
-// (sim/platform/esp_sntp.h) so this links in [env:display-sim] too.
-#include "esp_sntp.h"
 #include <display/config.h>
 #include <display/config/features.h>
-#include <display/core/HeapDiag.h>
 #include <display/core/StandbyTransitionPolicy.h>
-#include <display/core/WiFiFallbackPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -76,7 +72,7 @@ void Controller::setup() {
     settings.load();
 
     mode = settings.getStartupMode();
-
+    
     // Initialize process mutex for thread-safe access
     processMutex = xSemaphoreCreateMutex();
     if (processMutex == nullptr) {
@@ -192,9 +188,6 @@ void Controller::connect() {
 
     updateLastAction();
     initialized = true;
-    // PRO-334: report internal DMA-capable DRAM headroom at end of setup() so the
-    // baseline floor (with WiFi/BLE/HomeKit/mDNS coming up) is visible on serial.
-    GM_LOG_INTERNAL_DRAM("setup() end");
 }
 
 #ifndef GAGGIMATE_HEADLESS
@@ -338,50 +331,11 @@ void Controller::setupInfos() {
 }
 
 void Controller::setupWifi() {
-    staConfigured = settings.getWifiSsid() != "" && settings.getWifiPassword() != "";
-    if (staConfigured) {
+    if (settings.getWifiSsid() != "" && settings.getWifiPassword() != "") {
         WiFi.setHostname(settings.getMdnsName().c_str());
         WiFi.mode(WIFI_STA);
         WiFi.setAutoReconnect(true);
         WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-        // PRO-335 P2-2: register the WiFi event handlers UNCONDITIONALLY, before
-        // WiFi.begin(), instead of inside the connect-success branch below. The old
-        // placement meant that if the initial connect loop timed out (so we fell
-        // through to SoftAP) but Arduino auto-reconnect later associated, the
-        // STA_GOT_IP / STA_DISCONNECTED handlers were never installed, so
-        // controller:wifi:connect / :disconnect never fired and the plugins
-        // (mDNS / MQTT / DiagLog / WebUI relay) never (re)armed. Registering here
-        // also backs the PRO-333 SoftAP-fallback watchdog, which relies on these
-        // connect/disconnect transitions being observed for the whole STA lifetime.
-        WiFi.onEvent(
-            [this](WiFiEvent_t, WiFiEventInfo_t) {
-                // PRO-333: a STA association/IP completing here re-arms the
-                // watchdog. Without this, isApConnection is sticky: once a
-                // SoftAP fallback set it true (router reboot, outage, out of
-                // range, or the HomeKit ASSOC/AUTH loop) the wifiWatchdog()
-                // guard (!staConnectedOnce || isApConnection) returned early
-                // forever and the device stayed in AP mode until a manual
-                // reboot — even after the home network came back. STA_GOT_IP
-                // fires when the link is (re)established, so clear the AP flag,
-                // mark that we have connected at least once, and reset the
-                // down-clock. If we were AP-only, flip the radio back to STA so
-                // the device returns to the LAN automatically.
-                staConnectedOnce = true;
-                staDownSince = 0;
-                if (isApConnection) {
-                    isApConnection = false;
-                    WiFi.mode(WIFI_STA);
-                }
-                pluginManager->trigger("controller:wifi:connect", "AP", 0);
-            },
-            WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
-        WiFi.onEvent(
-            [this](WiFiEvent_t, WiFiEventInfo_t info) {
-                ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
-                         WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
-                pluginManager->trigger("controller:wifi:disconnect");
-            },
-            WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
         WiFi.begin(settings.getWifiSsid(), settings.getWifiPassword());
         WiFi.setTxPower(WIFI_POWER_19_5dBm);
         for (int attempts = 0; attempts < WIFI_CONNECT_ATTEMPTS; attempts++) {
@@ -395,22 +349,21 @@ void Controller::setupWifi() {
         if (WiFi.status() == WL_CONNECTED) {
             ESP_LOGI(LOG_TAG, "Connected to %s with IP address %s", settings.getWifiSsid().c_str(),
                      WiFi.localIP().toString().c_str());
-            staConnectedOnce = true;
-            staDownSince = 0;
-            // PRO-335 P1-1: configTzTime() already starts SNTP (via
-            // esp_netif_sntp_init). The previous manual sntp_set_sync_mode() +
-            // sntp_setservername() + sntp_init() trio re-initialized an
-            // already-initialized SNTP service, which asserts/abort()s on IDF 5.x
-            // ("SNTP already initialized") on every successful WiFi connect.
-            //
-            // SMOOTH sync (slew the clock instead of stepping it) was the
-            // intended behavior, so keep it — but set it BEFORE configTzTime().
-            // esp_netif_sntp_init() honors a pre-set sync mode, so setting it
-            // first avoids the post-init re-init abort while preserving SMOOTH.
-            sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+            WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger("controller:wifi:connect", "AP", 0); },
+                         WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+            WiFi.onEvent(
+                [this](WiFiEvent_t, WiFiEventInfo_t info) {
+                    ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
+                             WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
+                    pluginManager->trigger("controller:wifi:disconnect");
+                },
+                WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
             configTzTime(resolve_timezone(settings.getTimezone()), NTP_SERVER);
             setenv("TZ", resolve_timezone(settings.getTimezone()), 1);
             tzset();
+            sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+            sntp_setservername(0, NTP_SERVER);
+            sntp_init();
         } else {
             WiFi.disconnect(true, true);
             ESP_LOGI(LOG_TAG, "Timed out while connecting to WiFi");
@@ -418,7 +371,12 @@ void Controller::setupWifi() {
         }
     }
     if (WiFi.status() != WL_CONNECTED) {
-        startSoftAp();
+        isApConnection = true;
+        WiFi.mode(WIFI_AP);
+        WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_IP, WIFI_SUBNET_MASK);
+        WiFi.softAP(WIFI_AP_SSID);
+        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+        ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
     }
 
     pluginManager->on("ota:update:start", [this](Event const &) { this->updating = true; });
@@ -427,138 +385,11 @@ void Controller::setupWifi() {
     pluginManager->trigger("controller:wifi:connect", "AP", isApConnection ? 1 : 0);
 }
 
-// PRO-333: factored out of setupWifi() so wifiWatchdog() can re-open the SoftAP
-// when a previously-good STA connection is lost.
-//
-// When STA credentials are configured, fall back to WIFI_AP_STA (NOT AP-only):
-// keeping the STA interface alive lets Arduino auto-reconnect keep retrying the
-// home network in the background while the SoftAP serves the web UI. That is
-// what makes the router-reboot / out-of-range case auto-recover — when the home
-// network returns, the STA re-associates and the ARDUINO_EVENT_WIFI_STA_GOT_IP
-// handler (above) clears isApConnection and flips the radio back to WIFI_STA. In
-// AP-only mode the STA radio is off, STA_GOT_IP can never fire, and the device
-// would stay on its SoftAP forever (the sticky-isApConnection bug). With no
-// credentials there is no STA to keep alive, so use plain WIFI_AP.
-void Controller::startSoftAp() {
-    isApConnection = true;
-    staDownSince = 0; // AP is the reachable surface now; stop the STA-down clock.
-    WiFi.mode(staConfigured ? WIFI_AP_STA : WIFI_AP);
-    WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_IP, WIFI_SUBNET_MASK);
-    WiFi.softAP(WIFI_AP_SSID);
-    if (staConfigured) {
-        // Keep the STA trying the home network in the background so a later
-        // recovery fires STA_GOT_IP and pulls us back onto the LAN. begin()
-        // here is harmless if a connect is already in flight.
-        WiFi.begin(settings.getWifiSsid(), settings.getWifiPassword());
-    }
-    WiFi.setTxPower(WIFI_POWER_19_5dBm);
-    ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
-}
-
-// PRO-333: WiFi STA recovery / SoftAP-fallback watchdog.
-//
-// setupWifi() only falls back to SoftAP if the *initial* connect fails. Once a
-// STA connection succeeds it is never re-checked, so a later sustained STA loss
-// (the HomeKit/HomeSpan ASSOC_LEAVE -> AUTH_EXPIRE loop, a router reboot, going
-// out of range) leaves the device stranded: off the LAN and never on its own
-// SoftAP. This watchdog runs each loop tick and, for a STA-configured device
-// that is NOT already in AP mode, tracks how long the link has been down and:
-//   - within the grace window: does nothing (Arduino auto-reconnect heals blips)
-//   - past grace: re-asserts STA ownership with an explicit reconnect
-//   - past the fallback window: opens SoftAP so the user is never locked out
-//
-// The pure decision lives in WiFiFallbackPolicy.h (host-tested); this method
-// only owns the timing bookkeeping and the WiFi side effects.
-void Controller::wifiWatchdog() {
-    // Only babysit a configured STA, and only once it has actually connected at
-    // least once (a never-connected STA is handled by setupWifi's AP fallback).
-    if (!staConfigured || !staConnectedOnce || isApConnection) {
-        return;
-    }
-
-    const unsigned long now = millis();
-    if (now - lastWifiWatchdog < WIFI_WATCHDOG_INTERVAL_MS) {
-        return;
-    }
-    lastWifiWatchdog = now;
-
-    // PRO-365: the STA link is "up" only when the driver reports associated AND
-    // we actually hold a routable IP. During a HomeKit/HomeSpan ASSOC_LEAVE ->
-    // AUTH_EXPIRE loop (or a router-side deauth) the ESP32 can sit in a half-open
-    // association where WiFi.status() still returns WL_CONNECTED while the DHCP
-    // lease is gone (localIP() == 0.0.0.0) and the device is unreachable. Judging
-    // liveness on WiFi.status() alone left the down-clock pinned at 0 forever in
-    // that state, so RECONNECT/OPEN_SOFTAP never fired and the device stayed
-    // stranded until a manual reboot. staLinkUsable() (host-tested in
-    // WiFiFallbackPolicy.h) treats "associated but no IP" as DOWN so recovery
-    // proceeds. INADDR_ANY (0.0.0.0) is the no-lease sentinel here, not
-    // INADDR_NONE.
-    const bool hasValidIp = WiFi.localIP() != IPAddress(static_cast<uint32_t>(0));
-    const bool connected = staLinkUsable(WiFi.status() == WL_CONNECTED, hasValidIp);
-    if (connected) {
-        staDownSince = 0;
-        return;
-    }
-
-    // Link is down. Start (or continue) the down-clock.
-    if (staDownSince == 0) {
-        staDownSince = now;
-    }
-    const unsigned long downForMs = now - staDownSince;
-
-    // `connected` is provably false here: the early return above bails when the
-    // STA link is usable (associated AND holding a routable IP), so the watchdog
-    // only reaches this point on a down link. Pass a literal false rather than
-    // `connected` so the call site does not imply a live runtime branch that
-    // cannot occur. The pure function keeps the parameter for host-test coverage
-    // of both values.
-    switch (wifiWatchdogAction(/*staConnected*/ false, isApConnection, staConfigured, downForMs, WIFI_WATCHDOG_GRACE_MS,
-                               WIFI_WATCHDOG_FALLBACK_MS)) {
-    case WiFiWatchdogAction::RECONNECT:
-        ESP_LOGW(LOG_TAG, "WiFi STA down %lums, re-asserting connection to %s", downForMs, settings.getWifiSsid().c_str());
-        // Re-own the radio with an explicit reconnect. This matters when HomeKit
-        // is enabled: HomeSpan's init() calls WiFi.setAutoReconnect(false) (it
-        // expects to manage reconnects itself), and the PRO-333 fix neutralizes
-        // HomeSpan's WiFi.begin() via setWifiBegin(), so nothing else re-associates
-        // a dropped STA. reconnect() re-issues the association with our configured
-        // credentials intact.
-        WiFi.reconnect();
-        break;
-    case WiFiWatchdogAction::OPEN_SOFTAP:
-        ESP_LOGW(LOG_TAG, "WiFi STA down %lums, falling back to SoftAP so the web UI stays reachable", downForMs);
-        startSoftAp();
-        {
-            // PRO-333: this runs on the Arduino main loop task (Controller::loop()
-            // -> wifiWatchdog()), unlike the other controller:wifi:connect triggers
-            // (setupWifi on the setup task, the STA_GOT_IP handler on the
-            // arduino_events WiFi-event task). WebUIPlugin::start()/stop() carry
-            // AsyncTCP task affinity and a documented "never run synchronously from
-            // the watchdog" invariant, so tag this trigger `deferred=1`: WebUIPlugin
-            // latches it and runs start() from its own loop()-task deferred-intent
-            // drain instead of inline on this synchronous trigger path.
-            Event apRearm;
-            apRearm.id = "controller:wifi:connect";
-            apRearm.setInt("AP", 1);
-            apRearm.setInt("deferred", 1);
-            pluginManager->trigger(apRearm);
-        }
-        break;
-    case WiFiWatchdogAction::NONE:
-        break;
-    }
-}
-
 void Controller::loop() {
     pluginManager->loop();
 
     if (screenReady) {
         connect();
-    }
-
-    // PRO-333: babysit the STA link so a sustained loss re-asserts STA and
-    // ultimately falls back to SoftAP instead of leaving the user locked out.
-    if (initialized) {
-        wifiWatchdog();
     }
 
     unsigned long now = millis();
@@ -621,7 +452,7 @@ void Controller::loop() {
                 currentProcess->progress();
                 bool stillActive = currentProcess->isActive();
                 xSemaphoreGive(processMutex);
-
+                
                 if (!stillActive) {
                     deactivate();
                 }
@@ -728,7 +559,7 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
-
+    
     // Acquire mutex first to prevent TOCTOU race condition
     // Use portMAX_DELAY (blocking) with ESP_LOGE: failure here is critical and should never happen
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
@@ -736,7 +567,7 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
-
+    
     // Check if process is already active while holding the mutex
     if (currentProcess != nullptr && currentProcess->isActive()) {
         xSemaphoreGive(processMutex);
@@ -757,12 +588,12 @@ void Controller::startProcess(Process *process) {
         updateLastAction();
         return;
     }
-
+    
     processCompleted = false;
     this->currentProcess = process;
-
+    
     xSemaphoreGive(processMutex);
-
+    
     pluginManager->trigger("controller:process:start");
     updateLastAction();
 }
@@ -785,10 +616,10 @@ float Controller::getTargetTemp() const {
             return 0;
         }
     }
-
+    
     Process *proc = currentProcess;
     float result = 0;
-
+    
     switch (mode) {
     case MODE_STANDBY:
         result = profileManager->getSelectedProfile().temperature;
@@ -814,7 +645,7 @@ float Controller::getTargetTemp() const {
         result = 0;
         break;
     }
-
+    
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1110,10 +941,10 @@ void Controller::updateControl() {
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         return; // Skip this update if we can't get the mutex quickly
     }
-
+    
     Process *proc = currentProcess;
     bool active = proc != nullptr && proc->isActive();
-
+    
     // Copy values we need while holding the mutex to minimize lock time
     bool isAltRelayActive = false;
     int procType = -1;
@@ -1127,13 +958,13 @@ void Controller::updateControl() {
     float manualPumpPressure = 0.0f;
     float manualPumpFlow = 0.0f;
     float targetTemp = 0.0f;
-
+    
     if (active) {
         procType = proc->getType();
         pumpValue = proc->getPumpValue();
         relayActive = proc->isRelayActive();
         isAltRelayActive = proc->isAltRelayActive();
-
+        
         if (procType == MODE_BREW) {
             auto *brewProcess = static_cast<BrewProcess *>(proc);
             isAdvancedPump = brewProcess->isAdvancedPump();
@@ -1151,7 +982,7 @@ void Controller::updateControl() {
             targetTemp = manualProcess->getTemperature();
         }
     }
-
+    
     // Get target temp while still holding mutex to avoid race condition
     // Inline the logic from getTargetTemp() to avoid deadlock
     if (targetTemp == 0.0f) {
@@ -1173,7 +1004,7 @@ void Controller::updateControl() {
             break;
         }
     }
-
+    
     // Release mutex now that we've copied all needed values
     xSemaphoreGive(processMutex);
 
@@ -1198,8 +1029,9 @@ void Controller::updateControl() {
         }
         if (procType == MODE_BREW) {
             if (isAdvancedPump) {
-                clientController.sendAdvancedOutputControl(relayActive, targetTemp, brewPumpTargetIsPressure, brewPumpPressure,
-                                                           brewPumpFlow);
+                clientController.sendAdvancedOutputControl(relayActive, targetTemp,
+                                                           brewPumpTargetIsPressure,
+                                                           brewPumpPressure, brewPumpFlow);
                 targetPressure = brewPumpPressure;
                 targetFlow = brewPumpFlow;
                 return;
@@ -1282,14 +1114,14 @@ void Controller::activate() {
         break;
     default:;
     }
-
+    
     // Check if we started a brew process (with mutex protection)
     bool isBrewProcess = false;
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         isBrewProcess = currentProcess != nullptr && currentProcess->getType() == MODE_BREW;
         xSemaphoreGive(processMutex);
     }
-
+    
     if (isBrewProcess) {
         pluginManager->trigger("controller:brew:start");
     }
@@ -1301,7 +1133,7 @@ void Controller::deactivate() {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in deactivate");
         return;
     }
-
+    
     if (currentProcess == nullptr) {
         xSemaphoreGive(processMutex);
         return;
@@ -1310,7 +1142,7 @@ void Controller::deactivate() {
     lastProcess = currentProcess;
     currentProcess = nullptr;
     const int endedProcessType = lastProcess->getType();
-
+    
     xSemaphoreGive(processMutex);
     if (endedProcessType == MODE_BREW) {
         pluginManager->trigger("controller:brew:end");
@@ -1323,21 +1155,21 @@ void Controller::deactivate() {
 
 void Controller::clear() {
     processCompleted = true;
-
+    
     // Protect lastProcess access with mutex to prevent race with getProcessSnapshot() and onVolumetricMeasurement()
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in clear");
         return;
     }
-
+    
     if (lastProcess != nullptr && lastProcess->getType() == MODE_BREW) {
         pluginManager->trigger("controller:brew:clear");
     }
     delete lastProcess;
     lastProcess = nullptr;
-
+    
     xSemaphoreGive(processMutex);
-
+    
     currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
 }
 
@@ -1392,10 +1224,10 @@ bool Controller::isActive() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isActive - returning false (UI-safe: assume inactive)");
         return false;
     }
-
+    
     Process *proc = currentProcess;
     bool result = proc != nullptr && proc->isActive();
-
+    
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1408,10 +1240,10 @@ bool Controller::isActiveSafe() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isActiveSafe - returning true (conservative: assume active)");
         return true;
     }
-
+    
     Process *proc = currentProcess;
     bool result = proc != nullptr && proc->isActive();
-
+    
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1428,10 +1260,10 @@ bool Controller::isGrindActive() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isGrindActive - returning false (process may be active)");
         return false;
     }
-
+    
     Process *proc = currentProcess;
     bool result = proc != nullptr && proc->isActive() && proc->getType() == MODE_GRIND;
-
+    
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1441,12 +1273,12 @@ int Controller::getProcessType() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in getProcessType - returning -1");
         return -1;
     }
-
+    
     int type = -1;
     if (currentProcess != nullptr) {
         type = currentProcess->getType();
     }
-
+    
     xSemaphoreGive(processMutex);
     return type;
 }
@@ -1456,13 +1288,13 @@ uint8_t Controller::getBrewProcessPhaseIndex() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in getBrewProcessPhaseIndex - returning 0");
         return 0;
     }
-
+    
     uint8_t phaseIndex = 0;
     if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
         auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
         phaseIndex = static_cast<uint8_t>(brewProcess->phaseIndex);
     }
-
+    
     xSemaphoreGive(processMutex);
     return phaseIndex;
 }
@@ -1472,14 +1304,14 @@ bool Controller::isBrewProcessVolumetric() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isBrewProcessVolumetric - returning false");
         return false;
     }
-
+    
     bool isVolumetric = false;
     if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
         auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
-        isVolumetric = brewProcess->target == ProcessTarget::VOLUMETRIC && brewProcess->currentPhase.hasVolumetricTarget() &&
-                       isVolumetricAvailable();
+        isVolumetric = brewProcess->target == ProcessTarget::VOLUMETRIC &&
+                      brewProcess->currentPhase.hasVolumetricTarget() && isVolumetricAvailable();
     }
-
+    
     xSemaphoreGive(processMutex);
     return isVolumetric;
 }
@@ -1489,31 +1321,31 @@ bool Controller::isBrewProcessUtility() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isBrewProcessUtility - returning false");
         return false;
     }
-
+    
     bool isUtility = false;
     if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
         auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
         isUtility = brewProcess->isUtility();
     }
-
+    
     xSemaphoreGive(processMutex);
     return isUtility;
 }
 
 ProcessSnapshot Controller::getProcessSnapshot() const {
     ProcessSnapshot snapshot;
-
+    
     // Use consistent timeout strategy to prevent deadlocks
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW(LOG_TAG, "Mutex timeout in getProcessSnapshot - returning empty snapshot");
         return snapshot;
     }
-
+    
     Process *proc = currentProcess;
     if (proc == nullptr) {
         proc = lastProcess;
     }
-
+    
     if (proc != nullptr) {
         snapshot.exists = true;
         snapshot.isActive = proc->isActive();
@@ -1532,7 +1364,7 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.started = 0;
             snapshot.finished = 0;
         }
-
+        
         if (proc->getType() == MODE_BREW) {
             auto *brew = static_cast<BrewProcess *>(proc);
             snapshot.isBrew = true;
@@ -1575,7 +1407,7 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.manualTemperature = manual->temperature;
         }
     }
-
+    
     xSemaphoreGive(processMutex);
     return snapshot;
 }
@@ -1635,7 +1467,7 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }
-
+    
     // Update volume with mutex protection for both currentProcess and lastProcess
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         if (currentProcess != nullptr) {

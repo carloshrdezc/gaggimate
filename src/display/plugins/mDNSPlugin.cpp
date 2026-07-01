@@ -13,22 +13,14 @@ void mDNSPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
     pluginManager->on("controller:wifi:connect", [this](Event const &event) { start(event); });
 }
-void mDNSPlugin::start(Event const &event) {
+void mDNSPlugin::start(Event const &event) const {
     const int apMode = event.getInt("AP");
     if (apMode)
-        return;
-    // PRO-333: controller:wifi:connect fires more than once per STA session now
-    // (unconditional STA_GOT_IP + end-of-setupWifi on first connect; watchdog
-    // re-arm on recovery). MDNS.begin() on an already-running responder
-    // re-allocates the service and leaks scarce internal RAM (PRO-334), so make
-    // a duplicate start a no-op.
-    if (started)
         return;
     if (!MDNS.begin(controller->getSettings().getMdnsName().c_str())) {
         ESP_LOGE(LOG_TAG, "Error setting up mDNS responder");
         return;
     }
-    started = true;
 
 #if GAGGIMATE_ENABLE_WEBUI
     // Advertise HTTP service for web interface. All of these services point at

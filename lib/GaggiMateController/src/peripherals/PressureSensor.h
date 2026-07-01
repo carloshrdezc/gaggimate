@@ -35,7 +35,7 @@ class PressureSensor {
     xTaskHandle taskHandle;
 
     const char *LOG_TAG = "PressureSensor";
-    [[noreturn]] static void loopTask(void *arg);
+    static void loopTask(void *arg);
 };
 
 #endif // PRESSURESENSOR_H

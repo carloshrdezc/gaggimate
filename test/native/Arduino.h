@@ -92,44 +92,6 @@ class String {
     bool operator!=(const char *o) const { return _s != (o ? o : ""); }
     bool operator<(const String &o) const { return _s < o._s; }
 
-    // Arduino WString subset used by the pure profile-enumeration logic
-    // (src/display/core/ProfileEnumeration.h). Semantics mirror WString:
-    //  - lastIndexOf(ch): index of the last `ch`, or -1 if absent.
-    //  - substring(beginIndex): from beginIndex to end; clamps beginIndex to
-    //    [0, length] (out-of-range begin -> empty string).
-    //  - substring(beginIndex, endIndex): [begin, end) with begin/end clamped to
-    //    [0, length] and end floored to begin (begin >= end -> empty string).
-    //  - endsWith(suffix): true iff the string ends with suffix.
-    int lastIndexOf(char ch) const {
-        std::string::size_type pos = _s.rfind(ch);
-        return pos == std::string::npos ? -1 : static_cast<int>(pos);
-    }
-    String substring(unsigned int beginIndex) const {
-        if (beginIndex >= _s.length()) {
-            return String();
-        }
-        return String(_s.substr(beginIndex));
-    }
-    String substring(unsigned int beginIndex, unsigned int endIndex) const {
-        unsigned int len = static_cast<unsigned int>(_s.length());
-        if (beginIndex > len) {
-            beginIndex = len;
-        }
-        if (endIndex > len) {
-            endIndex = len;
-        }
-        if (beginIndex >= endIndex) {
-            return String();
-        }
-        return String(_s.substr(beginIndex, endIndex - beginIndex));
-    }
-    bool endsWith(const String &suffix) const {
-        if (suffix._s.length() > _s.length()) {
-            return false;
-        }
-        return _s.compare(_s.length() - suffix._s.length(), suffix._s.length(), suffix._s) == 0;
-    }
-
     const std::string &std_str() const { return _s; }
 
   private:

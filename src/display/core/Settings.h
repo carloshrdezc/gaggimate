@@ -6,8 +6,8 @@
 #include <Preferences.h>
 #include <display/core/constants.h>
 #include <display/core/utils.h>
-#include <utility>
 #include <vector>
+#include <utility>
 
 #define PREFERENCES_KEY "controller"
 
@@ -290,7 +290,7 @@ class Settings {
     bool cloudRelayEnabled = false;
 
     void doSave();
-    xTaskHandle taskHandle;
+    xTaskHandle taskHandle = nullptr;
     [[noreturn]] static void loopTask(void *arg);
 };
 

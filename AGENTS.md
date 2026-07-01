@@ -87,7 +87,7 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
   hand-written logic via the native compile DB; generated UI (`src/display/ui/**`)
   and vendored drivers (`src/display/drivers/**`) are excluded.
 - `[env:native-sanitize]` mirrors `[env:native]` plus `-fsanitize=address,undefined`.
-- C++ standard is **gnu++20** (PRO-294, enabled by the PRO-293 pioarduino Arduino-esp32 3.x / gcc 14.2.0 platform bump; see `docs/cpp-standard-spike.md`). Keep firmware + native envs in lockstep on `gnu++20`.
+- C++ standard stays at **gnu++17** (CAR-340 / `docs/cpp-standard-spike.md`) — do not change it.
 - See `CONTRIBUTING.md` "Continuous Integration & Local Checks" for full details.
 
 ## Code Formatting

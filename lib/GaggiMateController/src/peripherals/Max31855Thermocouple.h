@@ -44,7 +44,7 @@ class Max31855Thermocouple : public TemperatureSensor {
     temperature_error_callback_t error_callback;
 
     const char *LOG_TAG = "Max31855Thermocouple";
-    [[noreturn]] static void monitorTask(void *arg);
+    static void monitorTask(void *arg);
 };
 
 #endif // MAX31855THERMOCOUPLE_H

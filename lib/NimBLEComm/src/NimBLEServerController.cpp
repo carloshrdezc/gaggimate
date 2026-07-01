@@ -12,8 +12,7 @@ void NimBLEServerController::initServer(const String infoString) {
     ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
     NimBLEDevice::init("GPBLS");
-    NimBLEDevice::setPower(9); // +9 dBm. NimBLE 2.x: setPower takes int8_t dBm, not the
-                               // esp_power_level_t enum (whose ESP_PWR_LVL_P9 value is 7, not 9). PRO-290.
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
 
     // Create BLE Server
@@ -82,9 +81,7 @@ void NimBLEServerController::initServer(const String infoString) {
 
     advertising = NimBLEDevice::getAdvertising();
     advertising->addServiceUUID(SERVICE_UUID);
-    // NimBLE 2.x: setScanResponse() renamed to enableScanResponse(); scan
-    // response is no longer enabled by default. PRO-290.
-    advertising->enableScanResponse(true);
+    advertising->setScanResponse(true);
     advertising->start();
     ESP_LOGI(LOG_TAG, "BLE Server started, advertising...\n");
     xTaskCreate(loopTask, "NimBLEServerController::loop", configMINIMAL_STACK_SIZE * 4, this, 1, &taskHandle);
@@ -257,23 +254,20 @@ void NimBLEServerController::registerPumpModelCoeffsCallback(const pump_model_co
     pumpModelCoeffsCallback = callback;
 }
 
-// NimBLEServerCallbacks override (NimBLE 2.x signature: + NimBLEConnInfo&)
-void NimBLEServerController::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) {
+// BLEServerCallbacks override
+void NimBLEServerController::onConnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client connected.");
     deviceConnected = true;
     pServer->stopAdvertising();
 }
 
-// NimBLE 2.x no longer auto-restarts advertising on disconnect; this manual
-// startAdvertising() (preserved from 1.x) keeps reconnects working. Signature
-// gained NimBLEConnInfo& and an int reason in 2.x. PRO-290.
-void NimBLEServerController::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) {
+void NimBLEServerController::onDisconnect(NimBLEServer *pServer) {
     ESP_LOGI(LOG_TAG, "Client disconnected.");
     deviceConnected = false;
     pServer->startAdvertising(); // Restart advertising so clients can reconnect
 }
 
-void NimBLEServerController::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) {
+void NimBLEServerController::onWrite(NimBLECharacteristic *pCharacteristic) {
     ESP_LOGV(LOG_TAG, "Write received!");
 
     if (pCharacteristic->getUUID().equals(NimBLEUUID(OUTPUT_CONTROL_UUID))) {

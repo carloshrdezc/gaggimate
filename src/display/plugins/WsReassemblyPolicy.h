@@ -37,33 +37,18 @@
 constexpr size_t kWsMaxReassemblyBytes = 256 * 1024;
 
 // Pure predicate: would appending `incomingLen` bytes to a buffer that already
-// holds `currentBufBytes` bytes exceed `cap`? The running-total check
-// (currentBufBytes + incomingLen > cap) is the real backstop: it bounds the
-// cumulative reassembled total regardless of frame structure, fragment by
-// fragment. The declaredTotalLen early-reject is purely an OPTIMIZATION for the
-// common single-frame case — it lets a client announcing an over-cap length be
-// rejected up front before a single byte is appended, but it is NOT relied upon
-// to bound fragmented messages (see the declaredTotalLen note on the parameter
-// below). Overflow-safe: comparisons are written so the sum
+// holds `currentBufBytes` bytes exceed `cap`? Also catches a declared total
+// (declaredTotalLen, i.e. info->len at the first fragment) that already exceeds
+// the cap, so a client announcing a huge length is rejected up front before a
+// single byte is appended. Overflow-safe: comparisons are written so the sum
 // `currentBufBytes + incomingLen` is never formed in a way that could wrap
 // (compare against the remaining headroom instead).
 //
-// declaredTotalLen is the CURRENT FRAME's declared length (info->len at the
-// first fragment), which equals the whole-message length ONLY for an
-// unfragmented single frame (num == 0 && final == true). For a fragmented
-// message it is just the first fragment's announced length, NOT the cumulative
-// total — so do NOT treat it as the whole-message size; the running-total check
-// above is what bounds the cumulative reassembled total.
-//
 // Returns true => the append must be REFUSED (drop the buffer, do not append).
 // Returns false => the append is within the cap and may proceed.
-constexpr bool wsReassemblyWouldExceed(size_t currentBufBytes, size_t incomingLen,
-                                       size_t declaredTotalLen, // current frame's declared length (== whole message
-                                                                // only for an unfragmented single frame)
+constexpr bool wsReassemblyWouldExceed(size_t currentBufBytes, size_t incomingLen, size_t declaredTotalLen,
                                        size_t cap = kWsMaxReassemblyBytes) {
-    // Declared total of the CURRENT FRAME over the cap: reject up front. This is
-    // an optimization for the single-frame case; the running-total check below
-    // is the actual cumulative bound.
+    // Declared total (known at the first fragment) over the cap: reject up front.
     if (declaredTotalLen > cap) {
         return true;
     }

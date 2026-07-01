@@ -1,25 +1,22 @@
 #include "ProfileManager.h"
-#include "HeapDiag.h"
-#include "ProfileEnumeration.h"
-#include "SdReadRetryPolicy.h"
 #include <ArduinoJson.h>
 
 #include <algorithm>
 
 #include <utility>
 
-#if !defined(GAGGIMATE_SIM)
-#include <Arduino.h> // delay()
-#endif
-
 namespace {
-// PRO-349: forward declaration so the boot-time enumeration / id-migration
-// scans below can route their SD reads through the SAME bounded, ENOMEM-aware,
-// size-capped helper that loadProfile() uses (defined later in this anon
-// namespace). Before PRO-349 these scans streamed deserializeJson() straight
-// off an open SD File handle with no internal-DRAM pre-flight gate and no size
-// cap -- the exact pattern PRO-334 fixed for loadProfile().
-bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson);
+String filenameStem(const String &name) {
+    String stem = name;
+    int slash = stem.lastIndexOf('/');
+    if (slash >= 0) {
+        stem = stem.substring(slash + 1);
+    }
+    if (stem.endsWith(".json")) {
+        stem = stem.substring(0, stem.length() - 5);
+    }
+    return stem;
+}
 
 std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, const String &dir) {
     std::vector<std::pair<String, String>> migrations;
@@ -28,56 +25,29 @@ std::vector<std::pair<String, String>> collectProfileIdMigrations(fs::FS *fs, co
         return migrations;
     }
 
-    // PRO-349: enumerate the candidate filenames first, then read each through
-    // readProfileFileBounded() below. The previous implementation streamed
-    // deserializeJson() straight off the live openNextFile() handle with no
-    // internal-DRAM pre-flight gate and no size cap; at boot (HomeSpan/BLE/WiFi/
-    // mDNS all initializing) the internal DMA pool is most contended, so that
-    // ungated stream is the exact ENOMEM-spin pattern PRO-334 fixed. File::name()
-    // returns the bare basename on the ESP32 FS backends, so rebuild the
-    // directory-qualified path (as remintUnsafeProfileIds()/profilePath() do)
-    // before re-opening for the bounded read.
-    std::vector<String> names;
-    {
-        File file = root.openNextFile();
-        while (file) {
-            String name = file.name();
-            if (name.endsWith(".json")) {
-                names.push_back(name);
-            }
-            file = root.openNextFile();
-        }
-    }
-
-    for (const String &name : names) {
-        const String stem = filenameStem(name);
-        const String path = reconstructProfilePath(dir, name);
-        String json;
-        if (!readProfileFileBounded(fs, path, json)) {
-            // Gate-closed (internal DRAM below floor), oversized/corrupt, or a
-            // transient read failure -> skip this entry rather than parse a
-            // partial/unbounded buffer. Mirrors loadProfile()'s graceful
-            // degradation; a missed id-migration on a starved boot is recoverable
-            // on the next (healthier) boot, a wedged async/boot task is not.
-            continue;
-        }
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, json);
-        if (!err) {
-            JsonObject obj = doc.as<JsonObject>();
-            const String rawId = obj["id"] | "";
-            Profile profile{};
-            if (parseProfile(obj, profile)) {
-                if (profile.id.isEmpty()) {
-                    profile.id = filenameStem(name);
-                }
-                if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
-                    std::find_if(migrations.begin(), migrations.end(),
-                                 [&](const auto &migration) { return migration.first == rawId; }) == migrations.end()) {
-                    migrations.emplace_back(rawId, profile.id);
+    File file = root.openNextFile();
+    while (file) {
+        String name = file.name();
+        if (name.endsWith(".json")) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, file);
+            if (!err) {
+                JsonObject obj = doc.as<JsonObject>();
+                const String rawId = obj["id"] | "";
+                Profile profile{};
+                if (parseProfile(obj, profile)) {
+                    if (profile.id.isEmpty()) {
+                        profile.id = filenameStem(name);
+                    }
+                    if (!rawId.isEmpty() && !isSafeId(rawId) && isSafeId(profile.id) && profile.id != rawId &&
+                        std::find_if(migrations.begin(), migrations.end(),
+                                     [&](const auto &migration) { return migration.first == rawId; }) == migrations.end()) {
+                        migrations.emplace_back(rawId, profile.id);
+                    }
                 }
             }
         }
+        file = root.openNextFile();
     }
 
     return migrations;
@@ -133,23 +103,19 @@ std::vector<std::pair<String, String>> remintUnsafeProfileIds(fs::FS *fs, const 
         // the real file. (The directory-listing scanners read from the live
         // openNextFile() handle and never re-open by name, which is why only
         // this rewrite-and-rename pass needs the canonical form.)
-        const String oldPath = reconstructProfilePath(dir, name);
+        const String oldPath = dir + "/" + stem + ".json";
         String rawId;
         Profile profile{};
         bool parsed = false;
         {
-            // PRO-349: route the remint read through the bounded, ENOMEM-aware,
-            // size-capped helper instead of streaming deserializeJson() off the
-            // open handle. A gate-closed/oversized/transient-failure read returns
-            // false; skip this entry (it is retried on the next, healthier boot)
-            // rather than thrash the starving allocator at boot time.
-            String json;
-            if (!readProfileFileBounded(fs, oldPath, json)) {
-                ESP_LOGW("ProfileManager", "Remint: bounded read of %s refused/failed; skipping", oldPath.c_str());
+            File file = fs->open(oldPath, "r");
+            if (!file) {
+                ESP_LOGW("ProfileManager", "Remint: failed to open %s for read; skipping", oldPath.c_str());
                 continue;
             }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, json);
+            DeserializationError err = deserializeJson(doc, file);
+            file.close();
             if (err) {
                 ESP_LOGW("ProfileManager", "Remint: failed to parse %s (%s); skipping", oldPath.c_str(), err.c_str());
                 continue;
@@ -271,157 +237,33 @@ String findFilenameStemForId(fs::FS *fs, const String &dir, const String &id) {
         return String();
     }
 
-    // PRO-349: enumerate filenames first, then read each through the bounded,
-    // ENOMEM-aware, size-capped helper (as collectProfileIdMigrations() does)
-    // instead of streaming deserializeJson() off the live directory handle. The
-    // canonical directory-qualified path is rebuilt from the stem because
-    // File::name() returns the bare basename on the ESP32 FS backends.
-    std::vector<String> names;
-    {
-        File file = root.openNextFile();
-        while (file) {
-            String name = file.name();
-            if (name.endsWith(".json")) {
-                names.push_back(name);
-            }
-            file = root.openNextFile();
-        }
-    }
-
-    for (const String &name : names) {
-        String stem = filenameStem(name);
-        const String path = reconstructProfilePath(dir, name);
-        String json;
-        if (!readProfileFileBounded(fs, path, json)) {
-            // Gate-closed/oversized/transient -> skip; a missed match degrades to
-            // "not found" (the caller's existing miss path), never a wedge.
-            continue;
-        }
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, json);
-        if (!err) {
-            JsonObject obj = doc.as<JsonObject>();
-            Profile profile{};
-            if (parseProfile(obj, profile)) {
-                // Resolve the addressable id the same way loadProfile() and
-                // remintUnsafeProfileIds() do: in-file id wins, else a safe
-                // filename stem. Shared helper keeps the rule in one place.
-                if (profile.id.isEmpty()) {
-                    profile.id = resolveAddressableProfileId(profile.id, stem);
-                }
-                if (profile.id == id) {
-                    return stem;
+    File file = root.openNextFile();
+    while (file) {
+        String name = file.name();
+        if (name.endsWith(".json")) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, file);
+            if (!err) {
+                JsonObject obj = doc.as<JsonObject>();
+                Profile profile{};
+                if (parseProfile(obj, profile)) {
+                    String stem = filenameStem(name);
+                    // Resolve the addressable id the same way loadProfile() and
+                    // remintUnsafeProfileIds() do: in-file id wins, else a safe
+                    // filename stem. Shared helper keeps the rule in one place.
+                    if (profile.id.isEmpty()) {
+                        profile.id = resolveAddressableProfileId(profile.id, stem);
+                    }
+                    if (profile.id == id) {
+                        return stem;
+                    }
                 }
             }
         }
+        file = root.openNextFile();
     }
 
     return String();
-}
-
-// PRO-334: Fail-safe profile read for the async-task path.
-//
-// loadProfile() runs INLINE ON THE AsyncTCP task for `req:profiles:load`. The
-// previous implementation streamed deserializeJson() directly off the open SD
-// File handle. Under internal-DRAM exhaustion sdmmc_read_sectors fails with
-// ESP_ERR_NO_MEM (0x101) and a streaming parse keeps requesting bytes, so the
-// async_tcp task never pets its watchdog -> task-WDT abort -> reboot (the
-// reboot-on-Brew symptom).
-//
-// This helper makes the read BOUNDED and ENOMEM-aware:
-//   1. Pre-flight gate on internal-DRAM largest-block (shouldAttemptSdRead):
-//      below the floor we don't even poke the starving sdmmc allocator -- we
-//      return false so the caller surfaces a clean error to the client.
-//   2. Read the whole (small) profile file into an in-memory String with a
-//      STRICTLY BOUNDED retry schedule (kSdReadMaxAttempts, short capped
-//      backoffs that yield the CPU so the watchdog is pet), then parse the
-//      buffer. A transient failure becomes a clean `false`, never a spin.
-//
-// RESIDUAL RISK (PRO-342): the WDT-reboot rationale above is SPECIFIC TO THE
-// ASYNC_TCP PATH. The very same pre-flight gate is also reached via
-// loadProfile()/loadSelectedProfile() invoked on the DISPLAY-LOOP (UI) task
-// (e.g. DefaultUI.cpp profile-load call sites), which pets a DIFFERENT
-// watchdog. On that path the gate does NOT prevent a reboot -- there was no
-// async-task WDT abort to prevent -- so under internal-DRAM pressure it instead
-// degrades to a SPURIOUSLY FAILED PROFILE LOAD: the helper returns false and
-// the UI surfaces a "not found"/load failure (degraded UX, no crash) even
-// though the profile is present on disk. This is an accepted tradeoff: a clean
-// failed load beats thrashing the starving allocator, but the failure mode on
-// the loop-task path is a missed load, not the WDT reboot the async-path
-// rationale describes. No behavior change is intended here; this note only
-// documents the cross-path behavior.
-//
-// Returns true and fills `outJson` on success; false on a refused/failed read.
-bool readProfileFileBounded(fs::FS *fs, const String &path, String &outJson) {
-    // Pre-flight: refuse the DMA-backed read when internal DRAM is below the
-    // floor rather than thrash the allocator on the async task.
-    if (!shouldAttemptSdRead(gmInternalLargestBlock())) {
-        ESP_LOGW("ProfileManager", "Skipping SD read of %s: internal DRAM below floor (largest block=%u B < %u B)", path.c_str(),
-                 static_cast<unsigned>(gmInternalLargestBlock()), static_cast<unsigned>(kSdReadInternalDramFloorBytes));
-        return false;
-    }
-
-    for (int attempt = 0; attempt < kSdReadMaxAttempts; ++attempt) {
-        if (attempt > 0) {
-            const unsigned long backoff = nextSdReadBackoffMs(attempt);
-#if !defined(GAGGIMATE_SIM)
-            // vTaskDelay-backed delay() yields the CPU so the async_tcp task
-            // watchdog is pet between bounded retries.
-            if (backoff > 0) {
-                delay(backoff);
-            }
-#else
-            (void)backoff;
-#endif
-        }
-
-        File file = fs->open(path, "r");
-        if (!file) {
-            // open() failing is usually "no such file" (a genuine not-found),
-            // but can also be a transient FS/DMA error under pressure. Retry
-            // within the bounded budget; the final attempt's false is the clean
-            // give-up.
-            continue;
-        }
-
-        const size_t size = file.size();
-        String json;
-        bool readOk = false;
-        // A profile JSON is small; read the whole file into memory in one bounded
-        // pass instead of a streaming parse off the handle. The size cap
-        // (sdReadSizeDecision) is the shared bound every boot-time profile read
-        // uses (PRO-349): an oversized/corrupt file is refused rather than forcing
-        // a large internal allocation, an empty file is a failed read.
-        // reserve()+read keeps the SD access to a single bounded loop with a
-        // definite end.
-        if (sdReadSizeDecision(size) == SdReadSizeDecision::kRead && json.reserve(size + 1)) {
-            size_t total = 0;
-            uint8_t buf[512];
-            readOk = true;
-            while (total < size) {
-                const size_t want = (size - total) < sizeof(buf) ? (size - total) : sizeof(buf);
-                const int got = file.read(buf, want);
-                if (got <= 0) {
-                    // Short/failed read (ENOMEM on the sdmmc DMA buffer surfaces
-                    // here). Abandon this attempt and let the bounded retry loop
-                    // decide; never spin on a zero-progress read.
-                    readOk = false;
-                    break;
-                }
-                json.concat(reinterpret_cast<const char *>(buf), static_cast<unsigned int>(got));
-                total += static_cast<size_t>(got);
-            }
-            readOk = readOk && (total == size);
-        }
-        file.close();
-
-        if (readOk) {
-            outJson = std::move(json);
-            return true;
-        }
-        ESP_LOGW("ProfileManager", "SD read of %s failed (attempt %d/%d)", path.c_str(), attempt + 1, kSdReadMaxAttempts);
-    }
-    return false;
 }
 } // namespace
 
@@ -491,13 +333,10 @@ std::vector<String> ProfileManager::listProfiles() {
     File file = root.openNextFile();
     while (file) {
         String name = file.name();
-        if (isProfileFilename(name)) {
-            // PRO-354: use the shared pure stem extractor instead of an inline
-            // lastIndexOf('/')/lastIndexOf('.') substring. For a ".json" entry
-            // both yield the same value (strip the directory, drop the trailing
-            // ".json"), so listing behavior is unchanged; routing through the
-            // one helper keeps every directory scanner on a single definition.
-            uuids.push_back(filenameStem(name));
+        if (name.endsWith(".json")) {
+            int start = name.lastIndexOf('/') + 1;
+            int end = name.lastIndexOf('.');
+            uuids.push_back(name.substring(start, end));
         }
         file = root.openNextFile();
     }
@@ -519,20 +358,13 @@ std::vector<String> ProfileManager::listProfiles() {
 }
 
 bool ProfileManager::loadProfile(const String &uuid, Profile &outProfile) {
-    // PRO-334: read via the bounded, ENOMEM-aware helper instead of streaming
-    // deserializeJson() off the open File handle. loadProfile() runs on the
-    // AsyncTCP task for req:profiles:load / req:profiles:list; a streaming parse
-    // under internal-DRAM exhaustion could spin the async task into a task-WDT
-    // reboot. The helper pre-flight-gates on internal-DRAM headroom and bounds
-    // the read+retries, returning a clean false (surfaced to the client as
-    // "Profile not found") rather than ever hanging the task.
-    String json;
-    if (!readProfileFileBounded(_fs, profilePath(uuid), json)) {
+    File file = _fs->open(profilePath(uuid), "r");
+    if (!file)
         return false;
-    }
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
+    DeserializationError err = deserializeJson(doc, file);
+    file.close();
     if (err)
         return false;
 
@@ -573,42 +405,10 @@ bool ProfileManager::saveProfile(Profile &profile) {
     // collision; mint a fresh id instead. A matching id is a legitimate in-place
     // edit and is left untouched.
     if (!isNew && profileExists(profile.id)) {
-        // PRO-341 (Ref PRO-334, PR #330, finding #1): loadProfile() now sits
-        // behind the internal-DRAM pre-flight gate (readProfileFileBounded,
-        // shouldAttemptSdRead). Below the floor it returns false for a MEMORY
-        // reason, which is indistinguishable from "not found" at this call
-        // site. If we let that false short-circuit the collision check, the
-        // guard is silently skipped and the open("w") below could clobber an
-        // unrelated (legacy mismatched-stem) profile. Fail safe instead: when
-        // the gate would refuse the read, treat it exactly like a detected
-        // collision and mint a fresh id rather than risk an overwrite. The
-        // normal (sufficient-DRAM) path is unchanged: the gate is true, this
-        // branch is skipped, and the read-based check runs as before.
-        //
-        // PRO-344 (Ref PRO-341, PR #333, finding #1): below the floor this
-        // branch fires for EVERY existing-id save, including the common safe
-        // case of editing your own profile (stem == in-file id, no real
-        // collision). Without the read it is refusing, the gate cannot tell a
-        // safe in-place edit from a dangerous mismatched-stem collision, so it
-        // conservatively mints a fresh id, sets isNew = true, and the tail
-        // auto-favorites it. The net effect: a safe in-place edit is converted
-        // into a renamed, auto-favorited duplicate and the ORIGINAL file is
-        // left untouched. That is the unavoidable price of failing safe, and an
-        // accepted tradeoff -- the "normal-path unchanged" guarantee therefore
-        // holds only AT/ABOVE the floor.
-        if (!shouldAttemptSdRead(gmInternalLargestBlock())) {
-            // Log BEFORE overwriting profile.id so %s prints the ORIGINAL id
-            // the user was trying to save (the diagnostically useful value).
-            ESP_LOGW("ProfileManager", "saveProfile: internal DRAM below floor; failing safe to a fresh id for %s",
-                     profile.id.c_str());
+        Profile existing{};
+        if (loadProfile(profile.id, existing) && existing.id != profile.id) {
             profile.id = generateShortID();
             isNew = true;
-        } else {
-            Profile existing{};
-            if (loadProfile(profile.id, existing) && existing.id != profile.id) {
-                profile.id = generateShortID();
-                isNew = true;
-            }
         }
     }
 
@@ -673,11 +473,6 @@ void ProfileManager::selectProfile(const String &uuid) {
 
 Profile &ProfileManager::getSelectedProfile() { return selectedProfile; }
 
-// NOTE (PRO-342): loadSelectedProfile()/loadProfile() are also invoked on the
-// DISPLAY-LOOP (UI) task (see DefaultUI.cpp call sites), not just AsyncTCP. The
-// shared internal-DRAM pre-flight gate in readProfileFileBounded() degrades to
-// a failed profile load (not the async-path WDT reboot) under memory pressure
-// here -- see the residual-risk note on that helper above.
 bool ProfileManager::loadSelectedProfile(Profile &outProfile) { return loadProfile(_settings.getSelectedProfile(), outProfile); }
 
 std::vector<String> ProfileManager::getFavoritedProfiles(bool validate) {

@@ -13,8 +13,7 @@ void NimBLEClientController::initClient() {
     ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
     NimBLEDevice::init("GPBLC");
-    NimBLEDevice::setPower(9); // +9 dBm. NimBLE 2.x: setPower takes int8_t dBm, not the
-                               // esp_power_level_t enum (whose ESP_PWR_LVL_P9 value is 7, not 9). PRO-290.
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
     client = NimBLEDevice::createClient();
     scanner = NimBLEDevice::getScan();
@@ -31,16 +30,14 @@ void NimBLEClientController::initClient() {
 
 void NimBLEClientController::scan() {
     readyForConnection = false;
-    // NimBLE 2.x: setAdvertisedDeviceCallbacks() -> setScanCallbacks(); and
-    // clearDuplicateCache() was removed — passing restart=true to start() gives
-    // the same fresh-scan effect. PRO-290.
-    scanner->setScanCallbacks(this, true);
+    scanner->clearDuplicateCache();
+    scanner->setAdvertisedDeviceCallbacks(this, true);
     scanner->setInterval(2000);
     scanner->setWindow(100);
     scanner->setMaxResults(0);
     scanner->setDuplicateFilter(false);
     scanner->setActiveScan(true);
-    scanner->start(0, false, true); // duration 0 = continuous; restart=true clears the dup cache
+    scanner->start(0, nullptr, false); // Set to 0 for continuous
 }
 
 void NimBLEClientController::tare() {
@@ -366,8 +363,8 @@ bool NimBLEClientController::isReadyForConnection() const { return readyForConne
 
 bool NimBLEClientController::isConnected() { return client != nullptr && client->isConnected(); }
 
-// NimBLEScanCallbacks override (NimBLE 2.x: onResult now takes a const pointer)
-void NimBLEClientController::onResult(const NimBLEAdvertisedDevice *advertisedDevice) {
+// BLEAdvertisedDeviceCallbacks override
+void NimBLEClientController::onResult(NimBLEAdvertisedDevice *advertisedDevice) {
     ESP_LOGV(LOG_TAG, "Advertised Device found: %s \n", advertisedDevice->toString().c_str());
 
     // Check if this is the device we're looking for
@@ -384,8 +381,7 @@ void NimBLEClientController::onResult(const NimBLEAdvertisedDevice *advertisedDe
     }
 }
 
-// NimBLEClientCallbacks override (NimBLE 2.x: + int reason)
-void NimBLEClientController::onDisconnect(NimBLEClient *pClient, int reason) {
+void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     ESP_LOGI(LOG_TAG, "Disconnected from server, trying to reconnect...");
     tempControlChar = nullptr;
     pumpControlChar = nullptr;

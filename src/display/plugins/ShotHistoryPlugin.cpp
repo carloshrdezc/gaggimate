@@ -2,8 +2,8 @@
 
 #include "ExtendedRecordingPolicy.h"
 #include "ShotIndexMetadataPolicy.h"
-#include <LittleFS.h>
 #include <SD_MMC.h>
+#include <LittleFS.h>
 #include <algorithm>
 #include <cmath>
 #include <display/core/Controller.h>
@@ -72,7 +72,9 @@ String padId(uint32_t id, int length = 10) {
     return String(buffer);
 }
 
-String padId(const String &id, int length = 10) { return padId((uint32_t)id.toInt(), length); }
+String padId(const String& id, int length = 10) {
+    return padId((uint32_t)id.toInt(), length);
+}
 
 String normalizeBeanName(String value) {
     value.trim();
@@ -174,7 +176,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         fs = &SD_MMC;
         ESP_LOGI("ShotHistoryPlugin", "Logging shot history to SD card");
     }
-
+    
     // Create mutex for thread-safe access to shared state
     stateMutex = xSemaphoreCreateMutex();
     if (stateMutex == nullptr) {
@@ -188,7 +190,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create index mutex");
         return;
     }
-
+    
     pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
     pm->on("controller:brew:end", [this](Event const &) { endRecording(); });
     pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
@@ -202,22 +204,24 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
             endRecording(false);
         }
     });
-    pm->on("controller:volumetric-measurement:estimation:change", [this](Event const &event) {
-        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-            currentEstimatedWeight = event.getFloat("value");
-            xSemaphoreGive(stateMutex);
-        } else {
-            ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
-        }
-    });
-    pm->on("controller:volumetric-measurement:bluetooth:change", [this](Event const &event) {
-        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-            currentBluetoothWeight = event.getFloat("value");
-            xSemaphoreGive(stateMutex);
-        } else {
-            ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
-        }
-    });
+    pm->on("controller:volumetric-measurement:estimation:change",
+           [this](Event const &event) {
+               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+                   currentEstimatedWeight = event.getFloat("value");
+                   xSemaphoreGive(stateMutex);
+               } else {
+                   ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
+               }
+           });
+    pm->on("controller:volumetric-measurement:bluetooth:change",
+           [this](Event const &event) {
+               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+                   currentBluetoothWeight = event.getFloat("value");
+                   xSemaphoreGive(stateMutex);
+               } else {
+                   ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
+               }
+           });
     pm->on("boiler:currentTemperature:change", [this](Event const &event) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentTemperature = event.getFloat("value");
@@ -236,7 +240,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     });
     // Initialize rebuild state
     rebuildInProgress = false;
-
+    
     // Only create task if mutex was successfully created
     if (stateMutex != nullptr) {
         xTaskCreatePinnedToCore(loopTask, "ShotHistoryPlugin::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 0);
@@ -306,7 +310,7 @@ void ShotHistoryPlugin::initializeHeader() {
 ShotLogSample ShotHistoryPlugin::createSample(float bluetoothWeight, float estimatedWeight, float temperature,
                                               float puckResistance) {
     ShotLogSample sample{};
-
+    
     if (!controller) {
         ESP_LOGE("ShotHistoryPlugin", "Controller is null in createSample");
         return sample;
@@ -332,13 +336,12 @@ ShotLogSample ShotHistoryPlugin::createSample(float bluetoothWeight, float estim
 }
 
 void ShotHistoryPlugin::updateBluetoothFlow(float bluetoothWeight) {
-    static constexpr float BLUETOOTH_FLOW_SAMPLE_INTERVAL = 0.25f;  // 250ms sample interval
+    static constexpr float BLUETOOTH_FLOW_SAMPLE_INTERVAL = 0.25f; // 250ms sample interval
     static constexpr float BLUETOOTH_FLOW_SMOOTHING_FACTOR = 0.25f; // 25% new, 75% old
-
+    
     float btDiff = bluetoothWeight - lastBluetoothWeight;
     float btFlow = btDiff / BLUETOOTH_FLOW_SAMPLE_INTERVAL;
-    currentBluetoothFlow =
-        currentBluetoothFlow * (1.0f - BLUETOOTH_FLOW_SMOOTHING_FACTOR) + btFlow * BLUETOOTH_FLOW_SMOOTHING_FACTOR;
+    currentBluetoothFlow = currentBluetoothFlow * (1.0f - BLUETOOTH_FLOW_SMOOTHING_FACTOR) + btFlow * BLUETOOTH_FLOW_SMOOTHING_FACTOR;
     lastBluetoothWeight = bluetoothWeight;
 }
 
@@ -401,7 +404,9 @@ void ShotHistoryPlugin::patchHeaderWithFinalData(float finalBluetoothWeight) {
     currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
 }
 
-bool ShotHistoryPlugin::isShotTooShort() const { return header.durationMs <= MIN_VALID_SHOT_DURATION_MS; }
+bool ShotHistoryPlugin::isShotTooShort() const {
+    return header.durationMs <= MIN_VALID_SHOT_DURATION_MS;
+}
 
 void ShotHistoryPlugin::handleFailedShot() {
     fs->remove("/h/" + currentId + ".slog");
@@ -466,6 +471,7 @@ void ShotHistoryPlugin::appendCompletedShotToIndex(bool hasNotes) {
         ESP_LOGE("ShotHistoryPlugin", "CRITICAL: Failed to add completed shot %u to index", indexEntry.id);
     }
 }
+
 
 void ShotHistoryPlugin::record() {
     // PRO-277: stateMutex protects the cross-task scalar telemetry
@@ -625,12 +631,12 @@ void ShotHistoryPlugin::startRecording() {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for startRecording");
         return;
     }
-
+    
     if (!controller) {
         xSemaphoreGive(stateMutex);
         return;
     }
-
+    
     // Use thread-safe method to check process type and utility status
     if (controller->getProcessType() == MODE_BREW && controller->isBrewProcessUtility()) {
         xSemaphoreGive(stateMutex);
@@ -644,8 +650,8 @@ void ShotHistoryPlugin::startRecording() {
     lastStableWeight = 0.0f;
     currentEstimatedWeight = 0.0f;
     currentBluetoothFlow = 0.0f;
-    currentProfileName =
-        controller->getProcessType() == MODE_MANUAL ? "Manual" : controller->getProfileManager()->getSelectedProfile().label;
+    currentProfileName = controller->getProcessType() == MODE_MANUAL ? "Manual"
+                                                                     : controller->getProfileManager()->getSelectedProfile().label;
     currentBeanName = controller->getSettings().getSelectedBean();
     recording = true;
     extendedRecording = false;
@@ -658,7 +664,7 @@ void ShotHistoryPlugin::startRecording() {
 
     // Capture initial volumetric mode state (brew by weight vs brew by time)
     shotStartedVolumetric = controller->getSettings().isVolumetricTarget();
-
+    
     xSemaphoreGive(stateMutex);
 }
 
@@ -674,7 +680,7 @@ void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endRecording");
         return;
     }
-
+    
     // PRO-232: Open the post-stop settle window whenever a live BLE scale was the
     // active volumetric source at brew-end, gating on isBluetoothScaleHealthy()
     // rather than the instantaneous currentBluetoothWeight sample.
@@ -706,7 +712,7 @@ void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
     }
 
     recording = false;
-
+    
     xSemaphoreGive(stateMutex);
 }
 
@@ -716,11 +722,11 @@ void ShotHistoryPlugin::endExtendedRecording() {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endExtendedRecording");
         return;
     }
-
+    
     if (extendedRecording) {
         extendedRecording = false;
     }
-
+    
     xSemaphoreGive(stateMutex);
 }
 
@@ -733,7 +739,7 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
 
     // Get current profile to extract phase name
     Profile profile = controller->getProfileManager()->getSelectedProfile();
-
+    
     // Validate phaseNumber bounds before accessing profile data
     if (phaseNumber >= profile.phases.size() || phaseNumber >= 255) {
         // Use fallback for out-of-bounds phase numbers
@@ -743,8 +749,7 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
         transition.reserved = 0;
         snprintf(transition.phaseName, sizeof(transition.phaseName), "Phase %d", phaseNumber + 1);
         header.phaseTransitionCount++;
-        ESP_LOGD("ShotHistoryPlugin", "Recorded phase transition to phase %d (fallback name) at sample %d", phaseNumber,
-                 sampleIndex);
+        ESP_LOGD("ShotHistoryPlugin", "Recorded phase transition to phase %d (fallback name) at sample %d", phaseNumber, sampleIndex);
         return;
     }
 
@@ -753,7 +758,7 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
     transition.sampleIndex = sampleIndex;
     transition.phaseNumber = phaseNumber;
     transition.reserved = 0;
-
+    
     strncpy(transition.phaseName, profile.phases[phaseNumber].name.c_str(), sizeof(transition.phaseName) - 1);
     transition.phaseName[sizeof(transition.phaseName) - 1] = '\0';
 
@@ -849,7 +854,7 @@ size_t ShotHistoryPlugin::getFreeSpace() {
     if (!controller) {
         return 0;
     }
-
+    
     if (controller->isSDCard()) {
         uint64_t total = SD_MMC.totalBytes();
         uint64_t used = SD_MMC.usedBytes();
@@ -878,23 +883,21 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
                     // Read header only
                     ShotLogHeader hdr{};
                     size_t bytesRead = file.read(reinterpret_cast<uint8_t *>(&hdr), sizeof(hdr));
-
+                    
                     // Validate read size
                     if (bytesRead != sizeof(hdr)) {
-                        ESP_LOGW("ShotHistoryPlugin", "Failed to read header from %s: expected %zu bytes, got %zu", fname.c_str(),
-                                 sizeof(hdr), bytesRead);
+                        ESP_LOGW("ShotHistoryPlugin", "Failed to read header from %s: expected %zu bytes, got %zu", fname.c_str(), sizeof(hdr), bytesRead);
                         file = root.openNextFile();
                         continue;
                     }
-
+                    
                     // Validate magic number
                     if (hdr.magic != SHOT_LOG_MAGIC) {
-                        ESP_LOGW("ShotHistoryPlugin", "Invalid magic number in %s: 0x%08X (expected 0x%08X)", fname.c_str(),
-                                 hdr.magic, SHOT_LOG_MAGIC);
+                        ESP_LOGW("ShotHistoryPlugin", "Invalid magic number in %s: 0x%08X (expected 0x%08X)", fname.c_str(), hdr.magic, SHOT_LOG_MAGIC);
                         file = root.openNextFile();
                         continue;
                     }
-
+                    
                     // File is valid, process it
                     float finalWeight = hdr.finalWeight > 0 ? static_cast<float>(hdr.finalWeight) / WEIGHT_SCALE : 0.0f;
 
@@ -1043,7 +1046,8 @@ bool ShotHistoryPlugin::applyBeanUsageDelta(JsonVariantConst previousNotes, Json
 
     BeanEntry previousOriginal;
     const bool previousChanged = previousBeanIndex >= 0 && previousBeanIndex < static_cast<int>(beans.size()) &&
-                                 std::isfinite(previousDose) && previousDose != 0.0f && beans[previousBeanIndex].quantity >= 0.0f;
+                                 std::isfinite(previousDose) && previousDose != 0.0f &&
+                                 beans[previousBeanIndex].quantity >= 0.0f;
     if (!adjustBean(previousBeanIndex, previousDose, previousChanged ? &previousOriginal : nullptr)) {
         return false;
     }
