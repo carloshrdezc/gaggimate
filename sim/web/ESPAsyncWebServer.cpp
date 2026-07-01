@@ -2,6 +2,12 @@
 // HTTP/1.1 + WebSocket (RFC 6455) server, pumped from the simulator main loop.
 #include "ESPAsyncWebServer.h"
 
+// PRO-362: the ".." path-traversal segment guard was extracted verbatim into a
+// shared header-only predicate so the sim guard (below) and the host unit tests
+// (test/test_path_traversal_guard) share a single source of truth. `src` is on
+// the sim include path (scripts/sim_sdl_flags.py adds -I <proj>/src).
+#include "display/plugins/PathTraversalPolicy.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -521,28 +527,10 @@ static std::string urlDecode(const std::string &s) {
     return out;
 }
 
-// Reject any path containing a ".." parent-directory SEGMENT, to prevent
-// path traversal out of the WebUI document root (PRO-208). URL paths use '/'
-// separators on every platform, but a URL-supplied segment like "..\\x" would be
-// served verbatim and could traverse on a Windows host, where '\\' is also an OS
-// path separator. So BOTH '/' and '\\' are treated as segment separators here
-// (Windows-host hardening, Ref PRO-340 / PR #326 / PRO-208). A whole segment
-// equal to ".." (bounded by either separator or the string ends) is the attack;
-// an embedded ".." inside an otherwise normal filename (e.g. "foo..bar.js") is a
-// legitimate asset and is allowed.
-static bool hasTraversalSegment(const std::string &p) {
-    size_t start = 0;
-    while (start <= p.size()) {
-        size_t sep = p.find_first_of("/\\", start);
-        size_t end = (sep == std::string::npos) ? p.size() : sep;
-        if (end - start == 2 && p.compare(start, 2, "..") == 0)
-            return true;
-        if (sep == std::string::npos)
-            break;
-        start = sep + 1;
-    }
-    return false;
-}
+// PRO-362: hasTraversalSegment() moved verbatim to
+// src/display/plugins/PathTraversalPolicy.h (included at the top of this file)
+// so the sim guard and the host unit tests share one definition. Behavior is
+// unchanged — see the doc comment there. Called below at the serveWebAsset path.
 
 // Parse a multipart/form-data body into name=value args (the WebUI posts settings
 // as FormData). File parts (with a filename) are skipped — the settings form has none.
