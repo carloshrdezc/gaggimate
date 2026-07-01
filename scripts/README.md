@@ -103,7 +103,10 @@ any firmware / platform / lib-pin PR.
   it back via `GET /api/settings`, assert it persisted — catches PRO-331.
 
 Fails with a non-zero exit on any assertion miss and always saves the captured
-serial to an artifact file.
+serial to an artifact file. Exit code 2 / `RESULT: INCOMPLETE` is returned
+instead of pass/fail when the PRO-331 settings round-trip gate was skipped (no
+`--base-url` given and `--skip-settings-roundtrip` not passed) — treat it as
+not-safe-to-tag, not as a pass.
 
 **Usage:**
 ```bash
