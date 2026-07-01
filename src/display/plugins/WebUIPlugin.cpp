@@ -739,32 +739,12 @@ void WebUIPlugin::setupServer() {
             // app-side walk is the complete fix this library permits without
             // forking it. See the invariant at the `ws` declaration.
             if (type == WS_EVT_CONNECT) {
-                // PRO-357: do NOT enable setCloseClientOnQueueFull(true). With it
-                // enabled, AsyncWebSocketClient::_queueMessage() reacts to a full
-                // TX queue by calling _client->close() INLINE, synchronously, on
-                // whatever task is sending — which (per ESPAsyncWebServer v3.9.1)
-                // drives ~AsyncWebSocketClient() -> _handleEvent(WS_EVT_DISCONNECT)
-                // right here in this same onEvent handler. When the send is
-                // loopTask's broadcastAll() -> ws.textAll() (which holds wsMutex),
-                // that inline disconnect branch RE-TAKES the non-recursive wsMutex
-                // on the same task -> self-deadlock; the AsyncTCP task then blocks
-                // forever on wsMutex too and the Task Watchdog reboots the board
-                // (PRO-357 coredump: "Task watchdog got triggered ... async_tcp").
-                // Leaving it false makes a full queue DROP the new frame (queue is
-                // hard-capped at WS_MAX_QUEUED_MESSAGES, so no unbounded growth)
-                // instead of force-closing; the periodic evt:status heartbeat
-                // resends fresh state on the next tick, and a genuinely dead
-                // connection is still reaped by AsyncTCP's own _onTimeout->close()
-                // (which runs on the AsyncTCP task, NOT under a held wsMutex). The
-                // explicit abuse-close on the WS_EVT_DATA reassembly-cap path
-                // (handleWebSocketData -> client->close(1009)) is unaffected and
-                // still runs. See broadcastAll() and the `ws` invariant.
-                //
-                // Pin the decision (PRO-357): broadcastAll() sends under wsMutex
-                // and wsMutex is non-recursive, so the library's inline close is
-                // NOT safe to enable here. If a future change makes the send
-                // lock-free or the mutex recursive, this assert documents what
-                // must be re-evaluated before re-enabling setCloseClientOnQueueFull.
+                // PRO-357: leave setCloseClientOnQueueFull(false). The library's
+                // inline close-on-queue-full would re-enter WS_EVT_DISCONNECT on the
+                // sending task and self-deadlock the non-recursive wsMutex held by
+                // broadcastAll() -> ws.textAll(). Full rationale (the coredump, the
+                // fix, and the safety predicate's params) lives in
+                // WsBroadcastClosePolicy.h.
                 static_assert(!wsInlineCloseOnQueueFullIsSafe(/*sendsUnderSerializationLock=*/true,
                                                               /*mutexIsRecursive=*/false),
                               "WS broadcast sends under a non-recursive wsMutex: inline close-on-queue-full would "
