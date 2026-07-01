@@ -414,6 +414,20 @@ void BLEScalePlugin::establishConnection() {
                 // driver-dispatch-boundary deregistration handshake (scoped out of
                 // PR #337 as disproportionate for this plugin and high-regression on
                 // the vendored driver layer) — to bound the residual tail.
+                //
+                // CAVEAT (PRO-361): the host-task-ordering guarantee above covers only
+                // the CONNECTED/DISCONNECTING path, where deleteClient() DEFERS the
+                // client free to the BLE_GAP_EVENT_DISCONNECT handler on the host task.
+                // deleteClient() has a THIRD branch: when the client is ALREADY fully
+                // disconnected, it runs `delete clt` INLINE on the CALLER's task (the
+                // task that called disconnect() -> scale=nullptr -> ~RemoteScales() ->
+                // clientCleanup() -> deleteClient()). The "serialized after the notify
+                // frame on the host task" ordering does NOT apply to that inline branch.
+                // This is not a defect in this plugin: an already-disconnected teardown
+                // has no live notify frame to race, and the callbackInFlight drain plus
+                // the active=false short-circuit already fence the onMeasurement leg. The
+                // note exists only so a future reader does not over-trust the
+                // host-task-ordering guarantee for the already-disconnected case.
                 struct CallbackInFlightGuard {
                     ~CallbackInFlightGuard() { BLEScales.markCallbackInFlight(false); }
                 };
