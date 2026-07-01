@@ -143,6 +143,63 @@ void test_default_thresholds_are_ordered(void) {
     TEST_ASSERT_TRUE(WIFI_WATCHDOG_GRACE_MS > 0);
 }
 
+// PRO-365: staLinkUsable() decides whether the STA link is actually usable, not
+// merely associated. A HomeKit/HomeSpan ASSOC_LEAVE -> AUTH_EXPIRE loop can
+// leave the ESP32 in a half-open state where WiFi.status() still reports
+// WL_CONNECTED (statusConnected=true) but the DHCP lease is gone
+// (hasValidIp=false). The old watchdog judged liveness on status alone, so it
+// kept zeroing the down-clock and the recovery path never fired. The link is
+// usable only when BOTH the association AND a routable IP are present.
+
+// Associated with a valid IP: the only genuinely usable state.
+void test_link_usable_when_connected_with_ip(void) { TEST_ASSERT_TRUE(staLinkUsable(true, true)); }
+
+// The PRO-365 bug shape: associated but no routable IP (half-open AUTH_EXPIRE).
+// Must be treated as DOWN so the down-clock advances and recovery proceeds.
+void test_link_down_when_connected_without_ip(void) { TEST_ASSERT_FALSE(staLinkUsable(true, false)); }
+
+// Not associated: down regardless of any stale IP the netif might still report.
+void test_link_down_when_not_connected(void) {
+    TEST_ASSERT_FALSE(staLinkUsable(false, true));
+    TEST_ASSERT_FALSE(staLinkUsable(false, false));
+}
+
+// PRO-365 end-to-end at the pure level: feed staLinkUsable() into the same
+// staConnected slot wifiWatchdogAction() reads and confirm the half-open
+// association (associated, no IP) now progresses NONE -> RECONNECT -> OPEN_SOFTAP
+// exactly like a hard disconnect, instead of being frozen as "connected". This
+// is the regression that pins the fix: before PRO-365, WiFi.status()==WL_CONNECTED
+// alone reported the link up and the watchdog never acted.
+void test_half_open_association_progresses_to_recovery(void) {
+    // Half-open: associated but no routable IP -> the watchdog must see "down".
+    const bool halfOpenConnected = staLinkUsable(/*statusConnected*/ true, /*hasValidIp*/ false);
+    TEST_ASSERT_FALSE(halfOpenConnected);
+
+    // Within grace: hold off (auto-reconnect gets a chance).
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::NONE),
+                          static_cast<int>(wifiWatchdogAction(halfOpenConnected, /*apMode*/ false, /*staConfigured*/ true,
+                                                              WIFI_WATCHDOG_GRACE_MS - 1, WIFI_WATCHDOG_GRACE_MS,
+                                                              WIFI_WATCHDOG_FALLBACK_MS)));
+    // Past grace: re-assert STA.
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::RECONNECT),
+                          static_cast<int>(wifiWatchdogAction(halfOpenConnected, false, true, WIFI_WATCHDOG_GRACE_MS,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+    // Past fallback: open SoftAP so the user is never locked out.
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::OPEN_SOFTAP),
+                          static_cast<int>(wifiWatchdogAction(halfOpenConnected, false, true, WIFI_WATCHDOG_FALLBACK_MS,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+}
+
+// A genuinely healthy link (associated + IP) still short-circuits to NONE even
+// well past the fallback window — the fix must not make a good link look down.
+void test_healthy_link_is_noop_past_fallback(void) {
+    const bool healthyConnected = staLinkUsable(/*statusConnected*/ true, /*hasValidIp*/ true);
+    TEST_ASSERT_TRUE(healthyConnected);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WiFiWatchdogAction::NONE),
+                          static_cast<int>(wifiWatchdogAction(healthyConnected, false, true, WIFI_WATCHDOG_FALLBACK_MS * 4,
+                                                              WIFI_WATCHDOG_GRACE_MS, WIFI_WATCHDOG_FALLBACK_MS)));
+}
+
 static int runWiFiFallbackPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_connected_is_noop);
@@ -157,6 +214,11 @@ static int runWiFiFallbackPolicyTests() {
     RUN_TEST(test_ap_mode_is_noop_regardless_of_down_time);
     RUN_TEST(test_rearm_after_softap_then_sta_recovery);
     RUN_TEST(test_default_thresholds_are_ordered);
+    RUN_TEST(test_link_usable_when_connected_with_ip);
+    RUN_TEST(test_link_down_when_connected_without_ip);
+    RUN_TEST(test_link_down_when_not_connected);
+    RUN_TEST(test_half_open_association_progresses_to_recovery);
+    RUN_TEST(test_healthy_link_is_noop_past_fallback);
     return UNITY_END();
 }
 

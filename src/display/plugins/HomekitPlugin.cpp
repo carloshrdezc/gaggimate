@@ -3,6 +3,7 @@
 #include "../core/Controller.h"
 #include "../core/HeapDiag.h"
 #include "../core/constants.h"
+#include <WiFi.h>
 #include <cmath>
 #include <utility>
 
@@ -117,6 +118,20 @@ void HomekitPlugin::initializeHomekit() {
     // Bracket its bring-up so the per-component cost is visible on serial.
     GM_LOG_INTERNAL_DRAM("before HomeSpan begin");
     homeSpan.begin(Category::Thermostats, DEVICE_NAME, this->controller->getSettings().getMdnsName().c_str());
+
+    // PRO-365: HomeSpan's init() (called inside homeSpan.begin()) sets
+    // WiFi.setAutoReconnect(false) early in boot because it expects to manage
+    // reconnects itself. Since PRO-333 neutralized HomeSpan's WiFi.begin() via
+    // setWifiBegin([]{}), nothing re-arms the Arduino stack's own reconnect after
+    // that, leaving Controller::wifiWatchdog() as the *sole* recovery driver. As
+    // defense-in-depth for the AUTH_EXPIRE drop, restore auto-reconnect here so
+    // the Arduino stack independently retries the last real WiFi.begin() (the one
+    // Controller::setupWifi() issued with the configured credentials) alongside
+    // the watchdog. This is safe and does NOT reintroduce the PRO-333 double-WiFi-
+    // driver problem: auto-reconnect only re-issues the LAST begin() — HomeSpan's
+    // begin() is a no-op, so it re-associates Controller's credentials, never
+    // HomeSpan's radio path.
+    WiFi.setAutoReconnect(true);
 
     spanAccessory = new SpanAccessory();
     accessoryInformation = new Service::AccessoryInformation();

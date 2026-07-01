@@ -482,7 +482,19 @@ void Controller::wifiWatchdog() {
     }
     lastWifiWatchdog = now;
 
-    const bool connected = WiFi.status() == WL_CONNECTED;
+    // PRO-365: the STA link is "up" only when the driver reports associated AND
+    // we actually hold a routable IP. During a HomeKit/HomeSpan ASSOC_LEAVE ->
+    // AUTH_EXPIRE loop (or a router-side deauth) the ESP32 can sit in a half-open
+    // association where WiFi.status() still returns WL_CONNECTED while the DHCP
+    // lease is gone (localIP() == 0.0.0.0) and the device is unreachable. Judging
+    // liveness on WiFi.status() alone left the down-clock pinned at 0 forever in
+    // that state, so RECONNECT/OPEN_SOFTAP never fired and the device stayed
+    // stranded until a manual reboot. staLinkUsable() (host-tested in
+    // WiFiFallbackPolicy.h) treats "associated but no IP" as DOWN so recovery
+    // proceeds. INADDR_ANY (0.0.0.0) is the no-lease sentinel here, not
+    // INADDR_NONE.
+    const bool hasValidIp = WiFi.localIP() != IPAddress(static_cast<uint32_t>(0));
+    const bool connected = staLinkUsable(WiFi.status() == WL_CONNECTED, hasValidIp);
     if (connected) {
         staDownSince = 0;
         return;
@@ -494,11 +506,12 @@ void Controller::wifiWatchdog() {
     }
     const unsigned long downForMs = now - staDownSince;
 
-    // `connected` is provably false here: the early return above bails when
-    // WiFi.status() == WL_CONNECTED, so the watchdog only reaches this point on
-    // a down link. Pass a literal false rather than `connected` so the call site
-    // does not imply a live runtime branch that cannot occur. The pure function
-    // keeps the parameter for host-test coverage of both values.
+    // `connected` is provably false here: the early return above bails when the
+    // STA link is usable (associated AND holding a routable IP), so the watchdog
+    // only reaches this point on a down link. Pass a literal false rather than
+    // `connected` so the call site does not imply a live runtime branch that
+    // cannot occur. The pure function keeps the parameter for host-test coverage
+    // of both values.
     switch (wifiWatchdogAction(/*staConnected*/ false, isApConnection, staConfigured, downForMs, WIFI_WATCHDOG_GRACE_MS,
                                WIFI_WATCHDOG_FALLBACK_MS)) {
     case WiFiWatchdogAction::RECONNECT:
