@@ -157,6 +157,12 @@ python3 scripts/boot_smoke_test.py --skip-settings-roundtrip
   assertion names the bug class it maps to (e.g. a `LoadProhibited` hit points
   at the PRO-330 class; a failed settings round-trip points at PRO-331). **Do
   not tag the nightly.**
+- **Exit code 2 / `RESULT: INCOMPLETE`** — the PRO-331 settings round-trip gate
+  did not run (usually because `--base-url` was omitted without
+  `--skip-settings-roundtrip`). Boot health may have passed, but a skipped gate
+  is NOT a green result: **do not tag the nightly** — re-run with
+  `--base-url http://<board-ip>` (or explicitly pass `--skip-settings-roundtrip`
+  if you intend to skip it).
 - The full captured boot serial is always saved to the artifact file
   (`boot_smoke_serial.log` by default, plus `*.roundtrip` for the second boot) —
   attach it to the issue / PR when reporting a failure.
