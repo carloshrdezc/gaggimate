@@ -290,7 +290,7 @@ class Settings {
     bool cloudRelayEnabled = false;
 
     void doSave();
-    xTaskHandle taskHandle;
+    xTaskHandle taskHandle = nullptr;
     [[noreturn]] static void loopTask(void *arg);
 };
 
