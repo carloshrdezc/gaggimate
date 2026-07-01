@@ -68,6 +68,27 @@ constexpr WiFiWatchdogAction wifiWatchdogAction(bool staConnected, bool apMode, 
     return WiFiWatchdogAction::NONE;
 }
 
+// PRO-365: decide whether the STA link is actually USABLE, not merely
+// "associated". The watchdog originally treated `WiFi.status() == WL_CONNECTED`
+// as the sole liveness signal. During a HomeKit/HomeSpan ASSOC_LEAVE ->
+// AUTH_EXPIRE loop (and some router-side deauth / half-open cases) the ESP32 STA
+// can sit in a half-open association where WiFi.status() still reports
+// WL_CONNECTED even though the link is unusable: the DHCP lease was dropped, so
+// there is no routable IP and the device is unreachable. In that state the
+// watchdog's `connected` branch kept zeroing the down-clock every tick, so the
+// RECONNECT / OPEN_SOFTAP recovery path never fired and the device stayed
+// stranded until a manual reboot (the reported PRO-365 symptom: ~78 min uptime,
+// zero WiFi/reconnect log activity).
+//
+// The link is only usable when BOTH hold: the driver reports associated
+// (statusConnected) AND we hold a valid, routable STA IP (hasValidIp; i.e.
+// WiFi.localIP() != 0.0.0.0, the no-DHCP-lease sentinel). Treating "associated
+// but no IP" as DOWN lets the down-clock advance and recovery proceed. Kept
+// pure (no Arduino / WiFi headers) so [env:native] can cover it; the Controller
+// computes the two booleans from WiFi.status() and WiFi.localIP() at the call
+// site.
+constexpr bool staLinkUsable(bool statusConnected, bool hasValidIp) { return statusConnected && hasValidIp; }
+
 // Default thresholds used by Controller. Kept here so the firmware and the host
 // test share one source of truth.
 //   - 15s grace: long enough that a normal auto-reconnect (which retries on the
