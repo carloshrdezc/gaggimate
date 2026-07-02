@@ -49,8 +49,12 @@ semver_t from_string(const string &version) {
         patch = atoi(numbers.at(2).substr(0, split_at).c_str());
         auto prerelease = numbers.at(2).substr(split_at + 1);
         prerelease_ptr = (char *)malloc(prerelease.length() + 1);
-        prerelease.copy(prerelease_ptr, prerelease.length());
-        prerelease_ptr[prerelease.length()] = '\0';
+        if (prerelease_ptr != nullptr) {
+            prerelease.copy(prerelease_ptr, prerelease.length());
+            prerelease_ptr[prerelease.length()] = '\0';
+        }
+        // On malloc failure prerelease_ptr stays nullptr, which is the well-defined
+        // "no prerelease" representation (render_to_string guards prerelease != nullptr).
     } else {
         patch = atoi(numbers.at(2).c_str());
     }
