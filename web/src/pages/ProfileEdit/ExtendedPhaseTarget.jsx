@@ -58,6 +58,7 @@ export function ExtendedPhaseTarget({ onChange, target, index, onRemove }) {
                   id={`phase-${index}-target-value`}
                   className='grow'
                   type='number'
+                  inputMode='decimal'
                   value={target.value || 0}
                   onChange={e =>
                     onChange({

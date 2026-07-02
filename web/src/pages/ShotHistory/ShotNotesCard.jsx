@@ -381,6 +381,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
           {isEditing ? (
             <input
               type='number'
+              inputMode='decimal'
               step='0.1'
               className='nd-input'
               value={notes.doseIn}
@@ -402,6 +403,7 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
           {isEditing ? (
             <input
               type='number'
+              inputMode='decimal'
               step='0.1'
               className='nd-input'
               value={notes.doseOut}

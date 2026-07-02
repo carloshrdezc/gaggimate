@@ -119,6 +119,7 @@ export function NotesBarExpanded({
                 <div className={`${labelCls} mb-1`}>Dose In (g)</div>
                 <input
                   type='number'
+                  inputMode='decimal'
                   step='0.1'
                   className={inputCls}
                   value={notes.doseIn}
@@ -130,6 +131,7 @@ export function NotesBarExpanded({
                 <div className={`${labelCls} mb-1`}>Dose Out (g)</div>
                 <input
                   type='number'
+                  inputMode='decimal'
                   step='0.1'
                   className={inputCls}
                   value={notes.doseOut}
