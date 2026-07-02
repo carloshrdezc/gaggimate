@@ -226,7 +226,7 @@ bool Amoled_DisplayPanel::initTouch() {
 
     if (tmp->begin(Wire, CST92XX_DEVICE_ADDRESS, hwConfig.i2c_sda, hwConfig.i2c_scl)) {
         _touchDrv = tmp;
-        ESP_LOGI("Amoled_DisplayPanel", "Successfully initialized %s!\n", _touchDrv->getModelName());
+        ESP_LOGI("Amoled_DisplayPanel", "Successfully initialized %s!", _touchDrv->getModelName());
         tmp->setMaxCoordinates(466, 466);
         if (hwConfig.mirror_touch) {
             tmp->setMirrorXY(true, true);
@@ -245,7 +245,7 @@ bool Amoled_DisplayPanel::initTouch() {
         tmp2->interruptTrigger();
 
         _touchDrv = tmp2;
-        ESP_LOGI("Amoled_DisplayPanel", "Successfully initialized %s!\n", _touchDrv->getModelName());
+        ESP_LOGI("Amoled_DisplayPanel", "Successfully initialized %s!", _touchDrv->getModelName());
 
         touchType = TOUCH_FT3168;
         panelType = DISPLAY_1_43_INCHES;

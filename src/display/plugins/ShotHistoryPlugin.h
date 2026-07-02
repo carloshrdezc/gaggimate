@@ -3,9 +3,10 @@
 
 #include "PostStopGracePolicy.h"
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <atomic>
 #include <display/core/Plugin.h>
+#include <display/core/VolumetricCoalescer.h>
 #include <display/core/utils.h>
 #include <display/models/shot_log_format.h>
 #include <freertos/FreeRTOS.h>
@@ -54,6 +55,20 @@ class ShotHistoryPlugin : public Plugin {
 
   private:
     // Index helper functions
+    // PRO-277: all four /h/index.bin entry points (appendToIndex, updateIndexMetadata,
+    // markIndexDeleted, rebuildIndex) are reached from MULTIPLE tasks — the ShotHistory
+    // loopTask (record() -> createEarlyIndexEntry / appendCompletedShotToIndex), the
+    // WebUI request task (handleRequest -> updateIndexMetadata / markIndexDeleted), and
+    // the dedicated async-rebuild task. They each did their own fs->open(.."r+") with no
+    // serialization, so concurrent opens of the same file corrupted/lost writes and the
+    // post-shot metadata update could not find a freshly-appended entry. indexMutex
+    // serializes the whole body of each; the public methods take it and delegate to the
+    // *Locked() implementations below. These never call each other, so a non-recursive
+    // mutex is deadlock-free.
+    bool appendToIndexLocked(const ShotIndexEntry &entry);
+    void updateIndexMetadataLocked(uint32_t shotId, uint8_t rating, uint16_t volume);
+    void markIndexDeletedLocked(uint32_t shotId);
+    void rebuildIndexLocked();
     bool readIndexHeader(File &indexFile, ShotIndexHeader &header);
     int findEntryPosition(File &indexFile, const ShotIndexHeader &header, uint32_t shotId);
     bool readEntryAtPosition(File &indexFile, size_t position, ShotIndexEntry &entry);
@@ -69,12 +84,15 @@ class ShotHistoryPlugin : public Plugin {
     // Phase 1 refactoring: extracted helper methods from record()
     bool openLogFileIfNeeded();
     void initializeHeader();
-    ShotLogSample createSample();
-    void updateBluetoothFlow();
+    // PRO-277: createSample / updateBluetoothFlow take the telemetry snapshot
+    // captured under stateMutex in record(), so the file-building work runs
+    // lock-free and can no longer block the event callbacks.
+    ShotLogSample createSample(float bluetoothWeight, float estimatedWeight, float temperature, float puckResistance);
+    void updateBluetoothFlow(float bluetoothWeight);
     bool writeSampleToBuffer(const ShotLogSample &sample);
     void checkEarlyIndexCreation();
-    void closeLogFile();
-    void patchHeaderWithFinalData();
+    void closeLogFile(float finalBluetoothWeight);
+    void patchHeaderWithFinalData(float finalBluetoothWeight);
     bool isShotTooShort() const;
     void handleFailedShot();
     void handleCompletedShot();
@@ -91,7 +109,7 @@ class ShotHistoryPlugin : public Plugin {
 
     Controller *controller = nullptr;
     PluginManager *pluginManager = nullptr;
-    FS *fs = &SPIFFS;
+    FS *fs = &LittleFS;
     String currentId = "";
     bool isFileOpen = false;
     File currentFile;
@@ -113,6 +131,12 @@ class ShotHistoryPlugin : public Plugin {
     unsigned long lastWeightChangeTime = 0;
     float currentTemperature = 0.0f;
     float currentBluetoothWeight = 0.0f;
+    // PRO-367: coalesce-latest for the bluetooth-weight recording handler. The
+    // handler takes stateMutex with a fail-fast timeout; on a failed take the old
+    // code DROPPED the weight, so the RECORDED yield could lag the settled weight.
+    // The scale weight is monotonic cumulative, so we latch the freshest value on
+    // a failed take and apply it on the next successful take instead of dropping.
+    volumetric::Coalescer bluetoothWeightCoalescer{};
     float lastStableWeight = 0.0f;
     float lastBluetoothWeight = 0.0f;
     float currentBluetoothFlow = 0.0f;
@@ -129,6 +153,9 @@ class ShotHistoryPlugin : public Plugin {
 
     xTaskHandle taskHandle;
     SemaphoreHandle_t stateMutex = nullptr; // Protects shared state accessed by record()
+    // PRO-277: serializes every operation on /h/index.bin across the loopTask,
+    // the WebUI request task, and the async-rebuild task (see *Locked helpers above).
+    SemaphoreHandle_t indexMutex = nullptr;
     bool flushBuffer();
     static void loopTask(void *arg);
 };

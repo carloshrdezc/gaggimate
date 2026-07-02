@@ -36,7 +36,7 @@ build_src_filter = -<*> +<controller/>
 
 ### Controller Firmware
 
-Located in `lib/GaggiMateControlle` and `src/controller`.
+Located in `lib/GaggiMateController` and `src/controller`.
 Implements hardware control and BLE communication.
 `GaggiMateController.*` sets up peripherals (heater, pump, valve) and handles safety mechanisms such as thermal runaway shutoff.
 Communication with the display uses the NimBLE library.
@@ -55,7 +55,7 @@ The `web/` directory contains a Preact + Vite project. The README inside explain
 - `npm run build` - Builds for production, emitting to `dist/`
 - `npm run preview` - Starts a server at http://localhost:4173/ to test production build locally
 
-When building the firmware, the scripts/build_spiffs.sh script installs the web dependencies and copies the compiled files to the data/ directory for inclusion in the device’s SPIFFS image.
+When building the firmware, the scripts/build_webui.sh script installs the web dependencies and packs the compiled bundle into src/display/webassets/ for embedding into the device's app image.
 
 ### Next Steps for Learning
 
@@ -71,8 +71,8 @@ When building the firmware, the scripts/build_spiffs.sh script installs the web 
     - Ensure [PlatformIO](https://platformio.org/) is available for firmware builds.
 3. **Build the project** to verify your environment:
     - `platformio run -e display` and `platformio run -e controller` compile the firmware.
-    - `./scripts/builds_spiffs.sh` builds the web assets.
-4. **Upload the Web UI** by running `platformio run -e display -t uploadfs`
+    - `./scripts/build_webui.sh` builds and embeds the web assets.
+4. **Flash the seed filesystem** (optional) by running `platformio run -e display -t uploadfs`. The web UI is embedded in the app image (see step 3), so `uploadfs` only writes the seed-profile filesystem image (`data/p`) — it no longer carries the web UI.
 
 ## Code Style
 

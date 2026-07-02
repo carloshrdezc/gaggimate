@@ -17,11 +17,12 @@ class LedControlPlugin : public Plugin {
     unsigned long lastUpdate = 0;
     bool initialized = false;
 
-    uint8_t last_r = -1;
-    uint8_t last_g = -1;
-    uint8_t last_b = -1;
-    uint8_t last_w = -1;
-    uint8_t last_ext = -1;
+    bool firstSend = true;
+    uint8_t last_r = 0;
+    uint8_t last_g = 0;
+    uint8_t last_b = 0;
+    uint8_t last_w = 0;
+    uint8_t last_ext = 0;
 
     Controller *controller = nullptr;
 };

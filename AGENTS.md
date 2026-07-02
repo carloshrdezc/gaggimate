@@ -7,7 +7,7 @@ This file provides guidance to agents when working with code in this repository.
 **Every task — feature, bug, refactor, chore, brainstorm, research, doc update, investigation — gets a Linear issue. No exceptions.** Use the Linear skill for all tooling decisions; this section defines project-specific rules.
 
 ### Defaults
-- **Team**: the workspace's only team (key `CAR`) — use it without asking.
+- **Team**: coding work lives under team `PRO` (key `PRO`) — use it without asking. (Migration 2026-06: coding issues moved from team `CAR` to team `PRO`; the old `CAR` team now holds personal/non-coding issues only. Historical `CAR-NNN` citations below are preserved as provenance.)
 - **Project**: match by name to the GitHub repo. The default project for this repo is `gaggimate`. Resolution rules:
   1. Look for an exact case-insensitive match on the GitHub repo name (`gaggimate`).
   2. If no exact match, pick the closest existing project by name (e.g. `Gaggimate`, `gaggimate-firmware`).
@@ -39,10 +39,10 @@ The agent must drive the issue through these Linear states as work progresses. N
 Always include Linear magic words in the PR description so the link is automatic:
 
 ```
-Fixes CAR-123
+Fixes PRO-123
 ```
 
-(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref CAR-123` for related-but-not-closed issues.
+(Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref PRO-123` for related-but-not-closed issues.
 
 ### Workflow Per Task
 
@@ -63,8 +63,8 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 
 **Dual-platform project**: ESP32 firmware (PlatformIO) + Preact web UI (Vite)
 - Firmware: `pio run -e display` (display with UI) or `pio run -e display-headless` (no UI)
-- Web UI must be built BEFORE firmware SPIFFS: `cd web && npm ci && npm run build` then run `scripts/build_spiffs.sh`
-- Web assets are gzipped and placed in `data/w/` directory for SPIFFS filesystem
+- Web UI is embedded into the display/headless app image: run `scripts/build_webui.sh` (it runs `npm ci && npm run build` in `web/`, then gzips + packs the bundle into `src/display/webassets/`) before `pio run -e display`. The pre-hook stubs an empty bundle so a bare `pio run -e display` still links without a web build.
+- The fresh-install filesystem image holds only seed profiles (`data/p`); the web UI no longer ships in `data/w`.
 - Version auto-generated from git tags via `scripts/auto_firmware_version.py` into `src/version.h`
 
 ### CI gates (PRs to dev-master) — run these locally before pushing (CAR-341)
@@ -150,7 +150,7 @@ beans onto the same model.
 
 ## Testing
 
-**No test framework configured**: `test/` directory exists but contains only PlatformIO boilerplate. No unit tests currently implemented.
+**Unity host tests on the `native` env**: `test/` holds Unity test suites for pure/host-testable logic (e.g. `test_shot_index_metadata`, `test_extended_recording_policy`, `test_profile_validation`, `test_event_system`, `test_volumetric_target`, `test_ble_scale_scan_policy`, `test_diag_log_tee`). Run them with `pio test -e native` (and `pio test -e native-sanitize` under ASan/UBSan — both are gating CI legs). FreeRTOS-level concurrency and on-device behavior are not unit-tested; prefer extracting pure policy logic into a header so it can be host-tested.
 
 ## Local Libraries
 

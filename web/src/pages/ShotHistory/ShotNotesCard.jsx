@@ -2,16 +2,14 @@ import { useState, useEffect, useContext, useCallback } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
+import { RatingStars } from '../../components/RatingStars.jsx';
+import { RatingNumberInput } from '../../components/RatingNumberInput.jsx';
 import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans } from '../../utils/beanManager.js';
 import { listGrinders, recordGrinder } from '../../utils/grinderManager.js';
-import {
-  formatTenPointRating,
-  getRatingFillPercent,
-  normalizeTenPointRating,
-} from '../../utils/ratings.js';
+import { formatTenPointRating } from '../../utils/ratings.js';
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const apiService = useContext(ApiServiceContext);
@@ -240,7 +238,9 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
           : availableBeans.find(bean => bean.id === prev.beanId) || null;
       const newNotes = {
         ...prev,
-        [field]: field === 'rating' ? normalizeTenPointRating(value) : value,
+        // PRO-299: rating is normalized on blur inside RatingNumberInput
+        // (onCommit emits an already-normalized number), so store it as-is.
+        [field]: value,
       };
 
       if (field === 'beanType') {
@@ -262,18 +262,6 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     String(value || '')
       .trim()
       .toLowerCase();
-
-  const renderStars = rating => (
-    <div className='relative inline-flex text-lg leading-none'>
-      <div className='text-gray-300'>{'\u2605\u2605\u2605\u2605\u2605'}</div>
-      <div
-        className='absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-yellow-400'
-        style={{ width: getRatingFillPercent(rating) }}
-      >
-        {'\u2605\u2605\u2605\u2605\u2605'}
-      </div>
-    </div>
-  );
 
   const getTasteColor = taste => {
     switch (taste) {
@@ -340,18 +328,14 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
             Rating
           </label>
           <div className='flex items-center gap-3'>
-            {renderStars(notes.rating)}
+            <RatingStars rating={notes.rating} />
             {isEditing ? (
-              <input
-                type='number'
-                min='0'
-                max='10'
-                step='0.25'
+              <RatingNumberInput
                 className='nd-input'
                 style={{ width: '112px' }}
-                value={notes.rating || ''}
-                onChange={e => handleInputChange('rating', e.target.value)}
-                placeholder='0-10'
+                value={notes.rating}
+                ariaLabel='Shot rating (0-10)'
+                onCommit={rating => handleInputChange('rating', rating)}
               />
             ) : (
               <div className='font-nd-mono text-[13px] text-[var(--text-primary,#e8e8e8)]'>

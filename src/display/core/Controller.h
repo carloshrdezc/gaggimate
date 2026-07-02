@@ -5,6 +5,7 @@
 #include "NimBLEComm.h"
 #include "PluginManager.h"
 #include "Settings.h"
+#include "VolumetricCoalescer.h"
 #include <WiFi.h>
 #include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
@@ -264,6 +265,17 @@ class Controller {
     // Bluetooth scale connection monitoring
     VolumetricMeasurementSource currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
     unsigned long lastBluetoothMeasurement = 0;
+
+    // PRO-367: coalesce-latest holder for the stop-critical volumetric update.
+    // onVolumetricMeasurement() takes processMutex with a 10 ms fail-fast timeout;
+    // under diagnostic-log contention that take can fail. Rather than DROP the
+    // measurement (which stalls currentVolume and loses the yield stop), we latch
+    // the freshest value here and apply it on the next successful take. The scale
+    // weight is monotonic cumulative, so the newest value subsumes every earlier
+    // one and applying it loses no yield. Only measurements whose source matches
+    // the latched currentVolumetricSource ever reach here (source mismatch is
+    // rejected earlier), so a single coalescer for the active source is correct.
+    volumetric::Coalescer volumetricCoalescer{};
     static const unsigned long BLUETOOTH_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
     static const unsigned long CONTROLLER_WAITING_TIMEOUT_MS = 10000;
 

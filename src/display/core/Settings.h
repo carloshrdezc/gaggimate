@@ -51,6 +51,16 @@ class Settings {
   public:
     Settings();
 
+    // Reads all persisted values from NVS into memory and starts the periodic
+    // save task. MUST be called from setup() (after the Arduino core has run
+    // nvs_flash_init()), NOT from the constructor: Controller (and therefore
+    // this Settings member) is a global constructed during C++ static-init,
+    // which runs before nvs_flash_init(). Reading NVS in the constructor races
+    // that init and, on Arduino-esp32 3.x / IDF 5.x, fails with
+    // "nvs_open failed: NOT_INITIALIZED" so every getX() returns its default
+    // (PRO-331).
+    void load();
+
     void batchUpdate(const SettingsCallback &callback);
     void save(bool noDelay = false);
 
@@ -81,6 +91,9 @@ class Settings {
     bool isBoilerFillActive() const { return boilerFillActive; }
     int getStartupFillTime() const { return startupFillTime; }
     int getSteamFillTime() const { return steamFillTime; }
+    // PRO-266: when true, DiagnosticLogPlugin tees ESP_LOG output over UDP on the
+    // LAN for tether-free serial capture. Default false → zero hot-path cost.
+    bool getDiagnosticLogEnabled() const { return diagnosticLogEnabled; }
     bool isSmartGrindActive() const { return smartGrindActive; }
     int getSmartGrindMode() const { return smartGrindMode; }
     String getSmartGrindIp() const { return smartGrindIp; }
@@ -158,6 +171,7 @@ class Settings {
     void setStartupFillTime(int startup_fill_time);
     void setSteamFillTime(int steam_fill_time);
     void setSmartGrindActive(bool smart_grind_active);
+    void setDiagnosticLogEnabled(bool diagnostic_log_enabled);
     void setSmartGrindIp(String smart_grind_ip);
     void setSmartGrindMode(int smart_grind_mode);
     void setHomeAssistant(bool homeAssistant);
@@ -228,6 +242,7 @@ class Settings {
     int startupFillTime = 0;
     int steamFillTime = 0;
     bool smartGrindActive = false;
+    bool diagnosticLogEnabled = false;
     bool smartGrindToggle = false;
     int smartGrindMode = 0;
     String smartGrindIp = "";
@@ -275,8 +290,8 @@ class Settings {
     bool cloudRelayEnabled = false;
 
     void doSave();
-    xTaskHandle taskHandle;
-    static void loopTask(void *arg);
+    xTaskHandle taskHandle = nullptr;
+    [[noreturn]] static void loopTask(void *arg);
 };
 
 #endif // SETTINGS_H

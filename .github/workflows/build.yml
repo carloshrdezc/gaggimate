@@ -54,6 +54,20 @@ jobs:
           python-version: '3.11'
       - name: Install PlatformIO Core
         run: pip install platformio==6.1.19
+      # The web UI is embedded into the display/headless app image (PRO-215), so
+      # those firmware builds must run build_webui.sh first; otherwise
+      # embed_webui_pre.py stubs an EMPTY bundle and the released firmware serves
+      # 404 for / instead of the UI. The controller target has no web UI, so skip
+      # it there. (Node is only needed for the web build.)
+      - uses: actions/setup-node@v4
+        if: matrix.target != 'controller'
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build embedded web UI
+        if: matrix.target != 'controller'
+        run: bash scripts/build_webui.sh
       - name: Build ${{ matrix.target }}
         run: |
           mkdir -p out
@@ -64,7 +78,11 @@ jobs:
           # dropped, leaving the just-pushed stable tag out of STABLE_VERSIONS.
           # The old single-job pipeline deleted nightly before any pio run for
           # this reason; each parallel firmware leg must now do the same. (CAR-385)
+          # The `beta` moving tag (PRO-227) is deleted for the same reason — on a
+          # stable-tag release where `beta` still points at the same commit it
+          # could otherwise resolve in `git describe` and shadow the stable tag.
           git tag -d nightly 2>/dev/null || true
+          git tag -d beta 2>/dev/null || true
           pio run -e ${{ matrix.env }}
           mv .pio/build/${{ matrix.env }}/firmware.bin out/${{ matrix.prefix }}-firmware.bin
           mv .pio/build/${{ matrix.env }}/partitions.bin out/${{ matrix.prefix }}-partitions.bin
@@ -75,11 +93,13 @@ jobs:
           name: firmware-${{ matrix.target }}
           path: "out/*"
 
-  # Build the web UI and the SPIFFS filesystem image. Kept separate from the
-  # firmware matrix because only this step needs the web build (data/w/), and
-  # the filesystem image is shared by both display and headless targets.
+  # Build the fresh-install filesystem image. Since the web UI is embedded into
+  # the app image (PRO-215), this image no longer carries /w; it stages only /p
+  # (seed profiles) for fresh USB installs. build_webui.sh keeps `mkdir -p
+  # data/p` and produces no data/w, so `pio run -t buildfs` packages /p only.
+  # The image is shared by both display and headless targets.
   filesystem:
-    name: Web + filesystem
+    name: Filesystem (seed profiles)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -114,13 +134,13 @@ jobs:
           # the just-pushed stable tag.
           git tag -d beta 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-headless-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-headless-filesystem.bin
       - name: Archive filesystem + version
         uses: actions/upload-artifact@v4
         with:

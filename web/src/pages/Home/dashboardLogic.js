@@ -98,6 +98,10 @@ export function shouldKeepManualDraftDirty({ active, partial }) {
   return !active && Object.keys(partial ?? {}).length > 0;
 }
 
+export function computeYieldEditable({ allowYieldOverride, brewTarget, bluetoothConnected }) {
+  return !!allowYieldOverride && !!brewTarget && !!bluetoothConnected;
+}
+
 export function getAvailableModeOptions(isGrindAvailable = true, isManualAvailable = true) {
   return MODE_OPTIONS.filter(option => {
     if (option.id === MODE_GRIND) return isGrindAvailable;

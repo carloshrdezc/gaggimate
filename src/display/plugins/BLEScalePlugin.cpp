@@ -27,20 +27,23 @@ BLEScalePlugin BLEScales;
 BLEScalePlugin::BLEScalePlugin() = default;
 
 BLEScalePlugin::~BLEScalePlugin() {
-    // Disable active flag first to stop processing
+    // Disable active flag first so onMeasurement() short-circuits immediately.
     active = false;
 
-    // Give any running callbacks time to complete
-    delay(100);
+    // PRO-351: tear down in the right order with a real handshake instead of a
+    // blind delay(). Stop async scanning FIRST so the scanner (a NimBLEScanCallbacks)
+    // stops dispatching onResult callbacks, then disconnect() — which drops the
+    // scale connection and bounded-waits for any in-flight weight callback to
+    // drain before freeing the scale object. A fixed sleep is a timing
+    // assumption, not a lifetime guarantee; the drain wait observes the actual
+    // "no callback in flight" condition (see waitForCallbacksToDrain).
+    if (scanner != nullptr) {
+        scanner->stopAsyncScan();
+    }
 
-    // Ensure proper cleanup
     disconnect();
 
     if (scanner != nullptr) {
-        // Stop scanning first
-        scanner->stopAsyncScan();
-        // Give it time to actually stop
-        delay(50);
         delete scanner;
         scanner = nullptr;
     }
@@ -94,7 +97,11 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
         steamGraceDeadline = 0;
         active = false;
         disconnect();
-        scanner->stopAsyncScan();
+        // PRO-351: scanner can be null on the std::nothrow OOM path (setup at
+        // :76-78 logs-but-does-not-abort), so guard like the sibling call sites.
+        if (scanner != nullptr) {
+            scanner->stopAsyncScan();
+        }
     });
     manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
     manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
@@ -202,14 +209,19 @@ void BLEScalePlugin::update() {
     if (scale != nullptr) {
         // Call scale update with error checking
         scale->update();
-        if (!hasConnectedScale) {
-            reconnectionTries++;
-            if (reconnectionTries > RECONNECTION_TRIES) {
-                ESP_LOGW("BLEScalePlugin", "Max reconnection attempts reached, disconnecting");
-                disconnect();
-                if (scanner != nullptr) {
-                    scanner->initializeAsyncScan();
-                }
+        // PRO-5: route the counter through nextReconnectionTries() (tested in
+        // test_ble_scale_scan_policy) so it measures CONSECUTIVE failed reconnect
+        // ticks. A healthy tick resets it to 0; without that reset the counter was
+        // monotonic across the scale's lifetime (only cleared on a full teardown),
+        // so transient link flaps — which cluster right after a display-sleep
+        // radio-idle/wake cycle — accumulated and exhausted the RECONNECTION_TRIES
+        // budget, tripping the max-tries teardown prematurely and stopping reconnects.
+        reconnectionTries = nextReconnectionTries(reconnectionTries, hasConnectedScale);
+        if (!hasConnectedScale && reconnectionTries > RECONNECTION_TRIES) {
+            ESP_LOGW("BLEScalePlugin", "Max reconnection attempts reached, disconnecting");
+            disconnect();
+            if (scanner != nullptr) {
+                scanner->initializeAsyncScan();
             }
         }
     } else if (controller->getSettings().getSavedScale() != "" && scanner != nullptr) {
@@ -253,18 +265,48 @@ void BLEScalePlugin::scan() const {
 
 void BLEScalePlugin::disconnect() {
     if (scale != nullptr) {
-        // Add small delay to let any pending callbacks complete
-        delay(50);
+        // PRO-351: order matters for the cross-task lifetime handshake.
+        // 1. active=false was already set by the teardown caller, so any callback
+        //    that started before the flag flipped is the only one that can still
+        //    be touching `scale`. Wait (bounded) for it to drain.
+        waitForCallbacksToDrain();
 
-        // Check if scale is still valid before calling disconnect
+        // 2. Now that no weight callback is in flight, it is safe to disconnect
+        //    and free the scale.
         if (scale) {
             scale->disconnect();
         }
 
+        // 3. `scale` is a std::unique_ptr<RemoteScales> (see header): assigning
+        //    nullptr runs the deleter, which calls ~RemoteScales() ->
+        //    clientCleanup() and frees the object. The plugin OWNS the scale
+        //    (RemoteScalesFactory::create() returns a unique_ptr by value, moved
+        //    into this member in establishConnection()), so no explicit delete is
+        //    needed and adding one would be a double-free. Resetting the
+        //    smart pointer here IS the deallocation.
         scale = nullptr;
         uuid = "";
         doConnect = false;
         reconnectionTries = 0;
+    }
+}
+
+void BLEScalePlugin::waitForCallbacksToDrain() {
+    // PRO-351: bounded wait for any in-flight NimBLE weight callback to finish.
+    // Replaces the old blind delay(50): a fixed sleep is a timing assumption,
+    // this observes the actual "no callback in flight" flag. The hard cap
+    // guarantees teardown can never hang on a wedged callback task — if the flag
+    // is still set at the deadline we proceed anyway (no worse than the old
+    // unconditional sleep, and the active=false short-circuit limits the window).
+    constexpr unsigned long CALLBACK_DRAIN_TIMEOUT_MS = 100;
+    const unsigned long deadline = millis() + CALLBACK_DRAIN_TIMEOUT_MS;
+    while (callbackInFlight.load(std::memory_order_acquire)) {
+        if ((long)(millis() - deadline) >= 0) {
+            ESP_LOGW("BLEScalePlugin", "Callback drain timed out after %lums, proceeding with teardown",
+                     CALLBACK_DRAIN_TIMEOUT_MS);
+            break;
+        }
+        delay(1);
     }
 }
 
@@ -332,10 +374,70 @@ void BLEScalePlugin::establishConnection() {
             });
 
             scale->setWeightUpdatedCallback([](float weight) {
-                // Skip measurement from ISR context to avoid FreeRTOS deadlocks
+                // Skip measurement from ISR context to avoid FreeRTOS deadlocks.
+                // Kept ABOVE the in-flight flag so an ISR-context call bails
+                // without ever raising it.
                 if (xPortInIsrContext()) {
                     return;
                 }
+                // PRO-351: mark the callback in flight for the duration of the
+                // measurement so a concurrent teardown (waitForCallbacksToDrain)
+                // doesn't free the scale out from under this NimBLE-host-task
+                // callback. The flag is on the global BLEScales instance because
+                // this is a plain function-pointer callback (cannot capture this).
+                //
+                // PRO-353: clear the flag via an RAII guard so it is cleared on
+                // EVERY exit path. onMeasurement() routes into
+                // Controller::onVolumetricMeasurement() -> PluginManager::trigger()
+                // which invokes arbitrary registered handlers; if any of them (or
+                // onMeasurement itself) throws or early-returns, the guard's
+                // destructor still clears the flag, so teardown can never wedge on
+                // a stuck callbackInFlight.
+                //
+                // RESIDUAL-WINDOW CONSTRAINT (PRO-353): this flag fences ONLY the
+                // onMeasurement leg. It does NOT cover driver-frame state the scale
+                // driver may touch AFTER RemoteScales::setWeight() returns but still
+                // inside the same NimBLE-host-task notify frame (e.g. acaia's
+                // dataBuffer.erase(...) runs after the weight dispatch, outside this
+                // flagged window). A future scale driver whose notify handler reads
+                // or mutates more object state after setWeight() returns would grow
+                // that unprotected post-dispatch tail. The flag NARROWS the
+                // use-after-free window to the measurement leg; it does not close it.
+                //
+                // BACKSTOP (PRO-353, item 1): the residual post-setWeight tail is
+                // backstopped by NimBLE's own single-threaded host task on client
+                // teardown. BLEScalePlugin::disconnect() calls
+                // RemoteScales::disconnect() -> clientCleanup() ->
+                // NimBLEDevice::deleteClient(). With NimBLE-Arduino 2.x that sets
+                // deleteOnDisconnect and terminates the link; the client is not
+                // freed inline but from the BLE_GAP_EVENT_DISCONNECT handler, which
+                // runs ON the NimBLE host task — the SAME task that dispatches these
+                // notify/weight callbacks. So the free is serialized after any
+                // in-flight notify frame on that task returns; it cannot interleave
+                // with the driver's post-setWeight tail. We rely on that
+                // single-threaded-host-task ordering — NOT a full RemoteScales
+                // driver-dispatch-boundary deregistration handshake (scoped out of
+                // PR #337 as disproportionate for this plugin and high-regression on
+                // the vendored driver layer) — to bound the residual tail.
+                //
+                // CAVEAT (PRO-361): the host-task-ordering guarantee above covers only
+                // the CONNECTED/DISCONNECTING path, where deleteClient() DEFERS the
+                // client free to the BLE_GAP_EVENT_DISCONNECT handler on the host task.
+                // deleteClient() has a THIRD branch: when the client is ALREADY fully
+                // disconnected, it runs `delete clt` INLINE on the CALLER's task (the
+                // task that called disconnect() -> scale=nullptr -> ~RemoteScales() ->
+                // clientCleanup() -> deleteClient()). The "serialized after the notify
+                // frame on the host task" ordering does NOT apply to that inline branch.
+                // This is not a defect in this plugin: an already-disconnected teardown
+                // has no live notify frame to race, and the callbackInFlight drain plus
+                // the active=false short-circuit already fence the onMeasurement leg. The
+                // note exists only so a future reader does not over-trust the
+                // host-task-ordering guarantee for the already-disconnected case.
+                struct CallbackInFlightGuard {
+                    ~CallbackInFlightGuard() { BLEScales.markCallbackInFlight(false); }
+                };
+                BLEScales.markCallbackInFlight(true);
+                CallbackInFlightGuard guard;
                 BLEScales.onMeasurement(weight);
             });
 

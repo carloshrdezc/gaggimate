@@ -16,6 +16,13 @@ test('updates OTA channel to beta without changing other form fields', () => {
   expect(next.displayVersion).toBe('2.0.3');
 });
 
+test('updates OTA channel to beta without changing other form fields', () => {
+  const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.3' }, 'beta');
+
+  assert.equal(next.channel, 'beta');
+  assert.equal(next.displayVersion, '2.0.3');
+});
+
 test('falls back to stable for unexpected OTA channel values', () => {
   const next = updateOtaChannel({ channel: 'nightly' }, 'garbage-channel');
 

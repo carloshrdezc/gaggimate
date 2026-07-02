@@ -94,6 +94,49 @@ void test_redundant_mode_change_false_for_real_transitions(void) {
 // the requested 10 s hard cap.
 void test_unified_post_stop_grace_is_ten_seconds(void) { TEST_ASSERT_EQUAL_UINT32(10000, POST_STOP_GRACE_DURATION_MS); }
 
+// PRO-5: the reconnection-tries counter must measure CONSECUTIVE failed reconnect
+// ticks. A healthy tick resets it to 0; an unhealthy tick increments it. The old
+// code only reset on a full teardown, so a link that briefly dropped and
+// recovered left the counter stuck — clustered transient flaps (common right
+// after a display-sleep radio-idle/wake cycle) then exhausted the retry budget
+// and prematurely tore the scale down, so it stopped reconnecting after sleep.
+static_assert(nextReconnectionTries(0u, false) == 1u);
+static_assert(nextReconnectionTries(5u, false) == 6u);
+static_assert(nextReconnectionTries(5u, true) == 0u); // recovery clears the counter
+static_assert(nextReconnectionTries(0u, true) == 0u);
+
+void test_reconnection_tries_increments_only_while_disconnected(void) {
+    TEST_ASSERT_EQUAL_UINT32(1u, nextReconnectionTries(0u, false));
+    TEST_ASSERT_EQUAL_UINT32(6u, nextReconnectionTries(5u, false));
+}
+
+void test_reconnection_tries_resets_on_healthy_tick(void) {
+    // A single healthy tick must clear an accumulated counter, so the retry
+    // budget only ever counts back-to-back failed reconnects.
+    TEST_ASSERT_EQUAL_UINT32(0u, nextReconnectionTries(5u, true));
+    TEST_ASSERT_EQUAL_UINT32(0u, nextReconnectionTries(RECONNECTION_TRIES, true));
+}
+
+void test_transient_flaps_do_not_exhaust_budget_after_recovery(void) {
+    // Reconstructs the display-sleep symptom: several brief drops that each
+    // recover must NOT push the counter toward RECONNECTION_TRIES, because every
+    // recovery resets it. Only an uninterrupted run of failures should trip it.
+    unsigned int tries = 0;
+    for (int flap = 0; flap < 100; ++flap) {
+        tries = nextReconnectionTries(tries, false); // drop
+        tries = nextReconnectionTries(tries, true);  // recovers next tick
+    }
+    TEST_ASSERT_EQUAL_UINT32(0u, tries);
+    TEST_ASSERT_TRUE(tries <= RECONNECTION_TRIES); // never trips the teardown
+
+    // Contrast: an uninterrupted failure run still trips as intended.
+    tries = 0;
+    for (unsigned int i = 0; i <= RECONNECTION_TRIES; ++i) {
+        tries = nextReconnectionTries(tries, false);
+    }
+    TEST_ASSERT_TRUE(tries > RECONNECTION_TRIES);
+}
+
 static int runBleScaleScanPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_scale_scan_skips_modes_that_do_not_use_scale_data);
@@ -104,6 +147,9 @@ static int runBleScaleScanPolicyTests() {
     RUN_TEST(test_redundant_mode_change_detected_for_same_mode);
     RUN_TEST(test_redundant_mode_change_false_for_real_transitions);
     RUN_TEST(test_unified_post_stop_grace_is_ten_seconds);
+    RUN_TEST(test_reconnection_tries_increments_only_while_disconnected);
+    RUN_TEST(test_reconnection_tries_resets_on_healthy_tick);
+    RUN_TEST(test_transient_flaps_do_not_exhaust_budget_after_recovery);
     return UNITY_END();
 }
 

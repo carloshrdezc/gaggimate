@@ -26,6 +26,7 @@ import { cleanName, analyzerUiColors } from '../utils/analyzerUtils';
 import { NotesBarExpanded } from './NotesBarExpanded';
 import { SourceMarker } from './SourceMarker';
 import { getAnalyzerIconButtonClasses } from './analyzerControlStyles';
+import { formatTenPointRating } from '../../../utils/ratings.js';
 
 function isTypingTarget(target) {
   const activeElement =
@@ -132,7 +133,7 @@ function LoadedShotSummary({
             icon={faStar}
             className={`text-[10px] ${notes.rating > 0 ? 'opacity-60' : 'opacity-30'}`}
           />
-          {notes.rating > 0 ? `${notes.rating}/5` : '—'}
+          {notes.rating > 0 ? formatTenPointRating(notes.rating) : '—'}
         </span>
       </div>
     </button>
@@ -304,7 +305,12 @@ export function NotesBar({
 
   const handleInputChange = (field, value) => {
     setNotes(prev => {
-      const updated = { ...prev, [field]: value };
+      const updated = {
+        ...prev,
+        // PRO-299: rating is normalized on blur inside RatingNumberInput
+        // (onCommit emits an already-normalized number), so store it as-is.
+        [field]: value,
+      };
       if (field === 'doseIn' || field === 'doseOut') {
         const dIn = field === 'doseIn' ? value : prev.doseIn;
         const dOut = field === 'doseOut' ? value : prev.doseOut;

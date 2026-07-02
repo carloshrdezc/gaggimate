@@ -97,6 +97,39 @@ jobs:
       - name: Build display firmware (flags off)
         run: pio run -e display-flags-off
 
+  firmware-headless-4m:
+    name: Firmware build (display-headless-4m)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-316: compile the 4MB-flash headless target on every PR. [env:display-headless-4m]
+      # The no_ota single ~2,097,152 B app slot is selected by this repo's own board
+      # definition (boards/esp32-s3-supermini.json -> "partitions": "no_ota.csv"); only the
+      # CSV byte layout ships with the Espressif/Arduino platform. It is not set by this env
+      # or platformio.ini. It links today at ~99.7% flash (~7 KB headroom). Without this leg,
+      # a future change that adds a few KB would silently push it over the partition limit
+      # with nothing in CI to catch it.
+      # PlatformIO's linker exits non-zero on a region overflow, so a plain `pio run` fails
+      # the PR — no silent truncation. Like the sibling display jobs, this relies on
+      # embed_webui_pre.py's empty-bundle stub; the real web UI isn't needed to exercise
+      # the linker/partition check that gates flash overflow.
+      - name: Build display-headless-4m firmware
+        run: pio run -e display-headless-4m
+
   native:
     name: Native tests (ASan/UBSan)
     runs-on: ubuntu-latest
@@ -187,3 +220,49 @@ jobs:
           # non-zero (config/usage) errors. Flip to gating once the codebase is
           # clean (mirrors the -Werror note).
           echo "$FILES" | xargs clang-tidy -p .
+
+  simulator:
+    name: Simulator build (display-sim)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # The display-sim env links SDL2 via `sdl2-config` on Linux
+      # (see scripts/sim_sdl_flags.py), so the dev libs must be present.
+      - name: Install SDL2 dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+      # Build AND embed the web UI before the sim build. The simulator serves
+      # the WebUI from the firmware-embedded flash blob (gWebUiBlobStart) via the
+      # same serveWebAsset() path as the device — NOT from a filesystem dir — so
+      # build_webui.sh (npm build -> gzip -> embed_webui.py) must run to populate
+      # src/display/webassets/ with the real bundle. A bare `npm run build`
+      # leaves embed_webui_pre.py to drop an empty stub, which links but renders
+      # nothing, defeating the parity check this job exists for. [PRO-216]
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build and embed web UI
+        run: ./scripts/build_webui.sh
+      # Build the desktop simulator. Fails the PR if display-sim doesn't
+      # compile/link, so the simulator can't silently bit-rot when src/display
+      # or the sim/ shims change. With the real embedded bundle above, a broken
+      # serveWebAsset/blob path also fails the build, not just a link gap.
+      - name: Build display-sim simulator
+        run: pio run -e display-sim

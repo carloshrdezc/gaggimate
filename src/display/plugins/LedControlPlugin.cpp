@@ -5,13 +5,19 @@
 void LedControlPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
     pluginManager->on("controller:ready", [this](Event const) { initialized = true; });
+    // `controller:ready` is one-shot (gated by Controller::loaded), so it does not
+    // re-fire on a BLE reconnect. `controller:bluetooth:connect` fires on every
+    // successful connectToServer(), including reconnects, so re-arm a full resend
+    // there: sendLedControl is a no-op while disconnected, and the last_* cache may
+    // still match the desired state, leaving controller-side LEDs stale otherwise.
+    pluginManager->on("controller:bluetooth:connect", [this](Event const &) { firstSend = true; });
 }
 
 void LedControlPlugin::loop() {
     if (!initialized) {
         return;
     }
-    if (lastUpdate + UPDATE_INTERVAL < millis()) {
+    if (millis() - lastUpdate >= UPDATE_INTERVAL) {
         lastUpdate = millis();
         updateControl();
     }
@@ -42,15 +48,15 @@ void LedControlPlugin::updateControl() {
 }
 
 void LedControlPlugin::sendControl(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint8_t ext) {
-    if (r != last_r)
+    if (firstSend || r != last_r)
         this->controller->getClientController()->sendLedControl(0, r);
-    if (g != last_g)
+    if (firstSend || g != last_g)
         this->controller->getClientController()->sendLedControl(1, g);
-    if (b != last_b)
+    if (firstSend || b != last_b)
         this->controller->getClientController()->sendLedControl(2, b);
-    if (w != last_w)
+    if (firstSend || w != last_w)
         this->controller->getClientController()->sendLedControl(3, w);
-    if (ext != last_ext) {
+    if (firstSend || ext != last_ext) {
         this->controller->getClientController()->sendLedControl(4, 255 - ext);
         this->controller->getClientController()->sendLedControl(5, 255 - ext);
         this->controller->getClientController()->sendLedControl(6, 255 - ext);
@@ -61,4 +67,5 @@ void LedControlPlugin::sendControl(uint8_t r, uint8_t g, uint8_t b, uint8_t w, u
     last_b = b;
     last_w = w;
     last_ext = ext;
+    firstSend = false;
 }

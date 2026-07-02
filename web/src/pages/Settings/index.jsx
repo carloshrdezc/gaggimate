@@ -14,6 +14,7 @@ import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
 import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
+import { normalizeSettings } from './settingsNormalize.js';
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
@@ -38,51 +39,12 @@ export function Settings() {
 
   useEffect(() => {
     if (fetchedSettings) {
-      const settingsWithToggle = {
-        ...fetchedSettings,
-        standbyDisplayEnabled:
-          fetchedSettings.standbyDisplayEnabled !== undefined
-            ? fetchedSettings.standbyDisplayEnabled
-            : fetchedSettings.standbyBrightness > 0,
-        dashboardLayout: fetchedSettings.dashboardLayout || DASHBOARD_LAYOUTS.ORDER_FIRST,
-      };
-
-      if (fetchedSettings.pid) {
-        const pidParts = fetchedSettings.pid.split(',');
-        if (pidParts.length >= 4) {
-          settingsWithToggle.pid = pidParts.slice(0, 3).join(',');
-          settingsWithToggle.kf = pidParts[3];
-        } else {
-          settingsWithToggle.kf = '0.000';
-        }
-      }
-
-      if (fetchedSettings.autowakeupSchedules) {
-        const schedules = [];
-        if (
-          typeof fetchedSettings.autowakeupSchedules === 'string' &&
-          fetchedSettings.autowakeupSchedules.trim()
-        ) {
-          const scheduleStrings = fetchedSettings.autowakeupSchedules.split(';');
-          for (const scheduleStr of scheduleStrings) {
-            const [time, daysStr] = scheduleStr.split('|');
-            if (time && daysStr && daysStr.length === 7) {
-              const days = daysStr.split('').map(d => d === '1');
-              schedules.push({ time, days });
-            }
-          }
-        }
-        if (schedules.length === 0) {
-          schedules.push({ time: '07:00', days: [true, true, true, true, true, true, true] });
-        }
-        setAutoWakeupSchedules(schedules);
-      } else {
-        setAutoWakeupSchedules([
-          { time: '07:00', days: [true, true, true, true, true, true, true] },
-        ]);
-      }
-
-      setFormData(settingsWithToggle);
+      const { formData: normalized, autowakeupSchedules: schedules } = normalizeSettings(
+        fetchedSettings,
+        { defaultDashboardLayout: DASHBOARD_LAYOUTS.ORDER_FIRST },
+      );
+      setAutoWakeupSchedules(schedules);
+      setFormData(normalized);
     } else {
       setFormData({});
       setAutoWakeupSchedules([{ time: '07:00', days: [true, true, true, true, true, true, true] }]);
@@ -114,6 +76,8 @@ export function Settings() {
         setFormData(prev => ({ ...prev, delayAdjust: !prev.delayAdjust }));
       } else if (key === 'clock24hFormat') {
         setFormData(prev => ({ ...prev, clock24hFormat: !prev.clock24hFormat }));
+      } else if (key === 'diagnosticLog') {
+        setFormData(prev => ({ ...prev, diagnosticLog: !prev.diagnosticLog }));
       } else if (key === 'autowakeupEnabled') {
         setFormData(prev => ({ ...prev, autowakeupEnabled: !prev.autowakeupEnabled }));
       } else if (key === 'cloudRelayEnabled') {
@@ -198,6 +162,8 @@ export function Settings() {
         else formDataToSubmit.delete('allowYieldOverride');
         if (formData.clock24hFormat) formDataToSubmit.set('clock24hFormat', '1');
         else formDataToSubmit.delete('clock24hFormat');
+        if (formData.diagnosticLog) formDataToSubmit.set('diagnosticLog', '1');
+        else formDataToSubmit.delete('diagnosticLog');
 
         const schedulesStr = autowakeupSchedules
           .map(schedule => `${schedule.time}|${schedule.days.map(d => (d ? '1' : '0')).join('')}`)
@@ -281,7 +247,15 @@ export function Settings() {
       reader.onload = async e => {
         try {
           const data = JSON.parse(e.target.result);
-          setFormData(data);
+          // Normalize the imported payload the same way the device-fetch effect
+          // does: split pid/kf and derive the separate autowakeupSchedules array.
+          // Without this, the schedule editor state stays stale and Save writes
+          // the old schedule back, discarding the imported one (PRO-252).
+          const { formData: normalized, autowakeupSchedules: schedules } = normalizeSettings(data, {
+            defaultDashboardLayout: DASHBOARD_LAYOUTS.ORDER_FIRST,
+          });
+          setAutoWakeupSchedules(schedules);
+          setFormData(normalized);
         } catch (error) {
           console.error('Failed to parse settings file:', error);
           alert('Failed to parse settings file. Please ensure it is valid JSON.');
@@ -695,6 +669,49 @@ export function Settings() {
                 >
                   <span className='nd-toggle-thumb' />
                 </button>
+              </div>
+              <div className='border-l-2 border-[var(--text-secondary,#999)] pl-4'>
+                <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
+                  Diagnostics
+                </div>
+              </div>
+              <div className='flex items-center justify-between'>
+                <span className='font-nd-mono text-[14px] text-[var(--text-primary,#e8e8e8)]'>
+                  Diagnostic log (UDP)
+                </span>
+                <button
+                  type='button'
+                  className={`nd-toggle ${formData.diagnosticLog ? 'nd-toggle--active' : ''}`}
+                  onClick={onChange('diagnosticLog')}
+                  role='switch'
+                  aria-checked={!!formData.diagnosticLog}
+                >
+                  <span className='nd-toggle-thumb' />
+                </button>
+              </div>
+              <p className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)] -mt-2'>
+                When on, all device logs (INFO and above) are broadcast unencrypted over UDP on
+                port 9999 to the whole local network. Enable only on a trusted network, for
+                debugging. Default off.
+              </p>
+              <div className='flex flex-wrap items-center gap-x-4 gap-y-1 -mt-1'>
+                <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
+                  Download SD log:
+                </span>
+                <a
+                  href='/api/diag/log.txt'
+                  download='diag-log.txt'
+                  className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
+                >
+                  log.txt
+                </a>
+                <a
+                  href='/api/diag/log.1'
+                  download='diag-log.1.txt'
+                  className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
+                >
+                  log.1 (rotated)
+                </a>
               </div>
             </div>
           </Card>

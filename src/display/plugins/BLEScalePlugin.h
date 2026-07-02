@@ -3,17 +3,18 @@
 #include "../config/features.h"
 #include "../core/Plugin.h"
 #include "../core/constants.h"
+#include "BLEScaleScanPolicy.h" // PRO-5: RECONNECTION_TRIES + reconnect/scan policy (host-includable)
 #include "PostStopGracePolicy.h"
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
+#include <atomic>
 
 void on_ble_measurement(float value);
 
 constexpr unsigned long UPDATE_INTERVAL_MS = 1000;
-constexpr unsigned int RECONNECTION_TRIES = 15;
 
 // PRO-248: Hard-cap for the steam scale-alive grace window. NOTE: this window is
 // NOT where the last drips are actually captured — that happens earlier, while
@@ -74,6 +75,22 @@ class BLEScalePlugin : public Plugin {
     void update();
     void onProcessStart() const;
 
+    // PRO-351: cross-task teardown handshake. NimBLE notify callbacks dispatch on
+    // the NimBLE host task while teardown runs on the event-handler / AsyncTCP
+    // tasks. This flag is raised for the duration of the weight-updated callback
+    // body and cleared on exit, giving teardown a real "no callback in flight"
+    // observation instead of a blind delay(). waitForCallbacksToDrain() spins on
+    // it with a hard timeout so teardown can never hang on a stuck callback.
+    //
+    // PRO-353: this flag fences ONLY the onMeasurement leg, not driver-frame
+    // state a scale driver touches after RemoteScales::setWeight() returns in
+    // the same notify frame. It narrows — does not close — the teardown UAF
+    // window; the residual tail is backstopped by NimBLE's connection drain on
+    // client deletion. See the callback lambda in establishConnection() for the
+    // full rationale and the RAII guard that clears this on every exit path.
+    void markCallbackInFlight(bool inFlight) { callbackInFlight.store(inFlight, std::memory_order_release); }
+    void waitForCallbacksToDrain();
+
     // Teardown shared by the immediate mode-change disconnect path and the
     // steam grace-window expiry in loop(): stop processing, drop the scale
     // connection and halt async scanning. Call sites keep their own ESP_LOGI
@@ -107,6 +124,12 @@ class BLEScalePlugin : public Plugin {
     RemoteScalesPluginRegistry *pluginRegistry = nullptr;
     RemoteScalesScanner *scanner = nullptr;
     std::unique_ptr<RemoteScales> scale = nullptr;
+
+    // PRO-351: set true while a NimBLE weight-updated callback is executing on
+    // the NimBLE host task; teardown waits for this to clear before freeing the
+    // scale. atomic so the set (host task) and the read (teardown task) are a
+    // well-defined cross-task happens-before, not a torn read.
+    std::atomic<bool> callbackInFlight{false};
 };
 
 #else // GAGGIMATE_ENABLE_BLE_SCALE

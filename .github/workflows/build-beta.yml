@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
+        run: pip install platformio==6.1.19
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -51,11 +51,17 @@ jobs:
           # with the commit the nightly tag points at (e.g. right after a
           # dev-master -> master fast-forward), git describe could otherwise
           # resolve to nightly and write a junk version string (PRO-227 review).
-          git tag -d nightly 2>/dev/null || true
           git tag -d beta 2>/dev/null || true
+          git tag -d nightly 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
+      # The web UI is embedded into the display/headless app image (PRO-215), so
+      # build_webui.sh must run before the display/headless pio builds; otherwise
+      # embed_webui_pre.py stubs an EMPTY bundle and the beta firmware serves
+      # 404 for / instead of the UI. Run once here; the generated manifest+blob in
+      # src/display/webassets/ are reused by the display and headless builds. It
+      # also stages data/p (seed profiles) for the fresh-install filesystem image.
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build controller
         # NOTE: unlike build-nightly.yml, the beta build intentionally does NOT
         # set -DNIGHTLY_BUILD. Beta tracks `master` (release-candidate, closer to
@@ -83,10 +89,10 @@ jobs:
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin upload/display/filesystem.bin
-          cp .pio/build/display/spiffs.bin upload/headless/filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
-          cp .pio/build/display/spiffs.bin out/display-headless-filesystem.bin
+          cp .pio/build/display/littlefs.bin upload/display/filesystem.bin
+          cp .pio/build/display/littlefs.bin upload/headless/filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-headless-filesystem.bin
       - name: Build display
         run: |
           pio run -e display

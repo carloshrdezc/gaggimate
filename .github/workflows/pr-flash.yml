@@ -47,8 +47,11 @@ jobs:
           mkdir -p out
           git tag -d nightly 2>/dev/null || true
           git describe --tags --dirty > out/version.txt
-      - name: Build Web
-        run: ./scripts/build_spiffs.sh
+      # The web UI is embedded into the display app image (PRO-215), so
+      # build_webui.sh must run before the display pio build; it also stages
+      # data/p (seed profiles) for the fresh-install filesystem image below.
+      - name: Build embedded web UI
+        run: ./scripts/build_webui.sh
       - name: Build controller
         run: |
           pio run -e controller
@@ -64,7 +67,7 @@ jobs:
       - name: Build display FS
         run: |
           pio run -t buildfs -e display
-          cp .pio/build/display/spiffs.bin out/display-filesystem.bin
+          cp .pio/build/display/littlefs.bin out/display-filesystem.bin
       - name: Upload PR artifacts
         # Always available on the PR's checks page, including for fork PRs.
         # This is the firmware's home now that the gh-pages publish job is gone
@@ -74,4 +77,3 @@ jobs:
           name: pr-${{ github.event.pull_request.number }}-firmware
           path: ./out
           retention-days: 14
-

@@ -1,9 +1,16 @@
 #include "NimBLEServerController.h"
 
+#include "comms.pb.h"
+#include "pb_decode.h"
+#include "pb_encode.h"
+#include <esp_heap_caps.h>
+
 NimBLEServerController::NimBLEServerController() {}
 
 void NimBLEServerController::initServer(const String infoString) {
     this->infoString = infoString;
+    ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
     NimBLEDevice::init("GPBLS");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set to maximum power
     NimBLEDevice::setMTU(128);
@@ -90,55 +97,127 @@ void NimBLEServerController::loop() {
 void NimBLEServerController::sendSensorData(float temperature, float pressure, float puckFlow, float pumpFlow,
                                             float puckResistance) {
     if (deviceConnected && sensorChar != nullptr) {
-        std::string value = float_to_string(temperature) + "," + float_to_string(pressure) + "," + float_to_string(puckFlow) +
-                            "," + float_to_string(pumpFlow) + "," + float_to_string(puckResistance);
-        sensorChar->setValue(value);
+        // PRO-242: nanopb wire format (was lossy 3-dp float_to_string text).
+        gaggimate_SensorData msg = gaggimate_SensorData_init_zero;
+        msg.temperature = temperature;
+        msg.pressure = pressure;
+        msg.puck_flow = puckFlow;
+        msg.pump_flow = pumpFlow;
+        msg.puck_resistance = puckResistance;
+
+        uint8_t buf[gaggimate_SensorData_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_SensorData_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendSensorData encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        sensorChar->setValue(buf, os.bytes_written);
         sensorChar->notify();
     }
 }
 
 void NimBLEServerController::sendError(int errorCode) {
     if (deviceConnected) {
-        errorChar->setValue(std::to_string(errorCode));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_Error msg = gaggimate_Error_init_zero;
+        msg.code = errorCode;
+
+        uint8_t buf[gaggimate_Error_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_Error_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendError encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        errorChar->setValue(buf, os.bytes_written);
         errorChar->notify();
     }
 }
 
 void NimBLEServerController::sendBrewBtnState(bool brewButtonStatus) {
     if (deviceConnected) {
-        // Send brew notification to the client
-        brewBtnChar->setValue(std::to_string(static_cast<int>(brewButtonStatus)));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_BrewButton msg = gaggimate_BrewButton_init_zero;
+        msg.pressed = brewButtonStatus;
+
+        uint8_t buf[gaggimate_BrewButton_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_BrewButton_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendBrewBtnState encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        brewBtnChar->setValue(buf, os.bytes_written);
         brewBtnChar->notify();
     }
 }
 
 void NimBLEServerController::sendSteamBtnState(bool steamButtonStatus) {
     if (deviceConnected) {
-        // Send steam notification to the client
-        steamBtnChar->setValue(std::to_string(static_cast<int>(steamButtonStatus)));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_SteamButton msg = gaggimate_SteamButton_init_zero;
+        msg.pressed = steamButtonStatus;
+
+        uint8_t buf[gaggimate_SteamButton_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_SteamButton_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendSteamBtnState encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        steamBtnChar->setValue(buf, os.bytes_written);
         steamBtnChar->notify();
     }
 }
 
 void NimBLEServerController::sendAutotuneResult(float Kp, float Ki, float Kd) {
     if (deviceConnected) {
-        // Send with default Kf=0.0 (disabled)
-        std::string value = float_to_string(Kp) + "," + float_to_string(Ki) + "," + float_to_string(Kd) + ",0.0";
-        autotuneResultChar->setValue(value);
+        // PRO-243: nanopb wire format (was lossy 3-dp float_to_string text with a
+        // "0.0" Kf token appended). Kf stays at its proto default (0 = disabled);
+        // the public 3-float signature is unchanged.
+        gaggimate_AutotuneResult msg = gaggimate_AutotuneResult_init_zero;
+        msg.kp = Kp;
+        msg.ki = Ki;
+        msg.kd = Kd;
+
+        uint8_t buf[gaggimate_AutotuneResult_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_AutotuneResult_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendAutotuneResult encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        autotuneResultChar->setValue(buf, os.bytes_written);
         autotuneResultChar->notify();
     }
 }
 
 void NimBLEServerController::sendVolumetricMeasurement(float value) {
     if (deviceConnected) {
-        volumetricMeasurementChar->setValue(float_to_string(value));
+        // PRO-243: nanopb wire format (was lossy 3-dp float_to_string text).
+        gaggimate_VolumetricMeasurement msg = gaggimate_VolumetricMeasurement_init_zero;
+        msg.value = value;
+
+        uint8_t buf[gaggimate_VolumetricMeasurement_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_VolumetricMeasurement_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendVolumetricMeasurement encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        volumetricMeasurementChar->setValue(buf, os.bytes_written);
         volumetricMeasurementChar->notify();
     }
 }
 
 void NimBLEServerController::sendTofMeasurement(int value) {
     if (deviceConnected) {
-        tofMeasurementChar->setValue(std::to_string(value));
+        // PRO-243: nanopb wire format (was std::to_string text).
+        gaggimate_TofMeasurement msg = gaggimate_TofMeasurement_init_zero;
+        msg.distance_mm = value;
+
+        uint8_t buf[gaggimate_TofMeasurement_size];
+        pb_ostream_t os = pb_ostream_from_buffer(buf, sizeof(buf));
+        if (!pb_encode(&os, gaggimate_TofMeasurement_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "sendTofMeasurement encode failed: %s", PB_GET_ERROR(&os));
+            return;
+        }
+        tofMeasurementChar->setValue(buf, os.bytes_written);
         tofMeasurementChar->notify();
     }
 }
@@ -162,7 +241,11 @@ void NimBLEServerController::registerLedControlCallback(const led_control_callba
 
 void NimBLEServerController::setInfo(const String infoString) {
     this->infoString = infoString;
-    infoChar->setValue(infoString);
+    // PRO-243: infoString carries the raw nanopb SystemInfo bytes (built by
+    // make_system_info). Write via the length-delimited buffer overload so any
+    // embedded NUL bytes in the protobuf payload survive (a String overload
+    // could stop at the first NUL).
+    infoChar->setValue(reinterpret_cast<const uint8_t *>(infoString.c_str()), infoString.length());
 }
 
 void NimBLEServerController::registerPidControlCallback(const pid_control_callback_t &callback) { pidControlCallback = callback; }
@@ -188,96 +271,150 @@ void NimBLEServerController::onWrite(NimBLECharacteristic *pCharacteristic) {
     ESP_LOGV(LOG_TAG, "Write received!");
 
     if (pCharacteristic->getUUID().equals(NimBLEUUID(OUTPUT_CONTROL_UUID))) {
-        auto control = String(pCharacteristic->getValue().c_str());
-        uint8_t type = get_token(control, 0, ',').toInt();
-        uint8_t valve = get_token(control, 1, ',').toInt();
-        float boilerSetpoint = get_token(control, 3, ',').toFloat();
+        // PRO-242: nanopb wire format. Byte 0 = type discriminator (0 simple /
+        // 1 advanced), bytes 1.. = the encoded SimpleOutput / AdvancedOutput.
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        if (raw.size() < 1) {
+            ESP_LOGW(LOG_TAG, "Output control payload too short");
+            return;
+        }
+        const uint8_t type = raw[0];
+        const uint8_t *body = raw.data() + 1;
+        const size_t bodyLen = raw.size() - 1;
         if (type == 0) {
-            float pumpSetpoint = get_token(control, 2, ',').toFloat();
-            ESP_LOGV(LOG_TAG, "Received output control: type=%d, valve=%d, pump=%.1f, boiler=%.1f", type, valve, pumpSetpoint,
-                     boilerSetpoint);
+            gaggimate_SimpleOutput msg = gaggimate_SimpleOutput_init_zero;
+            pb_istream_t is = pb_istream_from_buffer(body, bodyLen);
+            if (!pb_decode(&is, gaggimate_SimpleOutput_fields, &msg)) {
+                ESP_LOGE(LOG_TAG, "SimpleOutput decode failed: %s", PB_GET_ERROR(&is));
+                return;
+            }
+            ESP_LOGV(LOG_TAG, "Received output control: type=%d, valve=%d, pump=%.1f, boiler=%.1f", type, msg.valve,
+                     msg.pump_setpoint, msg.boiler_setpoint);
             if (outputControlCallback != nullptr) {
-                outputControlCallback(valve == 1, pumpSetpoint, boilerSetpoint);
+                outputControlCallback(msg.valve, msg.pump_setpoint, msg.boiler_setpoint);
             }
         } else if (type == 1) {
-            bool pressureTarget = get_token(control, 4, ',').toInt() == 1;
-            float pumpPressure = get_token(control, 5, ',').toFloat();
-            float pumpFlow = get_token(control, 6, ',').toFloat();
+            gaggimate_AdvancedOutput msg = gaggimate_AdvancedOutput_init_zero;
+            pb_istream_t is = pb_istream_from_buffer(body, bodyLen);
+            if (!pb_decode(&is, gaggimate_AdvancedOutput_fields, &msg)) {
+                ESP_LOGE(LOG_TAG, "AdvancedOutput decode failed: %s", PB_GET_ERROR(&is));
+                return;
+            }
             ESP_LOGV(LOG_TAG, "Received advanced output control: type=%d, valve=%d, pressure_target=%d, pressure=%.1f, flow=%.1f",
-                     type, valve, pressureTarget, pumpPressure, pumpFlow);
+                     type, msg.valve, msg.pressure_target, msg.pump_pressure, msg.pump_flow);
             if (advancedControlCallback != nullptr) {
-                advancedControlCallback(valve == 1, boilerSetpoint, pressureTarget, pumpPressure, pumpFlow);
+                advancedControlCallback(msg.valve, msg.boiler_setpoint, msg.pressure_target, msg.pump_pressure, msg.pump_flow);
             }
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(ALT_CONTROL_CHAR_UUID))) {
-        bool pinState = (pCharacteristic->getValue()[0] == '1');
-        ESP_LOGV(LOG_TAG, "Received ALT control: %s", pinState ? "ON" : "OFF");
+        // PRO-244: nanopb wire format (was raw '1'/'0' byte).
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_AltControl msg = gaggimate_AltControl_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_AltControl_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "AltControl decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Received ALT control: %s", msg.active ? "ON" : "OFF");
         if (altControlCallback != nullptr) {
-            altControlCallback(pinState);
+            altControlCallback(msg.active);
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(PING_CHAR_UUID))) {
+        // PRO-244: nanopb wire format (was literal "1"). Empty message — decode
+        // validates the (0-byte) payload before firing the callback.
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_Ping msg = gaggimate_Ping_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_Ping_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "Ping decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
         ESP_LOGV(LOG_TAG, "Received ping");
         if (pingCallback != nullptr) {
             pingCallback();
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(AUTOTUNE_CHAR_UUID))) {
-        ESP_LOGV(LOG_TAG, "Received autotune");
+        // PRO-244: nanopb wire format (was "testTime,samples" comma text).
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_AutotuneRequest msg = gaggimate_AutotuneRequest_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_AutotuneRequest_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "AutotuneRequest decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Received autotune: test_time=%d, samples=%d", static_cast<int>(msg.test_time),
+                 static_cast<int>(msg.samples));
         if (autotuneCallback != nullptr) {
-            auto autotune = String(pCharacteristic->getValue().c_str());
-            int testTime = get_token(autotune, 0, ',').toInt();
-            int samples = get_token(autotune, 1, ',').toInt();
-            autotuneCallback(testTime, samples);
+            autotuneCallback(msg.test_time, msg.samples);
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(PID_CONTROL_CHAR_UUID))) {
-        auto pid = String(pCharacteristic->getValue().c_str());
-        float Kp = get_token(pid, 0, ',').toFloat();
-        float Ki = get_token(pid, 1, ',').toFloat();
-        float Kd = get_token(pid, 2, ',').toFloat();
-
-        // Optional thermal feedforward parameter (default value if not provided)
-        float Kf = 0.0f; // Default combined feedforward gain
-
-        String kfToken = get_token(pid, 3, ',');
-
-        if (kfToken.length() > 0 && kfToken.toFloat() > 0.0f) {
-            Kf = kfToken.toFloat();
+        // PRO-244: nanopb wire format (was "Kp,Ki,Kd[,Kf]" comma text). Kf is
+        // optional on the wire; when the display omits it the proto default 0
+        // mirrors the old "Kf=0 when unset" behavior. Callback stays 4-arg.
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_PidSettings msg = gaggimate_PidSettings_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_PidSettings_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "PidSettings decode failed: %s", PB_GET_ERROR(&is));
+            return;
         }
-
-        ESP_LOGI(LOG_TAG, "BLE received PID string: '%s'", pid.c_str());
-        ESP_LOGI(LOG_TAG, "Parsed PID: Kp=%.2f, Ki=%.2f, Kd=%.2f, Kf=%.3f (combined)", Kp, Ki, Kd, Kf);
+        ESP_LOGI(LOG_TAG, "Parsed PID: Kp=%.2f, Ki=%.2f, Kd=%.2f, Kf=%.3f (combined)", msg.kp, msg.ki, msg.kd, msg.kf);
         if (pidControlCallback != nullptr) {
-            pidControlCallback(Kp, Ki, Kd, Kf);
+            pidControlCallback(msg.kp, msg.ki, msg.kd, msg.kf);
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(PUMP_MODEL_COEFFS_CHAR_UUID))) {
-        auto pumpModelCoeffs = String(pCharacteristic->getValue().c_str());
-        float a = get_token(pumpModelCoeffs, 0, ',').toFloat();
-        float b = get_token(pumpModelCoeffs, 1, ',').toFloat();
-        float c = get_token(pumpModelCoeffs, 2, ',', "nan").toFloat();
-        float d = get_token(pumpModelCoeffs, 3, ',', "nan").toFloat();
-        ESP_LOGV(LOG_TAG, "Received pump flow polynomial coefficients: %.6f, %.6f, %.6f, %.6f", a, b, c, d);
+        // PRO-244: nanopb wire format (was "a,b,c,d" comma text). c and d may be
+        // NaN (two-point flow mode); the IEEE-754 float on the wire preserves it.
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_PumpModelCoeffs msg = gaggimate_PumpModelCoeffs_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_PumpModelCoeffs_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "PumpModelCoeffs decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Received pump flow polynomial coefficients: %.6f, %.6f, %.6f, %.6f", msg.a, msg.b, msg.c, msg.d);
         if (pumpModelCoeffsCallback != nullptr) {
-            pumpModelCoeffsCallback(a, b, c, d);
+            pumpModelCoeffsCallback(msg.a, msg.b, msg.c, msg.d);
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(PRESSURE_SCALE_UUID))) {
-        String scale_string = pCharacteristic->getValue().c_str();
-        float scale_value = scale_string.toFloat();
-
-        ESP_LOGV(LOG_TAG, "Received pressure scale: %.2f", scale_value);
+        // PRO-244: nanopb wire format (was lossy 3-dp float text).
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_PressureScale msg = gaggimate_PressureScale_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_PressureScale_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "PressureScale decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Received pressure scale: %.2f", msg.scale);
         if (pressureScaleCallback != nullptr) {
-            pressureScaleCallback(scale_value);
+            pressureScaleCallback(msg.scale);
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(VOLUMETRIC_TARE_UUID))) {
+        // PRO-244: nanopb wire format (was literal "1"). Empty message — decode
+        // validates the (0-byte) payload before firing the callback.
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_Tare msg = gaggimate_Tare_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_Tare_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "Tare decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
         ESP_LOGV(LOG_TAG, "Received tare");
         if (tareCallback != nullptr) {
             tareCallback();
         }
     } else if (pCharacteristic->getUUID().equals(NimBLEUUID(LED_CONTROL_UUID))) {
+        // PRO-244: nanopb wire format (was "channel,brightness" comma text).
+        const NimBLEAttValue raw = pCharacteristic->getValue();
+        gaggimate_LedControl msg = gaggimate_LedControl_init_zero;
+        pb_istream_t is = pb_istream_from_buffer(raw.data(), raw.size());
+        if (!pb_decode(&is, gaggimate_LedControl_fields, &msg)) {
+            ESP_LOGE(LOG_TAG, "LedControl decode failed: %s", PB_GET_ERROR(&is));
+            return;
+        }
+        ESP_LOGV(LOG_TAG, "Received led control, %d: %d", static_cast<int>(msg.channel), static_cast<int>(msg.brightness));
         if (ledControlCallback != nullptr) {
-            auto msg = String(pCharacteristic->getValue().c_str());
-            uint8_t channel = get_token(msg, 0, ',').toInt();
-            uint8_t brightness = get_token(msg, 1, ',').toInt();
-            ledControlCallback(channel, brightness);
-            ESP_LOGV(LOG_TAG, "Received led control, %d: %d", channel, brightness);
+            ledControlCallback(static_cast<uint8_t>(msg.channel), static_cast<uint8_t>(msg.brightness));
         }
     }
 }

@@ -37,7 +37,7 @@ GaggiMate turns a stock Gaggia Classic / Classic Pro into a programmable profili
 - JSON import/export.
 
 ### Shot history & analytics
-- **Binary shot log** on SPIFFS/SD with per-phase transition metadata and per-shot notes, ratings and bean linkage.
+- **Binary shot log** on LittleFS/SD with per-phase transition metadata and per-shot notes, ratings and bean linkage.
 - **Shot Analyzer** — Multi-shot overlay charts, predictive exit-reason detection, per-phase metrics and chart export.
 - **Statistics dashboard** — Trends, summary cards and per-profile / per-phase breakdowns with shareable deep links.
 - **Browser-side IndexedDB library** — Imported shots are usable offline alongside the device's history.
@@ -82,9 +82,10 @@ GaggiMate turns a stock Gaggia Classic / Classic Pro into a programmable profili
 | `display-headless` | Firmware without the UI (for boards without a display) |
 | `display-headless-8m` | Headless variant for 8 MB flash boards (Seeed XIAO ESP32-S3) |
 | `controller` | Firmware for the GaggiMate controller MCU |
+| `display-sim` | Desktop simulator — builds the display firmware natively with SDL2 for development (no hardware required) |
 | `native` / `native-sanitize` | Host unit-test environments (the latter under AddressSanitizer + UBSan) |
 
-The web UI lives in `web/` and is built separately with Vite (`cd web && npm ci && npm run build`). The build output is gzipped into `data/w/` and packed into the display firmware's SPIFFS filesystem image via `scripts/build_spiffs.sh`; see [AGENTS.md](AGENTS.md) for the full build flow.
+The web UI lives in `web/` and is built separately with Vite. It is gzipped and embedded directly into the display firmware's application partition via `scripts/build_webui.sh` (which runs the Vite build and `scripts/embed_webui.py`); see [AGENTS.md](AGENTS.md) for the full build flow.
 
 ## Screenshots and Images
 

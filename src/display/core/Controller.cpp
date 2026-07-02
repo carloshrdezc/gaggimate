@@ -1,11 +1,24 @@
 #include "Controller.h"
 #include "ArduinoJson.h"
+#ifndef GAGGIMATE_SIM
+// PRO-243: nanopb SystemInfo decode for the INFO characteristic (real firmware
+// only; the sim keeps the legacy JSON path — see setupInfos()).
+#include "comms.pb.h"
+#include "pb_decode.h"
+#endif
 #include "esp_sntp.h"
+#ifndef GAGGIMATE_SIM
+// PRO-330: esp_wifi_set_ps() — enforce WiFi modem-sleep before BLE controller
+// init so WiFi/BLE software coexistence can enable (device-only; the sim stubs
+// BLE and has no coexistence path).
+#include <esp_wifi.h>
+#endif
 #include <SD_MMC.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -15,7 +28,9 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
+#endif
 #include <display/plugins/BoilerFillPlugin.h>
 #if GAGGIMATE_ENABLE_HOMEKIT
 #include <display/plugins/HomekitPlugin.h>
@@ -29,16 +44,33 @@
 #if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
 #endif
+#ifndef GAGGIMATE_SIM // mDNS is device-only (the sim WiFi shim has no real mDNS)
 #include <display/plugins/mDNSPlugin.h>
+#endif
+#ifndef GAGGIMATE_SIM // DiagnosticLogPlugin uses WiFiUDP — device-only (PRO-266)
+#include <display/plugins/DiagnosticLogPlugin.h>
+#endif
 #ifndef GAGGIMATE_HEADLESS
+#ifdef GAGGIMATE_SIM
+#include <SdlDriver.h> // desktop SDL panel stands in for the hardware drivers
+#else
 #include <display/drivers/AmoledDisplayDriver.h>
 #include <display/drivers/LilyGoDriver.h>
 #include <display/drivers/WaveshareDriver.h>
+#endif
 #endif
 
 const String LOG_TAG = F("Controller");
 
 void Controller::setup() {
+    // PRO-331: load persisted settings from NVS now, NOT in the Settings
+    // constructor. Settings is a member of the global `controller`, so its
+    // constructor runs during C++ static-init — before the Arduino core calls
+    // nvs_flash_init(). Reading NVS that early fails on Arduino-esp32 3.x and
+    // every value silently falls back to its default (WiFi never connects).
+    // setup() runs after nvs init, so the read here succeeds.
+    settings.load();
+
     mode = settings.getStartupMode();
     
     // Initialize process mutex for thread-safe access
@@ -47,8 +79,14 @@ void Controller::setup() {
         ESP_LOGE(LOG_TAG, "Failed to create process mutex");
     }
 
-    if (!SPIFFS.begin(true)) {
-        Serial.println(F("An Error has occurred while mounting SPIFFS"));
+    // Web assets are served from this partition. LittleFS (not SPIFFS): SPIFFS
+    // has no directory tree, so stat()/exists() is O(whole filesystem) and a
+    // miss scans every page -- the web handler does that synchronously in the
+    // async_tcp task for every request, which under a multi-tab load burst
+    // pegged CPU0 for >5s and tripped the task watchdog (reboot). LittleFS
+    // lookups are O(path). maxOpenFiles 16 for concurrent asset serving. [GM-90]
+    if (!LittleFS.begin(true, "/littlefs", 16)) {
+        Serial.println(F("An Error has occurred while mounting LittleFS"));
     }
 
 #ifndef GAGGIMATE_HEADLESS
@@ -64,7 +102,7 @@ void Controller::setup() {
         ESP_LOGI(LOG_TAG, "Used: %lluMB, Capacity: %lluMB", SD_MMC.usedBytes() / 1024 / 1024, SD_MMC.cardSize() / 1024 / 1024);
     }
 #endif
-    FS *fs = &SPIFFS;
+    FS *fs = &LittleFS;
     if (sdcard) {
         fs = &SD_MMC;
     }
@@ -79,7 +117,7 @@ void Controller::setup() {
         pluginManager->registerPlugin(new HomekitPlugin(settings.getWifiSsid(), settings.getWifiPassword()));
     else
         pluginManager->registerPlugin(new mDNSPlugin());
-#else
+#elif !defined(GAGGIMATE_SIM)
     // HomeKit compiled out: register mDNS unconditionally so the device stays
     // discoverable on the network (HomeKit otherwise provides its own mDNS).
     pluginManager->registerPlugin(new mDNSPlugin());
@@ -104,6 +142,12 @@ void Controller::setup() {
 #endif
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
+#ifndef GAGGIMATE_SIM
+    // PRO-266: tees ESP_LOG over UDP for tether-free serial capture. Self-gated
+    // on Settings::getDiagnosticLogEnabled() (default OFF) — registered
+    // unconditionally so it can be toggled at runtime without a reflash.
+    pluginManager->registerPlugin(new DiagnosticLogPlugin());
+#endif
     pluginManager->setup(this);
 
     pluginManager->on("profiles:profile:save", [this](Event const &event) {
@@ -148,6 +192,9 @@ void Controller::connect() {
 
 #ifndef GAGGIMATE_HEADLESS
 void Controller::setupPanel() {
+#ifdef GAGGIMATE_SIM
+    driver = SdlDriver::getInstance(); // desktop SDL panel
+#else
     if (LilyGoDriver::getInstance()->isCompatible()) {
         driver = LilyGoDriver::getInstance();
     } else if (AmoledDisplayDriver::getInstance()->isCompatible()) {
@@ -159,16 +206,39 @@ void Controller::setupPanel() {
         delay(10000);
         ESP.restart();
     }
+#endif
     driver->init();
 }
 #endif
 
 void Controller::setupBluetooth() {
+#ifndef GAGGIMATE_SIM
+    // PRO-330: connect() brings WiFi up (setupWifi()) immediately before this BLE
+    // init. On the Arduino-esp32 3.x / IDF 5.x platform (PRO-293), the BT
+    // controller's software-coexistence bring-up (coex_enable, reached from
+    // esp_bt_controller_init/enable) ABORTS unless WiFi modem-sleep is enabled
+    // (WIFI_PS_MIN_MODEM) — IDF logs "Should enable WiFi modem sleep when both
+    // WiFi and Bluetooth are enabled" and the controller faults during its own
+    // failed-init cleanup (LoadProhibited in btdm_controller_deinit_internal ->
+    // uxListRemove). See NimBLE-Arduino#437 / espressif/esp-idf#9595.
+    //
+    // The Arduino WiFi.setSleep() path only applies esp_wifi_set_ps() on the
+    // STA-start event, so the AP-fallback case (WiFi.softAP("GaggiMate"), the
+    // common no-credentials path) never sets it and coexistence aborts. Force
+    // the coexistence-required power-save mode directly here, after WiFi is up
+    // and right before the BT controller initializes, covering STA and AP alike.
+    // This was implicit on the old IDF 4.4 platform (where v156 ran); IDF 5.x
+    // enforces it, which is why the NimBLE 1.x->2.x + platform bump regressed it.
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+#endif
     clientController.initClient();
     clientController.registerDisconnectCallback([this]() {
         if (initialized) {
             pluginManager->trigger("controller:bluetooth:disconnect");
             waitingForController = true;
+            // Restart the grace clock so the next scan/reconnect attempt gets a
+            // full CONTROLLER_WAITING_TIMEOUT_MS window (PRO-3).
+            connectStartTime = millis();
             setMode(MODE_STANDBY);
         }
     });
@@ -215,11 +285,15 @@ void Controller::setupBluetooth() {
 
 void Controller::setupInfos() {
     const std::string info = clientController.readInfo();
-    printf("System info: %s\n", info.c_str());
+#ifdef GAGGIMATE_SIM
+    // PRO-243: the simulator's NimBLEClientController (sim/comms, intentionally
+    // untouched) still serves the legacy JSON info string and the sim build does
+    // not link the nanopb codegen, so keep parsing JSON here for the sim only.
+    ESP_LOGI(LOG_TAG, "System info (sim/json): %s", info.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, info);
     if (err) {
-        printf("Error deserializing JSON: %s\n", err.c_str());
+        ESP_LOGE(LOG_TAG, "Error deserializing JSON: %s", err.c_str());
         systemInfo = SystemInfo{
             .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
     } else {
@@ -232,6 +306,28 @@ void Controller::setupInfos() {
                                     .tof = doc["cp"]["tof"].as<bool>(),
                                 }};
     }
+#else
+    // PRO-243: nanopb SystemInfo wire format (was an ArduinoJson string). The
+    // controller encodes gaggimate_SystemInfo in make_system_info(); decode it
+    // back into the firmware's SystemInfo struct here.
+    ESP_LOGI(LOG_TAG, "System info: %u bytes", static_cast<unsigned>(info.size()));
+    gaggimate_SystemInfo msg = gaggimate_SystemInfo_init_zero;
+    pb_istream_t is = pb_istream_from_buffer(reinterpret_cast<const uint8_t *>(info.data()), info.size());
+    if (!pb_decode(&is, gaggimate_SystemInfo_fields, &msg)) {
+        ESP_LOGE(LOG_TAG, "Error decoding SystemInfo: %s", PB_GET_ERROR(&is));
+        systemInfo = SystemInfo{
+            .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
+    } else {
+        systemInfo = SystemInfo{.hardware = String(msg.hardware),
+                                .version = String(msg.version),
+                                .capabilities = SystemCapabilities{
+                                    .dimming = msg.capabilities.dimming,
+                                    .pressure = msg.capabilities.pressure,
+                                    .ledControl = msg.capabilities.led_control,
+                                    .tof = msg.capabilities.tof,
+                                }};
+    }
+#endif
 }
 
 void Controller::setupWifi() {
@@ -308,8 +404,11 @@ void Controller::loop() {
 
     if (clientController.isReadyForConnection() && clientController.connectToServer()) {
         waitingForController = false;
+        // Reset the grace clock so a subsequent disconnect measures from the
+        // moment of (re)connection, not from original boot (PRO-3).
+        connectStartTime = millis();
         setupInfos();
-        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f\n", settings.getPressureScaling());
+        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f", settings.getPressureScaling());
         setPressureScale();
         clientController.sendPidSettings(settings.getPid());
         clientController.sendPumpModelCoeffs(settings.getPumpModelCoeffs());
@@ -1096,8 +1195,21 @@ void Controller::deactivateGrind() {
 }
 
 void Controller::activateStandby() {
-    setMode(MODE_STANDBY);
+    // PRO-278: tear the running process down BEFORE flipping the mode, never
+    // the other way around. The reverse order (setMode then deactivate) leaves
+    // a window in which mode == MODE_STANDBY while the steam/brew process is
+    // still currentProcess and isActive(). In that window setMode() has already
+    // dispatched the mutable `controller:mode:change` event, and a re-assert
+    // path (a still-active SteamProcess, the steam UI screen, or a mode-change
+    // handler) can flip the mode back to MODE_STEAM/MODE_BREW before deactivate()
+    // lands — the user-reported "stop-steam bounces back, second press sticks"
+    // bug. Deactivating first means the mode-change event fires with no active
+    // process to re-assert against, so a single press lands in Standby and stays.
+    // This matches every sibling teardown: deactivateStandby(), the steam-button
+    // release in handleSteamButton(), and WebUIPlugin's req:change-mode STANDBY
+    // path all deactivate() before setMode().
     deactivate();
+    setMode(MODE_STANDBY);
 }
 
 void Controller::deactivateStandby() {
@@ -1356,14 +1468,25 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         return;
     }
     
-    // Update volume with mutex protection for both currentProcess and lastProcess
+    // PRO-367: never lose the stop-critical measurement to a timed-out take.
+    // Latch the freshest value first (outside the lock). The scale weight is
+    // monotonic cumulative, so the newest value subsumes any earlier one.
+    volumetricCoalescer.latch(measurement);
+
+    // Update volume with mutex protection for both currentProcess and lastProcess.
+    // On a SUCCESSFUL take, apply the freshest latched value (which may be this
+    // measurement, or one coalesced from a prior take that timed out) so a
+    // previously-dropped weight is never lost. On a FAILED take we simply return:
+    // the value stays latched and the next successful take applies it.
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        double latest = measurement;
+        volumetricCoalescer.consumeInto(latest);
         if (currentProcess != nullptr) {
-            currentProcess->updateVolume(measurement);
+            currentProcess->updateVolume(latest);
         }
         // Also update lastProcess while holding mutex to prevent race with clear()
         if (lastProcess != nullptr && !lastProcess->isComplete()) {
-            lastProcess->updateVolume(measurement);
+            lastProcess->updateVolume(latest);
         }
         xSemaphoreGive(processMutex);
     }
@@ -1392,7 +1515,7 @@ void Controller::onVolumetricDelete() {
 }
 
 void Controller::handleBrewButton(int brewButtonStatus) {
-    printf("current screen %d, brew button %d\n", getMode(), brewButtonStatus);
+    ESP_LOGD(LOG_TAG, "current screen %d, brew button %d", getMode(), brewButtonStatus);
     if (brewButtonStatus) {
         switch (getMode()) {
         case MODE_STANDBY:
@@ -1432,7 +1555,7 @@ void Controller::handleBrewButton(int brewButtonStatus) {
 }
 
 void Controller::handleSteamButton(int steamButtonStatus) {
-    printf("current screen %d, steam button %d\n", getMode(), steamButtonStatus);
+    ESP_LOGD(LOG_TAG, "current screen %d, steam button %d", getMode(), steamButtonStatus);
     if (steamButtonStatus) {
         switch (getMode()) {
         case MODE_STANDBY:

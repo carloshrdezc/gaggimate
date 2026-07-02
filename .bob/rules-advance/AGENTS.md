@@ -26,7 +26,7 @@
 
 ## Build Order Critical
 
-**Web UI must build before firmware SPIFFS**: Always run `cd web && npm ci && npm run build` then `scripts/build_spiffs.sh` before `pio run`. Web assets are gzipped into `data/w/`.
+**Web UI embeds into the firmware app image**: Always run `cd web && npm ci && npm run build` then `scripts/build_webui.sh` before `pio run`. The bundle is gzipped and packed into `src/display/webassets/`.
 
 ## MCP & Browser Tools Available
 
