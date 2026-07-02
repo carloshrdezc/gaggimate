@@ -3,6 +3,7 @@
 #include "../config/features.h"
 #include "../core/Plugin.h"
 #include "../core/constants.h"
+#include "BLEScaleScanPolicy.h" // PRO-5: RECONNECTION_TRIES + reconnect/scan policy (host-includable)
 #include "PostStopGracePolicy.h"
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
@@ -14,7 +15,6 @@
 void on_ble_measurement(float value);
 
 constexpr unsigned long UPDATE_INTERVAL_MS = 1000;
-constexpr unsigned int RECONNECTION_TRIES = 15;
 
 // PRO-248: Hard-cap for the steam scale-alive grace window. NOTE: this window is
 // NOT where the last drips are actually captured — that happens earlier, while
