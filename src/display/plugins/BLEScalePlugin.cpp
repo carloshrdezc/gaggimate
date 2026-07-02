@@ -485,7 +485,17 @@ void BLEScalePlugin::onMeasurement(float value) const {
         return;
     }
 
-    // Cache only validated, accepted measurements
+    // Cache only validated, accepted measurements.
+    //
+    // NOTE (PRO-385 / PRO-377 / PR #370): this assignment intentionally sits BELOW the
+    // MIN_MEASUREMENT_INTERVAL_MS (10 ms) rate-limit early-return above. During a
+    // measurement burst faster than that interval, getLastWeight() therefore returns the
+    // last value that was *throttled through* to the controller, NOT the absolute latest
+    // raw reading. This is a conscious design choice, not a bug: the accessor deliberately
+    // mirrors what the controller actually consumed, and the throttled samples are
+    // intentionally-dropped duplicates. Do NOT "fix" this by moving the assignment above
+    // the rate-limit early-return (e.g. when BeanconquerorPlugin lands) — that would make
+    // getLastWeight() diverge from the value the controller was actually fed.
     lastWeight = value;
 
     // Safe to call controller method

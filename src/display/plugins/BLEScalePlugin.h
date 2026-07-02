@@ -69,6 +69,8 @@ class BLEScalePlugin : public Plugin {
 
     std::vector<DiscoveredDevice> getDiscoveredScales() const;
     void tare() const;
+    // Returns the last rate-limited-through measurement, not the absolute latest raw reading
+    // during a fast burst — this "freeze" is intentional; see onMeasurement() in the .cpp (PRO-385).
     float getLastWeight() const { return lastWeight; }
 
   private:
