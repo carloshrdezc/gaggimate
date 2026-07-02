@@ -476,7 +476,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
 
       <div className='mt-2 flex flex-row gap-4'>
         <h3 className='text-lg font-medium'>Stop when</h3>
-        <div className='dropdown'>
+        <div className='dropdown dropdown-top dropdown-end'>
           <Tooltip content='Add stop condition'>
             <div
               tabIndex='0'
@@ -489,7 +489,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
           </Tooltip>
           <ul
             tabIndex='0'
-            className='menu dropdown-content bg-base-100 rounded-box z-1 w-52 p-2 shadow-sm'
+            className='menu dropdown-content bg-base-100 rounded-box z-50 max-h-[60vh] w-52 flex-nowrap overflow-y-auto p-2 shadow-sm'
           >
             {availableTargetTypes.map(t => (
               <li key={`${t.type}-${t.operator}`}>
