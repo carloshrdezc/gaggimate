@@ -126,6 +126,89 @@ void test_malformed_patch_with_prerelease_returns_zero(void) {
     semver_free(&v);
 }
 
+// PRO-387: leading whitespace on a core component ("  12.0.0", "1. 2.0") is
+// rejected. strtol would skip leading whitespace and accept "  12" as 12; the
+// digit-only lead-char precheck now returns the sentinel instead.
+void test_leading_whitespace_component_returns_zero(void) {
+    semver_t a = from_string("  12.0.0");
+    TEST_ASSERT_EQUAL_INT(0, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("1. 2.0");
+    TEST_ASSERT_EQUAL_INT(0, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+}
+
+// PRO-387: a leading '-' sign on any core component ("-1.0.0", "1.-1.0",
+// "1.0.-1") is rejected. strtol would parse "-1" as a negative value; semver
+// core components must be non-negative, so these return the sentinel.
+void test_negative_sign_component_returns_zero(void) {
+    semver_t a = from_string("-1.0.0");
+    TEST_ASSERT_EQUAL_INT(0, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("1.-1.0");
+    TEST_ASSERT_EQUAL_INT(0, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+
+    semver_t c = from_string("1.0.-1");
+    TEST_ASSERT_EQUAL_INT(0, c.major);
+    TEST_ASSERT_EQUAL_INT(0, c.minor);
+    TEST_ASSERT_EQUAL_INT(0, c.patch);
+    TEST_ASSERT_NULL(c.prerelease);
+    semver_free(&c);
+}
+
+// PRO-387: a leading '+' sign on a core component ("+1.0.0", "1.+1.0") is
+// rejected. Note this differs from the "+build.5" metadata case (that '+'
+// starts the metadata suffix on the WHOLE version and is stripped up front);
+// here the '+' is the lead char of a numeric component and must be rejected.
+void test_positive_sign_component_returns_zero(void) {
+    semver_t a = from_string("+1.0.0");
+    TEST_ASSERT_EQUAL_INT(0, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("1.+1.0");
+    TEST_ASSERT_EQUAL_INT(0, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+}
+
+// PRO-387 positive control: a normal, unpadded tag ("2.0.0", "v2.0.0") still
+// parses unchanged after the lead-char precheck was added.
+void test_unpadded_tag_still_parses(void) {
+    semver_t a = from_string("2.0.0");
+    TEST_ASSERT_EQUAL_INT(2, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("v2.0.0");
+    TEST_ASSERT_EQUAL_INT(2, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+}
+
 static int runSemverExtensionsTests() {
     UNITY_BEGIN();
     RUN_TEST(test_build_metadata_simple);
@@ -136,6 +219,10 @@ static int runSemverExtensionsTests() {
     RUN_TEST(test_non_numeric_components_return_zero);
     RUN_TEST(test_trailing_garbage_patch_returns_zero);
     RUN_TEST(test_malformed_patch_with_prerelease_returns_zero);
+    RUN_TEST(test_leading_whitespace_component_returns_zero);
+    RUN_TEST(test_negative_sign_component_returns_zero);
+    RUN_TEST(test_positive_sign_component_returns_zero);
+    RUN_TEST(test_unpadded_tag_still_parses);
     return UNITY_END();
 }
 
