@@ -462,7 +462,6 @@ void BLEScalePlugin::establishConnection() {
 }
 
 void BLEScalePlugin::onMeasurement(float value) const {
-    lastWeight = value;
     // Rate limiting to prevent callback flooding
     unsigned long now = millis();
     if (now - lastMeasurementTime < MIN_MEASUREMENT_INTERVAL_MS) {
@@ -485,6 +484,9 @@ void BLEScalePlugin::onMeasurement(float value) const {
         ESP_LOGW("BLEScalePlugin", "Invalid measurement value: %f, ignoring", value);
         return;
     }
+
+    // Cache only validated, accepted measurements
+    lastWeight = value;
 
     // Safe to call controller method
     controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::BLUETOOTH);
