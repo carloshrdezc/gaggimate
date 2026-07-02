@@ -209,14 +209,19 @@ void BLEScalePlugin::update() {
     if (scale != nullptr) {
         // Call scale update with error checking
         scale->update();
-        if (!hasConnectedScale) {
-            reconnectionTries++;
-            if (reconnectionTries > RECONNECTION_TRIES) {
-                ESP_LOGW("BLEScalePlugin", "Max reconnection attempts reached, disconnecting");
-                disconnect();
-                if (scanner != nullptr) {
-                    scanner->initializeAsyncScan();
-                }
+        // PRO-5: route the counter through nextReconnectionTries() (tested in
+        // test_ble_scale_scan_policy) so it measures CONSECUTIVE failed reconnect
+        // ticks. A healthy tick resets it to 0; without that reset the counter was
+        // monotonic across the scale's lifetime (only cleared on a full teardown),
+        // so transient link flaps — which cluster right after a display-sleep
+        // radio-idle/wake cycle — accumulated and exhausted the RECONNECTION_TRIES
+        // budget, tripping the max-tries teardown prematurely and stopping reconnects.
+        reconnectionTries = nextReconnectionTries(reconnectionTries, hasConnectedScale);
+        if (!hasConnectedScale && reconnectionTries > RECONNECTION_TRIES) {
+            ESP_LOGW("BLEScalePlugin", "Max reconnection attempts reached, disconnecting");
+            disconnect();
+            if (scanner != nullptr) {
+                scanner->initializeAsyncScan();
             }
         }
     } else if (controller->getSettings().getSavedScale() != "" && scanner != nullptr) {
