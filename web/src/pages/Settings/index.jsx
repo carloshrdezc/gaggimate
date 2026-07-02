@@ -1,5 +1,6 @@
-import { faFileExport, faFileImport, faCheck, faEye, faEyeSlash, faArrowLeft, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faFileExport, faCheck, faEye, faEyeSlash, faArrowLeft, faSave } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { ImportButton } from '../../components/ImportButton.jsx';
 import { computed } from '@preact/signals';
 import { useQuery } from 'preact-fetching';
 import { useCallback, useEffect, useRef, useState, useContext } from 'preact/hooks';
@@ -289,20 +290,7 @@ export function Settings() {
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <label
-            htmlFor='settingsImport'
-            className='nd-action-btn cursor-pointer'
-            title='Import Settings'
-          >
-            <FontAwesomeIcon icon={faFileImport} />
-          </label>
-          <input
-            onChange={onUpload}
-            className='hidden'
-            id='settingsImport'
-            type='file'
-            accept='.json,application/json'
-          />
+          <ImportButton onChange={onUpload} title='Import Settings' />
         </div>
       </div>
 
