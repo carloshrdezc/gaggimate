@@ -206,6 +206,16 @@ int DiagnosticLogPlugin::teeVprintf(const char *format, va_list args) {
         if (line.len > 0) {
             // Non-blocking: drop the line rather than ever stall the caller.
             // drainTask echoes line.text to UART + broadcasts UDP + appends SD.
+            // PRO-368: on a full 64-deep queue this drops the line from ALL
+            // sinks, INCLUDING the UART / serial-over-USB echo — because PRO-367
+            // moved that echo into drainTask, so it is now downstream of this
+            // enqueue rather than emitted here. PR #357's "serial output
+            // preserved when diag ON" guarantee is therefore bounded by queue
+            // capacity: under saturation the UART sink is dropped too. This is a
+            // deliberate, accepted trade-off, not a defect — reintroducing a
+            // synchronous UART echo on the caller is exactly the core-1
+            // processMutex critical-section lengthening PRO-367 fixed, so the
+            // producer path must stay non-blocking (drop-all-sinks-on-overflow).
             xQueueSend(self->queue, &line, 0);
         }
     }
@@ -232,6 +242,8 @@ void DiagnosticLogPlugin::drainTask(void *arg) {
             // last in-flight line from serial (it is still enqueued for UDP/SD).
             // In exchange, ESP_LOG* on core-1 during a shot no longer lengthens
             // the critical sections that were tripping the 10 ms volumetric take.
+            // (Separately, PRO-368: a full-queue enqueue in teeVprintf drops the
+            // line from this UART echo too — see the saturation-drop note there.)
             if (previousVprintf != nullptr)
                 echoToUart(previousVprintf, line.text);
 
