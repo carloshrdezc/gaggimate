@@ -31,7 +31,7 @@ vector<string> split(const string &s, char delim) {
 // A digit-only lead-char precheck additionally rejects leading whitespace
 // ("  12") and a leading sign ("-1" / "+1"), which strtol would otherwise
 // accept; semver core components must be non-negative and unpadded.
-static bool parse_component(const string &tok, int &out) {
+bool parse_component(const string &tok, int &out) {
     if (tok.empty()) {
         return false;
     }

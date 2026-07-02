@@ -203,6 +203,25 @@ void test_plus_caught_by_metadata_strip_returns_zero(void) {
     semver_free(&b);
 }
 
+// PRO-390: direct unit test of the `parse_component` seam (now externally
+// linkable, declared in semver_extensions.h). PRO-389 documented that a
+// leading-'+' token can never reach parse_component via from_string (build
+// metadata is stripped before the '.'-split), so the '+' lead-char rejection
+// was asserted only indirectly. This test calls parse_component directly to
+// lock that rejection: a "+1" token returns false AND leaves `out` untouched
+// (strtol consumes no digits after the lead-char precheck fails). A valid
+// numeric token ("42") is included as a positive control to prove the seam
+// works both ways.
+void test_parse_component_rejects_leading_plus(void) {
+    int out = -999;
+    TEST_ASSERT_FALSE(parse_component("+1", out));
+    TEST_ASSERT_EQUAL_INT(-999, out); // out must not be written on rejection
+
+    int ok = -999;
+    TEST_ASSERT_TRUE(parse_component("42", ok));
+    TEST_ASSERT_EQUAL_INT(42, ok);
+}
+
 // PRO-387 positive control: a normal, unpadded tag ("2.0.0", "v2.0.0") still
 // parses unchanged after the lead-char precheck was added.
 void test_unpadded_tag_still_parses(void) {
@@ -234,6 +253,7 @@ static int runSemverExtensionsTests() {
     RUN_TEST(test_leading_whitespace_component_returns_zero);
     RUN_TEST(test_negative_sign_component_returns_zero);
     RUN_TEST(test_plus_caught_by_metadata_strip_returns_zero);
+    RUN_TEST(test_parse_component_rejects_leading_plus);
     RUN_TEST(test_unpadded_tag_still_parses);
     return UNITY_END();
 }
