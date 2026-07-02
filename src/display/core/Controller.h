@@ -7,6 +7,7 @@
 #include "Settings.h"
 #include "VolumetricCoalescer.h"
 #include <WiFi.h>
+#include <atomic>
 #include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
 #include <display/core/GrinderManager.h>
@@ -173,7 +174,7 @@ class Controller {
     void onProfileSave() const;
     void onProfileSaveAsNew();
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
-    void setVolumetricOverride(bool override) { volumetricOverride = override; }
+    void setVolumetricOverride(bool override) { volumetricOverride.store(override, std::memory_order_release); }
     bool isBluetoothScaleHealthy() const;
     void onFlush();
     int getWaterLevel() const {
@@ -256,15 +257,18 @@ class Controller {
     bool screenReady = false;
     bool waitingForController = false;
     unsigned long connectStartTime = 0;
-    bool volumetricOverride = false;
+    std::atomic<bool> volumetricOverride{false};
     bool processCompleted = false;
     bool steamReady = false;
     bool sdcard = false;
     int error = 0;
 
     // Bluetooth scale connection monitoring
-    VolumetricMeasurementSource currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
-    unsigned long lastBluetoothMeasurement = 0;
+    // PRO-375: written on the UI/control task, read on the BLE/measurement task
+    // (onVolumetricMeasurement); atomic with acquire/release to synchronize the
+    // cross-task accesses (see BLEScalePlugin.h callbackInFlight precedent).
+    std::atomic<VolumetricMeasurementSource> currentVolumetricSource{VolumetricMeasurementSource::INACTIVE};
+    std::atomic<unsigned long> lastBluetoothMeasurement{0};
 
     // PRO-367: coalesce-latest holder for the stop-critical volumetric update.
     // onVolumetricMeasurement() takes processMutex with a 10 ms fail-fast timeout;
