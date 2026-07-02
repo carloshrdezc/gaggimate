@@ -181,6 +181,7 @@ export function PluginCard({
                 id='startupFillTime'
                 name='startupFillTime'
                 type='number'
+                inputMode='decimal'
                 className='nd-input'
                 placeholder='0'
                 value={formData.startupFillTime}
@@ -198,6 +199,7 @@ export function PluginCard({
                 id='steamFillTime'
                 name='steamFillTime'
                 type='number'
+                inputMode='decimal'
                 className='nd-input'
                 placeholder='0'
                 value={formData.steamFillTime}
@@ -336,6 +338,7 @@ export function PluginCard({
                 id='haPort'
                 name='haPort'
                 type='number'
+                inputMode='numeric'
                 className='nd-input'
                 placeholder='0'
                 value={formData.haPort}

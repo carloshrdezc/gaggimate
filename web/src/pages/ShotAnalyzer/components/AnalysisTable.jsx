@@ -603,6 +603,7 @@ export function AnalysisTable({
               </span>
               <input
                 type='number'
+                inputMode='numeric'
                 min='0'
                 step='50'
                 value={
@@ -624,6 +625,7 @@ export function AnalysisTable({
               </span>
               <input
                 type='number'
+                inputMode='numeric'
                 min='0'
                 step='50'
                 value={

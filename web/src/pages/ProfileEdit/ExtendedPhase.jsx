@@ -103,6 +103,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                 id={`phase-${index}-duration`}
                 className='grow'
                 type='number'
+                inputMode='decimal'
                 min='1'
                 value={phase.duration}
                 onChange={e => onFieldChange('duration', parseFloat(e.target.value))}
@@ -122,6 +123,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                 id={`phase-${index}-target`}
                 className='grow'
                 type='number'
+                inputMode='decimal'
                 value={`${phase.temperature || 0}`}
                 onChange={e => onFieldChange('temperature', parseFloat(e.target.value))}
                 aria-label='Target temperature'
@@ -269,6 +271,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                 id={`phase-${index}-power`}
                 className='grow'
                 type='number'
+                inputMode='numeric'
                 step='1'
                 min={0}
                 max={100}
@@ -299,6 +302,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                     id={`phase-${index}-pressure`}
                     className='grow'
                     type='number'
+                    inputMode='decimal'
                     step='0.01'
                     min={mode === 'pressure' ? '0.1' : '0'}
                     value={currentPressure.toString()}
@@ -324,6 +328,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                     id={`phase-${index}-flow`}
                     className='grow'
                     type='number'
+                    inputMode='decimal'
                     step='0.01'
                     value={currentFlow.toString()}
                     onChange={e =>
@@ -421,6 +426,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                   id={`phase-${index}-transition-duration`}
                   className='grow'
                   type='number'
+                  inputMode='decimal'
                   value={phase.transition?.duration || 0}
                   onChange={e =>
                     onFieldChange('transition', {

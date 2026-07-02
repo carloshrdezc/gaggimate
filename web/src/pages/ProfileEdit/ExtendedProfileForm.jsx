@@ -161,6 +161,7 @@ export function ExtendedProfileForm(props) {
                   id='temperature'
                   name='temperature'
                   type='number'
+                  inputMode='decimal'
                   className='grow'
                   value={data?.temperature}
                   onChange={e => onFieldChange('temperature', parseFloat(e.target.value))}

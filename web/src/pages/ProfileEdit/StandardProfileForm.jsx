@@ -101,6 +101,7 @@ export function StandardProfileForm(props) {
                   id='temperature'
                   name='temperature'
                   type='number'
+                  inputMode='decimal'
                   className='grow'
                   value={data?.temperature}
                   onChange={e => onFieldChange('temperature', parseFloat(e.target.value))}
@@ -267,6 +268,7 @@ function Phase({ phase, index, onChange, onRemove, pressureAvailable }) {
                 id={`phase-${index}-duration`}
                 className='grow'
                 type='number'
+                inputMode='decimal'
                 min='1'
                 value={phase.duration}
                 onChange={e => onFieldChange('duration', parseFloat(e.target.value))}
@@ -286,6 +288,7 @@ function Phase({ phase, index, onChange, onRemove, pressureAvailable }) {
                 id={`phase-${index}-target`}
                 className='grow'
                 type='number'
+                inputMode='decimal'
                 value={targetWeight}
                 onChange={e => onVolumetricTargetChange(parseFloat(e.target.value))}
                 aria-label='Target weight in grams'
@@ -397,6 +400,7 @@ function Phase({ phase, index, onChange, onRemove, pressureAvailable }) {
                 id={`phase-${index}-power`}
                 className='grow'
                 type='number'
+                inputMode='numeric'
                 step='1'
                 min={0}
                 max={100}
@@ -422,6 +426,7 @@ function Phase({ phase, index, onChange, onRemove, pressureAvailable }) {
                   id={`phase-${index}-pressure`}
                   className='grow'
                   type='number'
+                  inputMode='decimal'
                   step='0.01'
                   value={pressure}
                   onChange={e =>
@@ -444,6 +449,7 @@ function Phase({ phase, index, onChange, onRemove, pressureAvailable }) {
                   id={`phase-${index}-flow`}
                   className='grow'
                   type='number'
+                  inputMode='decimal'
                   step='0.01'
                   value={flow}
                   onChange={e =>
