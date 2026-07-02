@@ -28,8 +28,17 @@ vector<string> split(const string &s, char delim) {
 // token (end pointer at the terminating '\0'), so non-numeric ("abc"), empty,
 // or trailing-garbage ("12x") tokens are rejected instead of silently coerced
 // to 0 as the old atoi() did. ERANGE / int-range overflow is also rejected.
+// A digit-only lead-char precheck additionally rejects leading whitespace
+// ("  12") and a leading sign ("-1" / "+1"), which strtol would otherwise
+// accept; semver core components must be non-negative and unpadded.
 static bool parse_component(const string &tok, int &out) {
     if (tok.empty()) {
+        return false;
+    }
+    // Reject leading whitespace, '+'/'-' sign, or any non-digit lead char: semver core
+    // components must be non-negative and unpadded. strtol would otherwise accept "  12" and "-1".
+    unsigned char c0 = static_cast<unsigned char>(tok[0]);
+    if (c0 < '0' || c0 > '9') {
         return false;
     }
     errno = 0;
