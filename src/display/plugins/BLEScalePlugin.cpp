@@ -2,11 +2,11 @@
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
+#include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
-#include <cmath> // For isfinite()
 #include <display/core/Controller.h>
 #include <scales/acaia.h>
 #include <scales/bookoo.h>
@@ -479,8 +479,8 @@ void BLEScalePlugin::onMeasurement(float value) const {
         return; // Don't process measurements when not active
     }
 
-    // Validate the measurement value
-    if (!isfinite(value) || value < -1000.0f || value > 10000.0f) {
+    // Validate the measurement value (shared gate — see BLEScaleMeasurementPolicy.h)
+    if (!isValidBleScaleMeasurement(value)) {
         ESP_LOGW("BLEScalePlugin", "Invalid measurement value: %f, ignoring", value);
         return;
     }
