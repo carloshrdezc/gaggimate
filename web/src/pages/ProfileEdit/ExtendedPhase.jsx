@@ -489,7 +489,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
           </Tooltip>
           <ul
             tabIndex='0'
-            className='menu dropdown-content bg-base-100 rounded-box z-50 max-h-[60vh] w-52 flex-nowrap overflow-y-auto p-2 shadow-sm'
+            className='menu dropdown-content bg-base-100 rounded-box z-[65] max-h-[60vh] w-52 flex-nowrap overflow-y-auto p-2 shadow-sm'
           >
             {availableTargetTypes.map(t => (
               <li key={`${t.type}-${t.operator}`}>
