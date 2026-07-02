@@ -120,7 +120,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
           <div className='input-group'>
             <label htmlFor={`phase-${index}-temperature`} className='input w-full'>
               <input
-                id={`phase-${index}-target`}
+                id={`phase-${index}-temperature`}
                 className='grow'
                 type='number'
                 inputMode='decimal'
