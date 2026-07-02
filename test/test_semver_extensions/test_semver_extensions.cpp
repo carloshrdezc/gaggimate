@@ -171,11 +171,23 @@ void test_negative_sign_component_returns_zero(void) {
     semver_free(&c);
 }
 
-// PRO-387: a leading '+' sign on a core component ("+1.0.0", "1.+1.0") is
-// rejected. Note this differs from the "+build.5" metadata case (that '+'
-// starts the metadata suffix on the WHOLE version and is stripped up front);
-// here the '+' is the lead char of a numeric component and must be rejected.
-void test_positive_sign_component_returns_zero(void) {
+// PRO-389: a '+' anywhere in the tag ("+1.0.0", "1.+1.0") yields the
+// {0,0,0,nullptr,nullptr} sentinel — but NOT via the digit-only lead-char
+// precheck in parse_component, as an earlier comment claimed. `from_string`
+// strips build metadata (everything at and after the FIRST '+') BEFORE the
+// '.'-split, so the '+' is consumed up front and the surviving core is empty
+// or too short, tripping the `numbers.size() < 3` guard:
+//   * "+1.0.0" -> first '+' at index 0 -> ver "" -> split size 0 -> size()<3
+//   * "1.+1.0" -> first '+' at index 2 -> ver "1." -> split ["1"] size 1 -> size()<3
+// Consequently the '+' branch of the lead-char precheck (c0 == '+') is
+// UNREACHABLE via from_string by design: any '+' triggers the metadata strip
+// first, so a core component can never be handed to parse_component with a '+'
+// lead char. The digit-only precheck's non-digit-lead-char rejection is still
+// genuinely exercised by the whitespace (' ') and negative-sign ('-') tests
+// above; only the '+' char value cannot arrive there through from_string.
+// The assertions below remain valid (both inputs yield the sentinel); this
+// test documents WHY (upstream metadata strip), not the precheck.
+void test_plus_caught_by_metadata_strip_returns_zero(void) {
     semver_t a = from_string("+1.0.0");
     TEST_ASSERT_EQUAL_INT(0, a.major);
     TEST_ASSERT_EQUAL_INT(0, a.minor);
@@ -221,7 +233,7 @@ static int runSemverExtensionsTests() {
     RUN_TEST(test_malformed_patch_with_prerelease_returns_zero);
     RUN_TEST(test_leading_whitespace_component_returns_zero);
     RUN_TEST(test_negative_sign_component_returns_zero);
-    RUN_TEST(test_positive_sign_component_returns_zero);
+    RUN_TEST(test_plus_caught_by_metadata_strip_returns_zero);
     RUN_TEST(test_unpadded_tag_still_parses);
     return UNITY_END();
 }
