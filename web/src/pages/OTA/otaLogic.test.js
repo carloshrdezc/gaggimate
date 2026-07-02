@@ -1,6 +1,10 @@
 import { test, expect } from 'vitest';
 
-import { updateOtaChannel, canFlashTaggedRelease } from './otaLogic.js';
+import {
+  updateOtaChannel,
+  canFlashTaggedRelease,
+  canUpdateOnAcknowledgedChannel,
+} from './otaLogic.js';
 
 test('updates OTA channel to nightly without changing other form fields', () => {
   const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.3' }, 'nightly');
@@ -122,8 +126,6 @@ test('canFlashTaggedRelease: still rejects mismatched semver even with v-prefix'
 // canUpdateOnAcknowledgedChannel gate — protects the "Update Display"/"Update
 // Controller" buttons when the channel is "latest" or "nightly" but the
 // dropdown holds an unsaved selection.
-
-import { canUpdateOnAcknowledgedChannel } from './otaLogic.js';
 
 test('canUpdateOnAcknowledgedChannel: enabled when dropdown matches device channel', () => {
   const formData = { channel: 'latest', displayUpdateAvailable: true };
