@@ -116,7 +116,7 @@ End-user documentation (sourcing, assembly, setup) lives at [https://gaggimate.e
 
 Additional reference material in this repo:
 
-- [docs/websocket-api.yaml](docs/websocket-api.yaml) — WebSocket API reference ([rendered preview](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/carloshrdezc/gaggimate/master/docs/websocket-api.yaml))
+- [docs/websocket-api.yaml](docs/websocket-api.yaml) — WebSocket API reference ([rendered preview](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/carloshrdezc/gaggimate/dev-master/docs/websocket-api.yaml))
 - [docs/shot-notes-api.md](docs/shot-notes-api.md) — Shot-notes endpoint contract
 - [docs/ble-pairing.md](docs/ble-pairing.md) — BLE pairing and recovery
 - [AGENTS.md](AGENTS.md) — Build system, formatting and architecture notes
