@@ -531,7 +531,7 @@ bool Controller::isVolumetricAvailable() const {
 // Depends on the cross-shot invariant that currentVolumetricSource is reset to
 // INACTIVE in clear() between shots, so a stale BLUETOOTH source can't leak in.
 bool Controller::isActiveVolumetricSourceLive() const {
-    switch (currentVolumetricSource) {
+    switch (currentVolumetricSource.load(std::memory_order_acquire)) {
     case VolumetricMeasurementSource::BLUETOOTH:
         return isBluetoothScaleHealthy();
     case VolumetricMeasurementSource::FLOW_ESTIMATION:
@@ -1078,10 +1078,11 @@ void Controller::activate() {
         clientController.tare();
         if (isVolumetricAvailable()) {
 #ifdef NIGHTLY_BUILD
-            currentVolumetricSource =
-                isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
+            currentVolumetricSource.store(isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH
+                                                                    : VolumetricMeasurementSource::FLOW_ESTIMATION,
+                                          std::memory_order_release);
 #else
-            currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+            currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
 #endif
             if (mode == MODE_BREW) {
                 pluginManager->trigger("controller:brew:prestart");
@@ -1177,7 +1178,7 @@ void Controller::clear() {
 
     xSemaphoreGive(processMutex);
 
-    currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
+    currentVolumetricSource.store(VolumetricMeasurementSource::INACTIVE, std::memory_order_release);
 }
 
 void Controller::activateGrind() {
@@ -1188,7 +1189,7 @@ void Controller::activateGrind() {
         return;
     clear();
     if (settings.isVolumetricTarget() && isVolumetricAvailable()) {
-        currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+        currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
         startProcess(new GrindProcess(ProcessTarget::VOLUMETRIC, 0, settings.getTargetGrindVolume(), settings.getGrindDelay()));
     } else {
         startProcess(
@@ -1467,10 +1468,10 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
                                : F("controller:volumetric-measurement:bluetooth:change"),
                            "value", static_cast<float>(measurement));
     if (source == VolumetricMeasurementSource::BLUETOOTH) {
-        lastBluetoothMeasurement = millis();
+        lastBluetoothMeasurement.store(millis(), std::memory_order_release);
     }
 
-    if (currentVolumetricSource != source) {
+    if (currentVolumetricSource.load(std::memory_order_acquire) != source) {
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }
@@ -1500,8 +1501,8 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
 }
 
 bool Controller::isBluetoothScaleHealthy() const {
-    long timeSinceLastBluetooth = (long)(millis() - lastBluetoothMeasurement);
-    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride;
+    long timeSinceLastBluetooth = (long)(millis() - lastBluetoothMeasurement.load(std::memory_order_acquire));
+    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride.load(std::memory_order_acquire);
 }
 
 void Controller::onFlush() {
