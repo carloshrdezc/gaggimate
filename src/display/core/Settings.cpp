@@ -73,6 +73,16 @@ void Settings::load() {
     autoSteamEnabled = preferences.getBool("autosteam", false);
     doseGrams = preferences.getDouble("dosegrams", 18.0);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
+    // PRO-400: EMPTY default so a device that never stored "ic" is detectable.
+    installedChannel = preferences.getString("ic", "");
+    // One-time migration backfill: existing devices are assumed to have the
+    // selected channel's head already installed (installed == selected), so a
+    // normal upgrade sees NO forced re-flash. Written back read-write here
+    // (load() opened NVS with begin(..., false)).
+    if (installedChannel.isEmpty()) {
+        installedChannel = otaChannel;
+        preferences.putString("ic", installedChannel);
+    }
     savedScale = preferences.getString("ssc", "");
     momentaryButtons = preferences.getBool("mb", false);
     boilerFillActive = preferences.getBool("bf_a", false);
@@ -306,6 +316,11 @@ void Settings::setDoseGrams(double dose_grams) {
 
 void Settings::setOTAChannel(const String &otaChannel) {
     this->otaChannel = otaChannel;
+    save();
+}
+
+void Settings::setInstalledChannel(const String &installedChannel) {
+    this->installedChannel = installedChannel;
     save();
 }
 
@@ -634,6 +649,7 @@ void Settings::doSave() {
     preferences.putBool("autosteam", autoSteamEnabled);
     preferences.putDouble("dosegrams", doseGrams);
     preferences.putString("oc", otaChannel);
+    preferences.putString("ic", installedChannel);
     preferences.putString("ssc", savedScale);
     preferences.putBool("bf_a", boilerFillActive);
     preferences.putInt("bf_su", startupFillTime);
