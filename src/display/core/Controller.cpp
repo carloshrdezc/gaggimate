@@ -1167,15 +1167,17 @@ void Controller::clear() {
     }
     delete lastProcess;
     lastProcess = nullptr;
-    
-    xSemaphoreGive(processMutex);
-    
-    currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
+
     // PRO-369: reset the coalescer's pending latch between shots (defense-in-depth).
+    // Done under processMutex to match the guarded consume side (volumetricCoalescer.consumeInto).
     // Harmless today (the next shot latches fresh before consumeInto, and updateVolume
     // is an absolute assignment), but guards against a future incremental-updateVolume
     // refactor silently reintroducing cross-shot yield corruption from a stale latch.
     volumetricCoalescer = {};
+
+    xSemaphoreGive(processMutex);
+
+    currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
 }
 
 void Controller::activateGrind() {
