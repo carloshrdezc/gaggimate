@@ -223,7 +223,6 @@ class Controller {
     Driver *driver = nullptr;
 #endif
     NimBLEClientController clientController;
-    hw_timer_t *timer = nullptr;
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
