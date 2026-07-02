@@ -1,6 +1,9 @@
 
 #include <Arduino.h>
 
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <sstream>
 #include <vector>
 
@@ -18,6 +21,28 @@ vector<string> split(const string &s, char delim) {
     }
 
     return result;
+}
+
+// Parse a single semver core component (major/minor/patch) with std::strtol.
+// A token is valid only if it is non-empty AND strtol consumes the ENTIRE
+// token (end pointer at the terminating '\0'), so non-numeric ("abc"), empty,
+// or trailing-garbage ("12x") tokens are rejected instead of silently coerced
+// to 0 as the old atoi() did. ERANGE / int-range overflow is also rejected.
+static bool parse_component(const string &tok, int &out) {
+    if (tok.empty()) {
+        return false;
+    }
+    errno = 0;
+    char *end = nullptr;
+    long v = strtol(tok.c_str(), &end, 10);
+    if (end == tok.c_str() || *end != '\0') {
+        return false; // no digits consumed, or trailing garbage
+    }
+    if (errno == ERANGE || v < INT_MIN || v > INT_MAX) {
+        return false;
+    }
+    out = static_cast<int>(v);
+    return true;
 }
 
 semver_t from_string(const string &version) {
@@ -39,15 +64,34 @@ semver_t from_string(const string &version) {
     if (numbers.size() < 3) {
         return {0, 0, 0, nullptr, nullptr};
     }
-    auto major = atoi(numbers.at(0).c_str());
-    auto minor = atoi(numbers.at(1).c_str());
-    int patch;
-    char *prerelease_ptr = nullptr;
 
+    // Parse & validate all three core components FIRST, before allocating the
+    // prerelease copy, so a malformed patch can never leak a malloc'd buffer.
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+    if (!parse_component(numbers.at(0), major) || !parse_component(numbers.at(1), minor)) {
+        return {0, 0, 0, nullptr, nullptr};
+    }
+
+    string prerelease;
+    bool has_prerelease = false;
     auto split_at = numbers.at(2).find('-');
     if (split_at != string::npos) {
-        patch = atoi(numbers.at(2).substr(0, split_at).c_str());
-        auto prerelease = numbers.at(2).substr(split_at + 1);
+        if (!parse_component(numbers.at(2).substr(0, split_at), patch)) {
+            return {0, 0, 0, nullptr, nullptr};
+        }
+        prerelease = numbers.at(2).substr(split_at + 1);
+        has_prerelease = true;
+    } else {
+        if (!parse_component(numbers.at(2), patch)) {
+            return {0, 0, 0, nullptr, nullptr};
+        }
+    }
+
+    // All core components are known-good; only now allocate the prerelease copy.
+    char *prerelease_ptr = nullptr;
+    if (has_prerelease) {
         prerelease_ptr = (char *)malloc(prerelease.length() + 1);
         if (prerelease_ptr != nullptr) {
             prerelease.copy(prerelease_ptr, prerelease.length());
@@ -55,8 +99,6 @@ semver_t from_string(const string &version) {
         }
         // On malloc failure prerelease_ptr stays nullptr, which is the well-defined
         // "no prerelease" representation (render_to_string guards prerelease != nullptr).
-    } else {
-        patch = atoi(numbers.at(2).c_str());
     }
 
     semver_t _ver = {major, minor, patch, nullptr, prerelease_ptr};

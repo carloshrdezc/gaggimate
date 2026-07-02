@@ -89,6 +89,43 @@ void test_prerelease_preserved(void) {
     semver_free(&v);
 }
 
+// PRO-376: a fully non-numeric tag ("abc.def.ghi") is a deliberate parse
+// failure. The old unchecked atoi() silently coerced each token to 0; the
+// checked strtol parse now returns the {0,0,0,nullptr,nullptr} sentinel used
+// for empty / too-few-component input. (0,0,0 is the sentinel here, distinct
+// from a real "0.0.0" tag only in that prerelease is NULL, which it is.)
+void test_non_numeric_components_return_zero(void) {
+    semver_t v = from_string("abc.def.ghi");
+    TEST_ASSERT_EQUAL_INT(0, v.major);
+    TEST_ASSERT_EQUAL_INT(0, v.minor);
+    TEST_ASSERT_EQUAL_INT(0, v.patch);
+    TEST_ASSERT_NULL(v.prerelease);
+    semver_free(&v);
+}
+
+// PRO-376: trailing garbage on a component ("1.2.3x") is rejected — the whole
+// token must be consumed by strtol, so this returns the sentinel too.
+void test_trailing_garbage_patch_returns_zero(void) {
+    semver_t v = from_string("1.2.3x");
+    TEST_ASSERT_EQUAL_INT(0, v.major);
+    TEST_ASSERT_EQUAL_INT(0, v.minor);
+    TEST_ASSERT_EQUAL_INT(0, v.patch);
+    TEST_ASSERT_NULL(v.prerelease);
+    semver_free(&v);
+}
+
+// PRO-376: a malformed patch on the prerelease path ("1.2.x-rc1") must still
+// return the sentinel AND must not leak the prerelease malloc (validated under
+// [env:native-sanitize] ASan). The prerelease of the sentinel is NULL.
+void test_malformed_patch_with_prerelease_returns_zero(void) {
+    semver_t v = from_string("1.2.x-rc1");
+    TEST_ASSERT_EQUAL_INT(0, v.major);
+    TEST_ASSERT_EQUAL_INT(0, v.minor);
+    TEST_ASSERT_EQUAL_INT(0, v.patch);
+    TEST_ASSERT_NULL(v.prerelease);
+    semver_free(&v);
+}
+
 static int runSemverExtensionsTests() {
     UNITY_BEGIN();
     RUN_TEST(test_build_metadata_simple);
@@ -96,6 +133,9 @@ static int runSemverExtensionsTests() {
     RUN_TEST(test_prerelease_with_build_metadata);
     RUN_TEST(test_leading_v_stripped);
     RUN_TEST(test_prerelease_preserved);
+    RUN_TEST(test_non_numeric_components_return_zero);
+    RUN_TEST(test_trailing_garbage_patch_returns_zero);
+    RUN_TEST(test_malformed_patch_with_prerelease_returns_zero);
     return UNITY_END();
 }
 
