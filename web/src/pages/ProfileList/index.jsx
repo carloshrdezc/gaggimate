@@ -37,7 +37,7 @@ import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
 import { faCopy } from '@fortawesome/free-solid-svg-icons/faCopy';
 import { faTrashCan } from '@fortawesome/free-solid-svg-icons/faTrashCan';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
-import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
+import { ImportButton } from '../../components/ImportButton.jsx';
 import { faEllipsisVertical } from '@fortawesome/free-solid-svg-icons/faEllipsisVertical';
 import { faChartSimple } from '@fortawesome/free-solid-svg-icons/faChartSimple';
 import { ConfirmButton } from '../../components/ConfirmButton.jsx';
@@ -930,17 +930,7 @@ export function ProfileList() {
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <label htmlFor='profileImport' className='nd-action-btn cursor-pointer' title='Import Profiles'>
-            <FontAwesomeIcon icon={faFileImport} />
-          </label>
-          <input
-            onChange={onUpload}
-            className='hidden'
-            id='profileImport'
-            type='file'
-            multiple
-            accept='.json,application/json'
-          />
+          <ImportButton onChange={onUpload} title='Import Profiles' multiple />
           <ConfirmButton
             onAction={onClear}
             icon={faTrashCan}
