@@ -19,6 +19,7 @@
 #include <display/config.h>
 #include <display/config/features.h>
 #include <display/core/StandbyTransitionPolicy.h>
+#include <display/core/SteamButtonPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -1564,20 +1565,24 @@ void Controller::handleBrewButton(int brewButtonStatus) {
 
 void Controller::handleSteamButton(int steamButtonStatus) {
     ESP_LOGD(LOG_TAG, "current screen %d, steam button %d", getMode(), steamButtonStatus);
-    if (steamButtonStatus) {
-        switch (getMode()) {
-        case MODE_STANDBY:
-            setMode(MODE_STEAM);
-            break;
-        case MODE_BREW:
-            setMode(MODE_STEAM);
-            break;
-        default:
-            break;
-        }
-    } else if (!settings.isMomentaryButtons() && getMode() == MODE_STEAM) {
+    // PRO-391: a non-momentary (latching) switch reports a persistent LEVEL, not
+    // a one-shot press, so entering Steam must trigger on the rising edge only.
+    // Otherwise a still-latched-high level re-asserts MODE_STEAM right after an
+    // explicit web-UI Standby and bounces the machine back to Steam. Momentary
+    // buttons are one-shot at the source and are intentionally not edge-gated.
+    const SteamButtonAction action =
+        decideSteamButtonAction(settings.isMomentaryButtons(), previousSteamButtonStatus, steamButtonStatus, getMode());
+    previousSteamButtonStatus = steamButtonStatus;
+    switch (action) {
+    case SteamButtonAction::ENTER_STEAM:
+        setMode(MODE_STEAM);
+        break;
+    case SteamButtonAction::EXIT_STEAM:
         deactivate();
         setMode(MODE_BREW);
+        break;
+    case SteamButtonAction::NONE:
+        break;
     }
 }
 

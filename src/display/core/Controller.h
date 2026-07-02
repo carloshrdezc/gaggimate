@@ -215,6 +215,11 @@ class Controller {
 
     // steam button
     void handleSteamButton(int steamButtonStatus);
+    // PRO-391: previous steam-button level seen by handleSteamButton(). Used to
+    // detect the rising edge of a non-momentary (latching) switch so a sustained
+    // latched-high level does not re-assert MODE_STEAM after an explicit Standby.
+    // 0 = not pressed (initial state).
+    int previousSteamButtonStatus = 0;
     void handleProfileUpdate();
 
     // Private Attributes
