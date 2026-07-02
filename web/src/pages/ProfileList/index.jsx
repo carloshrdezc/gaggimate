@@ -930,7 +930,7 @@ export function ProfileList() {
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <label className='nd-action-btn cursor-pointer' title='Import Profiles'>
+          <label htmlFor='profileImport' className='nd-action-btn cursor-pointer' title='Import Profiles'>
             <FontAwesomeIcon icon={faFileImport} />
           </label>
           <input
