@@ -32,6 +32,7 @@ info:
         observable surface with a note on its origin.
 
     ## x-since-version convention
+    Note: the `2.0.15` release line above records *when* the full message surface was audited against source (a point-in-time snapshot); it is distinct from a per-message *introduction* version, which the firmware does not track — hence the `"unknown"` placeholders below.
     Each request and event carries an `x-since-version` extension field. The
     firmware does not track a machine-readable per-message introduction version,
     and this project's policy is to avoid fabricating per-event version guesses.
