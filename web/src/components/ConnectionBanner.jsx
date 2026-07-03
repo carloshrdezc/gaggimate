@@ -71,7 +71,6 @@ export function ConnectionBanner() {
     <div className='mx-auto px-4 pt-3 lg:px-8 xl:container'>
       <div
         role='alert'
-        aria-live='assertive'
         className='flex flex-row items-center gap-3 rounded-lg border-2 p-3'
         style={{ borderColor: colorVar, background: bgColor }}
       >
@@ -87,7 +86,11 @@ export function ConnectionBanner() {
           >
             Connection lost
           </span>
-          <span className='font-nd-mono text-[12px] text-[var(--text-primary,#e8e8e8)]'>
+          <span
+            aria-live='off'
+            aria-atomic='false'
+            className='font-nd-mono text-[12px] text-[var(--text-primary,#e8e8e8)]'
+          >
             {countdownText}
           </span>
         </div>

@@ -106,4 +106,27 @@ describe('ConnectionBanner (PRO-7)', () => {
     expect(screen.getByRole('alert')).toBeTruthy();
     expect(screen.getByText(/Automatic reconnection stopped/)).toBeTruthy();
   });
+
+  // PRO-409 — quiet the per-second countdown for screen-reader users.
+  // `role='alert'` already implies an assertive live region, so the "Connection
+  // lost" heading announces once. The explicit `aria-live='assertive'` was
+  // redundant and, combined with the 1s countdown update, caused AT to
+  // re-announce the whole banner on every tick. We drop the redundant
+  // aria-live from the root and mark the ticking countdown span aria-live='off'
+  // so only the static heading is announced. Mirrors MigrationWarningBanner,
+  // which uses role='alert' alone.
+  test('does not use an explicit assertive live region and silences the countdown', () => {
+    connectionState.value = 'reconnecting';
+    nextReconnectAt.value = Date.now() + 5000;
+
+    renderBanner();
+
+    const alert = screen.getByRole('alert');
+    // role='alert' alone — no redundant explicit aria-live on the root.
+    expect(alert.getAttribute('aria-live')).toBeNull();
+
+    // The per-second countdown text must not re-announce every tick.
+    const countdown = screen.getByText(/Retrying in/);
+    expect(countdown.getAttribute('aria-live')).toBe('off');
+  });
 });
