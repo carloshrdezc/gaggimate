@@ -97,6 +97,49 @@ jobs:
       - name: Build display firmware (flags off)
         run: pio run -e display-flags-off
 
+  firmware-single-flag-off:
+    name: Firmware build (display, single feature off)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - display-no-homekit
+          - display-no-mqtt
+          - display-no-ble-scale
+          - display-no-webui
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-8: build EACH feature flag disabled on its own. The firmware-flags-off
+      # leg above (and the default `display` build) cannot surface a regression
+      # that only appears when exactly ONE flag is off: with the other three ON,
+      # a symbol/definition the single-off path needs can still be pulled in, so
+      # the all-off and all-on builds both link while the single-off permutation
+      # would fail (undefined-symbol / ODR / dangling-ref stub drift). Precedent:
+      # CAR-383's WEBUI=0 mDNS-advertising-a-dead-:80-service bug was exactly this
+      # single-flag-off class. Each matrix env (see [env:display-no-*] in
+      # platformio.ini) flips one GAGGIMATE_ENABLE_* macro to 0; the linker exits
+      # non-zero on any missing/duplicate symbol, so a broken single-off leg fails
+      # the PR here instead of shipping. Like the sibling display jobs this relies
+      # on embed_webui_pre.py's empty-bundle stub — the real web UI isn't needed
+      # to exercise the compile/link check.
+      - name: Build display firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
+
   firmware-headless-4m:
     name: Firmware build (display-headless-4m)
     runs-on: ubuntu-latest
