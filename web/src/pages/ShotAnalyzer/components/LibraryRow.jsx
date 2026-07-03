@@ -76,7 +76,7 @@ export function LibraryRow({ item, isMatch, isActive, isShot, onLoad, onExport, 
                 tone: 'success',
                 className: 'h-6 w-6',
               })}
-              title='Profile statistics'
+              aria-label='Profile statistics'
             >
               <FontAwesomeIcon icon={faChartSimple} size='xs' />
             </a>
