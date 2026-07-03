@@ -190,7 +190,11 @@ export function otaActionLabel(formData, pendingChannel) {
       installedChannel: formData.installedChannel,
     })
   ) {
-    return `Switch to ${capitalizeChannel(channel)}`;
+    // Strip the internal `tag:` routing prefix so a pinned-tag switch shows the
+    // bare semver ("Switch to 2.0.8"), not the leaked token ("Switch to tag:2.0.8").
+    const displayChannel =
+      typeof channel === 'string' && channel.startsWith('tag:') ? channel.slice(4) : channel;
+    return `Switch to ${capitalizeChannel(displayChannel)}`;
   }
   if (typeof channel === 'string' && channel.startsWith('tag:')) {
     return 'Flash';
