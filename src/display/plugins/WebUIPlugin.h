@@ -225,10 +225,12 @@ class WebUIPlugin : public Plugin {
     // it is written on the WiFi-event task and read/CAS'd on the loop task, which
     // run on different cores; relaxed ordering suffices — the flag is the only
     // shared datum and a missed-by-one-tick drain is harmless (loop() re-checks
-    // every ~2 ms). pendingApMode carries the connect event's "AP" flag so the
-    // deferred start() applies the correct captive-portal mode.
+    // every ~2 ms). PRO-418: the connect event's captive-portal mode (AP vs STA)
+    // is folded INTO this intent (StartAp / StartStation) rather than carried in a
+    // separate pendingApMode atomic, so a single atomic conveys both the start
+    // decision and its mode — the loop task can never pair a fresh Start with a
+    // stale AP flag (there is no second atomic to race against).
     std::atomic<WebUiLifecycleIntent> pendingLifecycle{WebUiLifecycleIntent::None};
-    std::atomic<bool> pendingApMode{false};
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
 

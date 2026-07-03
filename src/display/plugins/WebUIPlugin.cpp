@@ -105,13 +105,16 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         "display-firmware.bin", "display-filesystem.bin", "board-firmware.bin");
     pluginManager->on("controller:wifi:connect", [this](Event const &event) {
         // PRO-417: do NOT call start() inline — this runs on the arduino_events
-        // WiFi-event task. Latch the desired mode + Start intent and let loop()
-        // (Arduino loop task) run the actual start() off this task. Carry the
-        // "AP" flag through pendingApMode so the deferred start() picks the right
-        // captive-portal mode. Last event wins (latchLifecycleIntent coalesces).
-        pendingApMode.store(event.getInt("AP") != 0, std::memory_order_relaxed);
+        // WiFi-event task. Latch the desired Start intent and let loop() (Arduino
+        // loop task) run the actual start() off this task.
+        // PRO-418: the captive-portal mode (AP vs STA) is folded INTO the intent
+        // (StartAp / StartStation) so a single atomic carries both the "start"
+        // decision and the mode. No separate pendingApMode atomic, hence no
+        // cross-atomic ordering hazard — the deferred start() reads the mode
+        // straight off the drained intent. Last event wins (latchLifecycleIntent
+        // coalesces), and a later connect's mode overwrites an earlier one.
         pendingLifecycle.store(
-            latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Start),
+            latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), startIntentForApMode(event.getInt("AP") != 0)),
             std::memory_order_relaxed);
     });
     pluginManager->on("controller:wifi:disconnect", [this](Event const &) {
@@ -257,9 +260,14 @@ void WebUIPlugin::loop() {
     // for the next tick rather than being lost.
     {
         const WebUiLifecycleIntent latched = pendingLifecycle.exchange(WebUiLifecycleIntent::None, std::memory_order_relaxed);
-        switch (lifecycleDrainAction(latched)) {
-        case WebUiLifecycleAction::RunStart:
-            apMode = pendingApMode.load(std::memory_order_relaxed);
+        const WebUiLifecycleAction action = lifecycleDrainAction(latched);
+        switch (action) {
+        case WebUiLifecycleAction::RunStartStation:
+        case WebUiLifecycleAction::RunStartAp:
+            // PRO-418: the AP mode rides on the drained intent itself (single
+            // atomic), so there is no second pendingApMode load that could be
+            // stale relative to the intent.
+            apMode = drainActionIsAp(action);
             start();
             break;
         case WebUiLifecycleAction::RunStop:

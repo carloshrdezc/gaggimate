@@ -29,10 +29,14 @@ void tearDown(void) {}
 
 // --- Latch coalescing: last WiFi event wins ---------------------------------
 
-// A connect event latches Start; a disconnect latches Stop, from the idle None.
+// A connect event latches a Start intent that carries the captive-portal mode
+// (AP=1 -> StartAp, AP=0 -> StartStation); a disconnect latches Stop, from idle
+// None. PRO-418: the mode is folded into the intent, so one atomic conveys both.
 void test_latch_from_none(void) {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::Start),
-                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::None, WebUiLifecycleIntent::Start)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::StartStation),
+                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::None, startIntentForApMode(false))));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::StartAp),
+                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::None, startIntentForApMode(true))));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::Stop),
                           static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::None, WebUiLifecycleIntent::Stop)));
 }
@@ -45,9 +49,9 @@ void test_latch_from_none(void) {
 // N start()/stop() pairs on a storm — just one drain to the final state.
 void test_latch_last_event_wins(void) {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::Stop),
-                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::Start, WebUiLifecycleIntent::Stop)));
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::Start),
-                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::Stop, WebUiLifecycleIntent::Start)));
+                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::StartStation, WebUiLifecycleIntent::Stop)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::StartAp),
+                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::Stop, startIntentForApMode(true))));
 }
 
 // A None "request" is a no-op that preserves any still-pending latch. (The
@@ -57,10 +61,36 @@ void test_latch_last_event_wins(void) {
 void test_latch_none_preserves_pending(void) {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::Stop),
                           static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::Stop, WebUiLifecycleIntent::None)));
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::Start),
-                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::Start, WebUiLifecycleIntent::None)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::StartStation),
+                          static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::StartStation, WebUiLifecycleIntent::None)));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleIntent::None),
                           static_cast<int>(latchLifecycleIntent(WebUiLifecycleIntent::None, WebUiLifecycleIntent::None)));
+}
+
+// PRO-418: the AP mode is atomic with the Start decision. A connect(AP=1)
+// followed by a drain must yield an AP start — never a station start paired with
+// a stale-or-fresh AP flag from a second atomic. This is the ordering contract
+// the enum-fold establishes by construction: because the mode IS the intent, a
+// drained StartAp can only ever mean apMode==true and StartStation apMode==false.
+void test_ap_mode_rides_the_intent(void) {
+    // connect(AP=1) -> drain -> AP start (apMode==true).
+    const WebUiLifecycleIntent apLatch = latchLifecycleIntent(WebUiLifecycleIntent::None, startIntentForApMode(true));
+    const WebUiLifecycleAction apAction = lifecycleDrainAction(apLatch);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStartAp), static_cast<int>(apAction));
+    TEST_ASSERT_TRUE(drainActionIsAp(apAction));
+
+    // connect(AP=0) -> drain -> station start (apMode==false).
+    const WebUiLifecycleIntent staLatch = latchLifecycleIntent(WebUiLifecycleIntent::None, startIntentForApMode(false));
+    const WebUiLifecycleAction staAction = lifecycleDrainAction(staLatch);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStartStation), static_cast<int>(staAction));
+    TEST_ASSERT_FALSE(drainActionIsAp(staAction));
+
+    // A later connect's mode overwrites an earlier one (last event wins), so the
+    // drained mode always matches the FINAL connect — no cross-atomic staleness.
+    const WebUiLifecycleIntent flipped = latchLifecycleIntent(startIntentForApMode(false), startIntentForApMode(true));
+    TEST_ASSERT_TRUE(drainActionIsAp(lifecycleDrainAction(flipped)));
+    const WebUiLifecycleIntent flippedBack = latchLifecycleIntent(startIntentForApMode(true), startIntentForApMode(false));
+    TEST_ASSERT_FALSE(drainActionIsAp(lifecycleDrainAction(flippedBack)));
 }
 
 // --- Drain mapping: latched intent -> loop() action -------------------------
@@ -71,13 +101,16 @@ void test_drain_none_is_noop(void) {
                           static_cast<int>(lifecycleDrainAction(WebUiLifecycleIntent::None)));
 }
 
-// A Start latch drains to RunStart (loop() calls start() on the loop task); a
+// A StartStation latch drains to RunStartStation and a StartAp latch to
+// RunStartAp (loop() calls start() in the matching mode on the loop task); a
 // Stop latch drains to RunStop (loop() calls stop() there). This is the whole
 // point of the fix: the heavy call runs on the loop task, never inline on the
 // WiFi-event task.
 void test_drain_maps_intent_to_action(void) {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStart),
-                          static_cast<int>(lifecycleDrainAction(WebUiLifecycleIntent::Start)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStartStation),
+                          static_cast<int>(lifecycleDrainAction(WebUiLifecycleIntent::StartStation)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStartAp),
+                          static_cast<int>(lifecycleDrainAction(WebUiLifecycleIntent::StartAp)));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStop),
                           static_cast<int>(lifecycleDrainAction(WebUiLifecycleIntent::Stop)));
 }
@@ -88,20 +121,25 @@ void test_drain_maps_intent_to_action(void) {
 // blocking start()/stop() calls. This is the property that keeps the WiFi-event
 // task (and, post-fix, the loop task) from doing O(disconnects) heavy teardown.
 void test_storm_coalesces_to_single_final_action(void) {
-    // Edges as they arrive on the WiFi-event task (associate=Start, leave=Stop):
+    // Edges as they arrive on the WiFi-event task (associate=Start, leave=Stop).
+    // PRO-418: the associate edges carry a mode; alternate AP/STA to prove the
+    // coalesced latch reflects the LAST edge's mode too, not just Start-vs-Stop.
     const WebUiLifecycleIntent edges[] = {
-        WebUiLifecycleIntent::Stop,  WebUiLifecycleIntent::Start, WebUiLifecycleIntent::Stop,
-        WebUiLifecycleIntent::Start, WebUiLifecycleIntent::Stop,  WebUiLifecycleIntent::Start,
+        WebUiLifecycleIntent::Stop,  startIntentForApMode(true), WebUiLifecycleIntent::Stop,
+        startIntentForApMode(false), WebUiLifecycleIntent::Stop, startIntentForApMode(false),
     };
     WebUiLifecycleIntent latch = WebUiLifecycleIntent::None;
     for (const WebUiLifecycleIntent e : edges) {
         latch = latchLifecycleIntent(latch, e);
     }
-    // Final edge was Start -> exactly one RunStart, regardless of the 6 edges.
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStart), static_cast<int>(lifecycleDrainAction(latch)));
+    // Final edge was a station connect -> exactly one RunStartStation, regardless
+    // of the 6 edges, and apMode resolves to false (the final connect's mode).
+    const WebUiLifecycleAction action = lifecycleDrainAction(latch);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStartStation), static_cast<int>(action));
+    TEST_ASSERT_FALSE(drainActionIsAp(action));
 
     // If the storm had ended on a leave, the single drained action is RunStop.
-    WebUiLifecycleIntent latch2 = WebUiLifecycleIntent::Start;
+    WebUiLifecycleIntent latch2 = WebUiLifecycleIntent::StartStation;
     latch2 = latchLifecycleIntent(latch2, WebUiLifecycleIntent::Stop);
     TEST_ASSERT_EQUAL_INT(static_cast<int>(WebUiLifecycleAction::RunStop), static_cast<int>(lifecycleDrainAction(latch2)));
 }
@@ -111,6 +149,7 @@ static int runWebUiLifecycleDeferPolicyTests() {
     RUN_TEST(test_latch_from_none);
     RUN_TEST(test_latch_last_event_wins);
     RUN_TEST(test_latch_none_preserves_pending);
+    RUN_TEST(test_ap_mode_rides_the_intent);
     RUN_TEST(test_drain_none_is_noop);
     RUN_TEST(test_drain_maps_intent_to_action);
     RUN_TEST(test_storm_coalesces_to_single_final_action);
