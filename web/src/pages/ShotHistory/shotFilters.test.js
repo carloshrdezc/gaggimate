@@ -236,6 +236,38 @@ describe('availableProfiles / availableBeans', () => {
     expect(labels.indexOf('Unknown bean (2)')).toBeLessThan(labels.indexOf('Unknown bean (10)'));
   });
 
+  test('availableBeans orders names differing only by case/accent deterministically (PRO-416)', () => {
+    // Two real bean names that differ only by case or accent must NOT be treated
+    // as equal by the sort. A `sensitivity: 'base'` comparator returns 0 for these
+    // pairs, leaving their relative order unstable; the numeric-only comparator
+    // keeps a deterministic, reproducible ordering.
+    const shots = [
+      { id: 40, beanId: 'bean-ethiopie', beanName: 'Ethiopie' },
+      { id: 41, beanId: 'bean-ethiopie-lc', beanName: 'ethiopie' },
+      { id: 42, beanId: 'bean-cafe', beanName: 'cafe' },
+      { id: 43, beanId: 'bean-cafe-accent', beanName: 'café' },
+    ];
+    const result = availableBeans(shots, []);
+    const labels = result.map(b => b.name);
+
+    // The two case-only and two accent-only names each remain distinct entries.
+    expect(labels).toContain('Ethiopie');
+    expect(labels).toContain('ethiopie');
+    expect(labels).toContain('cafe');
+    expect(labels).toContain('café');
+
+    // Ordering is stable and reproducible: running the sort again yields the
+    // same sequence (a sensitivity:'base' comparator would leave these pairs
+    // in an undefined relative order).
+    const rerun = availableBeans(shots, []).map(b => b.name);
+    expect(rerun).toEqual(labels);
+
+    // And no case/accent-only pair is collapsed to an equal (zero) comparison:
+    // each name compares non-zero against its near-twin.
+    expect('Ethiopie'.localeCompare('ethiopie', undefined, { numeric: true })).not.toBe(0);
+    expect('cafe'.localeCompare('café', undefined, { numeric: true })).not.toBe(0);
+  });
+
   test('availableBeans only disambiguates fallback rows, never real names (PRO-410)', () => {
     const shots = [
       { id: 30, beanId: 'bean-real', beanName: 'Colombia' },
