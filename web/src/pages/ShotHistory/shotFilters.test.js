@@ -208,6 +208,34 @@ describe('availableProfiles / availableBeans', () => {
     expect(result.map(b => b.id).sort()).toEqual(['bean-1', 'bean-2', 'bean-3']);
   });
 
+  test('availableBeans sorts disambiguation suffixes numerically, not lexically (PRO-414)', () => {
+    // 12 distinct blank-name beans -> 'Unknown bean', 'Unknown bean (2)' … '(12)'.
+    const shots = Array.from({ length: 12 }, (_, i) => ({
+      id: 100 + i,
+      beanId: `bean-${i + 1}`,
+      beanName: '',
+    }));
+    const result = availableBeans(shots, []);
+
+    const labels = result.map(b => b.name);
+    // Numeric-aware order: '(2)' precedes '(10)' (lexical would put '(10)' first).
+    expect(labels).toEqual([
+      'Unknown bean',
+      'Unknown bean (2)',
+      'Unknown bean (3)',
+      'Unknown bean (4)',
+      'Unknown bean (5)',
+      'Unknown bean (6)',
+      'Unknown bean (7)',
+      'Unknown bean (8)',
+      'Unknown bean (9)',
+      'Unknown bean (10)',
+      'Unknown bean (11)',
+      'Unknown bean (12)',
+    ]);
+    expect(labels.indexOf('Unknown bean (2)')).toBeLessThan(labels.indexOf('Unknown bean (10)'));
+  });
+
   test('availableBeans only disambiguates fallback rows, never real names (PRO-410)', () => {
     const shots = [
       { id: 30, beanId: 'bean-real', beanName: 'Colombia' },
