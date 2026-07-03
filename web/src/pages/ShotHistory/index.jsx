@@ -442,6 +442,7 @@ export function ShotHistory() {
             className='nd-action-btn'
             disabled={archiveBusy || history.length === 0}
             title='Export History'
+            aria-label='Export History'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>

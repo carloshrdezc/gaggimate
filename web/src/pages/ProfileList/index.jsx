@@ -927,6 +927,7 @@ export function ProfileList() {
             className='nd-action-btn'
             disabled={profiles.length === 0}
             title='Export Profiles'
+            aria-label='Export Profiles'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>

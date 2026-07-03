@@ -225,6 +225,7 @@ export function BeansPage() {
             onClick={onExport}
             disabled={busy || beans.length === 0}
             title='Export Beans'
+            aria-label='Export Beans'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
