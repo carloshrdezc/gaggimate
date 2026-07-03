@@ -1,5 +1,6 @@
 #include "WebUIPlugin.h"
 #include "OtaChannelSwitchPolicy.h"
+#include "OtaUpdateCheckPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
@@ -416,8 +417,26 @@ void WebUIPlugin::loop() {
         updateOTAStatus("Checking...");
     }
     const unsigned long now = millis();
-    if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
+    // PRO-411: back off the periodic OTA update-check after consecutive
+    // failures instead of always retrying every UPDATE_CHECK_INTERVAL. A failing
+    // check opens a fresh TLS connection to github.com concurrently with
+    // async_tcp/wifi/mdns; on a persistent failure that both hammers github.com
+    // and gives the (now-guarded) connect path repeated chances to misbehave.
+    // The effective interval doubles per consecutive failure up to
+    // UPDATE_CHECK_MAX_INTERVAL and resets on the first success. The device stays
+    // online and responsive throughout — checkForUpdates() failures are logged
+    // and swallowed, never fatal.
+    const unsigned long effectiveInterval = otaBackoffInterval(
+        static_cast<uint32_t>(UPDATE_CHECK_INTERVAL), static_cast<uint32_t>(UPDATE_CHECK_MAX_INTERVAL), otaCheckFailureCount);
+    if (lastUpdateCheck == 0 || now - lastUpdateCheck > effectiveInterval) {
         ota->checkForUpdates();
+        if (ota->isUpdateCheckFailed()) {
+            if (otaCheckFailureCount < UINT32_MAX) {
+                otaCheckFailureCount++;
+            }
+        } else {
+            otaCheckFailureCount = 0;
+        }
         pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
