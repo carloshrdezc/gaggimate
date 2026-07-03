@@ -21,6 +21,7 @@ class GitHubOTA {
     void checkForUpdates() {}
     bool isUpdateAvailable(bool = false) const { return false; }
     String getCurrentVersion() const { return _version; }
+    bool isUpdateCheckFailed() const { return false; }
     bool update(bool = true, bool = true, bool = false) { return false; }
     void setReleaseUrl(const String &) {}
     void setControllerVersion(const String &) {}
