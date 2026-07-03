@@ -11,6 +11,7 @@
 
 #include "../core/constants.h"
 #include "GitHubOTA.h"
+#include "WebUiLifecycleDeferPolicy.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -212,6 +213,22 @@ class WebUIPlugin : public Plugin {
     bool updating = false; // loop-task-owned; set via pendingOtaStart drain (CAR-377)
     bool apMode = false;
     bool serverRunning = false;
+    // PRO-417: deferred web-server lifecycle intent. The WiFi (dis)connect events
+    // fire on the arduino_events WiFi-event task; running the heavy start()/stop()
+    // (stopRelay()'s ~500 ms spin-wait + ws.closeAll() under wsMutex) inline there,
+    // once per ASSOC_LEAVE, stalls the WiFi event queue / core 0 while the vendored
+    // WPA-supplicant is mid-(re)association — a contributor to the interrupt-WDT
+    // panic under disassociation churn. The event handler now only LATCHES the
+    // desired target here (last event wins, coalesced by latchLifecycleIntent) and
+    // loop() drains it on the Arduino loop task, mirroring the OTA-start / mDNS /
+    // MQTT defer discipline (see WebUiLifecycleDeferPolicy.h). std::atomic because
+    // it is written on the WiFi-event task and read/CAS'd on the loop task, which
+    // run on different cores; relaxed ordering suffices — the flag is the only
+    // shared datum and a missed-by-one-tick drain is harmless (loop() re-checks
+    // every ~2 ms). pendingApMode carries the connect event's "AP" flag so the
+    // deferred start() applies the correct captive-portal mode.
+    std::atomic<WebUiLifecycleIntent> pendingLifecycle{WebUiLifecycleIntent::None};
+    std::atomic<bool> pendingApMode{false};
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
 
