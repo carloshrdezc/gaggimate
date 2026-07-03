@@ -48,7 +48,7 @@ import {
   availableProfiles,
   availableBeans,
   filtersFromQuery,
-  filtersToQueryString,
+  mergeFiltersIntoSearch,
 } from './shotFilters.js';
 
 const connected = computed(() => machine.value.connected);
@@ -103,7 +103,7 @@ export function ShotHistory() {
   // do not stack history entries and survive navigating away and back).
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const query = filtersToQueryString(filters);
+    const query = mergeFiltersIntoSearch(window.location.search, filters);
     const next = `${window.location.pathname}${query}${window.location.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) {

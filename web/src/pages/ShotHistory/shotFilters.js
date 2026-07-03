@@ -200,3 +200,21 @@ export function filtersToQueryString(filters) {
   const str = params.toString();
   return str ? `?${str}` : '';
 }
+
+/**
+ * Merge the active filter params into an existing search string, preserving any
+ * query params ShotHistory does not own. The filter params (QUERY_KEYS) stay
+ * authoritative: they are set when active and removed when at their defaults,
+ * while unrelated params are carried through untouched. Returns a query string
+ * ('' when nothing remains, otherwise '?...').
+ */
+export function mergeFiltersIntoSearch(currentSearch, filters) {
+  const params = new URLSearchParams(currentSearch || '');
+  // Drop the keys we own so cleared filters are removed rather than stacked.
+  for (const param of Object.values(QUERY_KEYS)) params.delete(param);
+  // Re-apply the currently-active filter params.
+  const active = filtersToSearchParams(filters);
+  for (const [key, value] of active.entries()) params.set(key, value);
+  const str = params.toString();
+  return str ? `?${str}` : '';
+}

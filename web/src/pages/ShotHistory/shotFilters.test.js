@@ -11,6 +11,7 @@ import {
   filtersFromQuery,
   filtersToSearchParams,
   filtersToQueryString,
+  mergeFiltersIntoSearch,
 } from './shotFilters.js';
 
 // Build a Unix-seconds timestamp for a given local date.
@@ -218,5 +219,54 @@ describe('URL query serialization', () => {
     expect(params.get('q')).toBe('x');
     expect(params.get('dmin')).toBe('5');
     expect(params.get('from')).toBeNull();
+  });
+});
+
+describe('mergeFiltersIntoSearch', () => {
+  test('all-default filters + no unrelated params -> empty query string', () => {
+    expect(mergeFiltersIntoSearch('', defaultFilters())).toBe('');
+    expect(mergeFiltersIntoSearch(undefined, defaultFilters())).toBe('');
+  });
+
+  test('preserves an unrelated param when a filter is applied', () => {
+    const query = mergeFiltersIntoSearch('?ref=abc', { ...defaultFilters(), profile: 'Espresso' });
+    const params = new URLSearchParams(query);
+    expect(params.get('ref')).toBe('abc');
+    expect(params.get('profile')).toBe('Espresso');
+  });
+
+  test('clearing a filter removes its own param but keeps the unrelated one', () => {
+    // Start with an active filter param plus an unrelated param, then clear filters.
+    const query = mergeFiltersIntoSearch('?profile=Espresso&ref=abc', defaultFilters());
+    const params = new URLSearchParams(query);
+    expect(params.get('profile')).toBeNull();
+    expect(params.get('ref')).toBe('abc');
+  });
+
+  test('writes active filter params alongside a preserved unrelated param', () => {
+    const filters = {
+      ...defaultFilters(),
+      profile: 'Espresso',
+      beanId: 'bean-a',
+      text: 'fruity',
+    };
+    const query = mergeFiltersIntoSearch('?ref=abc', filters);
+    const params = new URLSearchParams(query);
+    expect(params.get('ref')).toBe('abc');
+    expect(params.get('profile')).toBe('Espresso');
+    expect(params.get('bean')).toBe('bean-a');
+    expect(params.get('q')).toBe('fruity');
+  });
+
+  test('owned params are authoritative: stale filter values are replaced, not stacked', () => {
+    // A pre-existing owned param at a different value gets overwritten by the
+    // currently-active filter rather than appended twice.
+    const query = mergeFiltersIntoSearch('?profile=Turbo&ref=abc', {
+      ...defaultFilters(),
+      profile: 'Espresso',
+    });
+    const params = new URLSearchParams(query);
+    expect(params.getAll('profile')).toEqual(['Espresso']);
+    expect(params.get('ref')).toBe('abc');
   });
 });
