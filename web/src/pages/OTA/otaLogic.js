@@ -97,3 +97,88 @@ export function canUpdateOnAcknowledgedChannel({ formData, pendingChannel } = {}
   if (pendingChannel === undefined) return true;
   return pendingChannel === channel;
 }
+
+// Decide whether the device-acknowledged channel differs from the channel the
+// currently-installed firmware was built on.
+//
+// The firmware (PRO-400) persists the channel it last flashed from and reports
+// it back in res:ota-settings as `installedChannel`. When the user selects a
+// *different* channel (e.g. installed on `latest`, now switching to `beta`),
+// the next OTA is a channel switch — it may install a different, possibly
+// LOWER, version and force-flashes even when the device reports "current".
+//
+// Graceful fallback: older firmware that predates PRO-400 does not emit
+// `installedChannel`. When it's absent/undefined we return false so the UI
+// degrades to its pre-channel-switch behavior (no switch state, no warning).
+export function otaChannelDiffersFromInstalled({ selectedChannel, installedChannel } = {}) {
+  if (typeof installedChannel !== 'string' || installedChannel.length === 0) {
+    return false;
+  }
+  if (typeof selectedChannel !== 'string' || selectedChannel.length === 0) {
+    return false;
+  }
+  return selectedChannel !== installedChannel;
+}
+
+// Decide whether the flash/update button should be enabled in the
+// channel-switch state (the device-acknowledged channel differs from the
+// installed channel).
+//
+// Mirrors canFlashTaggedRelease's anti-stale-`_latest_url` discipline: after
+// switching channels the firmware force-flashes, so we must not enable the
+// button until the device has echoed the newly-saved channel back (proving
+// checkForUpdates() has resolved `_latest_url` for the new channel).
+//
+// Gate (all must hold):
+//   1. The dropdown selection has been saved & acknowledged
+//      (pendingChannel === formData.channel).
+//   2. A real status came back (not "Checking..." / "Update failed" / empty).
+//   3. The acknowledged channel differs from formData.installedChannel.
+export function canSwitchChannel({ formData, pendingChannel } = {}) {
+  if (!formData || typeof formData !== 'object') return false;
+  const { channel, status, installedChannel } = formData;
+  if (typeof channel !== 'string' || channel.length === 0) return false;
+  if (pendingChannel !== channel) return false;
+  if (typeof status !== 'string' || status.length === 0) return false;
+  if (status === 'Checking...' || status === 'Update failed') return false;
+  return otaChannelDiffersFromInstalled({ selectedChannel: channel, installedChannel });
+}
+
+// Capitalize a channel name for display ("beta" -> "Beta"). Tag channels
+// (`tag:<semver>`) are passed through unchanged since they aren't a
+// human-friendly channel name.
+function capitalizeChannel(channel) {
+  if (typeof channel !== 'string' || channel.length === 0) return channel;
+  if (channel.startsWith('tag:')) return channel;
+  return channel.charAt(0).toUpperCase() + channel.slice(1);
+}
+
+// Contextual label for the flash/update action:
+//   - Channel switch (acknowledged channel differs from installed) -> "Switch to <Channel>"
+//   - Pinned-tag flash                                             -> "Flash"
+//   - Within-channel update                                        -> "Update"
+//
+// Channel-switch takes precedence when the acknowledged channel differs from
+// the installed channel. Reuses the existing predicates so the three states
+// stay consistent with the button-enable logic.
+//
+// `pendingChannel` is part of the API contract (mirrors the other helpers'
+// arity) but not consulted: the label keys off the already-acknowledged
+// `formData.channel`, the same source the enable gate uses.
+// eslint-disable-next-line no-unused-vars
+export function otaActionLabel(formData, pendingChannel) {
+  if (!formData || typeof formData !== 'object') return 'Update';
+  const { channel } = formData;
+  if (
+    otaChannelDiffersFromInstalled({
+      selectedChannel: channel,
+      installedChannel: formData.installedChannel,
+    })
+  ) {
+    return `Switch to ${capitalizeChannel(channel)}`;
+  }
+  if (typeof channel === 'string' && channel.startsWith('tag:')) {
+    return 'Flash';
+  }
+  return 'Update';
+}
