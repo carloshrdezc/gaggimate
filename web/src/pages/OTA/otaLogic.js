@@ -134,6 +134,16 @@ export function otaChannelDiffersFromInstalled({ selectedChannel, installedChann
 //      (pendingChannel === formData.channel).
 //   2. A real status came back (not "Checking..." / "Update failed" / empty).
 //   3. The acknowledged channel differs from formData.installedChannel.
+//
+// Intentionally weaker than canFlashTaggedRelease for a `tag:` channel: when a
+// pinned tag differs from installedChannel this gate enables on the channel
+// switch alone and does NOT re-require the pinned-tag semver match (gate #4
+// above), so the button can enable a beat earlier than the pure pinned-tag
+// path. This is safe because the firmware is the real authority: the
+// ForceMatchTag/Refuse path (OtaChannelSwitchPolicy) only force-flashes when
+// the synchronously-resolved head matches the pinned tag and Refuses a
+// stale/mismatched resolved tag, so an early-enabled click is refused
+// device-side rather than mis-flashed. (PRO-405; flagged P3 in PRO-401 review.)
 export function canSwitchChannel({ formData, pendingChannel } = {}) {
   if (!formData || typeof formData !== 'object') return false;
   const { channel, status, installedChannel } = formData;
