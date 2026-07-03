@@ -376,7 +376,8 @@ test('otaActionLabel: "Switch to Nightly" capitalizes the channel name', () => {
 test('otaActionLabel: channel-switch takes precedence over pinned-tag state', () => {
   // Selected tag channel differs from the installed (latest) channel -> switch.
   const formData = { channel: 'tag:2.0.8', installedChannel: 'latest', status: '2.0.8' };
-  expect(otaActionLabel(formData, 'tag:2.0.8')).toBe('Switch to tag:2.0.8');
+  // PRO-404: the internal `tag:` prefix is stripped for display -> bare semver.
+  expect(otaActionLabel(formData, 'tag:2.0.8')).toBe('Switch to 2.0.8');
 });
 
 test('otaActionLabel: "Update" for malformed input', () => {
