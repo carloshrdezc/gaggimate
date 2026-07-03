@@ -107,6 +107,10 @@ export default class ApiService {
     console.log('WebSocket connected successfully');
     this.reconnectAttempts = 0;
     this.isConnecting = false;
+    // Transport is up: clear the banner (PRO-7). The countdown target is no
+    // longer meaningful once we're connected.
+    connectionState.value = 'connected';
+    nextReconnectAt.value = null;
     machine.value = {
       ...machine.value,
       connected: true,
@@ -162,12 +166,41 @@ export default class ApiService {
       this.maxReconnectDelay,
     );
 
+    // Surface reconnect state so the connection-lost banner can show a live
+    // countdown until the next attempt (PRO-7). Backoff continues indefinitely
+    // up to maxReconnectDelay, so the state stays 'reconnecting' — we never
+    // give up on our own.
+    connectionState.value = 'reconnecting';
+    nextReconnectAt.value = Date.now() + delay;
+
     console.log(`Scheduling reconnect attempt ${this.reconnectAttempts + 1} in ${delay}ms`);
 
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectAttempts++;
       this.connect();
     }, delay);
+  }
+
+  /**
+   * Force an immediate reconnect, bypassing the backoff delay (PRO-7).
+   *
+   * Wired to the "Reconnect now" button on the connection-lost banner. Clears
+   * any pending scheduled reconnect, resets the exponential backoff so the
+   * NEXT failure starts from `baseReconnectDelay` again, and retries right
+   * away.
+   */
+  reconnectNow() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this.reconnectAttempts = 0;
+    nextReconnectAt.value = null;
+    // Clear the in-flight guard so a forced reconnect isn't swallowed if a
+    // prior connect() attempt is still marked pending (e.g. a socket that
+    // opened but never fired open/close).
+    this.isConnecting = false;
+    this.connect();
   }
 
   _onMessage(event) {
@@ -369,6 +402,26 @@ export default class ApiService {
 }
 
 export const ApiServiceContext = createContext(null);
+
+/**
+ * Connection-lost banner state (PRO-7).
+ *
+ * - `'connected'`    — transport is up; banner hidden.
+ * - `'reconnecting'` — socket dropped and a reconnect is scheduled/in-flight.
+ *
+ * `'failed'` is reserved for a future attempt cap; today the backoff continues
+ * up to `maxReconnectDelay` and never gives up, so the state stays
+ * `'reconnecting'` while offline. Starts optimistic so a stable connection
+ * never flashes the banner during the initial handshake.
+ */
+export const connectionState = signal('connected');
+
+/**
+ * Epoch-ms timestamp of the next scheduled reconnect attempt, or `null` when
+ * connected / retrying immediately. The banner derives its live countdown from
+ * this (PRO-7).
+ */
+export const nextReconnectAt = signal(null);
 
 export const machine = signal({
   connected: false,
