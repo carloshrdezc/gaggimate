@@ -213,6 +213,10 @@ export function filtersToSearchParams(filters) {
 /**
  * Serialize active filters to a query string. Returns '' when all filters are
  * at their defaults (so the URL has no trailing '?').
+ *
+ * Retained as an intentional public/test helper: it has no current production
+ * caller (index.jsx uses mergeFiltersIntoSearch to preserve unrelated params),
+ * but it is a pure, tested part of this module's serialization surface.
  */
 export function filtersToQueryString(filters) {
   const params = filtersToSearchParams(filters);
@@ -226,14 +230,27 @@ export function filtersToQueryString(filters) {
  * authoritative: they are set when active and removed when at their defaults,
  * while unrelated params are carried through untouched. Returns a query string
  * ('' when nothing remains, otherwise '?...').
+ *
+ * Owned keys are updated in place so a landing URL whose params already match
+ * the active filters is left byte-for-byte unchanged — no spurious reorder that
+ * would trigger a pointless replaceState on mount (PRO-412). `URLSearchParams`
+ * .set() updates an existing key at its current position (and collapses
+ * duplicates); .delete() removes a now-inactive owned key. Unrelated params and
+ * already-present owned params keep their original order; only a newly-active
+ * owned key that was absent gets appended at the end.
  */
 export function mergeFiltersIntoSearch(currentSearch, filters) {
   const params = new URLSearchParams(currentSearch || '');
-  // Drop the keys we own so cleared filters are removed rather than stacked.
-  for (const param of Object.values(QUERY_KEYS)) params.delete(param);
-  // Re-apply the currently-active filter params.
   const active = filtersToSearchParams(filters);
-  for (const [key, value] of active.entries()) params.set(key, value);
+  for (const param of Object.values(QUERY_KEYS)) {
+    if (active.has(param)) {
+      // Update in place (or append if absent) without disturbing other params.
+      params.set(param, active.get(param));
+    } else {
+      // Inactive/cleared filter: drop the owned key so it isn't stacked.
+      params.delete(param);
+    }
+  }
   const str = params.toString();
   return str ? `?${str}` : '';
 }
