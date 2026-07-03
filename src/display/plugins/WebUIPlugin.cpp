@@ -303,10 +303,16 @@ void WebUIPlugin::loop() {
         if (isTag || channelSwitch) {
             ota->checkForUpdates();
             const String resolved = ota->getCurrentVersion();
-            // resolveFailed at this layer == the resolver produced no version
-            // string (network error / GitHub redirect quirk / malformed
-            // channel). Mirrors the existing tag: confirm signal.
-            const bool resolveFailed = resolved.isEmpty();
+            // resolveFailed at this layer == the last checkForUpdates() failed
+            // to resolve a head (network error / GitHub redirect quirk /
+            // malformed channel). We consult the AUTHORITATIVE failure flag
+            // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+            // resolve getCurrentVersion() returns the STALE version string from
+            // a prior successful check, so a periodic check that already
+            // populated a version would otherwise mask a failed channel-switch
+            // resolve and force-flash against a stale _latest_url. Keep the
+            // || isEmpty() as a belt-and-suspenders guard (empty is untrustworthy).
+            const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
             const String pinned = isTag ? channel.substring(4) : String("");
             const OtaFlashDecision decision =
                 decideOtaFlash(isTag, pinned.c_str(), /*selectedEqInstalled=*/!channelSwitch,
