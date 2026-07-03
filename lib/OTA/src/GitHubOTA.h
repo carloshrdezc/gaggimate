@@ -30,6 +30,12 @@ class GitHubOTA {
     void checkForUpdates();
     bool isUpdateAvailable(bool controller = false) const;
     String getCurrentVersion() const;
+    // Authoritative resolve-failure signal from the last checkForUpdates().
+    // getCurrentVersion() cannot be trusted for this: on a failed resolve it
+    // returns the STALE _latest_version_string from a prior successful check
+    // (never cleared on the failure early-return), so emptiness alone can
+    // mask a failure. Callers gating on "did the resolve fail" must use this.
+    bool isUpdateCheckFailed() const { return _update_check_failed; }
     bool update(bool controller = true, bool display = true, bool force = false);
     void setReleaseUrl(const String &release_url);
     void setControllerVersion(const String &controller_version);

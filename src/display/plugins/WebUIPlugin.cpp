@@ -1,4 +1,5 @@
 #include "WebUIPlugin.h"
+#include "OtaChannelSwitchPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
@@ -278,51 +279,88 @@ void WebUIPlugin::loop() {
     }
     if (updating) {
         pluginManager->trigger("ota:update:start");
-        // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
-        // This bypasses the upgrade-only guard so re-flashing the same version
-        // and downgrading both work.
-        const String channel = controller->getSettings().getOTAChannel();
-        const bool force = channel.startsWith("tag:");
+        // PRO-400: force-flash whenever the user pinned a specific tag
+        // (e.g. "tag:2.0.8") OR switched channels (stable <-> beta <-> nightly).
+        // A tag bypasses the upgrade-only guard so re-flashing the same version
+        // and downgrading both work. A channel switch must ALWAYS flash the
+        // resolved head of the newly-selected channel regardless of semver
+        // direction (beta->stable / nightly->stable are lower/equal semver and
+        // would otherwise stall on the upgrade-only guard), while upgrades
+        // WITHIN a channel still run the guard. See OtaChannelSwitchPolicy.h.
+        Settings &settings = controller->getSettings();
+        const String channel = settings.getOTAChannel();
+        const String previousInstalledChannel = settings.getInstalledChannel();
+        const bool isTag = channel.startsWith("tag:");
+        const bool channelSwitch = !isTag && channel != previousInstalledChannel;
+        // A tag pin OR a channel switch needs a synchronous resolve + confirm
+        // before we can trust what would be flashed. This also defeats the
+        // stale-_latest_url race the tag: path documents: a WS client can send
+        // `req:ota-settings <channel>` then `req:ota-start` before the throttled
+        // checkForUpdates() in this same loop runs, so `_latest_url` may still
+        // hold the previous channel's resolved URL.
         bool tagResolved = true;
-        if (force) {
-            // Defense-in-depth: a WS client can send `req:ota-settings tag:X`
-            // followed immediately by `req:ota-start` before the throttled
-            // checkForUpdates() in this same loop runs (the if-blocks in
-            // loop() are sequential, and the OTA-start arm executes first).
-            // In that race `_release_url` points at tag/X but `_latest_url`
-            // still holds the previous channel's resolved URL, so a forced
-            // update would flash the wrong asset.
-            //
-            // Resolve `_latest_url` synchronously here, then verify the
-            // freshly-resolved version equals the pinned tag. If it doesn't
-            // (network error, GitHub redirect quirk, malformed channel), we
-            // refuse the update — never flash a tag we can't confirm.
-            const String pinned = channel.substring(4);
+        bool forceChannelSwitch = false;
+        if (isTag || channelSwitch) {
             ota->checkForUpdates();
             const String resolved = ota->getCurrentVersion();
-            // GitHub release tags occasionally carry a leading `v` prefix
-            // (`v1.8.2`); the resolver strips it, but the channel string we
-            // stored does not. Treat them as equal so legacy tags still flash.
-            // Cover both directions in case a future resolver path keeps the
-            // `v` and the channel string drops it.
-            const bool match = resolved == pinned ||
-                               (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
-                               (resolved.startsWith("v") && resolved.substring(1) == pinned);
-            if (!match) {
-                ESP_LOGE("WebUIPlugin",
-                         "Refusing forced OTA: pinned tag %s but resolved %s",
-                         pinned.c_str(), resolved.c_str());
+            // resolveFailed at this layer == the last checkForUpdates() failed
+            // to resolve a head (network error / GitHub redirect quirk /
+            // malformed channel). We consult the AUTHORITATIVE failure flag
+            // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+            // resolve getCurrentVersion() returns the STALE version string from
+            // a prior successful check, so a periodic check that already
+            // populated a version would otherwise mask a failed channel-switch
+            // resolve and force-flash against a stale _latest_url. Keep the
+            // || isEmpty() as a belt-and-suspenders guard (empty is untrustworthy).
+            const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+            const String pinned = isTag ? channel.substring(4) : String("");
+            const OtaFlashDecision decision =
+                decideOtaFlash(isTag, pinned.c_str(), /*selectedEqInstalled=*/!channelSwitch,
+                               /*installedEmpty=*/previousInstalledChannel.isEmpty(), resolved.c_str(), resolveFailed);
+            switch (decision) {
+            case OtaFlashDecision::ForceMatchTag:
+                // pinned tag confirmed (leading-`v` tolerant) — force flash.
+                break;
+            case OtaFlashDecision::ForceChannelSwitch:
+                // new channel head resolved — force flash regardless of semver
+                // direction.
+                forceChannelSwitch = true;
+                break;
+            case OtaFlashDecision::Refuse:
+            default:
+                // tag mismatch, or a switch whose new-channel resolve failed /
+                // came back empty: never flash something we can't confirm.
+                if (isTag) {
+                    ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s", pinned.c_str(),
+                             resolved.c_str());
+                } else {
+                    ESP_LOGE("WebUIPlugin", "Refusing channel-switch OTA to %s: resolve failed", channel.c_str());
+                }
                 tagResolved = false;
+                break;
             }
+        }
+        // force=true for a confirmed tag pin OR a confirmed channel switch.
+        const bool force = isTag || forceChannelSwitch;
+        // On a confirmed channel switch, persist installedChannel = otaChannel
+        // BEFORE update() (the success path reboots via GitHubOTA and never
+        // returns). Restored below if update() returns false (no reboot).
+        if (forceChannelSwitch) {
+            settings.setInstalledChannel(channel);
         }
         bool updateSucceeded = false;
         if (tagResolved) {
-            updateSucceeded =
-                ota->update(updateComponent != "display", updateComponent != "controller", force);
+            updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
         }
         pluginManager->trigger("ota:update:end");
         updating = false;
         if (!updateSucceeded) {
+            // update() returned (no reboot) — restore the previous
+            // installedChannel so a failed switch doesn't leave the persisted
+            // installed marker ahead of what is actually flashed.
+            if (forceChannelSwitch) {
+                settings.setInstalledChannel(previousInstalledChannel);
+            }
             updateOTAStatus(tagResolved ? "Update failed" : "Update failed (tag not resolved)");
         }
     }
@@ -1879,6 +1917,10 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["controllerVersion"] = controller->getSystemInfo().version;
     doc["hardware"] = controller->getSystemInfo().hardware;
     doc["channel"] = settings.getOTAChannel();
+    // PRO-400 (Issue B / PRO-401): the channel whose head is installed, so the
+    // web UI can detect a pending channel switch (selected != installed) and
+    // surface the force-flash affordance.
+    doc["installedChannel"] = settings.getInstalledChannel();
     doc["updating"] = updating;
     // Surface the build-time list of selectable stable releases so the web UI
     // can render a "flash a specific tag" dropdown.
