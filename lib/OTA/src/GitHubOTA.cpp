@@ -99,6 +99,13 @@ bool GitHubOTA::update(bool controller, bool display, bool force) {
     const char *TAG = "update";
 
     bool updateExecuted = false;
+    // PRO-403: reset the per-call controller-flashed marker. On the default
+    // two-component flash the controller can succeed and the display then fail,
+    // in which case update() returns false but the controller is already
+    // running the new image. Callers restoring an installedChannel marker on
+    // failure need to know the controller was actually flashed. See the
+    // accessor didFlashControllerLastUpdate().
+    _last_update_flashed_controller = false;
 
     if (controller && (force || update_required(_latest_version, _controller_version))) {
         ESP_LOGI(TAG, "Controller update is required, running firmware update.");
@@ -110,6 +117,7 @@ bool GitHubOTA::update(bool controller, bool display, bool force) {
         }
         ESP_LOGI(TAG, "Controller update successful. Restarting...\n");
         updateExecuted = true;
+        _last_update_flashed_controller = true;
     }
 
     if (display && (force || update_required(_latest_version, _version))) {

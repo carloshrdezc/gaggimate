@@ -358,7 +358,17 @@ void WebUIPlugin::loop() {
             // update() returned (no reboot) — restore the previous
             // installedChannel so a failed switch doesn't leave the persisted
             // installed marker ahead of what is actually flashed.
-            if (forceChannelSwitch) {
+            //
+            // PRO-403: but only when NO component was actually flashed. On the
+            // default two-component flash the controller can flash OK and the
+            // display then fail; update() returns false while the controller is
+            // already running the new channel's head. installedChannel is a
+            // whole-device marker feeding the next channel-switch decision and
+            // the PRO-401 pending-switch UI hint, so on such a partial flash we
+            // must KEEP installedChannel = channel (the new one) to reflect the
+            // controller's actual on-device state. Only restore when the
+            // controller was not flashed (the old channel is still what runs).
+            if (forceChannelSwitch && !ota->didFlashControllerLastUpdate()) {
                 settings.setInstalledChannel(previousInstalledChannel);
             }
             updateOTAStatus(tagResolved ? "Update failed" : "Update failed (tag not resolved)");
