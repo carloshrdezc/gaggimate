@@ -334,4 +334,27 @@ describe('mergeFiltersIntoSearch', () => {
     expect(params.getAll('profile')).toEqual(['Espresso']);
     expect(params.get('ref')).toBe('abc');
   });
+
+  test('no spurious reorder when the URL already matches the active filters (PRO-412)', () => {
+    // Landing on a URL whose owned params already equal the active filters must
+    // be left byte-for-byte unchanged, so the index.jsx mount effect does not
+    // fire a pointless replaceState purely to reorder identical params.
+    const current = '?profile=Espresso&ref=abc';
+    const query = mergeFiltersIntoSearch(current, {
+      ...defaultFilters(),
+      profile: 'Espresso',
+    });
+    expect(query).toBe(current);
+  });
+
+  test('updates an owned param in place without moving unrelated params (PRO-412)', () => {
+    // Changing an owned filter value keeps every param at its original position
+    // (owned key updated in place, unrelated key untouched) rather than being
+    // deleted and re-appended.
+    const query = mergeFiltersIntoSearch('?profile=Turbo&ref=abc', {
+      ...defaultFilters(),
+      profile: 'Espresso',
+    });
+    expect(query).toBe('?profile=Espresso&ref=abc');
+  });
 });
