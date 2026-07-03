@@ -104,10 +104,25 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         },
         "display-firmware.bin", "display-filesystem.bin", "board-firmware.bin");
     pluginManager->on("controller:wifi:connect", [this](Event const &event) {
-        apMode = event.getInt("AP");
-        start();
+        // PRO-417: do NOT call start() inline — this runs on the arduino_events
+        // WiFi-event task. Latch the desired mode + Start intent and let loop()
+        // (Arduino loop task) run the actual start() off this task. Carry the
+        // "AP" flag through pendingApMode so the deferred start() picks the right
+        // captive-portal mode. Last event wins (latchLifecycleIntent coalesces).
+        pendingApMode.store(event.getInt("AP") != 0, std::memory_order_relaxed);
+        pendingLifecycle.store(
+            latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Start),
+            std::memory_order_relaxed);
     });
-    pluginManager->on("controller:wifi:disconnect", [this](Event const &) { stop(); });
+    pluginManager->on("controller:wifi:disconnect", [this](Event const &) {
+        // PRO-417: do NOT call stop() inline — stop()/stopRelay() blocks the
+        // WiFi-event task (~500 ms spin-wait + ws.closeAll() under wsMutex) once
+        // per ASSOC_LEAVE, stalling core 0 while WPA-supplicant re-associates.
+        // Latch a Stop intent; loop() drains it on the Arduino loop task.
+        pendingLifecycle.store(
+            latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Stop),
+            std::memory_order_relaxed);
+    });
     pluginManager->on("controller:ready", [this](Event const &) {
         ota->setControllerVersion(controller->getSystemInfo().version);
         ota->init(controller->getClientController()->getClient());
@@ -230,6 +245,31 @@ struct SemaphoreGuard {
 } // namespace
 
 void WebUIPlugin::loop() {
+    // PRO-417: drain the deferred web-server lifecycle intent latched by the WiFi
+    // (dis)connect event handlers. Runs FIRST, on the Arduino loop task, so the
+    // heavy start()/stop() (stopRelay()'s bounded spin-wait + ws.closeAll() under
+    // wsMutex) executes here instead of inline on the arduino_events WiFi-event
+    // task, where doing it once per ASSOC_LEAVE stalled core 0 while WPA-supplicant
+    // re-associated. Must stay ABOVE the `if (!serverRunning) return;` guard below
+    // so a queued Start (server currently down) is not stranded; a Stop while the
+    // server is down is a no-op inside stop() (its own `!serverRunning` guard).
+    // Read-and-clear atomically so a WiFi event that arrives mid-drain re-latches
+    // for the next tick rather than being lost.
+    {
+        const WebUiLifecycleIntent latched = pendingLifecycle.exchange(WebUiLifecycleIntent::None, std::memory_order_relaxed);
+        switch (lifecycleDrainAction(latched)) {
+        case WebUiLifecycleAction::RunStart:
+            apMode = pendingApMode.load(std::memory_order_relaxed);
+            start();
+            break;
+        case WebUiLifecycleAction::RunStop:
+            stop();
+            break;
+        case WebUiLifecycleAction::None:
+        default:
+            break;
+        }
+    }
     // Latch deferred OTA-start intent posted by handleOTAStart on the WS/relay
     // task (CAR-377). Runs on the loop task, so `updating` and `updateComponent`
     // are written and read only here. If contended, leave pendingOtaStart set so
@@ -818,9 +858,11 @@ void WebUIPlugin::stop() {
         return;
     server.end();
     {
-        // PRO-313: closeAll() walks the client list and runs on the WiFi-event
-        // task (start()/stop()), a third task distinct from loopTask and
-        // AsyncTCP. Serialize it against their client-list access.
+        // PRO-313: closeAll() walks the client list. Since PRO-417 stop() runs on
+        // the Arduino loop task (drained from a WiFi-event latch), not inline on
+        // the arduino_events WiFi-event task — but the wsMutex is still required to
+        // serialize this walk against the AsyncTCP task's client-list mutation
+        // (connect/disconnect), which is a different task on a different core.
         SemaphoreGuard lock(wsMutex);
         ws.closeAll();
     }
@@ -847,11 +889,12 @@ void WebUIPlugin::stop() {
 
 void WebUIPlugin::startRelay() {
     // Caller-context: startRelay()/stopRelay() are invoked from two different
-    // FreeRTOS tasks — start()/stop() run inline on the arduino_events WiFi-event
-    // task (controller:wifi:connect/disconnect), while handleSettings() runs on the
-    // AsyncTCP /api/settings task and calls stopRelay()+startRelay() back-to-back.
-    // A WiFi (dis)connect can therefore genuinely interleave with a cloud-relay
-    // settings toggle. They are now serialized by relayLifecycleMutex (taken at the
+    // FreeRTOS tasks — since PRO-417 start()/stop() run on the Arduino loop task
+    // (drained from a WiFi-event latch on controller:wifi:connect/disconnect),
+    // while handleSettings() runs on the AsyncTCP /api/settings task and calls
+    // stopRelay()+startRelay() back-to-back. A WiFi (dis)connect drain can
+    // therefore still genuinely interleave with a cloud-relay settings toggle.
+    // They are serialized by relayLifecycleMutex (taken at the
     // top of both functions, released on every return path) so the atomic-flag
     // handoff with relayLoopTask stays coherent and two starts can never both
     // observe relayTaskHandle==nullptr and orphan a live task (CAR-259). A plain
@@ -985,7 +1028,8 @@ void WebUIPlugin::stopRelay() {
         // allocator. The task nulls relayTaskHandle just before vTaskDelete(NULL).
         relayTaskExitRequested.store(true, std::memory_order_release);
         // Bound the wait so a wedged task can never hang the caller (this runs
-        // on the WiFi-event / AsyncTCP web-server task). Loop cadence is 10 ms;
+        // on the Arduino loop task via the PRO-417 lifecycle drain, or the AsyncTCP
+        // web-server task via handleSettings()). Loop cadence is 10 ms;
         // a single relayWs.loop() with an SSL handshake or large frame in flight
         // can exceed that, so allow generous slack before giving up.
         constexpr TickType_t pollInterval = pdMS_TO_TICKS(10);
