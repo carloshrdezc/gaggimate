@@ -164,6 +164,25 @@ describe('availableProfiles / availableBeans', () => {
     expect(result.find(b => b.id === 'bean-a').name).toBe('Ethiopia Yirgacheffe');
     expect(result.find(b => b.id === 'bean-b').name).toBe('Colombia');
   });
+
+  test('availableBeans uses "Unknown bean" fallback when name is blank, not the raw id (PRO-407)', () => {
+    const shots = [
+      // beanId present, but not in the library AND shot.beanName is blank.
+      { id: 10, beanId: 'bean-x', beanName: '' },
+      // beanId in the library, but the library entry's name is blank/whitespace.
+      { id: 11, beanId: 'bean-y', beanName: '   ' },
+    ];
+    const beans = [{ id: 'bean-y', name: '  ' }];
+    const result = availableBeans(shots, beans);
+
+    // The display label must be the friendly fallback, never the raw id.
+    for (const opt of result) {
+      expect(opt.name).toBe('Unknown bean');
+      expect(opt.name).not.toBe(opt.id);
+    }
+    // The id field is preserved so the dropdown option still filters correctly.
+    expect(result.map(b => b.id).sort()).toEqual(['bean-x', 'bean-y']);
+  });
 });
 
 describe('URL query serialization', () => {

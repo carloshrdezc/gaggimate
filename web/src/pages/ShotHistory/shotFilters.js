@@ -153,7 +153,11 @@ export function availableBeans(shots, beans) {
     const id = String(shot.beanId || '').trim();
     if (!id || seen.has(id)) continue;
     const libBean = beanById.get(id);
-    const name = String(libBean?.name || shot.beanName || id).trim();
+    // Prefer the library name, then the shot's inferred beanName. When both are
+    // blank, show a human-friendly label instead of leaking the raw internal id
+    // into the dropdown (PRO-407). The `id` field is kept intact for filtering.
+    const resolved = String(libBean?.name || shot.beanName || '').trim();
+    const name = resolved || 'Unknown bean';
     seen.set(id, { id, name });
   }
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
