@@ -141,6 +141,8 @@ export function availableProfiles(shots) {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
+const UNKNOWN_BEAN_LABEL = 'Unknown bean';
+
 /**
  * Collect the distinct beans referenced by the shot history as
  * { id, name } pairs, sorted by name. Falls back to the shot's inferred
@@ -149,6 +151,10 @@ export function availableProfiles(shots) {
 export function availableBeans(shots, beans) {
   const beanById = new Map((Array.isArray(beans) ? beans : []).map(b => [b.id, b]));
   const seen = new Map();
+  // Count how many distinct fallback ('Unknown bean') rows we've emitted so we
+  // can disambiguate them (PRO-410). When several distinct bean ids all resolve
+  // to a blank name, the dropdown would otherwise render identical labels.
+  let unknownCount = 0;
   for (const shot of Array.isArray(shots) ? shots : []) {
     const id = String(shot.beanId || '').trim();
     if (!id || seen.has(id)) continue;
@@ -157,7 +163,16 @@ export function availableBeans(shots, beans) {
     // blank, show a human-friendly label instead of leaking the raw internal id
     // into the dropdown (PRO-407). The `id` field is kept intact for filtering.
     const resolved = String(libBean?.name || shot.beanName || '').trim();
-    const name = resolved || 'Unknown bean';
+    let name;
+    if (resolved) {
+      name = resolved;
+    } else {
+      // Deterministic (insertion-order) suffixing so distinct blank-name beans
+      // get distinct labels: 'Unknown bean', 'Unknown bean (2)', … (PRO-410).
+      // Each row keeps its own `id`, so per-bean filtering still works.
+      unknownCount += 1;
+      name = unknownCount === 1 ? UNKNOWN_BEAN_LABEL : `${UNKNOWN_BEAN_LABEL} (${unknownCount})`;
+    }
     seen.set(id, { id, name });
   }
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));

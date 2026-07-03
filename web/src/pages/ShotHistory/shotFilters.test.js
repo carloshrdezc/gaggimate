@@ -176,13 +176,50 @@ describe('availableProfiles / availableBeans', () => {
     const beans = [{ id: 'bean-y', name: '  ' }];
     const result = availableBeans(shots, beans);
 
-    // The display label must be the friendly fallback, never the raw id.
+    // The display label must be the friendly fallback family, never the raw id.
+    // Distinct blank-name beans are disambiguated with a numeric suffix (PRO-410).
     for (const opt of result) {
-      expect(opt.name).toBe('Unknown bean');
+      expect(opt.name).toMatch(/^Unknown bean( \(\d+\))?$/);
       expect(opt.name).not.toBe(opt.id);
     }
     // The id field is preserved so the dropdown option still filters correctly.
     expect(result.map(b => b.id).sort()).toEqual(['bean-x', 'bean-y']);
+  });
+
+  test('availableBeans disambiguates multiple blank-name beans with numeric suffixes (PRO-410)', () => {
+    const shots = [
+      { id: 20, beanId: 'bean-1', beanName: '' },
+      { id: 21, beanId: 'bean-2', beanName: '   ' },
+      { id: 22, beanId: 'bean-3', beanName: '' },
+    ];
+    // bean-2 is in the library but with a whitespace-only name (also a fallback).
+    const beans = [{ id: 'bean-2', name: '   ' }];
+    const result = availableBeans(shots, beans);
+
+    // Labels are distinct and follow the deterministic insertion-order sequence.
+    const byId = new Map(result.map(b => [b.id, b.name]));
+    expect(byId.get('bean-1')).toBe('Unknown bean');
+    expect(byId.get('bean-2')).toBe('Unknown bean (2)');
+    expect(byId.get('bean-3')).toBe('Unknown bean (3)');
+
+    // No two rows share a label, and each keeps its own id for filtering.
+    const labels = result.map(b => b.name);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(result.map(b => b.id).sort()).toEqual(['bean-1', 'bean-2', 'bean-3']);
+  });
+
+  test('availableBeans only disambiguates fallback rows, never real names (PRO-410)', () => {
+    const shots = [
+      { id: 30, beanId: 'bean-real', beanName: 'Colombia' },
+      { id: 31, beanId: 'bean-blank', beanName: '' },
+    ];
+    const beans = [{ id: 'bean-real', name: 'Colombia' }];
+    const result = availableBeans(shots, beans);
+
+    // The real name is untouched; the single blank row gets the bare fallback.
+    const byId = new Map(result.map(b => [b.id, b.name]));
+    expect(byId.get('bean-real')).toBe('Colombia');
+    expect(byId.get('bean-blank')).toBe('Unknown bean');
   });
 });
 
