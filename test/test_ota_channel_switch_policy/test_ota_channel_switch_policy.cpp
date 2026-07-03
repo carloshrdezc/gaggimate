@@ -59,8 +59,8 @@ void test_empty_installed_defensive_upgrade_only(void) {
 // beta -> latest is a LOWER semver switch, and latest -> beta may be an EQUAL
 // semver re-flash. Both must force-flash the resolved head of the new channel.
 void test_channel_switch_forces_regardless_of_semver_direction(void) {
-    // beta(2.1.0-beta) -> latest(2.0.0): lower semver, must force.
-    TEST_ASSERT_EQUAL(OtaFlashDecision::ForceChannelSwitch, decideOtaFlash(false, "", false, false, "2.0.0", false));
+    // beta(2.1.0-beta) -> latest(0.9.0): lower semver, must force.
+    TEST_ASSERT_EQUAL(OtaFlashDecision::ForceChannelSwitch, decideOtaFlash(false, "", false, false, "0.9.0", false));
     // latest -> beta where the resolved head equals the current version: equal
     // semver, must still force (idempotent re-flash advances installedChannel).
     TEST_ASSERT_EQUAL(OtaFlashDecision::ForceChannelSwitch, decideOtaFlash(false, "", false, false, "2.0.0", false));
