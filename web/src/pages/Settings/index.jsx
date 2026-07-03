@@ -287,6 +287,7 @@ export function Settings() {
             onClick={onExport}
             className='nd-action-btn'
             title='Export Settings'
+            aria-label='Export Settings'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>

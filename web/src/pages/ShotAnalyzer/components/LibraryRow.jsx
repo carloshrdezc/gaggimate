@@ -82,6 +82,7 @@ export function LibraryRow({ item, isMatch, isActive, isShot, onLoad, onExport, 
             </a>
           )}
           <button
+            aria-label='Export'
             onClick={() => onExport(item)}
             className={getAnalyzerIconButtonClasses({
               tone: 'subtle',
