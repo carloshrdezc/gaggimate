@@ -178,7 +178,7 @@ export function availableBeans(shots, beans) {
   // Numeric-aware sort so embedded disambiguation suffixes order naturally
   // ('(2)' before '(10)') rather than lexically (PRO-414).
   return [...seen.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }),
+    a.name.localeCompare(b.name, undefined, { numeric: true }),
   );
 }
 
