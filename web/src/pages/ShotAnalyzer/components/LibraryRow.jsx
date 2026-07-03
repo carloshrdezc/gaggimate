@@ -92,6 +92,7 @@ export function LibraryRow({ item, isMatch, isActive, isShot, onLoad, onExport, 
             <FontAwesomeIcon icon={faFileExport} size='xs' />
           </button>
           <button
+            aria-label='Delete'
             onClick={() => onDelete(item)}
             className={getAnalyzerIconButtonClasses({
               tone: 'error',
