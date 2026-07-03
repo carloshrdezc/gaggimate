@@ -62,6 +62,15 @@ void GitHubOTA::checkForUpdates() {
         auto semver_str = _latest_url.substring(last_slash + 1);
         semver_str.replace("/", "");
         ESP_LOGI(TAG, "semver_str %s\n", semver_str.c_str());
+        // PRO-411: a redirect that resolved but yielded no parseable version
+        // segment is a failed check, not a "downgrade to 0.0.0". Bail so
+        // isUpdateAvailable() returns false and the caller backs off, rather than
+        // feeding an empty string on into version handling.
+        if (semver_str.isEmpty()) {
+            ESP_LOGW(TAG, "redirect base_url did not contain a version segment");
+            _update_check_failed = true;
+            return;
+        }
         _latest_version_string = semver_str;
         _latest_version = from_string(semver_str.c_str());
     } else {
