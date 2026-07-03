@@ -36,6 +36,13 @@ class GitHubOTA {
     // (never cleared on the failure early-return), so emptiness alone can
     // mask a failure. Callers gating on "did the resolve fail" must use this.
     bool isUpdateCheckFailed() const { return _update_check_failed; }
+    // PRO-403: whether the controller component was actually flashed during the
+    // last update() call. On the default two-component flash the controller can
+    // flash successfully and the display then fail, so update() returns false
+    // while the controller is already running the new image. A caller restoring
+    // a persisted channel marker on failure must NOT restore in that case, or
+    // the marker will disagree with the on-device controller.
+    bool didFlashControllerLastUpdate() const { return _last_update_flashed_controller; }
     bool update(bool controller = true, bool display = true, bool force = false);
     void setReleaseUrl(const String &release_url);
     void setControllerVersion(const String &controller_version);
@@ -51,6 +58,7 @@ class GitHubOTA {
     String _latest_version_string;
     semver_t _latest_version = {0, 0, 0, nullptr, nullptr};
     bool _update_check_failed = false;
+    bool _last_update_flashed_controller = false;
     String _release_url;
     String _latest_url;
     String _firmware_name;
