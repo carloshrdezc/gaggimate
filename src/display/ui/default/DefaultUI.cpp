@@ -6,9 +6,16 @@
 #include <display/core/process/Process.h>
 #include <display/core/zones.h>
 #ifndef GAGGIMATE_SIM // hardware panel drivers are device-only
+#include <display/config/features.h>
+#if GM_DRIVER_AMOLED
 #include <display/drivers/AmoledDisplayDriver.h>
+#endif
+#if GM_DRIVER_LILYGO
 #include <display/drivers/LilyGoDriver.h>
+#endif
+#if GM_DRIVER_WAVESHARE
 #include <display/drivers/WaveshareDriver.h>
+#endif
 #include <display/drivers/common/LV_Helper.h>
 #endif
 #include <display/main.h>
@@ -25,9 +32,10 @@
 static EffectManager effect_mgr;
 
 // True when the active panel is the AMOLED display (drives a few theme/contrast
-// tweaks). In the desktop simulator there is no hardware AMOLED panel and the
-// driver classes are not compiled, so this is always false.
-#ifdef GAGGIMATE_SIM
+// tweaks). In the desktop simulator there is no hardware AMOLED panel, and in a
+// board-specific build that excludes the AMOLED family (GM_DRIVER_AMOLED == 0)
+// the driver class is not compiled, so this is always false.
+#if defined(GAGGIMATE_SIM) || !GM_DRIVER_AMOLED
 #define GM_PANEL_IS_AMOLED(panelDriver) (false)
 #else
 #define GM_PANEL_IS_AMOLED(panelDriver) (AmoledDisplayDriver::getInstance() == (panelDriver))
