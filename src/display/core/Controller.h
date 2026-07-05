@@ -6,6 +6,7 @@
 #include "PluginManager.h"
 #include "Settings.h"
 #include "VolumetricCoalescer.h"
+#include "VolumetricMeasurementSource.h"
 #include <WiFi.h>
 #include <atomic>
 #include <freertos/semphr.h>
@@ -63,8 +64,6 @@ const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https:
 // Mutex timeout for UI/event loop methods to prevent deadlocks
 // Chosen to prevent UI freezes while allowing reasonable wait for mutex
 constexpr TickType_t UI_MUTEX_TIMEOUT_MS = 100;
-
-enum class VolumetricMeasurementSource { INACTIVE, FLOW_ESTIMATION, BLUETOOTH };
 
 class Controller {
   public:

@@ -42,6 +42,7 @@
 #endif
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/SmartGrindPlugin.h>
+#include <display/plugins/VolumetricSourcePolicy.h>
 #if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
 #endif
@@ -1495,7 +1496,29 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         lastBluetoothMeasurement.store(millis(), std::memory_order_release);
     }
 
-    if (currentVolumetricSource.load(std::memory_order_acquire) != source) {
+    // PRO-4: mid-shot fallback. currentVolumetricSource is latched once at
+    // activate() and held for the whole shot; onVolumetricMeasurement() drops
+    // every sample whose source != the latched source (below). If a shot starts
+    // on BLUETOOTH and the BLE scale drops out mid-shot, BLE samples stop while
+    // FLOW_ESTIMATION samples keep arriving (they are produced by the controller
+    // sensor stream, independent of the scale) and get rejected — so the volume
+    // reading FREEZES. When that happens, fall the source FORWARD to
+    // FLOW_ESTIMATION so volume keeps advancing. The switch is naturally
+    // debounced by isBluetoothScaleHealthy() (unhealthy only once the 1.5 s
+    // BLUETOOTH_GRACE_PERIOD_MS window has elapsed) and is one-way: we never
+    // switch FLOW_ESTIMATION -> BLUETOOTH mid-shot. A late BLE read refreshes
+    // lastBluetoothMeasurement but cannot switch the source back (the predicate
+    // only fires on a FLOW_ESTIMATION sample while latched on BLUETOOTH).
+    VolumetricMeasurementSource latched = currentVolumetricSource.load(std::memory_order_acquire);
+    if (shouldFallBackToFlowEstimation(latched, source, isBluetoothScaleHealthy())) {
+        currentVolumetricSource.store(VolumetricMeasurementSource::FLOW_ESTIMATION, std::memory_order_release);
+        latched = VolumetricMeasurementSource::FLOW_ESTIMATION;
+        ESP_LOGW(LOG_TAG, "BLE scale unhealthy mid-shot; falling back volumetric source to flow-estimation");
+        pluginManager->trigger(F("controller:volumetric-measurement:source:change"), "value",
+                               static_cast<int>(VolumetricMeasurementSource::FLOW_ESTIMATION));
+    }
+
+    if (latched != source) {
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }
