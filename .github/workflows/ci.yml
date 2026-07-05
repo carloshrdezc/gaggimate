@@ -140,6 +140,44 @@ jobs:
       - name: Build display firmware (${{ matrix.env }})
         run: pio run -e ${{ matrix.env }}
 
+  firmware-driver-family:
+    name: Firmware build (display, single driver family)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - display-lilygo
+          - display-amoled
+          - display-waveshare
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-12: build EACH single-driver-family permutation. The default
+      # [env:display] compiles all three families (LilyGo/AMOLED/Waveshare) and
+      # keeps the full autodetect chain; these envs each -DGM_DRIVER_<FAMILY>=1
+      # to prune the other families' #includes + isCompatible() branches and
+      # narrow build_src_filter to drop their driver source. Without this leg,
+      # a broken family guard (a stray reference to an excluded family, or a
+      # build_src_filter that drops shared common/ code) would only surface on a
+      # hand-run board-specific build; here it fails the PR. Relies on
+      # embed_webui_pre.py's empty-bundle stub like the sibling display jobs.
+      - name: Build display firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
+
   firmware-headless-4m:
     name: Firmware build (display-headless-4m)
     runs-on: ubuntu-latest

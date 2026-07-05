@@ -55,9 +55,15 @@
 #ifdef GAGGIMATE_SIM
 #include <SdlDriver.h> // desktop SDL panel stands in for the hardware drivers
 #else
+#if GM_DRIVER_AMOLED
 #include <display/drivers/AmoledDisplayDriver.h>
+#endif
+#if GM_DRIVER_LILYGO
 #include <display/drivers/LilyGoDriver.h>
+#endif
+#if GM_DRIVER_WAVESHARE
 #include <display/drivers/WaveshareDriver.h>
+#endif
 #endif
 #endif
 
@@ -196,13 +202,30 @@ void Controller::setupPanel() {
 #ifdef GAGGIMATE_SIM
     driver = SdlDriver::getInstance(); // desktop SDL panel
 #else
-    if (LilyGoDriver::getInstance()->isCompatible()) {
+    // PRO-12: probe each compiled-in driver family in priority order (LilyGo ->
+    // AMOLED -> Waveshare). Board-specific builds compile in only a subset via
+    // the GM_DRIVER_* macros (see display/config/features.h); the default build
+    // has all three defined, so this preserves the original autodetect chain
+    // exactly. WaveshareDriver::isCompatible() is an unconditional `true`
+    // (catch-all), so keeping its guard last matches the historical fallback
+    // order.
+    driver = nullptr;
+#if GM_DRIVER_LILYGO
+    if (driver == nullptr && LilyGoDriver::getInstance()->isCompatible()) {
         driver = LilyGoDriver::getInstance();
-    } else if (AmoledDisplayDriver::getInstance()->isCompatible()) {
+    }
+#endif
+#if GM_DRIVER_AMOLED
+    if (driver == nullptr && AmoledDisplayDriver::getInstance()->isCompatible()) {
         driver = AmoledDisplayDriver::getInstance();
-    } else if (WaveshareDriver::getInstance()->isCompatible()) {
+    }
+#endif
+#if GM_DRIVER_WAVESHARE
+    if (driver == nullptr && WaveshareDriver::getInstance()->isCompatible()) {
         driver = WaveshareDriver::getInstance();
-    } else {
+    }
+#endif
+    if (driver == nullptr) {
         Serial.println("No compatible display driver found");
         delay(10000);
         ESP.restart();
