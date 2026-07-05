@@ -93,6 +93,21 @@ cd web && npm ci && npm run build && cd ..
 #    but the build must succeed — there is intentionally no -Werror yet).
 pio run -e display
 
+# 2b. Feature-flag permutation builds. Each of the GAGGIMATE_ENABLE_* features
+#     defaults ON; these envs compile the disabled permutations so the `#else`
+#     stubs never bit-rot. `display-flags-off` disables all four at once, and the
+#     four `display-no-*` envs (PRO-8) disable exactly ONE each — a single-flag
+#     regression (undefined-symbol / ODR / dangling-ref) can hide when the other
+#     three flags are ON, so the per-flag legs catch what the all-off leg can't.
+pio run -e display-flags-off
+pio run -e display-no-homekit
+pio run -e display-no-mqtt
+pio run -e display-no-ble-scale
+pio run -e display-no-webui
+
+# 2c. 4MB-flash headless target — gates against partition/flash overflow.
+pio run -e display-headless-4m
+
 # 3. Host unit tests, plain and under AddressSanitizer + UndefinedBehaviorSanitizer.
 #    Sanitizer findings fail the suite (CI sets ASAN_OPTIONS/UBSAN_OPTIONS to
 #    halt/abort on the first report).

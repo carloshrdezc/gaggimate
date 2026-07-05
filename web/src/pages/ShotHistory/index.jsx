@@ -39,7 +39,17 @@ import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
 import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
+import { faXmark } from '@fortawesome/free-solid-svg-icons/faXmark';
 import { inferBeanForShot, inferBeanIdForShot, listBeans } from '../../utils/beanManager.js';
+import {
+  defaultFilters,
+  hasActiveFilters,
+  applyShotFilters,
+  availableProfiles,
+  availableBeans,
+  filtersFromQuery,
+  mergeFiltersIntoSearch,
+} from './shotFilters.js';
 
 const connected = computed(() => machine.value.connected);
 
@@ -70,6 +80,36 @@ export function ShotHistory() {
   const itemsPerPage = 10;
 
   const [allBeans, setAllBeans] = useState([]);
+
+  // Advanced filters (PRO-31). Initialized from the URL query params so applied
+  // filters persist across navigation (read on mount, written on change).
+  const [filters, setFilters] = useState(() =>
+    typeof window !== 'undefined' ? filtersFromQuery(window.location.search) : defaultFilters(),
+  );
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Update a single filter field and reset pagination.
+  const updateFilter = useCallback((key, value) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setFilters(defaultFilters());
+    setCurrentPage(1);
+  }, []);
+
+  // Persist filters to the URL query string via replaceState (so filter changes
+  // do not stack history entries and survive navigating away and back).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const query = mergeFiltersIntoSearch(window.location.search, filters);
+    const next = `${window.location.pathname}${query}${window.location.hash}`;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (next !== current) {
+      window.history.replaceState(window.history.state, '', next);
+    }
+  }, [filters]);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,7 +369,7 @@ export function ShotHistory() {
   );
 
   const { paginatedHistory, totalPages, totalFilteredItems } = useMemo(() => {
-    let filtered = [...history];
+    let filtered = applyShotFilters(history, filters);
 
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase().trim();
@@ -407,13 +447,18 @@ export function ShotHistory() {
       totalPages: pages,
       totalFilteredItems: totalFiltered,
     };
-  }, [history, searchTerm, filterBy, sortBy, sortOrder, currentPage, allBeans]);
+  }, [history, filters, searchTerm, filterBy, sortBy, sortOrder, currentPage, allBeans]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  // Dropdown options derived from the loaded history + bean library (PRO-31).
+  const profileOptions = useMemo(() => availableProfiles(history), [history]);
+  const beanOptions = useMemo(() => availableBeans(history, allBeans), [history, allBeans]);
+  const filtersActive = hasActiveFilters(filters);
 
   if (loading) {
     return (
@@ -432,16 +477,26 @@ export function ShotHistory() {
             Shot History
           </h1>
           <p className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)] mt-2'>
-            {totalFilteredItems} of {history.length} shots
+            {totalFilteredItems} / {history.length} shots
             {totalPages > 1 && ` • Page ${currentPage} of ${totalPages}`}
           </p>
         </div>
         <div className='flex items-center gap-2'>
           <button
+            onClick={() => setFiltersOpen(open => !open)}
+            className={`nd-action-btn${filtersActive ? ' nd-action-btn--primary' : ''}`}
+            title='Filters'
+            aria-label='Toggle filters'
+            aria-expanded={filtersOpen}
+          >
+            <FontAwesomeIcon icon={faFilter} />
+          </button>
+          <button
             onClick={handleExportAll}
             className='nd-action-btn'
             disabled={archiveBusy || history.length === 0}
             title='Export History'
+            aria-label='Export History'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
@@ -529,6 +584,137 @@ export function ShotHistory() {
               </select>
             </div>
           </div>
+
+          {/* Advanced filter panel (PRO-31) — collapsible via header toggle */}
+          {filtersOpen && (
+            <div className='flex flex-col gap-4 rounded-md border border-[var(--home-border,rgba(255,255,255,0.08))] p-4'>
+              <div className='flex items-center justify-between gap-3'>
+                <span className='font-nd-mono text-[12px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+                  Filters — {totalFilteredItems} / {history.length}
+                </span>
+                <button
+                  type='button'
+                  onClick={clearFilters}
+                  disabled={!filtersActive}
+                  className='nd-action-btn nd-action-btn--text flex items-center gap-2 px-3'
+                  title='Clear filters'
+                >
+                  <FontAwesomeIcon icon={faXmark} />
+                  <span className='font-nd-mono text-[12px]'>Clear filters</span>
+                </button>
+              </div>
+
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                {/* Date range */}
+                <label className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    From date
+                  </span>
+                  <input
+                    type='date'
+                    value={filters.dateFrom}
+                    max={filters.dateTo || undefined}
+                    onChange={e => updateFilter('dateFrom', e.target.value)}
+                    className='nd-input'
+                  />
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    To date
+                  </span>
+                  <input
+                    type='date'
+                    value={filters.dateTo}
+                    min={filters.dateFrom || undefined}
+                    onChange={e => updateFilter('dateTo', e.target.value)}
+                    className='nd-input'
+                  />
+                </label>
+
+                {/* Profile */}
+                <label className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    Profile
+                  </span>
+                  <select
+                    value={filters.profile}
+                    onChange={e => updateFilter('profile', e.target.value)}
+                    className='nd-input pr-8'
+                  >
+                    <option value=''>All profiles</option>
+                    {profileOptions.map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Bean */}
+                <label className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    Bean
+                  </span>
+                  <select
+                    value={filters.beanId}
+                    onChange={e => updateFilter('beanId', e.target.value)}
+                    className='nd-input pr-8'
+                  >
+                    <option value=''>All beans</option>
+                    {beanOptions.map(bean => (
+                      <option key={bean.id} value={bean.id}>
+                        {bean.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Duration range (seconds) */}
+                <label className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    Min duration (s)
+                  </span>
+                  <input
+                    type='number'
+                    min='0'
+                    inputMode='numeric'
+                    placeholder='0'
+                    value={filters.durationMin}
+                    onChange={e => updateFilter('durationMin', e.target.value)}
+                    className='nd-input'
+                  />
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    Max duration (s)
+                  </span>
+                  <input
+                    type='number'
+                    min='0'
+                    inputMode='numeric'
+                    placeholder='∞'
+                    value={filters.durationMax}
+                    onChange={e => updateFilter('durationMax', e.target.value)}
+                    className='nd-input'
+                  />
+                </label>
+
+                {/* Free text (notes) */}
+                <label className='flex flex-col gap-1 sm:col-span-2'>
+                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                    Notes contain
+                  </span>
+                  <input
+                    type='text'
+                    placeholder='Search shot notes...'
+                    value={filters.text}
+                    onChange={e => updateFilter('text', e.target.value)}
+                    className='nd-input'
+                  />
+                </label>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Shot list */}

@@ -108,6 +108,7 @@ export function Autotune() {
                 <input
                   id='tuningGoal'
                   type='number'
+                  inputMode='numeric'
                   min='0'
                   max='100'
                   className='nd-input nd-input--lg'
@@ -129,6 +130,7 @@ export function Autotune() {
                 <input
                   id='windowSize'
                   type='number'
+                  inputMode='numeric'
                   min='1'
                   max='10'
                   className='nd-input nd-input--lg'

@@ -1,6 +1,13 @@
 import { test, expect } from 'vitest';
 
-import { updateOtaChannel, canFlashTaggedRelease } from './otaLogic.js';
+import {
+  updateOtaChannel,
+  canFlashTaggedRelease,
+  canUpdateOnAcknowledgedChannel,
+  otaChannelDiffersFromInstalled,
+  canSwitchChannel,
+  otaActionLabel,
+} from './otaLogic.js';
 
 test('updates OTA channel to nightly without changing other form fields', () => {
   const next = updateOtaChannel({ channel: 'latest', displayVersion: '2.0.3' }, 'nightly');
@@ -122,8 +129,6 @@ test('canFlashTaggedRelease: still rejects mismatched semver even with v-prefix'
 // canUpdateOnAcknowledgedChannel gate — protects the "Update Display"/"Update
 // Controller" buttons when the channel is "latest" or "nightly" but the
 // dropdown holds an unsaved selection.
-
-import { canUpdateOnAcknowledgedChannel } from './otaLogic.js';
 
 test('canUpdateOnAcknowledgedChannel: enabled when dropdown matches device channel', () => {
   const formData = { channel: 'latest', displayUpdateAvailable: true };
@@ -264,4 +269,118 @@ test('disable rule: latest channel + saved + flag false -> disabled', () => {
   };
   expect(decideDisabled(formData, 'latest', 'display')).toBe(true);
   expect(decideDisabled(formData, 'latest', 'controller')).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// otaChannelDiffersFromInstalled — PRO-401 channel-switch detection.
+// Firmware (PRO-400) reports `installedChannel`; older firmware omits it.
+
+test('otaChannelDiffersFromInstalled: true when selected differs from installed', () => {
+  expect(otaChannelDiffersFromInstalled({ selectedChannel: 'beta', installedChannel: 'latest' })).toBe(true);
+});
+
+test('otaChannelDiffersFromInstalled: false when selected equals installed', () => {
+  expect(otaChannelDiffersFromInstalled({ selectedChannel: 'latest', installedChannel: 'latest' })).toBe(false);
+});
+
+test('otaChannelDiffersFromInstalled: false when installedChannel is absent (older firmware)', () => {
+  expect(otaChannelDiffersFromInstalled({ selectedChannel: 'beta', installedChannel: undefined })).toBe(false);
+  expect(otaChannelDiffersFromInstalled({ selectedChannel: 'beta' })).toBe(false);
+  expect(otaChannelDiffersFromInstalled({ selectedChannel: 'beta', installedChannel: '' })).toBe(false);
+});
+
+test('otaChannelDiffersFromInstalled: false for malformed input', () => {
+  expect(otaChannelDiffersFromInstalled()).toBe(false);
+  expect(otaChannelDiffersFromInstalled({ installedChannel: 'latest' })).toBe(false);
+  expect(otaChannelDiffersFromInstalled({ selectedChannel: '', installedChannel: 'latest' })).toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// canSwitchChannel — enable gate for the channel-switch force-flash.
+
+test('canSwitchChannel: blocked while status is Checking...', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: 'Checking...' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: blocked when the acknowledged status reports a failure', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: 'Update failed' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: blocked while status is empty (no check yet)', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: '' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: blocked when pendingChannel !== formData.channel (unsaved change)', () => {
+  const formData = { channel: 'latest', installedChannel: 'latest', status: '2.0.8' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: enabled after ack (pending === channel, real status, channel !== installed)', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: '2.1.0-beta' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(true);
+});
+
+test('canSwitchChannel: blocked when channel === installedChannel (no switch)', () => {
+  const formData = { channel: 'latest', installedChannel: 'latest', status: '2.0.8' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'latest' })).toBe(false);
+});
+
+test('canSwitchChannel: blocked when installedChannel is absent (older firmware)', () => {
+  const formData = { channel: 'beta', status: '2.1.0-beta' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: false for malformed input', () => {
+  expect(canSwitchChannel()).toBe(false);
+  expect(canSwitchChannel({})).toBe(false);
+  expect(canSwitchChannel({ formData: null, pendingChannel: 'beta' })).toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// otaActionLabel — contextual verb for the flash/update button.
+
+test('otaActionLabel: "Update" for a within-channel update (no switch, not tag-pinned)', () => {
+  const formData = { channel: 'latest', installedChannel: 'latest', status: '2.0.8' };
+  expect(otaActionLabel(formData, 'latest')).toBe('Update');
+});
+
+test('otaActionLabel: "Update" when installedChannel is absent (older firmware)', () => {
+  const formData = { channel: 'latest', status: '2.0.8' };
+  expect(otaActionLabel(formData, 'latest')).toBe('Update');
+});
+
+test('otaActionLabel: "Flash" for a pinned tag on the installed channel', () => {
+  // Pinned tag, but installedChannel matches so it's not a channel switch.
+  const formData = { channel: 'tag:2.0.8', installedChannel: 'tag:2.0.8', status: '2.0.8' };
+  expect(otaActionLabel(formData, 'tag:2.0.8')).toBe('Flash');
+});
+
+test('otaActionLabel: "Flash" for a pinned tag when installedChannel is absent', () => {
+  const formData = { channel: 'tag:2.0.8', status: '2.0.8' };
+  expect(otaActionLabel(formData, 'tag:2.0.8')).toBe('Flash');
+});
+
+test('otaActionLabel: "Switch to Beta" when acknowledged channel differs from installed', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: '2.1.0-beta' };
+  expect(otaActionLabel(formData, 'beta')).toBe('Switch to Beta');
+});
+
+test('otaActionLabel: "Switch to Nightly" capitalizes the channel name', () => {
+  const formData = { channel: 'nightly', installedChannel: 'latest', status: 'nightly' };
+  expect(otaActionLabel(formData, 'nightly')).toBe('Switch to Nightly');
+});
+
+test('otaActionLabel: channel-switch takes precedence over pinned-tag state', () => {
+  // Selected tag channel differs from the installed (latest) channel -> switch.
+  const formData = { channel: 'tag:2.0.8', installedChannel: 'latest', status: '2.0.8' };
+  // PRO-404: the internal `tag:` prefix is stripped for display -> bare semver.
+  expect(otaActionLabel(formData, 'tag:2.0.8')).toBe('Switch to 2.0.8');
+});
+
+test('otaActionLabel: "Update" for malformed input', () => {
+  expect(otaActionLabel()).toBe('Update');
+  expect(otaActionLabel(null, 'latest')).toBe('Update');
 });

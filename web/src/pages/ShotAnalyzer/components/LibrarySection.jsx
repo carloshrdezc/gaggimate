@@ -89,6 +89,7 @@ export function LibrarySection({
                 className: 'h-7 w-7 p-1.5',
               })}
               title='Export All'
+              aria-label='Export All'
             >
               <FontAwesomeIcon icon={faFileExport} size='sm' />
             </button>

@@ -19,6 +19,7 @@
 #include <display/config.h>
 #include <display/config/features.h>
 #include <display/core/StandbyTransitionPolicy.h>
+#include <display/core/SteamButtonPolicy.h>
 #include <display/core/constants.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -531,7 +532,7 @@ bool Controller::isVolumetricAvailable() const {
 // Depends on the cross-shot invariant that currentVolumetricSource is reset to
 // INACTIVE in clear() between shots, so a stale BLUETOOTH source can't leak in.
 bool Controller::isActiveVolumetricSourceLive() const {
-    switch (currentVolumetricSource) {
+    switch (currentVolumetricSource.load(std::memory_order_acquire)) {
     case VolumetricMeasurementSource::BLUETOOTH:
         return isBluetoothScaleHealthy();
     case VolumetricMeasurementSource::FLOW_ESTIMATION:
@@ -1078,10 +1079,11 @@ void Controller::activate() {
         clientController.tare();
         if (isVolumetricAvailable()) {
 #ifdef NIGHTLY_BUILD
-            currentVolumetricSource =
-                isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
+            currentVolumetricSource.store(isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH
+                                                                    : VolumetricMeasurementSource::FLOW_ESTIMATION,
+                                          std::memory_order_release);
 #else
-            currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+            currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
 #endif
             if (mode == MODE_BREW) {
                 pluginManager->trigger("controller:brew:prestart");
@@ -1167,10 +1169,17 @@ void Controller::clear() {
     }
     delete lastProcess;
     lastProcess = nullptr;
-    
+
+    // PRO-369: reset the coalescer's pending latch between shots (defense-in-depth).
+    // Done under processMutex to match the guarded consume side (volumetricCoalescer.consumeInto).
+    // Harmless today (the next shot latches fresh before consumeInto, and updateVolume
+    // is an absolute assignment), but guards against a future incremental-updateVolume
+    // refactor silently reintroducing cross-shot yield corruption from a stale latch.
+    volumetricCoalescer = {};
+
     xSemaphoreGive(processMutex);
-    
-    currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
+
+    currentVolumetricSource.store(VolumetricMeasurementSource::INACTIVE, std::memory_order_release);
 }
 
 void Controller::activateGrind() {
@@ -1181,7 +1190,7 @@ void Controller::activateGrind() {
         return;
     clear();
     if (settings.isVolumetricTarget() && isVolumetricAvailable()) {
-        currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+        currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
         startProcess(new GrindProcess(ProcessTarget::VOLUMETRIC, 0, settings.getTargetGrindVolume(), settings.getGrindDelay()));
     } else {
         startProcess(
@@ -1460,10 +1469,10 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
                                : F("controller:volumetric-measurement:bluetooth:change"),
                            "value", static_cast<float>(measurement));
     if (source == VolumetricMeasurementSource::BLUETOOTH) {
-        lastBluetoothMeasurement = millis();
+        lastBluetoothMeasurement.store(millis(), std::memory_order_release);
     }
 
-    if (currentVolumetricSource != source) {
+    if (currentVolumetricSource.load(std::memory_order_acquire) != source) {
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }
@@ -1493,8 +1502,8 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
 }
 
 bool Controller::isBluetoothScaleHealthy() const {
-    long timeSinceLastBluetooth = (long)(millis() - lastBluetoothMeasurement);
-    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride;
+    long timeSinceLastBluetooth = (long)(millis() - lastBluetoothMeasurement.load(std::memory_order_acquire));
+    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride.load(std::memory_order_acquire);
 }
 
 void Controller::onFlush() {
@@ -1556,20 +1565,24 @@ void Controller::handleBrewButton(int brewButtonStatus) {
 
 void Controller::handleSteamButton(int steamButtonStatus) {
     ESP_LOGD(LOG_TAG, "current screen %d, steam button %d", getMode(), steamButtonStatus);
-    if (steamButtonStatus) {
-        switch (getMode()) {
-        case MODE_STANDBY:
-            setMode(MODE_STEAM);
-            break;
-        case MODE_BREW:
-            setMode(MODE_STEAM);
-            break;
-        default:
-            break;
-        }
-    } else if (!settings.isMomentaryButtons() && getMode() == MODE_STEAM) {
+    // PRO-391: a non-momentary (latching) switch reports a persistent LEVEL, not
+    // a one-shot press, so entering Steam must trigger on the rising edge only.
+    // Otherwise a still-latched-high level re-asserts MODE_STEAM right after an
+    // explicit web-UI Standby and bounces the machine back to Steam. Momentary
+    // buttons are one-shot at the source and are intentionally not edge-gated.
+    const SteamButtonAction action =
+        decideSteamButtonAction(settings.isMomentaryButtons(), previousSteamButtonStatus, steamButtonStatus, getMode());
+    previousSteamButtonStatus = steamButtonStatus;
+    switch (action) {
+    case SteamButtonAction::ENTER_STEAM:
+        setMode(MODE_STEAM);
+        break;
+    case SteamButtonAction::EXIT_STEAM:
         deactivate();
         setMode(MODE_BREW);
+        break;
+    case SteamButtonAction::NONE:
+        break;
     }
 }
 

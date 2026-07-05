@@ -2,11 +2,11 @@
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
+#include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
-#include <cmath> // For isfinite()
 #include <display/core/Controller.h>
 #include <scales/acaia.h>
 #include <scales/bookoo.h>
@@ -462,7 +462,6 @@ void BLEScalePlugin::establishConnection() {
 }
 
 void BLEScalePlugin::onMeasurement(float value) const {
-    lastWeight = value;
     // Rate limiting to prevent callback flooding
     unsigned long now = millis();
     if (now - lastMeasurementTime < MIN_MEASUREMENT_INTERVAL_MS) {
@@ -480,11 +479,24 @@ void BLEScalePlugin::onMeasurement(float value) const {
         return; // Don't process measurements when not active
     }
 
-    // Validate the measurement value
-    if (!isfinite(value) || value < -1000.0f || value > 10000.0f) {
+    // Validate the measurement value (shared gate — see BLEScaleMeasurementPolicy.h)
+    if (!isValidBleScaleMeasurement(value)) {
         ESP_LOGW("BLEScalePlugin", "Invalid measurement value: %f, ignoring", value);
         return;
     }
+
+    // Cache only validated, accepted measurements.
+    //
+    // NOTE (PRO-385 / PRO-377 / PR #370): this assignment intentionally sits BELOW the
+    // MIN_MEASUREMENT_INTERVAL_MS (10 ms) rate-limit early-return above. During a
+    // measurement burst faster than that interval, getLastWeight() therefore returns the
+    // last value that was *throttled through* to the controller, NOT the absolute latest
+    // raw reading. This is a conscious design choice, not a bug: the accessor deliberately
+    // mirrors what the controller actually consumed, and the throttled samples are
+    // intentionally-dropped duplicates. Do NOT "fix" this by moving the assignment above
+    // the rate-limit early-return (e.g. when BeanconquerorPlugin lands) — that would make
+    // getLastWeight() diverge from the value the controller was actually fed.
+    lastWeight = value;
 
     // Safe to call controller method
     controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::BLUETOOTH);

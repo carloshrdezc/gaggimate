@@ -91,7 +91,7 @@ export async function importShotHistoryArchive(payload) {
         shotId = String(timestamp);
         storageKey = `history-${shotId}.json`;
       }
-    } catch (e) {
+    } catch {
       // getShot threw a real DB error (not "not found") — proceed without collision check
       // A true collision will be handled by IndexedDB's natural overwrite behavior
     }

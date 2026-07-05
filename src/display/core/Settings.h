@@ -87,6 +87,11 @@ class Settings {
     bool isAutoSteamEnabled() const { return autoSteamEnabled; }
     double getDoseGrams() const { return doseGrams; }
     String getOTAChannel() const { return otaChannel; }
+    // PRO-400: the channel whose resolved head is believed to be flashed on the
+    // device. Distinct from getOTAChannel() (the SELECTED channel) so a channel
+    // switch can force-flash the new channel's head. Empty means "never stored"
+    // (pre-migration device); Settings::load() backfills it to otaChannel.
+    String getInstalledChannel() const { return installedChannel; }
     String getSavedScale() const { return savedScale; }
     bool isBoilerFillActive() const { return boilerFillActive; }
     int getStartupFillTime() const { return startupFillTime; }
@@ -166,6 +171,7 @@ class Settings {
     void setAutoSteamEnabled(bool auto_steam_enabled);
     void setDoseGrams(double dose_grams);
     void setOTAChannel(const String &otaChannel);
+    void setInstalledChannel(const String &installedChannel);
     void setSavedScale(const String &savedScale);
     void setBoilerFillActive(bool boiler_fill_active);
     void setStartupFillTime(int startup_fill_time);
@@ -256,6 +262,10 @@ class Settings {
     String timezone = DEFAULT_TIMEZONE;
     bool clock24hFormat = true;
     String otaChannel = DEFAULT_OTA_CHANNEL;
+    // PRO-400: channel whose head is installed. Defaults to DEFAULT_OTA_CHANNEL
+    // in memory, but is loaded from NVS key "ic" with an EMPTY default so
+    // "never stored" is detectable and backfilled once in load().
+    String installedChannel = DEFAULT_OTA_CHANNEL;
     String selectedBean;
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering

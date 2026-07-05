@@ -11,6 +11,7 @@
 
 #include "../core/constants.h"
 #include "GitHubOTA.h"
+#include "WebUiLifecycleDeferPolicy.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -19,6 +20,13 @@
 constexpr uint32_t RELAY_CLIENT_ID = 0xFFFFFFFE;
 
 constexpr size_t UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
+// PRO-411: cap for the exponential failure backoff of the periodic OTA
+// update-check. On consecutive check failures the effective interval doubles
+// from UPDATE_CHECK_INTERVAL up to this ceiling (6 h), then holds; a successful
+// check resets it back to UPDATE_CHECK_INTERVAL. This stops a persistently
+// failing check (github.com unreachable / TLS failing / transient WiFi loss)
+// from opening a fresh TLS connection every 5 min and hammering github.com.
+constexpr size_t UPDATE_CHECK_MAX_INTERVAL = 6 * 60 * 60 * 1000;
 constexpr size_t CLEANUP_PERIOD = 5 * 1000;
 constexpr size_t STATUS_PERIOD = 500;
 constexpr size_t DNS_PERIOD = 10;
@@ -194,12 +202,35 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
+    // PRO-411: consecutive OTA update-check failures, driving the exponential
+    // backoff of the effective check interval (see otaBackoffInterval() /
+    // UPDATE_CHECK_MAX_INTERVAL). Reset to 0 on any successful check. Loop-task
+    // owned (only read/written in loop()), like lastUpdateCheck.
+    uint32_t otaCheckFailureCount = 0;
     unsigned long lastStatus = 0;
     unsigned long lastCleanup = 0;
     unsigned long lastDns = 0;
     bool updating = false; // loop-task-owned; set via pendingOtaStart drain (CAR-377)
     bool apMode = false;
     bool serverRunning = false;
+    // PRO-417: deferred web-server lifecycle intent. The WiFi (dis)connect events
+    // fire on the arduino_events WiFi-event task; running the heavy start()/stop()
+    // (stopRelay()'s ~500 ms spin-wait + ws.closeAll() under wsMutex) inline there,
+    // once per ASSOC_LEAVE, stalls the WiFi event queue / core 0 while the vendored
+    // WPA-supplicant is mid-(re)association — a contributor to the interrupt-WDT
+    // panic under disassociation churn. The event handler now only LATCHES the
+    // desired target here (last event wins, coalesced by latchLifecycleIntent) and
+    // loop() drains it on the Arduino loop task, mirroring the OTA-start / mDNS /
+    // MQTT defer discipline (see WebUiLifecycleDeferPolicy.h). std::atomic because
+    // it is written on the WiFi-event task and read/CAS'd on the loop task, which
+    // run on different cores; relaxed ordering suffices — the flag is the only
+    // shared datum and a missed-by-one-tick drain is harmless (loop() re-checks
+    // every ~2 ms). PRO-418: the connect event's captive-portal mode (AP vs STA)
+    // is folded INTO this intent (StartAp / StartStation) rather than carried in a
+    // separate pendingApMode atomic, so a single atomic conveys both the start
+    // decision and its mode — the loop task can never pair a fresh Start with a
+    // stale AP flag (there is no second atomic to race against).
+    std::atomic<WebUiLifecycleIntent> pendingLifecycle{WebUiLifecycleIntent::None};
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
 

@@ -1,12 +1,45 @@
 asyncapi: '2.6.0'
 info:
   title: GaggiMate WebSocket API
-  version: '1.0.0'
+  version: '1.1.0'
   description: |
     This document describes the WebSocket interface exposed by the
     GaggiMate display firmware. Clients connect to `/ws` using the
     `ws://` or `wss://` protocol. Messages are JSON objects containing
     a `tp` field that specifies the type of message.
+
+    Request/response pairs carry a client-generated `rid` (request ID) that
+    the firmware echoes back on the matching `res:*` message so the client can
+    correlate the reply. Events (`evt:*`) are unsolicited broadcasts sent to
+    every connected client (and the cloud relay, when connected).
+
+    ## Message surface provenance
+    Every message type documented here was audited directly against the
+    firmware source as of the `2.0.15` release line
+    (`src/display/plugins/WebUIPlugin.cpp`, `src/display/plugins/ShotHistoryPlugin.cpp`)
+    and cross-checked against the web client (`web/src`). The document reflects
+    the message surface *as it exists in the code today* — it is not derived
+    from a wishlist. Notable audit results:
+      * `smartgrind` and `beanconqueror` message types were searched for and
+        are NOT present anywhere in the firmware or web client; they are not
+        documented here.
+      * `evt:shot-recording-error` is an INTERNAL PluginManager event
+        (`ShotHistoryPlugin`) and is never forwarded onto the WebSocket, so it
+        is intentionally not part of this API.
+      * `evt:relay-status` is emitted by the cloud relay proxy
+        (`relay-server/`), not the display firmware, but it is delivered to
+        clients over the same `/ws` stream, so it is documented as part of the
+        observable surface with a note on its origin.
+
+    ## x-since-version convention
+    Note: the `2.0.15` release line above records *when* the full message surface was audited against source (a point-in-time snapshot); it is distinct from a per-message *introduction* version, which the firmware does not track — hence the `"unknown"` placeholders below.
+    Each request and event carries an `x-since-version` extension field. The
+    firmware does not track a machine-readable per-message introduction version,
+    and this project's policy is to avoid fabricating per-event version guesses.
+    Therefore every entry uses the honest placeholder value `"unknown"`: it
+    marks the field as reserved for future, source-of-truth population (e.g. when
+    a new message type is added in a tagged release, set its `x-since-version` to
+    that tag) without asserting an unverified value for the existing surface.
 servers:
   production:
     url: '{protocol}://{host}/ws'
@@ -29,6 +62,8 @@ channels:
           - $ref: '#/components/messages/OtaSettingsResponse'
           - $ref: '#/components/messages/OtaProgressEvent'
           - $ref: '#/components/messages/AutotuneResultEvent'
+          - $ref: '#/components/messages/HistoryRebuildProgressEvent'
+          - $ref: '#/components/messages/RelayStatusEvent'
           - $ref: '#/components/messages/ProfilesListResponse'
           - $ref: '#/components/messages/ProfilesLoadResponse'
           - $ref: '#/components/messages/ProfilesSaveResponse'
@@ -37,6 +72,19 @@ channels:
           - $ref: '#/components/messages/ProfilesFavoriteResponse'
           - $ref: '#/components/messages/ProfilesUnfavoriteResponse'
           - $ref: '#/components/messages/ProfilesReorderResponse'
+          - $ref: '#/components/messages/BeansListResponse'
+          - $ref: '#/components/messages/BeansLoadResponse'
+          - $ref: '#/components/messages/BeansSaveResponse'
+          - $ref: '#/components/messages/BeansDeleteResponse'
+          - $ref: '#/components/messages/GrindersListResponse'
+          - $ref: '#/components/messages/GrindersSaveResponse'
+          - $ref: '#/components/messages/HistoryListResponse'
+          - $ref: '#/components/messages/HistoryGetResponse'
+          - $ref: '#/components/messages/HistoryDeleteResponse'
+          - $ref: '#/components/messages/HistoryNotesGetResponse'
+          - $ref: '#/components/messages/HistoryNotesSaveResponse'
+          - $ref: '#/components/messages/HistoryRebuildResponse'
+          - $ref: '#/components/messages/FlushStartResponse'
     publish:
       description: Messages sent from the client to the server.
       message:
@@ -44,6 +92,25 @@ channels:
           - $ref: '#/components/messages/OtaSettingsRequest'
           - $ref: '#/components/messages/OtaStartRequest'
           - $ref: '#/components/messages/AutotuneStartRequest'
+          - $ref: '#/components/messages/ProcessActivateRequest'
+          - $ref: '#/components/messages/ProcessDeactivateRequest'
+          - $ref: '#/components/messages/ProcessClearRequest'
+          - $ref: '#/components/messages/GrindActivateRequest'
+          - $ref: '#/components/messages/GrindDeactivateRequest'
+          - $ref: '#/components/messages/ChangeGrindTargetRequest'
+          - $ref: '#/components/messages/RaiseTempRequest'
+          - $ref: '#/components/messages/LowerTempRequest'
+          - $ref: '#/components/messages/RaiseGrindTargetRequest'
+          - $ref: '#/components/messages/LowerGrindTargetRequest'
+          - $ref: '#/components/messages/RaiseBrewTargetRequest'
+          - $ref: '#/components/messages/LowerBrewTargetRequest'
+          - $ref: '#/components/messages/ManualUpdateRequest'
+          - $ref: '#/components/messages/ChangeModeRequest'
+          - $ref: '#/components/messages/ChangeBrewTargetRequest'
+          - $ref: '#/components/messages/AutosteamSetRequest'
+          - $ref: '#/components/messages/DoseSetRequest'
+          - $ref: '#/components/messages/BeansSelectRequest'
+          - $ref: '#/components/messages/FlushStartRequest'
           - $ref: '#/components/messages/ProfilesListRequest'
           - $ref: '#/components/messages/ProfilesLoadRequest'
           - $ref: '#/components/messages/ProfilesSaveRequest'
@@ -52,17 +119,30 @@ channels:
           - $ref: '#/components/messages/ProfilesFavoriteRequest'
           - $ref: '#/components/messages/ProfilesUnfavoriteRequest'
           - $ref: '#/components/messages/ProfilesReorderRequest'
+          - $ref: '#/components/messages/BeansListRequest'
+          - $ref: '#/components/messages/BeansLoadRequest'
+          - $ref: '#/components/messages/BeansSaveRequest'
+          - $ref: '#/components/messages/BeansDeleteRequest'
+          - $ref: '#/components/messages/GrindersListRequest'
+          - $ref: '#/components/messages/GrindersSaveRequest'
+          - $ref: '#/components/messages/HistoryListRequest'
+          - $ref: '#/components/messages/HistoryGetRequest'
+          - $ref: '#/components/messages/HistoryDeleteRequest'
+          - $ref: '#/components/messages/HistoryNotesGetRequest'
+          - $ref: '#/components/messages/HistoryNotesSaveRequest'
+          - $ref: '#/components/messages/HistoryRebuildRequest'
 components:
   schemas:
     StatusPayload:
       type: object
+      description: |
+        Periodic device status broadcast (`WebUIPlugin::loop`). Sent to all
+        connected clients (and the relay) at the status interval whenever at
+        least one client is connected. Field names are terse wire keys.
       properties:
         tp:
           type: string
           enum: ['evt:status']
-        baf:
-          type: boolean
-          description: BLE authentication failed. True after pairing failure or rejected encrypted write; cleared on the next successful encrypted link.
         ct:
           type: number
           description: Current temperature
@@ -74,29 +154,142 @@ components:
           description: Current pressure
         fl:
           type: number
-          description: Current flow
+          description: Current pump flow
         pt:
-          type: number
-          description: Target pressure
+          type: [number, 'null']
+          description: Target pressure, or null when no pressure target applies in the current mode.
+        tf:
+          type: [number, 'null']
+          description: Target flow, or null when no flow target applies in the current mode.
         m:
           type: integer
           description: Machine mode
         p:
           type: string
           description: Selected profile label
+        puid:
+          type: string
+          description: Selected profile id (uuid)
+        bn:
+          type: string
+          description: Selected bean name
         cp:
           type: boolean
-          description: Indicates pressure capability
+          description: Pressure capability
         cd:
           type: boolean
-          description: Indicates dimming capability
+          description: Dimming capability
+        led:
+          type: boolean
+          description: LED-control capability
+        tw:
+          type: number
+          description: Total target weight for the selected profile's process.
+        bta:
+          type: integer
+          enum: [0, 1]
+          description: Brew volumetric (target) available — 1 if a volumetric source is available.
+        bt:
+          type: integer
+          enum: [0, 1]
+          description: Brew volumetric target active — 1 if volumetric is available and the selected profile is volumetric.
+        btd:
+          type: number
+          description: Selected profile total duration.
+        btv:
+          type: number
+          description: Raw volumetric target for the frontend Weight card.
+        ayo:
+          type: integer
+          enum: [0, 1]
+          description: Allow-yield-override setting.
+        as:
+          type: integer
+          enum: [0, 1]
+          description: Auto-steam enabled setting.
+        dg:
+          type: number
+          description: Brew dose in grams (rounded to 1 decimal).
+        gtd:
+          type: number
+          description: Target grind duration.
+        gtv:
+          type: number
+          description: Target grind volume.
+        gt:
+          type: integer
+          enum: [0, 1]
+          description: Grind volumetric target active.
+        gact:
+          type: integer
+          enum: [0, 1]
+          description: Grind currently active.
+        mtp:
+          type: string
+          enum: [flow, pressure]
+          description: Manual target type.
+        mp:
+          type: number
+          description: Manual pressure target.
+        mf:
+          type: number
+          description: Manual flow target.
+        mt:
+          type: number
+          description: Manual temperature target.
+        rssi:
+          type: integer
+          description: Controller BLE link RSSI (-127 when not connected).
+        cw:
+          type: number
+          description: Current Bluetooth scale weight (0 when disconnected or BLE scale compiled out).
+        bc:
+          type: boolean
+          description: Bluetooth scale connected status.
+        process:
+          type: object
+          description: |
+            Present only while a process (brew/grind/manual) exists. Reports the
+            live process snapshot. Fields vary by process type (`s`).
+          properties:
+            id:
+              type: string
+              description: Current shot ID (present only while recording an active shot).
+            a:
+              type: integer
+              enum: [0, 1]
+              description: Process active flag.
+            s:
+              type: string
+              enum: [brew, infusion, grind, manual]
+              description: Process/phase kind.
+            l:
+              type: string
+              description: Human-readable phase label (e.g. phase name, "Grinding", "Manual", "Finished").
+            e:
+              type: integer
+              description: Elapsed time in milliseconds since process start.
+            tt:
+              type: string
+              enum: [volumetric, time, flow, pressure]
+              description: Target type for the current phase.
+            pt:
+              type: number
+              description: Phase target value (volume, duration, flow, or pressure depending on tt).
+            pp:
+              type: number
+              description: Phase progress value (current volume, elapsed phase time, or current flow/pressure).
       required: [tp]
     OtaSettingsPayload:
       type: object
+      description: OTA settings + device storage/version snapshot (`WebUIPlugin::updateOTAStatus`).
       properties:
         tp:
           type: string
           enum: ['res:ota-settings']
+        status:
+          type: string
+          description: Current OTA status/version string passed to the update.
         latestVersion:
           type: string
         displayVersion:
@@ -113,9 +306,39 @@ components:
           type: string
         updating:
           type: boolean
+        availableVersions:
+          type: array
+          items:
+            type: string
+          description: Build-time list of selectable stable release tags.
+        spiffsTotal:
+          type: integer
+          description: LittleFS total bytes.
+        spiffsUsed:
+          type: integer
+          description: LittleFS used bytes.
+        spiffsFree:
+          type: integer
+          description: LittleFS free bytes.
+        spiffsUsedPct:
+          type: integer
+          description: LittleFS used percentage (present when total > 0).
+        sdTotal:
+          type: integer
+          description: SD card total bytes (present only when an SD card is present).
+        sdUsed:
+          type: integer
+          description: SD card used bytes (present only when an SD card is present).
+        sdFree:
+          type: integer
+          description: SD card free bytes (present only when an SD card is present).
+        sdUsedPct:
+          type: integer
+          description: SD card used percentage (present when an SD card is present and total > 0).
       required: [tp]
     OtaProgressPayload:
       type: object
+      description: OTA update progress broadcast (`WebUIPlugin::updateOTAProgress`).
       properties:
         tp:
           type: string
@@ -127,29 +350,108 @@ components:
       required: [tp, phase, progress]
     AutotuneResultPayload:
       type: object
+      description: Autotune completion broadcast (`WebUIPlugin::sendAutotuneResult`).
       properties:
         tp:
           type: string
           enum: ['evt:autotune-result']
         pid:
           type: string
+          description: New PID parameter string produced by the autotune run.
       required: [tp, pid]
+    HistoryRebuildProgressPayload:
+      type: object
+      description: Shot-history index rebuild progress broadcast (forwarded from the `evt:history-rebuild-progress` plugin event).
+      properties:
+        tp:
+          type: string
+          enum: ['evt:history-rebuild-progress']
+        total:
+          type: integer
+        current:
+          type: integer
+        status:
+          type: string
+      required: [tp]
+    RelayStatusPayload:
+      type: object
+      description: |
+        Device online/offline status. NOTE: this message is emitted by the
+        cloud relay proxy (`relay-server/`), not the display firmware, but it
+        is delivered to clients over the same `/ws` stream, so it is part of
+        the observable message surface.
+      properties:
+        tp:
+          type: string
+          enum: ['evt:relay-status']
+        deviceConnected:
+          type: boolean
+          description: Whether the paired device is currently connected to the relay.
+      required: [tp]
     ProfilePayload:
       $ref: '../schema/profile.json'
+    BeanPayload:
+      type: object
+      description: Bean entry. Shape is defined by the firmware BeanManager (writeBean/parseBean).
+      additionalProperties: true
+    HistoryEntryPayload:
+      type: object
+      description: Shot-history list entry (header-only summary read from each `.slog` file).
+      properties:
+        id:
+          type: string
+        version:
+          type: integer
+        timestamp:
+          type: integer
+          description: Shot start epoch.
+        profile:
+          type: string
+          description: Profile name.
+        profileId:
+          type: string
+        samples:
+          type: integer
+          description: Recorded sample count.
+        duration:
+          type: integer
+          description: Shot duration in milliseconds.
+        volume:
+          type: number
+          description: Final weight (present only when > 0).
+        incomplete:
+          type: boolean
+          description: True when the shot header is partial (sampleCount == 0).
+      required: [id]
   messages:
+    # ---- Events (server -> client) --------------------------------------
     StatusEvent:
+      x-since-version: 'unknown'
       payload:
         $ref: '#/components/schemas/StatusPayload'
     OtaSettingsResponse:
+      x-since-version: 'unknown'
       payload:
         $ref: '#/components/schemas/OtaSettingsPayload'
     OtaProgressEvent:
+      x-since-version: 'unknown'
       payload:
         $ref: '#/components/schemas/OtaProgressPayload'
     AutotuneResultEvent:
+      x-since-version: 'unknown'
       payload:
         $ref: '#/components/schemas/AutotuneResultPayload'
+    HistoryRebuildProgressEvent:
+      x-since-version: 'unknown'
+      payload:
+        $ref: '#/components/schemas/HistoryRebuildProgressPayload'
+    RelayStatusEvent:
+      x-since-version: 'unknown'
+      payload:
+        $ref: '#/components/schemas/RelayStatusPayload'
+    # ---- Profiles responses --------------------------------------------
     ProfilesListResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -166,6 +468,7 @@ components:
             type: string
         required: [tp]
     ProfilesLoadResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -180,6 +483,7 @@ components:
             type: string
         required: [tp]
     ProfilesSaveResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -194,6 +498,7 @@ components:
             type: string
         required: [tp]
     ProfilesDeleteResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -206,6 +511,7 @@ components:
             type: string
         required: [tp]
     ProfilesSelectResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -218,6 +524,7 @@ components:
             type: string
         required: [tp]
     ProfilesFavoriteResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -230,6 +537,7 @@ components:
             type: string
         required: [tp]
     ProfilesUnfavoriteResponse:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -241,7 +549,221 @@ components:
           error:
             type: string
         required: [tp]
+    ProfilesReorderResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:profiles:reorder']
+          rid:
+            type: string
+          # No error field; success implied
+        required: [tp]
+    # ---- Beans responses -----------------------------------------------
+    BeansListResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:beans:list']
+          rid:
+            type: string
+          beans:
+            type: array
+            items:
+              $ref: '#/components/schemas/BeanPayload'
+          error:
+            type: string
+        required: [tp]
+    BeansLoadResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:beans:load']
+          rid:
+            type: string
+          bean:
+            $ref: '#/components/schemas/BeanPayload'
+          error:
+            type: string
+        required: [tp]
+    BeansSaveResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:beans:save']
+          rid:
+            type: string
+          bean:
+            $ref: '#/components/schemas/BeanPayload'
+          error:
+            type: string
+        required: [tp]
+    BeansDeleteResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:beans:delete']
+          rid:
+            type: string
+          error:
+            type: string
+        required: [tp]
+    # ---- Grinders responses --------------------------------------------
+    GrindersListResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:grinders:list']
+          rid:
+            type: string
+          grinders:
+            type: array
+            items:
+              type: string
+          error:
+            type: string
+        required: [tp]
+    GrindersSaveResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:grinders:save']
+          rid:
+            type: string
+          grinders:
+            type: array
+            items:
+              type: string
+            description: Canonical grinder list after the device-authoritative merge/dedup/cap.
+          error:
+            type: string
+        required: [tp]
+    # ---- History responses ---------------------------------------------
+    HistoryListResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:list']
+          rid:
+            type: string
+          history:
+            type: array
+            items:
+              $ref: '#/components/schemas/HistoryEntryPayload'
+        required: [tp]
+    HistoryGetResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          `req:history:get` always returns an error over WebSocket — the binary
+          shot log must be fetched via the HTTP `/api/history?id=<id>` endpoint.
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:get']
+          rid:
+            type: string
+          error:
+            type: string
+        required: [tp]
+    HistoryDeleteResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:delete']
+          rid:
+            type: string
+          msg:
+            type: string
+        required: [tp]
+    HistoryNotesGetResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:notes:get']
+          rid:
+            type: string
+          notes:
+            type: object
+            description: Free-form shot notes object.
+            additionalProperties: true
+        required: [tp]
+    HistoryNotesSaveResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:notes:save']
+          rid:
+            type: string
+          msg:
+            type: string
+          error:
+            type: string
+        required: [tp]
+    HistoryRebuildResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Acknowledges the async shot-history index rebuild has started.
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:rebuild']
+          rid:
+            type: string
+          msg:
+            type: string
+        required: [tp]
+    # ---- Flush response ------------------------------------------------
+    FlushStartResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:flush:start']
+          rid:
+            type: string
+          success:
+            type: boolean
+        required: [tp]
+    # ---- OTA / autotune requests ---------------------------------------
     OtaSettingsRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -254,6 +776,7 @@ components:
             type: string
         required: [tp]
     OtaStartRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -262,8 +785,10 @@ components:
             enum: ['req:ota-start']
           cp:
             type: string
+            description: Component to update ("display", "controller", or empty for full update).
         required: [tp]
     AutotuneStartRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -275,7 +800,237 @@ components:
           samples:
             type: integer
         required: [tp]
+    # ---- Process / control requests (fire-and-forget, no response) -----
+    ProcessActivateRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Activate (start) the current process. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:process:activate']
+        required: [tp]
+    ProcessDeactivateRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Deactivate and clear the current process. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:process:deactivate']
+        required: [tp]
+    ProcessClearRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Clear the current process. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:process:clear']
+        required: [tp]
+    GrindActivateRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Activate grinding. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:grind:activate']
+        required: [tp]
+    GrindDeactivateRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Deactivate grinding. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:grind:deactivate']
+        required: [tp]
+    ChangeGrindTargetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Toggle grind target mode (Time vs Weight). `target` is a 0/1 flag; the
+          grams value itself is adjusted via raise/lower-grind-target. No response.
+        properties:
+          tp:
+            type: string
+            enum: ['req:change-grind-target']
+          target:
+            type: integer
+            enum: [0, 1]
+        required: [tp]
+    RaiseTempRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Increment target temperature. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:raise-temp']
+        required: [tp]
+    LowerTempRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Decrement target temperature. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:lower-temp']
+        required: [tp]
+    RaiseGrindTargetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Increment grind target. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:raise-grind-target']
+        required: [tp]
+    LowerGrindTargetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Decrement grind target. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:lower-grind-target']
+        required: [tp]
+    RaiseBrewTargetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Increment brew target. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:raise-brew-target']
+        required: [tp]
+    LowerBrewTargetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Decrement brew target. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:lower-brew-target']
+        required: [tp]
+    ManualUpdateRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Update manual-mode targets. Only applied when the machine is in manual
+          mode and manual control is available. Omitted numeric fields keep their
+          current value. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:manual:update']
+          targetType:
+            type: string
+            enum: [flow, pressure]
+          pressure:
+            type: number
+          flow:
+            type: number
+          temperature:
+            type: number
+        required: [tp]
+    ChangeModeRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Change the machine mode. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:change-mode']
+          mode:
+            type: integer
+            description: New machine mode (validated against grind/manual availability).
+        required: [tp]
+    ChangeBrewTargetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Set the brew target (yield in grams) on the in-memory profile's
+          volumetric target. Accepts float/int/uint. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:change-brew-target']
+          target:
+            type: number
+        required: [tp]
+    AutosteamSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Device-authoritative auto-steam toggle. Persisted and rebroadcast as
+          `as` in the next `evt:status`. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:autosteam:set']
+          enabled:
+            type: boolean
+        required: [tp]
+    DoseSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Device-authoritative brew dose in grams. Validated (0 < grams <= 200)
+          and rebroadcast as `dg` in `evt:status`. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:dose:set']
+          grams:
+            type: number
+        required: [tp, grams]
+    BeansSelectRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Select the active bean by name. Handled separately from the other
+          `req:beans:*` requests and does not produce a `res:*` reply.
+        properties:
+          tp:
+            type: string
+            enum: ['req:beans:select']
+          name:
+            type: string
+        required: [tp]
+    FlushStartRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:flush:start']
+          rid:
+            type: string
+        required: [tp]
+    # ---- Profiles requests ---------------------------------------------
     ProfilesListRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -286,6 +1041,7 @@ components:
             type: string
         required: [tp]
     ProfilesLoadRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -298,6 +1054,7 @@ components:
             type: string
         required: [tp, id]
     ProfilesSaveRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -310,6 +1067,7 @@ components:
             $ref: '#/components/schemas/ProfilePayload'
         required: [tp, profile]
     ProfilesDeleteRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -322,6 +1080,7 @@ components:
             type: string
         required: [tp, id]
     ProfilesSelectRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -334,6 +1093,7 @@ components:
             type: string
         required: [tp, id]
     ProfilesFavoriteRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -346,6 +1106,7 @@ components:
             type: string
         required: [tp, id]
     ProfilesUnfavoriteRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -358,6 +1119,7 @@ components:
             type: string
         required: [tp, id]
     ProfilesReorderRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
@@ -372,15 +1134,170 @@ components:
               type: string
             description: Full ordered list of profile IDs.
         required: [tp, order]
-
-    ProfilesReorderResponse:
+    # ---- Beans requests ------------------------------------------------
+    BeansListRequest:
+      x-since-version: 'unknown'
       payload:
         type: object
         properties:
           tp:
             type: string
-            enum: ['res:profiles:reorder']
+            enum: ['req:beans:list']
           rid:
             type: string
-          # No error field; success implied
+        required: [tp]
+    BeansLoadRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:beans:load']
+          rid:
+            type: string
+          id:
+            type: string
+        required: [tp, id]
+    BeansSaveRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:beans:save']
+          rid:
+            type: string
+          bean:
+            $ref: '#/components/schemas/BeanPayload'
+        required: [tp, bean]
+    BeansDeleteRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:beans:delete']
+          rid:
+            type: string
+          id:
+            type: string
+        required: [tp, id]
+    # ---- Grinders requests ---------------------------------------------
+    GrindersListRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:grinders:list']
+          rid:
+            type: string
+        required: [tp]
+    GrindersSaveRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Persist grinder name(s). Accepts either a single `name` (back-compat)
+          or a `names` array (batch sync). The device performs the
+          merge/dedup/cap and returns the canonical list.
+        properties:
+          tp:
+            type: string
+            enum: ['req:grinders:save']
+          rid:
+            type: string
+          name:
+            type: string
+          names:
+            type: array
+            items:
+              type: string
+        required: [tp]
+    # ---- History requests ----------------------------------------------
+    HistoryListRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:list']
+          rid:
+            type: string
+        required: [tp]
+    HistoryGetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Over WebSocket this always returns an error directing the client to the
+          HTTP `/api/history?id=<id>` endpoint for the binary shot log.
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:get']
+          rid:
+            type: string
+          id:
+            type: string
+        required: [tp]
+    HistoryDeleteRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:delete']
+          rid:
+            type: string
+          id:
+            type: string
+        required: [tp, id]
+    HistoryNotesGetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:notes:get']
+          rid:
+            type: string
+          id:
+            type: string
+        required: [tp, id]
+    HistoryNotesSaveRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:notes:save']
+          rid:
+            type: string
+          id:
+            type: string
+          notes:
+            type: object
+            description: Free-form shot notes (rating, doseOut, etc.).
+            additionalProperties: true
+        required: [tp, id]
+    HistoryRebuildRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Start an async rebuild of the shot-history index.
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:rebuild']
+          rid:
+            type: string
         required: [tp]

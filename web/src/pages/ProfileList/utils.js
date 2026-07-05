@@ -23,7 +23,7 @@ export function parseProfile(input) {
     // must count as an empty/failed parse, not a silent bogus profile (PRO-218).
     const shaped = profiles.filter(isProfileShaped);
     return shaped;
-  } catch (ignored) {
+  } catch {
     const result = TclConverter.toGaggiMate(input);
     if (result.ok) {
       return [result.json];

@@ -44,10 +44,25 @@ String get_redirect_location(WiFiClientSecure &wifi_client, String &initial_url)
         char errorText[128];
         int errCode = wifi_client.lastError(errorText, sizeof(errorText));
         ESP_LOGV(TAG, "httpCode: %d, errorCode %d: %s\n", httpCode, errCode, errorText);
+        // PRO-411: do NOT fall through to getLocation() on a non-FOUND code. On a
+        // TLS connect failure / HTTP error there is no valid Location header, and
+        // the resulting empty/uninitialised String previously flowed into the
+        // base-url derivation and downstream WiFi/TLS APIs (NULL String::c_str()
+        // deref -> async_tcp IllegalInstruction crash). Close the client and bail.
+        https.end();
+        return "";
     }
 
     String redirect_url = https.getLocation();
     https.end();
+
+    // PRO-411: a FOUND status with a missing/empty Location header is still
+    // unusable — never return an empty String the caller would treat as a valid
+    // redirect. Bail so the caller (get_updated_base_url_via_redirect) backs off.
+    if (redirect_url.isEmpty()) {
+        ESP_LOGE(TAG, "[HTTPS] Redirect returned empty Location\n");
+        return "";
+    }
 
     ESP_LOGI(TAG, "returns: %s\n", redirect_url.c_str());
     return redirect_url;

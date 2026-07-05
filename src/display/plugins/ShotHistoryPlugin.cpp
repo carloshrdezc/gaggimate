@@ -999,7 +999,12 @@ bool ShotHistoryPlugin::saveNotes(const String &id, const JsonDocument &notes) {
     }
     String notesStr;
     serializeJson(notes, notesStr);
-    file.print(notesStr);
+    size_t written = file.print(notesStr);
+    if (written != notesStr.length()) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to write notes: expected %u, wrote %zu", notesStr.length(), written);
+        file.close();
+        return false;
+    }
     file.close();
     return true;
 }
@@ -1009,7 +1014,10 @@ void ShotHistoryPlugin::loadNotes(const String &id, JsonDocument &notes) {
     if (file) {
         String notesStr = file.readString();
         file.close();
-        deserializeJson(notes, notesStr);
+        DeserializationError err = deserializeJson(notes, notesStr);
+        if (err != DeserializationError::Ok) {
+            ESP_LOGE("ShotHistoryPlugin", "Failed to parse notes JSON for %s: %s", id.c_str(), err.c_str());
+        }
     }
 }
 

@@ -103,6 +103,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                 id={`phase-${index}-duration`}
                 className='grow'
                 type='number'
+                inputMode='decimal'
                 min='1'
                 value={phase.duration}
                 onChange={e => onFieldChange('duration', parseFloat(e.target.value))}
@@ -119,9 +120,10 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
           <div className='input-group'>
             <label htmlFor={`phase-${index}-temperature`} className='input w-full'>
               <input
-                id={`phase-${index}-target`}
+                id={`phase-${index}-temperature`}
                 className='grow'
                 type='number'
+                inputMode='decimal'
                 value={`${phase.temperature || 0}`}
                 onChange={e => onFieldChange('temperature', parseFloat(e.target.value))}
                 aria-label='Target temperature'
@@ -269,6 +271,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                 id={`phase-${index}-power`}
                 className='grow'
                 type='number'
+                inputMode='numeric'
                 step='1'
                 min={0}
                 max={100}
@@ -299,6 +302,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                     id={`phase-${index}-pressure`}
                     className='grow'
                     type='number'
+                    inputMode='decimal'
                     step='0.01'
                     min={mode === 'pressure' ? '0.1' : '0'}
                     value={currentPressure.toString()}
@@ -324,6 +328,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                     id={`phase-${index}-flow`}
                     className='grow'
                     type='number'
+                    inputMode='decimal'
                     step='0.01'
                     value={currentFlow.toString()}
                     onChange={e =>
@@ -421,6 +426,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
                   id={`phase-${index}-transition-duration`}
                   className='grow'
                   type='number'
+                  inputMode='decimal'
                   value={phase.transition?.duration || 0}
                   onChange={e =>
                     onFieldChange('transition', {
@@ -470,7 +476,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
 
       <div className='mt-2 flex flex-row gap-4'>
         <h3 className='text-lg font-medium'>Stop when</h3>
-        <div className='dropdown'>
+        <div className='dropdown dropdown-top dropdown-end'>
           <Tooltip content='Add stop condition'>
             <div
               tabIndex='0'
@@ -483,7 +489,7 @@ export function ExtendedPhase({ phase, index, onChange, onRemove, pressureAvaila
           </Tooltip>
           <ul
             tabIndex='0'
-            className='menu dropdown-content bg-base-100 rounded-box z-1 w-52 p-2 shadow-sm'
+            className='menu dropdown-content bg-base-100 rounded-box z-[65] max-h-[60vh] w-52 flex-nowrap overflow-y-auto p-2 shadow-sm'
           >
             {availableTargetTypes.map(t => (
               <li key={`${t.type}-${t.operator}`}>

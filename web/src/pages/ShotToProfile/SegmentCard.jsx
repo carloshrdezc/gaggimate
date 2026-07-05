@@ -80,6 +80,7 @@ export function SegmentCard({ segment, samples, onChange }) {
         </select>
         <input
           type='number'
+          inputMode='decimal'
           step={segment.targetType === 'pressure' ? 0.5 : 0.1}
           min={0}
           max={segment.targetType === 'pressure' ? 12 : 6}
@@ -96,6 +97,7 @@ export function SegmentCard({ segment, samples, onChange }) {
         </label>
         <input
           type='number'
+          inputMode='decimal'
           step={1}
           min={80}
           max={105}

@@ -76,12 +76,13 @@ export function LibraryRow({ item, isMatch, isActive, isShot, onLoad, onExport, 
                 tone: 'success',
                 className: 'h-6 w-6',
               })}
-              title='Profile statistics'
+              aria-label='Profile statistics'
             >
               <FontAwesomeIcon icon={faChartSimple} size='xs' />
             </a>
           )}
           <button
+            aria-label='Export'
             onClick={() => onExport(item)}
             className={getAnalyzerIconButtonClasses({
               tone: 'subtle',
@@ -91,6 +92,7 @@ export function LibraryRow({ item, isMatch, isActive, isShot, onLoad, onExport, 
             <FontAwesomeIcon icon={faFileExport} size='xs' />
           </button>
           <button
+            aria-label='Delete'
             onClick={() => onDelete(item)}
             className={getAnalyzerIconButtonClasses({
               tone: 'error',

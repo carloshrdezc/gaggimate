@@ -89,6 +89,157 @@ void test_prerelease_preserved(void) {
     semver_free(&v);
 }
 
+// PRO-376: a fully non-numeric tag ("abc.def.ghi") is a deliberate parse
+// failure. The old unchecked atoi() silently coerced each token to 0; the
+// checked strtol parse now returns the {0,0,0,nullptr,nullptr} sentinel used
+// for empty / too-few-component input. (0,0,0 is the sentinel here, distinct
+// from a real "0.0.0" tag only in that prerelease is NULL, which it is.)
+void test_non_numeric_components_return_zero(void) {
+    semver_t v = from_string("abc.def.ghi");
+    TEST_ASSERT_EQUAL_INT(0, v.major);
+    TEST_ASSERT_EQUAL_INT(0, v.minor);
+    TEST_ASSERT_EQUAL_INT(0, v.patch);
+    TEST_ASSERT_NULL(v.prerelease);
+    semver_free(&v);
+}
+
+// PRO-376: trailing garbage on a component ("1.2.3x") is rejected — the whole
+// token must be consumed by strtol, so this returns the sentinel too.
+void test_trailing_garbage_patch_returns_zero(void) {
+    semver_t v = from_string("1.2.3x");
+    TEST_ASSERT_EQUAL_INT(0, v.major);
+    TEST_ASSERT_EQUAL_INT(0, v.minor);
+    TEST_ASSERT_EQUAL_INT(0, v.patch);
+    TEST_ASSERT_NULL(v.prerelease);
+    semver_free(&v);
+}
+
+// PRO-376: a malformed patch on the prerelease path ("1.2.x-rc1") must still
+// return the sentinel AND must not leak the prerelease malloc (validated under
+// [env:native-sanitize] ASan). The prerelease of the sentinel is NULL.
+void test_malformed_patch_with_prerelease_returns_zero(void) {
+    semver_t v = from_string("1.2.x-rc1");
+    TEST_ASSERT_EQUAL_INT(0, v.major);
+    TEST_ASSERT_EQUAL_INT(0, v.minor);
+    TEST_ASSERT_EQUAL_INT(0, v.patch);
+    TEST_ASSERT_NULL(v.prerelease);
+    semver_free(&v);
+}
+
+// PRO-387: leading whitespace on a core component ("  12.0.0", "1. 2.0") is
+// rejected. strtol would skip leading whitespace and accept "  12" as 12; the
+// digit-only lead-char precheck now returns the sentinel instead.
+void test_leading_whitespace_component_returns_zero(void) {
+    semver_t a = from_string("  12.0.0");
+    TEST_ASSERT_EQUAL_INT(0, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("1. 2.0");
+    TEST_ASSERT_EQUAL_INT(0, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+}
+
+// PRO-387: a leading '-' sign on any core component ("-1.0.0", "1.-1.0",
+// "1.0.-1") is rejected. strtol would parse "-1" as a negative value; semver
+// core components must be non-negative, so these return the sentinel.
+void test_negative_sign_component_returns_zero(void) {
+    semver_t a = from_string("-1.0.0");
+    TEST_ASSERT_EQUAL_INT(0, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("1.-1.0");
+    TEST_ASSERT_EQUAL_INT(0, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+
+    semver_t c = from_string("1.0.-1");
+    TEST_ASSERT_EQUAL_INT(0, c.major);
+    TEST_ASSERT_EQUAL_INT(0, c.minor);
+    TEST_ASSERT_EQUAL_INT(0, c.patch);
+    TEST_ASSERT_NULL(c.prerelease);
+    semver_free(&c);
+}
+
+// PRO-389: a '+' anywhere in the tag ("+1.0.0", "1.+1.0") yields the
+// {0,0,0,nullptr,nullptr} sentinel — but NOT via the digit-only lead-char
+// precheck in parse_component, as an earlier comment claimed. `from_string`
+// strips build metadata (everything at and after the FIRST '+') BEFORE the
+// '.'-split, so the '+' is consumed up front and the surviving core is empty
+// or too short, tripping the `numbers.size() < 3` guard:
+//   * "+1.0.0" -> first '+' at index 0 -> ver "" -> split size 0 -> size()<3
+//   * "1.+1.0" -> first '+' at index 2 -> ver "1." -> split ["1"] size 1 -> size()<3
+// Consequently the '+' branch of the lead-char precheck (c0 == '+') is
+// UNREACHABLE via from_string by design: any '+' triggers the metadata strip
+// first, so a core component can never be handed to parse_component with a '+'
+// lead char. The digit-only precheck's non-digit-lead-char rejection is still
+// genuinely exercised by the whitespace (' ') and negative-sign ('-') tests
+// above; only the '+' char value cannot arrive there through from_string.
+// The assertions below remain valid (both inputs yield the sentinel); this
+// test documents WHY (upstream metadata strip), not the precheck.
+void test_plus_caught_by_metadata_strip_returns_zero(void) {
+    semver_t a = from_string("+1.0.0");
+    TEST_ASSERT_EQUAL_INT(0, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("1.+1.0");
+    TEST_ASSERT_EQUAL_INT(0, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+}
+
+// PRO-390: direct unit test of the `parse_component` seam (now externally
+// linkable, declared in semver_extensions.h). PRO-389 documented that a
+// leading-'+' token can never reach parse_component via from_string (build
+// metadata is stripped before the '.'-split), so the '+' lead-char rejection
+// was asserted only indirectly. This test calls parse_component directly to
+// lock that rejection: a "+1" token returns false AND leaves `out` untouched
+// (strtol consumes no digits after the lead-char precheck fails). A valid
+// numeric token ("42") is included as a positive control to prove the seam
+// works both ways.
+void test_parse_component_rejects_leading_plus(void) {
+    int out = -999;
+    TEST_ASSERT_FALSE(parse_component("+1", out));
+    TEST_ASSERT_EQUAL_INT(-999, out); // out must not be written on rejection
+
+    int ok = -999;
+    TEST_ASSERT_TRUE(parse_component("42", ok));
+    TEST_ASSERT_EQUAL_INT(42, ok);
+}
+
+// PRO-387 positive control: a normal, unpadded tag ("2.0.0", "v2.0.0") still
+// parses unchanged after the lead-char precheck was added.
+void test_unpadded_tag_still_parses(void) {
+    semver_t a = from_string("2.0.0");
+    TEST_ASSERT_EQUAL_INT(2, a.major);
+    TEST_ASSERT_EQUAL_INT(0, a.minor);
+    TEST_ASSERT_EQUAL_INT(0, a.patch);
+    TEST_ASSERT_NULL(a.prerelease);
+    semver_free(&a);
+
+    semver_t b = from_string("v2.0.0");
+    TEST_ASSERT_EQUAL_INT(2, b.major);
+    TEST_ASSERT_EQUAL_INT(0, b.minor);
+    TEST_ASSERT_EQUAL_INT(0, b.patch);
+    TEST_ASSERT_NULL(b.prerelease);
+    semver_free(&b);
+}
+
 static int runSemverExtensionsTests() {
     UNITY_BEGIN();
     RUN_TEST(test_build_metadata_simple);
@@ -96,6 +247,14 @@ static int runSemverExtensionsTests() {
     RUN_TEST(test_prerelease_with_build_metadata);
     RUN_TEST(test_leading_v_stripped);
     RUN_TEST(test_prerelease_preserved);
+    RUN_TEST(test_non_numeric_components_return_zero);
+    RUN_TEST(test_trailing_garbage_patch_returns_zero);
+    RUN_TEST(test_malformed_patch_with_prerelease_returns_zero);
+    RUN_TEST(test_leading_whitespace_component_returns_zero);
+    RUN_TEST(test_negative_sign_component_returns_zero);
+    RUN_TEST(test_plus_caught_by_metadata_strip_returns_zero);
+    RUN_TEST(test_parse_component_rejects_leading_plus);
+    RUN_TEST(test_unpadded_tag_still_parses);
     return UNITY_END();
 }
 

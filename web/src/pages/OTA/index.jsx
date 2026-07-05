@@ -7,7 +7,7 @@ import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
-import { updateOtaChannel, canFlashTaggedRelease, canUpdateOnAcknowledgedChannel } from './otaLogic.js';
+import { updateOtaChannel, canFlashTaggedRelease, canUpdateOnAcknowledgedChannel, canSwitchChannel, otaChannelDiffersFromInstalled, otaActionLabel } from './otaLogic.js';
 
 // Constants
 const REBUILD_STATUS = {
@@ -114,6 +114,7 @@ const UpdateProgressView = ({ phase, progress }) => (
 const SystemInfoCard = ({ formData, pendingChannel, onChannelChange }) => {
   const {
     channel = 'latest',
+    installedChannel,
     availableVersions = [],
     hardware,
     controllerVersion,
@@ -137,6 +138,11 @@ const SystemInfoCard = ({ formData, pendingChannel, onChannelChange }) => {
     typeof selectedChannel === 'string' &&
     selectedChannel.startsWith('tag:') &&
     selectedChannel !== channel;
+  // Channel-switch warning: the selected channel differs from the channel the
+  // installed firmware was built on. Graceful fallback — when older firmware
+  // omits `installedChannel`, otaChannelDiffersFromInstalled returns false and
+  // no banner shows (see PRO-401 / PRO-400).
+  const isChannelSwitch = otaChannelDiffersFromInstalled({ selectedChannel, installedChannel });
 
   const rssi = machine.value?.status?.rssi ?? -100;
 
@@ -183,6 +189,11 @@ const SystemInfoCard = ({ formData, pendingChannel, onChannelChange }) => {
           {!isUnsavedTagSelection && channel.startsWith('tag:') && (
             <span className='font-nd-mono text-[12px] text-[var(--color-warning,#d4a843)]'>
               Pinned to a specific tag. Re-flash and downgrade are allowed; the upgrade-available indicator is bypassed.
+            </span>
+          )}
+          {isChannelSwitch && (
+            <span className='font-nd-mono text-[12px] text-[var(--color-warning,#d4a843)]'>
+              Switching channels may install a different — possibly lower — version, and will re-flash even if the device reports it is already up to date.
             </span>
           )}
         </div>
@@ -338,7 +349,21 @@ const ActionButtonsSection = memo(
     const tagFlashReady = canFlashTaggedRelease({ formData, pendingChannel });
     const channelAcknowledged = canUpdateOnAcknowledgedChannel({ formData, pendingChannel });
     const isTagPinned = typeof formData.channel === 'string' && formData.channel.startsWith('tag:');
-    // Three-way enable logic for Update Display / Update Controller:
+    // Channel-switch state: the device-acknowledged channel differs from the
+    // channel the installed firmware was built on (PRO-401). This takes
+    // precedence over the tag-pinned/normal paths for both the label and the
+    // enable gate. Like the tag path, switching force-flashes, so the button
+    // stays disabled until the device echoes the newly-saved channel back
+    // (canSwitchChannel enforces the same anti-stale-`_latest_url` gate).
+    const isChannelSwitch = otaChannelDiffersFromInstalled({
+      selectedChannel: formData.channel,
+      installedChannel: formData.installedChannel,
+    });
+    const switchReady = canSwitchChannel({ formData, pendingChannel });
+    // Three-way (now four-way) enable logic for Update Display / Update
+    // Controller:
+    //   - Channel switch (installedChannel present & differs)  -> ONLY enable
+    //                                                   when `switchReady`.
     //   - Acknowledged channel is `tag:*`           -> ONLY enable when
     //                                                   `tagFlashReady` (the
     //                                                   strict gate). NEVER
@@ -361,7 +386,11 @@ const ActionButtonsSection = memo(
     //                                                   flag.
     let displayDisabled;
     let controllerDisabled;
-    if (isTagPinned) {
+    if (isChannelSwitch) {
+      // Channel-switch path: switchReady or nothing.
+      displayDisabled = !switchReady;
+      controllerDisabled = !switchReady;
+    } else if (isTagPinned) {
       // Tag-pinned path: tagFlashReady or nothing.
       displayDisabled = !tagFlashReady;
       controllerDisabled = !tagFlashReady;
@@ -374,8 +403,10 @@ const ActionButtonsSection = memo(
       displayDisabled = !formData.displayUpdateAvailable;
       controllerDisabled = !formData.controllerUpdateAvailable;
     }
-    const displayLabel = isTagPinned ? 'Flash Display' : 'Update Display';
-    const controllerLabel = isTagPinned ? 'Flash Controller' : 'Update Controller';
+    // Contextual action verb: "Switch to <Channel>" / "Flash" / "Update".
+    const actionLabel = otaActionLabel(formData, pendingChannel);
+    const displayLabel = `${actionLabel} Display`;
+    const controllerLabel = `${actionLabel} Controller`;
     return (
     <div className='pt-4'>
       <div className='flex flex-col flex-wrap gap-2 sm:flex-row'>
@@ -422,6 +453,7 @@ const ActionButtonsSection = memo(
     return (
       prevProps.submitting === nextProps.submitting &&
       prevProps.formData.channel === nextProps.formData.channel &&
+      prevProps.formData.installedChannel === nextProps.formData.installedChannel &&
       prevProps.formData.status === nextProps.formData.status &&
       prevProps.formData.displayUpdateAvailable === nextProps.formData.displayUpdateAvailable &&
       prevProps.formData.controllerUpdateAvailable === nextProps.formData.controllerUpdateAvailable &&
