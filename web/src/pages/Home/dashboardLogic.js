@@ -195,3 +195,21 @@ export function getPrimaryActionState({ active, finished, mode, isGrindAvailable
     processKind: getProcessKindForMode(mode, isGrindAvailable, isManualAvailable),
   };
 }
+
+// PRO-421: decide whether the auto-steam effect should fire change-mode:STEAM
+// when a process transitions active -> inactive.
+//
+// Auto-steam must fire EXACTLY ONCE per brew/manual shot: after the shot ends we
+// switch to steam. The subtle bug it guards against is a DOUBLE fire — when the
+// auto-steamed steam session is itself stopped (web "Stop Steam" -> STANDBY),
+// the effect must NOT re-fire STEAM, or the machine bounces straight back to
+// Steam out of the Standby the user just asked for. The caller enforces the
+// once-only semantics by clearing lastActiveWasBrew after a fire; this helper is
+// the pure decision so it can be unit-tested.
+//
+//   lastActiveWasBrew - was the just-ended active session a brew/manual shot
+//                       (as opposed to steam/water/grind)?
+//   autoSteamEnabled  - the (device-authoritative) auto-steam setting.
+export function shouldFireAutoSteamOnStop({ lastActiveWasBrew, autoSteamEnabled }) {
+  return Boolean(lastActiveWasBrew) && Boolean(autoSteamEnabled);
+}

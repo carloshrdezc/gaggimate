@@ -275,6 +275,16 @@ class WebUIPlugin : public Plugin {
     // the default-target meaning.
     volatile uint8_t pendingModeChangeTarget = 0;
     volatile bool pendingModeChange = false;
+
+    // PRO-421: millis() timestamp of the last explicit STANDBY `req:change-mode`
+    // applied by this plugin. Used by shouldSuppressStandbyReassert() to reject a
+    // stale non-STANDBY re-assert (e.g. the web dashboard's auto-steam effect
+    // reflexively re-firing STEAM right after Stop-Steam) so an explicit Standby
+    // wins. Written and read only on the WS/relay handler task; a plain scalar is
+    // sufficient. Initialized so that before any STANDBY request the guard window
+    // has already elapsed (no spurious suppression at boot).
+    unsigned long lastExplicitStandbyMs = 0;
+    bool sawExplicitStandby = false;
 };
 
 // PRO-286: enforce at compile time the invariant the comment above documents — the

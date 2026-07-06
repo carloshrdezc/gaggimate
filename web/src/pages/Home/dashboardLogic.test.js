@@ -15,6 +15,7 @@ import {
   getPrimaryActionState,
   getProcessKindForMode,
   getTemperatureRingMetrics,
+  shouldFireAutoSteamOnStop,
   shouldKeepManualDraftDirty,
   shouldSendManualUpdate,
 } from './dashboardLogic.js';
@@ -216,6 +217,19 @@ test('stop steam changes mode to standby and clears process tracking', () => {
   expect(state.action).toBe('change-mode');
   expect(state.mode).toBe(0);
   expect(state.processKind).toBe(null);
+});
+
+test('auto-steam fires only for a brew/manual shot when enabled (PRO-421)', () => {
+  // Brew shot just ended, auto-steam on -> fire steam.
+  expect(shouldFireAutoSteamOnStop({ lastActiveWasBrew: true, autoSteamEnabled: true })).toBe(true);
+  // Auto-steam off -> never fire.
+  expect(shouldFireAutoSteamOnStop({ lastActiveWasBrew: true, autoSteamEnabled: false })).toBe(false);
+  // Not a brew/manual session (e.g. the auto-steamed STEAM session being
+  // stopped, after the caller clears lastActiveWasBrew) -> never re-fire. This
+  // is the bounce guard: pressing Stop-Steam must not re-send change-mode:STEAM
+  // right after the STANDBY.
+  expect(shouldFireAutoSteamOnStop({ lastActiveWasBrew: false, autoSteamEnabled: true })).toBe(false);
+  expect(shouldFireAutoSteamOnStop({ lastActiveWasBrew: false, autoSteamEnabled: false })).toBe(false);
 });
 
 test('standby primary action wakes the machine into brew', () => {
