@@ -42,6 +42,7 @@
 #endif
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/SmartGrindPlugin.h>
+#include <display/plugins/VolumetricSourcePolicy.h>
 #if GAGGIMATE_ENABLE_WEBUI
 #include <display/plugins/WebUIPlugin.h>
 #endif
@@ -55,9 +56,15 @@
 #ifdef GAGGIMATE_SIM
 #include <SdlDriver.h> // desktop SDL panel stands in for the hardware drivers
 #else
+#if GM_DRIVER_AMOLED
 #include <display/drivers/AmoledDisplayDriver.h>
+#endif
+#if GM_DRIVER_LILYGO
 #include <display/drivers/LilyGoDriver.h>
+#endif
+#if GM_DRIVER_WAVESHARE
 #include <display/drivers/WaveshareDriver.h>
+#endif
 #endif
 #endif
 
@@ -196,13 +203,30 @@ void Controller::setupPanel() {
 #ifdef GAGGIMATE_SIM
     driver = SdlDriver::getInstance(); // desktop SDL panel
 #else
-    if (LilyGoDriver::getInstance()->isCompatible()) {
+    // PRO-12: probe each compiled-in driver family in priority order (LilyGo ->
+    // AMOLED -> Waveshare). Board-specific builds compile in only a subset via
+    // the GM_DRIVER_* macros (see display/config/features.h); the default build
+    // has all three defined, so this preserves the original autodetect chain
+    // exactly. WaveshareDriver::isCompatible() is an unconditional `true`
+    // (catch-all), so keeping its guard last matches the historical fallback
+    // order.
+    driver = nullptr;
+#if GM_DRIVER_LILYGO
+    if (driver == nullptr && LilyGoDriver::getInstance()->isCompatible()) {
         driver = LilyGoDriver::getInstance();
-    } else if (AmoledDisplayDriver::getInstance()->isCompatible()) {
+    }
+#endif
+#if GM_DRIVER_AMOLED
+    if (driver == nullptr && AmoledDisplayDriver::getInstance()->isCompatible()) {
         driver = AmoledDisplayDriver::getInstance();
-    } else if (WaveshareDriver::getInstance()->isCompatible()) {
+    }
+#endif
+#if GM_DRIVER_WAVESHARE
+    if (driver == nullptr && WaveshareDriver::getInstance()->isCompatible()) {
         driver = WaveshareDriver::getInstance();
-    } else {
+    }
+#endif
+    if (driver == nullptr) {
         Serial.println("No compatible display driver found");
         delay(10000);
         ESP.restart();
@@ -1472,7 +1496,29 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         lastBluetoothMeasurement.store(millis(), std::memory_order_release);
     }
 
-    if (currentVolumetricSource.load(std::memory_order_acquire) != source) {
+    // PRO-4: mid-shot fallback. currentVolumetricSource is latched once at
+    // activate() and held for the whole shot; onVolumetricMeasurement() drops
+    // every sample whose source != the latched source (below). If a shot starts
+    // on BLUETOOTH and the BLE scale drops out mid-shot, BLE samples stop while
+    // FLOW_ESTIMATION samples keep arriving (they are produced by the controller
+    // sensor stream, independent of the scale) and get rejected — so the volume
+    // reading FREEZES. When that happens, fall the source FORWARD to
+    // FLOW_ESTIMATION so volume keeps advancing. The switch is naturally
+    // debounced by isBluetoothScaleHealthy() (unhealthy only once the 1.5 s
+    // BLUETOOTH_GRACE_PERIOD_MS window has elapsed) and is one-way: we never
+    // switch FLOW_ESTIMATION -> BLUETOOTH mid-shot. A late BLE read refreshes
+    // lastBluetoothMeasurement but cannot switch the source back (the predicate
+    // only fires on a FLOW_ESTIMATION sample while latched on BLUETOOTH).
+    VolumetricMeasurementSource latched = currentVolumetricSource.load(std::memory_order_acquire);
+    if (shouldFallBackToFlowEstimation(latched, source, isBluetoothScaleHealthy())) {
+        currentVolumetricSource.store(VolumetricMeasurementSource::FLOW_ESTIMATION, std::memory_order_release);
+        latched = VolumetricMeasurementSource::FLOW_ESTIMATION;
+        ESP_LOGW(LOG_TAG, "BLE scale unhealthy mid-shot; falling back volumetric source to flow-estimation");
+        pluginManager->trigger(F("controller:volumetric-measurement:source:change"), "value",
+                               static_cast<int>(VolumetricMeasurementSource::FLOW_ESTIMATION));
+    }
+
+    if (latched != source) {
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }

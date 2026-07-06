@@ -35,6 +35,7 @@ import {
   getProcessKindForMode,
   getPrimaryActionState,
   getTemperatureRingMetrics,
+  shouldFireAutoSteamOnStop,
   shouldKeepManualDraftDirty,
   shouldSendManualUpdate,
 } from './dashboardLogic.js';
@@ -1101,8 +1102,16 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     if (!wasActiveRef.current) return;
     wasActiveRef.current = false;
     setIsFlushing(false);
-    if (lastActiveWasBrewRef.current && autoSteamEnabled) {
+    if (shouldFireAutoSteamOnStop({ lastActiveWasBrew: lastActiveWasBrewRef.current, autoSteamEnabled })) {
       try { api.send({ tp: 'req:change-mode', mode: 2 }); } catch {}
+      // PRO-421: auto-steam fires exactly once per brew shot. Clearing the flag
+      // (and the underlying last-process type) prevents the effect from firing
+      // AGAIN when the auto-steamed session is later stopped: without this, the
+      // steam session re-captures lastActiveWasBrewRef === true (lastProcessType
+      // is still 'brew'), so pressing "Stop Steam" would re-send change-mode:2
+      // right after the STANDBY and bounce the machine back to Steam.
+      lastActiveWasBrewRef.current = false;
+      lastProcessTypeRef.current = null;
     }
   }, [active, autoSteamEnabled, api, setIsFlushing]);
 

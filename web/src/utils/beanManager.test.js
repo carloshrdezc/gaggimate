@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  inferBeanForShot,
+  inferBeanIdForShot,
+  isBeanRecordedForShot,
   listBeans,
   migrateLegacyBeansToDevice,
   removeBean,
@@ -590,6 +593,86 @@ describe('beanManager', () => {
       expect(count).toBe(1);
       expect(readKey(BEANS_STORAGE_KEY).map(b => b.id)).toEqual(['bean-offline-2']);
       expect(readKey(BEANS_PENDING_STORAGE_KEY)).toEqual(['bean-offline-2']);
+    });
+  });
+
+  // PRO-422: device-recorded bean (beanId/beanType on the shot record or its
+  // notes) is authoritative and must win over the per-browser localStorage
+  // selection-event log, which is now only a legacy fallback.
+  describe('inferBeanForShot / inferBeanIdForShot precedence (PRO-422)', () => {
+    const BEAN_SELECTION_EVENTS_KEY = 'gaggimate-bean-selection-events';
+
+    function seedSelectionEvent({ profileLabel, beanId, beanName, selectedAtMs }) {
+      localStorage.setItem(
+        BEAN_SELECTION_EVENTS_KEY,
+        JSON.stringify([{ profileLabel, beanId, beanName, selectedAtMs }]),
+      );
+    }
+
+    it('prefers a device-recorded beanId in notes over the localStorage guess', () => {
+      seedSelectionEvent({
+        profileLabel: 'Espresso',
+        beanId: 'guessed-bean',
+        beanName: 'Guessed Bean',
+        selectedAtMs: 1000,
+      });
+      const shot = {
+        profile: 'Espresso',
+        timestamp: 5, // 5000ms > 1000ms, so the guess would otherwise match
+        notes: { beanId: 'recorded-bean', beanType: 'Recorded Bean' },
+      };
+      expect(inferBeanIdForShot(shot)).toBe('recorded-bean');
+      expect(inferBeanForShot(shot)).toBe('Recorded Bean');
+    });
+
+    it('prefers a device-recorded beanType (name) over the localStorage guess', () => {
+      seedSelectionEvent({
+        profileLabel: 'Espresso',
+        beanId: 'guessed-bean',
+        beanName: 'Guessed Bean',
+        selectedAtMs: 1000,
+      });
+      const shot = { profile: 'Espresso', timestamp: 5, notes: { beanType: 'Recorded Bean' } };
+      expect(inferBeanForShot(shot)).toBe('Recorded Bean');
+    });
+
+    it('falls back to the localStorage selection-event log only when nothing was recorded', () => {
+      seedSelectionEvent({
+        profileLabel: 'Espresso',
+        beanId: 'legacy-bean',
+        beanName: 'Legacy Bean',
+        selectedAtMs: 1000,
+      });
+      const shot = { profile: 'Espresso', timestamp: 5, notes: {} };
+      expect(inferBeanIdForShot(shot)).toBe('legacy-bean');
+      expect(inferBeanForShot(shot)).toBe('Legacy Bean');
+    });
+
+    it('returns empty when there is neither a recorded bean nor a matching selection event', () => {
+      const shot = { profile: 'Espresso', timestamp: 5, notes: {} };
+      expect(inferBeanIdForShot(shot)).toBe('');
+      expect(inferBeanForShot(shot)).toBe('');
+    });
+  });
+
+  describe('isBeanRecordedForShot (PRO-422)', () => {
+    it('is true when the shot notes carry a device-recorded beanId', () => {
+      expect(isBeanRecordedForShot({ notes: { beanId: 'bean-1' } })).toBe(true);
+    });
+
+    it('is true when the shot notes carry a device-recorded beanType', () => {
+      expect(isBeanRecordedForShot({ notes: { beanType: 'Some Bean' } })).toBe(true);
+    });
+
+    it('is true when the recorded fields are hoisted onto the shot record', () => {
+      expect(isBeanRecordedForShot({ beanId: 'bean-1' })).toBe(true);
+      expect(isBeanRecordedForShot({ beanType: 'Some Bean' })).toBe(true);
+    });
+
+    it('is false when the bean is only a localStorage/inferred guess', () => {
+      expect(isBeanRecordedForShot({ profile: 'Espresso', timestamp: 5, notes: {} })).toBe(false);
+      expect(isBeanRecordedForShot({})).toBe(false);
+      expect(isBeanRecordedForShot(null)).toBe(false);
     });
   });
 });
