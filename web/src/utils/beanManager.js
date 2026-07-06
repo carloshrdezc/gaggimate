@@ -732,3 +732,14 @@ export function inferBeanIdForShot(shot) {
   if (shot?.notes?.beanId) return shot.notes.beanId;
   return resolveSelectionEventForShot(shot)?.beanId || '';
 }
+
+// PRO-422: true when the bean on this shot was recorded by the device
+// (beanId/beanType present on the shot record or its notes), rather than guessed
+// from the per-browser localStorage selection-event log. Only a device-recorded
+// bean is authoritative — the "(archived)" suffix and cross-device consistency
+// must rely on this, never on the legacy localStorage fallback.
+export function isBeanRecordedForShot(shot) {
+  return Boolean(
+    shot?.beanId || shot?.beanType || shot?.notes?.beanId || shot?.notes?.beanType,
+  );
+}

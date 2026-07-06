@@ -1,5 +1,6 @@
 #include "ShotHistoryPlugin.h"
 
+#include "BeanResolutionPolicy.h"
 #include "ExtendedRecordingPolicy.h"
 #include "ShotIndexMetadataPolicy.h"
 #include <SD_MMC.h>
@@ -76,12 +77,6 @@ String padId(const String& id, int length = 10) {
     return padId((uint32_t)id.toInt(), length);
 }
 
-String normalizeBeanName(String value) {
-    value.trim();
-    value.toLowerCase();
-    return value;
-}
-
 float parseDoseValue(JsonVariantConst value) {
     if (value.isNull()) {
         return 0.0f;
@@ -98,27 +93,17 @@ float parseDoseValue(JsonVariantConst value) {
 }
 
 int findBeanIndexForNotes(JsonVariantConst notes, const std::vector<BeanEntry> &beans) {
-    const String beanId = notes["beanId"].as<String>();
-    if (!beanId.isEmpty()) {
-        for (size_t i = 0; i < beans.size(); ++i) {
-            if (beans[i].id == beanId) {
-                return static_cast<int>(i);
-            }
-        }
+    // PRO-422: id-first, name-second resolution lives in the pure, host-testable
+    // BeanResolutionPolicy so the device and the native unit tests share one
+    // matching order. Build a lightweight (id, name) view over the beans vector.
+    std::vector<bean_resolution::BeanRef> refs;
+    refs.reserve(beans.size());
+    for (const auto &bean : beans) {
+        refs.push_back({std::string(bean.id.c_str()), std::string(bean.name.c_str())});
     }
-
-    const String beanType = normalizeBeanName(notes["beanType"].as<String>());
-    if (beanType.isEmpty()) {
-        return -1;
-    }
-
-    for (size_t i = 0; i < beans.size(); ++i) {
-        if (normalizeBeanName(beans[i].name) == beanType) {
-            return static_cast<int>(i);
-        }
-    }
-
-    return -1;
+    const std::string beanId = std::string(notes["beanId"].as<String>().c_str());
+    const std::string beanType = std::string(notes["beanType"].as<String>().c_str());
+    return bean_resolution::resolveBeanIndex(beanId, beanType, refs);
 }
 
 float roundBeanQuantity(float value) {
@@ -440,14 +425,26 @@ void ShotHistoryPlugin::handleCompletedShot() {
         JsonDocument autoNotes;
         loadNotes(currentId, previousNotes);
         loadNotes(currentId, autoNotes);
+        // PRO-422: stamp the device-recorded bean onto the shot notes so every web
+        // client reads the same authoritative bean. Write beanType (name) and, when
+        // we resolved one at brew start, the stable beanId. We only fill fields the
+        // WebUI hasn't already written, so a user-entered bean is never clobbered.
+        bool notesChanged = false;
         if (autoNotes["beanType"].isNull() || autoNotes["beanType"].as<String>().isEmpty()) {
             autoNotes["beanType"] = currentBeanName;
+            notesChanged = true;
+        }
+        if (!currentBeanId.isEmpty() && (autoNotes["beanId"].isNull() || autoNotes["beanId"].as<String>().isEmpty())) {
+            autoNotes["beanId"] = currentBeanId;
+            notesChanged = true;
+        }
+        if (notesChanged) {
             hasNotes = saveNotes(currentId, autoNotes);
             if (hasNotes && !applyBeanUsageDelta(previousNotes, autoNotes)) {
                 ESP_LOGW("ShotHistoryPlugin", "Failed to update bean usage for completed shot %s", currentId.c_str());
             }
         } else {
-            hasNotes = true; // WebUI already wrote notes that include beanType
+            hasNotes = true; // WebUI already wrote notes that include beanType/beanId
         }
     } else {
         // No bean selected — WebUI may still have written dose-only notes.
@@ -632,6 +629,26 @@ void ShotHistoryPlugin::record() {
     }
 }
 
+String ShotHistoryPlugin::resolveSelectedBeanId(const String &beanName) {
+    if (beanName.isEmpty() || !controller) {
+        return "";
+    }
+    BeanManager *manager = controller->getBeanManager();
+    if (!manager) {
+        return "";
+    }
+    // Reuse the shared id-first/name-second resolver so the capture-time lookup
+    // and the read-time findBeanIndexForNotes agree on name normalization.
+    std::vector<BeanEntry> beans = manager->listBeans();
+    std::vector<bean_resolution::BeanRef> refs;
+    refs.reserve(beans.size());
+    for (const auto &bean : beans) {
+        refs.push_back({std::string(bean.id.c_str()), std::string(bean.name.c_str())});
+    }
+    const int idx = bean_resolution::resolveBeanIndex("", std::string(beanName.c_str()), refs);
+    return idx >= 0 ? beans[static_cast<size_t>(idx)].id : String("");
+}
+
 void ShotHistoryPlugin::startRecording() {
     // Acquire mutex to protect shared state
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
@@ -660,6 +677,13 @@ void ShotHistoryPlugin::startRecording() {
     currentProfileName = controller->getProcessType() == MODE_MANUAL ? "Manual"
                                                                      : controller->getProfileManager()->getSelectedProfile().label;
     currentBeanName = controller->getSettings().getSelectedBean();
+    // PRO-422: the device stores only the selected bean NAME (req:beans:select
+    // carries no id), so resolve name -> stable BeanManager id here at capture
+    // time. This id is written durably onto the shot notes at shot end so every
+    // web client reads the same authoritative bean instead of guessing per
+    // browser. Empty when no bean is selected or the name no longer matches a
+    // stored bean (older/deleted bean) — the shot then carries name-only, as before.
+    currentBeanId = resolveSelectedBeanId(currentBeanName);
     recording = true;
     extendedRecording = false;
     indexEntryCreated = false; // Reset flag for new shot
