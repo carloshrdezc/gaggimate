@@ -21,6 +21,7 @@
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ChangeModeDeferPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
+#include <display/plugins/StandbyReassertPolicy.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
@@ -1206,6 +1207,22 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 return;
             if (newMode == MODE_MANUAL && !controller->isManualAvailable())
                 return;
+            // PRO-421: an explicit Standby wins over a stale, near-immediate
+            // re-assert of a non-Standby mode. When Stop-Steam is pressed while
+            // auto-steam is enabled, the web dashboard reflexively re-fires
+            // `req:change-mode` STEAM ~150 ms after the STANDBY (confirmed live);
+            // the firmware is the authoritative layer and must reject that stale
+            // re-assert so a single press lands in Standby and stays. STANDBY
+            // itself is never suppressed. A deliberate re-entry outside the short
+            // guard window still works. Checked BEFORE deactivate() so a
+            // suppressed request tears nothing down. Mirrors PRO-391's principle
+            // (a stale assertion must not override an explicit Standby) for the
+            // WebUIPlugin mode-change path. See StandbyReassertPolicy.h.
+            const unsigned long msSinceStandby =
+                sawExplicitStandby ? (millis() - lastExplicitStandbyMs) : STANDBY_REASSERT_GUARD_MS;
+            if (shouldSuppressStandbyReassert(newMode, msSinceStandby)) {
+                return;
+            }
             // PRO-261: honor the post-shot extended-recording / scale-settle gate
             // that the display's auto-steam path already respects (DefaultUI::loop
             // / pendingAutoSteam, PRO-223 / PRO-248 / PRO-232). This handler runs
@@ -1241,6 +1258,12 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 pendingModeChange = false;
                 controller->clear();
                 controller->setMode(newMode);
+                // PRO-421: record when an explicit STANDBY landed so an immediate
+                // stale non-STANDBY re-assert (see the guard above) is rejected.
+                if (newMode == MODE_STANDBY) {
+                    lastExplicitStandbyMs = millis();
+                    sawExplicitStandby = true;
+                }
             }
         }
     } else if (msgType == "req:change-brew-target") {
