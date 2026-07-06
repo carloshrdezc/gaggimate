@@ -98,6 +98,11 @@ class ShotHistoryPlugin : public Plugin {
     void handleCompletedShot();
     void appendCompletedShotToIndex(bool hasNotes = false);
 
+    // PRO-422: resolve the selected bean NAME (all Settings stores) to its stable
+    // BeanManager id at capture time. Returns "" when no bean is selected, the
+    // BeanManager is unavailable, or no stored bean matches the name.
+    String resolveSelectedBeanId(const String &beanName);
+
     unsigned long getTime();
 
     void endRecording(bool allowExtendedRecording = true);
@@ -144,6 +149,7 @@ class ShotHistoryPlugin : public Plugin {
     float currentPuckResistance = 0.0f;
     String currentProfileName;
     String currentBeanName;
+    String currentBeanId; // PRO-422: BeanManager id of the selected bean at brew start ("" if none/unknown)
 
     // Phase transition tracking (v5+)
     uint8_t lastRecordedPhase = 0xFF; // Invalid initial value to detect first phase

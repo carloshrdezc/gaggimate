@@ -40,7 +40,7 @@ import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
 import { faXmark } from '@fortawesome/free-solid-svg-icons/faXmark';
-import { inferBeanForShot, inferBeanIdForShot, listBeans } from '../../utils/beanManager.js';
+import { inferBeanForShot, inferBeanIdForShot, isBeanRecordedForShot, listBeans } from '../../utils/beanManager.js';
 import {
   defaultFilters,
   hasActiveFilters,
@@ -127,7 +127,12 @@ export function ShotHistory() {
   }, [apiService, connected.value]);
 
   const enrichShotWithBean = useCallback(
-    shot => ({ ...shot, beanName: inferBeanForShot(shot), beanId: inferBeanIdForShot(shot) }),
+    shot => ({
+      ...shot,
+      beanName: inferBeanForShot(shot),
+      beanId: inferBeanIdForShot(shot),
+      beanRecorded: isBeanRecordedForShot(shot),
+    }),
     [],
   );
 
@@ -439,7 +444,10 @@ export function ShotHistory() {
       const bean = shot.beanId
         ? allBeans.find(b => b.id === shot.beanId)
         : allBeans.find(b => b.name.trim().toLowerCase() === shot.beanName.trim().toLowerCase());
-      return bean ? { ...shot, beanArchived: !!bean.archived } : shot;
+      // PRO-422: only flag "(archived)" when the bean was recorded by the device
+      // (authoritative). An inferred/localStorage-guessed bean must not surface
+      // the archived suffix, since the guess may bind to an unrelated bean.
+      return bean && shot.beanRecorded ? { ...shot, beanArchived: !!bean.archived } : shot;
     });
 
     return {
