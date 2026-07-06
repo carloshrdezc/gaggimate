@@ -524,6 +524,7 @@ void WebUIPlugin::loop() {
         doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
         doc["puid"] = controller->getProfileManager()->getSelectedProfile().id;
         doc["bn"] = controller->getSettings().getSelectedBean();
+        doc["gr"] = controller->getSettings().getSelectedGrinder();
         doc["cp"] = controller->getSystemInfo().capabilities.pressure;
         doc["cd"] = controller->getSystemInfo().capabilities.dimming;
         doc["tw"] = profileManager->getSelectedProfile().getTotalVolume(); // total target weight for the process
@@ -1662,11 +1663,34 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
         if (!ok) {
             response["error"] = F("Save failed");
         } else {
+            // PRO-424: mirror the bean delete-cleanup. Grinders are a recorded
+            // history with no hard-delete endpoint, so a save/sync is the only
+            // point a previously-selected grinder can disappear (evicted by the
+            // cap, or replaced by a batch sync that omits it). If the currently
+            // selected grinder is no longer present, clear the selection and
+            // emit the event so the web clients converge.
+            const String selected = controller->getSettings().getSelectedGrinder();
+            if (!selected.isEmpty()) {
+                auto grinders = grinderManager->listGrinders();
+                bool stillPresent = std::find(grinders.begin(), grinders.end(), selected) != grinders.end();
+                if (!stillPresent) {
+                    controller->getSettings().setSelectedGrinder("");
+                    pluginManager->trigger("grinders:selected", "name", String(""));
+                }
+            }
             auto arr = response["grinders"].to<JsonArray>();
             for (const auto &grinder : grinderManager->listGrinders()) {
                 arr.add(grinder);
             }
         }
+    } else if (type == "req:grinders:select") {
+        // PRO-424: firmware-authoritative selected grinder, mirroring
+        // req:beans:select. Persist to NVS and broadcast so every client
+        // (and the status payload's "gr" key) reflects the new selection.
+        String grinderName = request["name"].is<String>() ? request["name"].as<String>() : String("");
+        controller->getSettings().setSelectedGrinder(grinderName);
+        pluginManager->trigger("grinders:selected", "name", grinderName);
+        response["name"] = grinderName;
     }
 
     sendResponse(clientId, response);
