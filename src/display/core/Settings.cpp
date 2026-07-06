@@ -108,6 +108,7 @@ void Settings::load() {
     clock24hFormat = preferences.getBool("clk_24h", true);
     selectedProfile = preferences.getString("sp", "");
     selectedBean = preferences.getString("sb", "");
+    selectedGrinder = preferences.getString("sg", "");
     favoritedProfiles = cleanProfileIds(explode(preferences.getString("fp", ""), ','), "favoritedProfiles");
     profileOrder = cleanProfileIds(explode(preferences.getString("po", ""), ','), "profileOrder");
     steamPumpPercentage = preferences.getFloat("spp", DEFAULT_STEAM_PUMP_PERCENTAGE);
@@ -422,6 +423,11 @@ void Settings::setSelectedBean(String selected_bean) {
     save();
 }
 
+void Settings::setSelectedGrinder(String selected_grinder) {
+    this->selectedGrinder = std::move(selected_grinder);
+    save();
+}
+
 void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
     favoritedProfiles = cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles");
     save();
@@ -669,6 +675,7 @@ void Settings::doSave() {
     preferences.putBool("clk_24h", clock24hFormat);
     preferences.putString("sp", selectedProfile);
     preferences.putString("sb", selectedBean);
+    preferences.putString("sg", selectedGrinder);
     preferences.putInt("sbt", standbyTimeout);
     preferences.putBool("mb", momentaryButtons);
     preferences.putString("fp", implode(favoritedProfiles, ","));
