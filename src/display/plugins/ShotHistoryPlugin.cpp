@@ -92,15 +92,24 @@ float parseDoseValue(JsonVariantConst value) {
     return std::isfinite(parsed) && parsed > 0.0f ? parsed : 0.0f;
 }
 
-int findBeanIndexForNotes(JsonVariantConst notes, const std::vector<BeanEntry> &beans) {
-    // PRO-422: id-first, name-second resolution lives in the pure, host-testable
-    // BeanResolutionPolicy so the device and the native unit tests share one
-    // matching order. Build a lightweight (id, name) view over the beans vector.
+// PRO-423: build the lightweight (id, name) view the pure BeanResolutionPolicy
+// consumes. Shared by both resolution call sites (read-time findBeanIndexForNotes
+// and capture-time resolveSelectedBeanId) so the BeanEntry -> BeanRef marshalling
+// lives in exactly one place.
+std::vector<bean_resolution::BeanRef> refsFromBeans(const std::vector<BeanEntry> &beans) {
     std::vector<bean_resolution::BeanRef> refs;
     refs.reserve(beans.size());
     for (const auto &bean : beans) {
         refs.push_back({std::string(bean.id.c_str()), std::string(bean.name.c_str())});
     }
+    return refs;
+}
+
+int findBeanIndexForNotes(JsonVariantConst notes, const std::vector<BeanEntry> &beans) {
+    // PRO-422: id-first, name-second resolution lives in the pure, host-testable
+    // BeanResolutionPolicy so the device and the native unit tests share one
+    // matching order. Build a lightweight (id, name) view over the beans vector.
+    const std::vector<bean_resolution::BeanRef> refs = refsFromBeans(beans);
     const std::string beanId = std::string(notes["beanId"].as<String>().c_str());
     const std::string beanType = std::string(notes["beanType"].as<String>().c_str());
     return bean_resolution::resolveBeanIndex(beanId, beanType, refs);
@@ -640,11 +649,7 @@ String ShotHistoryPlugin::resolveSelectedBeanId(const String &beanName) {
     // Reuse the shared id-first/name-second resolver so the capture-time lookup
     // and the read-time findBeanIndexForNotes agree on name normalization.
     std::vector<BeanEntry> beans = manager->listBeans();
-    std::vector<bean_resolution::BeanRef> refs;
-    refs.reserve(beans.size());
-    for (const auto &bean : beans) {
-        refs.push_back({std::string(bean.id.c_str()), std::string(bean.name.c_str())});
-    }
+    const std::vector<bean_resolution::BeanRef> refs = refsFromBeans(beans);
     const int idx = bean_resolution::resolveBeanIndex("", std::string(beanName.c_str()), refs);
     return idx >= 0 ? beans[static_cast<size_t>(idx)].id : String("");
 }
