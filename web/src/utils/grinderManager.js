@@ -434,6 +434,22 @@ export function inferGrinderForShot(shot) {
   return resolveGrinderSelectionForShot(shot)?.grinder || '';
 }
 
+// PRO-438: resolve the grinder to PRE-FILL into the Shot Notes form's editable
+// `grinder` field. The firmware (PRO-428 contract) stamps the selected grinder
+// under `grinderName` in the shot's device notes JSON, but the form field binds
+// to `grinder`, so that authoritative device value was being dropped (grinder
+// blank in a fresh browser). This surfaces it — fill-only-when-empty so a
+// previously user-entered/saved grinder is never clobbered.
+// Precedence: existing user-entered/saved loadedNotes.grinder ->
+// device-recorded savedNotes.grinderName -> localStorage selection-log guess
+// shot.grinder. Returns an editable pre-fill, never authoritative-locked.
+export function resolveGrinderPrefill(loadedNotes, savedNotes, shot) {
+  if (loadedNotes?.grinder) return loadedNotes.grinder;
+  if (savedNotes?.grinderName) return savedNotes.grinderName;
+  if (shot?.grinder) return shot.grinder;
+  return '';
+}
+
 // PRO-430: true when the grinder on this shot was recorded by the DEVICE
 // (the PRO-428 firmware `grinderName` field — or an explicit shot grinder —
 // present on the shot record or its notes), rather than guessed from the

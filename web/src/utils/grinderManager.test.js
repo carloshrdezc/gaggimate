@@ -8,6 +8,7 @@ import {
   inferGrinderForShot,
   inferGrindSettingForShot,
   isGrinderRecordedForShot,
+  resolveGrinderPrefill,
 } from './grinderManager.js';
 
 const GRINDERS_STORAGE_KEY = 'gaggimate-grinders';
@@ -502,6 +503,40 @@ describe('grinderManager', () => {
       });
       const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrinderForShot(shot)).toBe('LStore Guess');
+    });
+  });
+
+  // PRO-438: the Shot Notes form field binds to `grinder`, but the device
+  // firmware stamps the selected grinder under `grinderName` (PRO-428). The
+  // ShotNotesCard prefill dropped it (grinder blank in a fresh browser).
+  // resolveGrinderPrefill surfaces the device value as an editable default,
+  // fill-only-when-empty so a saved grinder is never clobbered.
+  // Precedence: saved loadedNotes.grinder > device savedNotes.grinderName >
+  // localStorage selection-log guess shot.grinder.
+  describe('resolveGrinderPrefill (PRO-438)', () => {
+    it('keeps a saved user-entered grinder over the device grinderName', () => {
+      const loadedNotes = { grinder: 'My Saved Grinder' };
+      const savedNotes = { grinderName: 'Device Df64' };
+      const shot = { grinder: 'LStore Guess' };
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('My Saved Grinder');
+    });
+
+    it('uses the device savedNotes.grinderName when no saved grinder exists', () => {
+      const loadedNotes = { grinder: '' };
+      const savedNotes = { grinderName: 'Device Df64' };
+      const shot = { grinder: 'LStore Guess' };
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('Device Df64');
+    });
+
+    it('falls back to the localStorage shot.grinder guess when neither is present', () => {
+      const loadedNotes = { grinder: '' };
+      const savedNotes = {};
+      const shot = { grinder: 'LStore Guess' };
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('LStore Guess');
+    });
+
+    it('returns an empty string when no source has a grinder', () => {
+      expect(resolveGrinderPrefill({ grinder: '' }, {}, {})).toBe('');
     });
   });
 });
