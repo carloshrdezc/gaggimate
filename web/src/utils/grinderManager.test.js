@@ -7,6 +7,7 @@ import {
   getCurrentGrinderSelection,
   inferGrinderForShot,
   inferGrindSettingForShot,
+  isGrinderRecordedForShot,
 } from './grinderManager.js';
 
 const GRINDERS_STORAGE_KEY = 'gaggimate-grinders';
@@ -301,14 +302,22 @@ describe('grinderManager', () => {
     });
 
     it('does not infer a selection recorded AFTER the shot was pulled', () => {
-      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
       const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) - 60 };
       expect(inferGrinderForShot(shot)).toBe('');
       expect(inferGrindSettingForShot(shot)).toBe('');
     });
 
     it('prefers an explicit value on the shot / its notes over the selection log', () => {
-      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
       const shot = {
         profile: 'Espresso',
         timestamp: Math.floor(Date.now() / 1000) + 5,
@@ -319,7 +328,11 @@ describe('grinderManager', () => {
     });
 
     it('does not cross profiles', () => {
-      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
       const shot = { profile: 'Filter', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrinderForShot(shot)).toBe('');
     });
@@ -341,7 +354,9 @@ describe('grinderManager', () => {
     });
 
     it('no-ops for a blank / whitespace value', () => {
-      expect(recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '   ' })).toBeNull();
+      expect(
+        recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '   ' }),
+      ).toBeNull();
       expect(recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '' })).toBeNull();
       const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrindSettingForShot(shot)).toBe('');
@@ -349,7 +364,11 @@ describe('grinderManager', () => {
 
     it('takes PRECEDENCE over the machine grind-TARGET label from the selection log', () => {
       // Machine target label recorded via the grinder-selection log …
-      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
       // … and a manual dial number recorded afterwards. The manual value wins.
       recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
 
@@ -362,14 +381,22 @@ describe('grinderManager', () => {
       // a machine-target selection recorded after the manual entry must not
       // shadow it.
       recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
-      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
 
       const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrindSettingForShot(shot)).toBe('3.2');
     });
 
     it('falls back to the machine target label when no manual value was entered', () => {
-      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
       const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrindSettingForShot(shot)).toBe('28s');
     });
@@ -401,6 +428,80 @@ describe('grinderManager', () => {
       recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
       const shot = { profile: 'Filter', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrindSettingForShot(shot)).toBe('');
+    });
+  });
+
+  // PRO-430: the device now stamps the selected grinder NAME into a shot's notes
+  // under `grinderName` (PRO-428 firmware contract). isGrinderRecordedForShot
+  // distinguishes that authoritative device value from a per-browser
+  // localStorage selection-event guess, and inferGrinderForShot must prefer it.
+  describe('isGrinderRecordedForShot (PRO-430)', () => {
+    it('is true when the shot notes carry a device-recorded grinderName', () => {
+      expect(isGrinderRecordedForShot({ notes: { grinderName: 'Niche Zero' } })).toBe(true);
+    });
+
+    it('is true when the recorded fields are hoisted onto the shot record', () => {
+      expect(isGrinderRecordedForShot({ grinderName: 'Niche Zero' })).toBe(true);
+    });
+
+    it('is true when a user-entered grinder note is present', () => {
+      expect(isGrinderRecordedForShot({ notes: { grinder: 'Saved Grinder' } })).toBe(true);
+      expect(isGrinderRecordedForShot({ grinder: 'Saved Grinder' })).toBe(true);
+    });
+
+    it('is false when the grinder is only a localStorage/inferred guess', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'LStore Guess',
+        grindSetting: '28s',
+      });
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5, notes: {} };
+      // A localStorage selection event WOULD infer for this shot, but no device
+      // field is present, so it is not authoritative.
+      expect(inferGrinderForShot(shot)).toBe('LStore Guess');
+      expect(isGrinderRecordedForShot(shot)).toBe(false);
+      expect(isGrinderRecordedForShot({})).toBe(false);
+      expect(isGrinderRecordedForShot(null)).toBe(false);
+    });
+  });
+
+  describe('inferGrinderForShot device-recorded precedence (PRO-430)', () => {
+    it('prefers the device-recorded notes.grinderName over a different localStorage-log grinder', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'LStore Guess',
+        grindSetting: '28s',
+      });
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grinderName: 'Device Niche' },
+      };
+      expect(inferGrinderForShot(shot)).toBe('Device Niche');
+    });
+
+    it('prefers a hoisted shot.grinderName over the localStorage log', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'LStore Guess',
+        grindSetting: '28s',
+      });
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        grinderName: 'Device Niche',
+      };
+      expect(inferGrinderForShot(shot)).toBe('Device Niche');
+    });
+
+    it('still resolves a localStorage-only shot from the selection log (no regression)', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'LStore Guess',
+        grindSetting: '28s',
+      });
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrinderForShot(shot)).toBe('LStore Guess');
     });
   });
 });

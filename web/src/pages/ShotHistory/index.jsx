@@ -41,7 +41,7 @@ import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
 import { faXmark } from '@fortawesome/free-solid-svg-icons/faXmark';
 import { inferBeanForShot, inferBeanIdForShot, isBeanRecordedForShot, listBeans } from '../../utils/beanManager.js';
-import { inferGrinderForShot, inferGrindSettingForShot } from '../../utils/grinderManager.js';
+import { inferGrinderForShot, inferGrindSettingForShot, isGrinderRecordedForShot } from '../../utils/grinderManager.js';
 import {
   defaultFilters,
   hasActiveFilters,
@@ -133,6 +133,7 @@ export function ShotHistory() {
       beanName: inferBeanForShot(shot),
       beanId: inferBeanIdForShot(shot),
       beanRecorded: isBeanRecordedForShot(shot),
+      grinderRecorded: isGrinderRecordedForShot(shot),
       // PRO-425: pre-fill defaults for Shot Notes' grinder / grindSetting from
       // the dashboard grinder-selection log. Editable — not authoritative.
       grinder: inferGrinderForShot(shot),
