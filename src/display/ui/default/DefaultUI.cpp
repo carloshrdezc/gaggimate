@@ -651,6 +651,13 @@ void DefaultUI::init() {
         selectedBean = event.getString("name");
         rerender = true;
     });
+    // PRO-428: mirror the beans:selected listener for grinders. The firmware already
+    // fires grinders:selected with a "name" string (WebUIPlugin.cpp) but had zero
+    // on-device subscribers until now. Surfaced on the GrindScreen next to the bean.
+    pluginManager->on("grinders:selected", [this](Event const &event) {
+        selectedGrinder = event.getString("name");
+        rerender = true;
+    });
     pluginManager->on("controller:volumetric-measurement:bluetooth:change", [=](Event const &event) {
         double newWeight = event.getFloat("value");
         if (round(newWeight * 10.0) != round(bluetoothWeight * 10.0)) {
@@ -1193,15 +1200,30 @@ void DefaultUI::setupReactive() {
                               }
                               ensureGrindBeanLabel();
                               if (grindBeanLabel != nullptr) {
-                                  if (selectedBean.isEmpty()) {
+                                  // PRO-428: the GrindScreen is where the grinder is
+                                  // most relevant, so surface it alongside the bean on
+                                  // the same wrap label. Show "Bean • X" and/or
+                                  // "Grinder • Y" (each line omitted when empty); hide
+                                  // the whole label only when neither is selected.
+                                  if (selectedBean.isEmpty() && selectedGrinder.isEmpty()) {
                                       lv_obj_add_flag(grindBeanLabel, LV_OBJ_FLAG_HIDDEN);
                                   } else {
                                       lv_obj_clear_flag(grindBeanLabel, LV_OBJ_FLAG_HIDDEN);
-                                      lv_label_set_text_fmt(grindBeanLabel, "Bean • %s", selectedBean.c_str());
+                                      String label;
+                                      if (!selectedBean.isEmpty()) {
+                                          label = "Bean • " + selectedBean;
+                                      }
+                                      if (!selectedGrinder.isEmpty()) {
+                                          if (!label.isEmpty()) {
+                                              label += "\n";
+                                          }
+                                          label += "Grinder • " + selectedGrinder;
+                                      }
+                                      lv_label_set_text(grindBeanLabel, label.c_str());
                                   }
                               }
                           },
-                          &bluetoothWeight, &volumetricAvailable, &bluetoothScales, &selectedBean);
+                          &bluetoothWeight, &volumetricAvailable, &bluetoothScales, &selectedBean, &selectedGrinder);
     effect_mgr.use_effect(
         [=] { return currentScreen == ui_BrewScreen; },
         [=]() {

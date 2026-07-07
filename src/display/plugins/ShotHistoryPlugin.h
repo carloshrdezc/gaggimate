@@ -150,6 +150,7 @@ class ShotHistoryPlugin : public Plugin {
     String currentProfileName;
     String currentBeanName;
     String currentBeanId; // PRO-422: BeanManager id of the selected bean at brew start ("" if none/unknown)
+    String currentGrinderName; // PRO-428: selected grinder name at brew start ("" if none); stamped as notes "grinderName"
 
     // Phase transition tracking (v5+)
     uint8_t lastRecordedPhase = 0xFF; // Invalid initial value to detect first phase
