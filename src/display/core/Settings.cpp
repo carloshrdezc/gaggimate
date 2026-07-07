@@ -418,13 +418,75 @@ void Settings::setSelectedProfile(String selected_profile) {
     save();
 }
 
+SemaphoreHandle_t Settings::ensureSelectedNameMutex() const {
+    if (selectedNameMutex == nullptr) {
+        selectedNameMutex = xSemaphoreCreateMutex();
+        if (selectedNameMutex == nullptr) {
+            // Out of memory creating the mutex: degrade gracefully. The selected-name
+            // accessors proceed without locking rather than crashing; the only downside
+            // is the original (pre-PRO-427) torn-read race.
+            ESP_LOGE("Settings", "Failed to create selected-name mutex; proceeding without locking");
+        }
+    }
+    return selectedNameMutex;
+}
+
+String Settings::getSelectedBean() const {
+    // PRO-427: copy the member into a local under the lock, then return the local so
+    // the String copy cannot race a concurrent setSelectedBean() buffer realloc.
+    SemaphoreHandle_t mutex = ensureSelectedNameMutex();
+    if (mutex == nullptr) {
+        return selectedBean;
+    }
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    String bean = selectedBean;
+    xSemaphoreGive(mutex);
+    return bean;
+}
+
+String Settings::getSelectedGrinder() const {
+    // PRO-427: same guarded copy as getSelectedBean(), sharing selectedNameMutex.
+    SemaphoreHandle_t mutex = ensureSelectedNameMutex();
+    if (mutex == nullptr) {
+        return selectedGrinder;
+    }
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    String grinder = selectedGrinder;
+    xSemaphoreGive(mutex);
+    return grinder;
+}
+
 void Settings::setSelectedBean(String selected_bean) {
-    this->selectedBean = std::move(selected_bean);
+    // PRO-427: assign under the shared lock so a concurrent getSelectedBean() copy
+    // never observes a String buffer mid-realloc. save() is intentionally left
+    // OUTSIDE the lock scope: it only sets dirty=true (the deferred flush task calls
+    // doSave() later), so holding the lock across it would gain nothing and risk
+    // widening the critical section over a flash write.
+    {
+        SemaphoreHandle_t mutex = ensureSelectedNameMutex();
+        if (mutex != nullptr) {
+            xSemaphoreTake(mutex, portMAX_DELAY);
+            this->selectedBean = std::move(selected_bean);
+            xSemaphoreGive(mutex);
+        } else {
+            this->selectedBean = std::move(selected_bean);
+        }
+    }
     save();
 }
 
 void Settings::setSelectedGrinder(String selected_grinder) {
-    this->selectedGrinder = std::move(selected_grinder);
+    // PRO-427: same guarded assignment as setSelectedBean(), sharing selectedNameMutex.
+    {
+        SemaphoreHandle_t mutex = ensureSelectedNameMutex();
+        if (mutex != nullptr) {
+            xSemaphoreTake(mutex, portMAX_DELAY);
+            this->selectedGrinder = std::move(selected_grinder);
+            xSemaphoreGive(mutex);
+        } else {
+            this->selectedGrinder = std::move(selected_grinder);
+        }
+    }
     save();
 }
 

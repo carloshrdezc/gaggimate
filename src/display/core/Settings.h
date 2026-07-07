@@ -6,8 +6,10 @@
 #include <Preferences.h>
 #include <display/core/constants.h>
 #include <display/core/utils.h>
-#include <vector>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <utility>
+#include <vector>
 
 #define PREFERENCES_KEY "controller"
 
@@ -112,8 +114,12 @@ class Settings {
     String getTimezone() const { return timezone; }
     bool isClock24hFormat() const { return clock24hFormat; }
     String getSelectedProfile() const { return selectedProfile; }
-    String getSelectedBean() const { return selectedBean; }
-    String getSelectedGrinder() const { return selectedGrinder; }
+    // PRO-427: getSelectedBean/getSelectedGrinder copy the String member under
+    // selectedNameMutex (see Settings.cpp). Declared out-of-line so the guarded
+    // copy is not exposed as inline; the read task and the WebSocket-handler task
+    // that mutates these members must serialize to avoid a torn String read.
+    String getSelectedBean() const;
+    String getSelectedGrinder() const;
     std::vector<String> getFavoritedProfiles() const { return favoritedProfiles; }
     std::vector<String> getProfileOrder() const { return profileOrder; }
     int getMainBrightness() const { return mainBrightness; }
@@ -270,6 +276,14 @@ class Settings {
     String installedChannel = DEFAULT_OTA_CHANNEL;
     String selectedBean;
     String selectedGrinder;
+    // PRO-427: guards cross-task access to selectedBean/selectedGrinder. The
+    // display/loop task copy-reads these (status payload, shot-history capture)
+    // while the WebSocket-handler task (async_tcp) mutates them; on a dual-core
+    // ESP32 a concurrent set reallocates the String buffer under a copy-read
+    // (torn read). One shared mutex serializes all four selected-name accessors.
+    // mutable so the const getters can lock it; lazily created on first use
+    // (robust to static-init order); a null handle degrades to lock-free.
+    mutable SemaphoreHandle_t selectedNameMutex = nullptr;
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering
     float steamPumpPercentage = DEFAULT_STEAM_PUMP_PERCENTAGE;
@@ -303,6 +317,12 @@ class Settings {
     bool cloudRelayEnabled = false;
 
     void doSave();
+    // PRO-427: lazily create selectedNameMutex on first use and return it (may be
+    // null if creation fails, in which case callers degrade to lock-free access).
+    // const because the const selected-name getters need to lock; the handle is
+    // mutable. Not itself thread-safe against a truly simultaneous first call from
+    // two tasks, but the first accesses happen during single-threaded setup.
+    SemaphoreHandle_t ensureSelectedNameMutex() const;
     xTaskHandle taskHandle = nullptr;
     [[noreturn]] static void loopTask(void *arg);
 };
