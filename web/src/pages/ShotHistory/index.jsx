@@ -133,6 +133,9 @@ export function ShotHistory() {
       beanName: inferBeanForShot(shot),
       beanId: inferBeanIdForShot(shot),
       beanRecorded: isBeanRecordedForShot(shot),
+      // PRO-434 (ref PRO-430 / PR #429): reserved for symmetry with `beanRecorded`.
+      // No current consumer — unlike beans, grinders have no archived lifecycle,
+      // so there is no `grinderArchived` feature to gate. Seeds a future one.
       grinderRecorded: isGrinderRecordedForShot(shot),
       // PRO-425: pre-fill defaults for Shot Notes' grinder / grindSetting from
       // the dashboard grinder-selection log. Editable — not authoritative.
