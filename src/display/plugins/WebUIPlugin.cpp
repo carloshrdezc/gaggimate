@@ -1669,9 +1669,9 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
             // cap, or replaced by a batch sync that omits it). If the currently
             // selected grinder is no longer present, clear the selection and
             // emit the event so the web clients converge.
+            const auto grinders = grinderManager->listGrinders();
             const String selected = controller->getSettings().getSelectedGrinder();
             if (!selected.isEmpty()) {
-                auto grinders = grinderManager->listGrinders();
                 bool stillPresent = std::find(grinders.begin(), grinders.end(), selected) != grinders.end();
                 if (!stillPresent) {
                     controller->getSettings().setSelectedGrinder("");
@@ -1679,7 +1679,7 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
                 }
             }
             auto arr = response["grinders"].to<JsonArray>();
-            for (const auto &grinder : grinderManager->listGrinders()) {
+            for (const auto &grinder : grinders) {
                 arr.add(grinder);
             }
         }
