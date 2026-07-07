@@ -5,6 +5,7 @@ import {
   MODE_MANUAL,
   MODE_STANDBY,
   MODE_STEAM,
+  buildStandbyProfileCurve,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
@@ -269,3 +270,59 @@ test('yield is locked when all conditions are false', () => {
     computeYieldEditable({ allowYieldOverride: false, brewTarget: false, bluetoothConnected: false })
   ).toBe(false);
 });
+
+// PRO-426: standby profile mini-curve builder.
+test('standby curve returns null for missing / empty / non-array phases', () => {
+  expect(buildStandbyProfileCurve(null, { width: 100, height: 40 })).toBeNull();
+  expect(buildStandbyProfileCurve({}, { width: 100, height: 40 })).toBeNull();
+  expect(buildStandbyProfileCurve({ phases: [] }, { width: 100, height: 40 })).toBeNull();
+  expect(buildStandbyProfileCurve({ phases: 'nope' }, { width: 100, height: 40 })).toBeNull();
+});
+
+test('standby curve returns null for invalid dimensions', () => {
+  const p = { phases: [{ duration: 10, pump: { pressure: 9 } }] };
+  expect(buildStandbyProfileCurve(p, { width: 0, height: 40 })).toBeNull();
+  expect(buildStandbyProfileCurve(p, { width: 100, height: -1 })).toBeNull();
+  expect(buildStandbyProfileCurve(p, {})).toBeNull();
+});
+
+test('standby curve returns null when profile has zero total duration', () => {
+  const p = { phases: [{ duration: 0, pump: { pressure: 9 } }, { pump: { pressure: 6 } }] };
+  expect(buildStandbyProfileCurve(p, { width: 100, height: 40 })).toBeNull();
+});
+
+test('standby curve maps a two-phase pressure profile to viewBox points', () => {
+  // Phase 1: 10s ramp to 9 bar; phase 2: 20s hold at 9 bar. Max pressure = 12.
+  const profile = {
+    phases: [
+      { duration: 10, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+      { duration: 20, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+    ],
+  };
+  const curve = buildStandbyProfileCurve(profile, { width: 102, height: 42, padding: 2 });
+  expect(curve).not.toBeNull();
+  expect(curve.totalDuration).toBe(30);
+  expect(curve.phaseCount).toBe(2);
+  // 3 points: t=0, end of phase 1 (t=10), end of phase 2 (t=30).
+  const pts = curve.pressure.split(' ');
+  expect(pts).toHaveLength(3);
+  // inner width = 98 (102 - 2*2), padding 2. x at t=0 -> 2.0; t=30 -> 100.0.
+  expect(pts[0].split(',')[0]).toBe('2.0');
+  expect(pts[2].split(',')[0]).toBe('100.0');
+  // y for 9/12 bar: padding + (1 - 0.75)*innerH(38) = 2 + 9.5 = 11.5.
+  expect(pts[1].split(',')[1]).toBe('11.5');
+});
+
+test('standby curve treats -1 sentinel as carry-over of previous value', () => {
+  const profile = {
+    phases: [
+      { duration: 5, pump: { target: 'pressure', pressure: 6, flow: 2 } },
+      { duration: 5, pump: { target: 'pressure', pressure: -1, flow: -1 } },
+    ],
+  };
+  const curve = buildStandbyProfileCurve(profile, { width: 100, height: 40 });
+  const pPts = curve.pressure.split(' ');
+  // End-of-phase-1 y and end-of-phase-2 y must match (6 bar carried through).
+  expect(pPts[1].split(',')[1]).toBe(pPts[2].split(',')[1]);
+});
+
