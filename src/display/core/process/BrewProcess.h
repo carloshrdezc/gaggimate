@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <display/core/constants.h>
 #include <display/core/predictive.h>
+#include <display/core/process/GlobalWeightCutoffPolicy.h>
 #include <display/core/process/Process.h>
 #include <display/models/profile.h>
 #include <esp_log.h>
@@ -64,16 +65,37 @@ class BrewProcess : public Process {
 
     unsigned long getPhaseDuration() const { return static_cast<long>(currentPhase.duration) * 1000L; }
 
+    // Predicted extra volume (grams) expected to land during brewDelay, using
+    // the volumetric rate calculator. Zero when no volume has been measured yet
+    // and clamped to [0, 8] g so a spurious rate can't project a huge overshoot.
+    // Shared by isCurrentPhaseFinished() (per-phase stop) and
+    // isGlobalWeightCutoffReached() (PRO-440 whole-shot ceiling) so both account
+    // for in-flight drips identically.
+    double predictedAddedVolume() {
+        if (currentVolume <= 0.0) {
+            return 0.0;
+        }
+        double currentRate = volumetricRateCalculator.getRate();
+        return std::clamp(currentRate * brewDelay, 0.0, 8.0);
+    }
+
+    // PRO-440: whole-shot cumulative-weight ceiling, evaluated every progress
+    // tick independent of the current phase. Derives the ceiling from the
+    // profile's final volumetric target (getBrewVolume()) and reuses the same
+    // predictive-overshoot volume as the per-phase stop. See
+    // GlobalWeightCutoffPolicy.h for the pure decision + rationale.
+    bool isGlobalWeightCutoffReached() {
+        return ::isGlobalWeightCutoffReached(target, volumetricAvailable, getBrewVolume(), currentVolume,
+                                             predictedAddedVolume());
+    }
+
     bool isCurrentPhaseFinished() {
         if (millis() - currentPhaseStarted > BREW_SAFETY_DURATION_MS) {
             return true;
         }
         double volume = currentVolume;
         if (volume > 0.0) {
-            double currentRate = volumetricRateCalculator.getRate();
-            double predictedAddedVolume = currentRate * brewDelay;
-            predictedAddedVolume = std::clamp(predictedAddedVolume, 0.0, 8.0);
-            volume = currentVolume + predictedAddedVolume;
+            volume = currentVolume + predictedAddedVolume();
         }
         float timeInPhase = static_cast<float>(millis() - currentPhaseStarted) / 1000.0f;
         // CAR-367: only the profile's terminal volumetric phase may treat its
@@ -170,6 +192,22 @@ class BrewProcess : public Process {
             return;
         }
         waterPumped += currentFlow / 10.0f; // Add current flow divided to 100ms to water pumped counter
+        // PRO-440: global cumulative-weight ceiling. If the whole-shot yield
+        // (getBrewVolume(), the profile's final volumetric target) is reached —
+        // predictive overshoot included — end the shot NOW, regardless of which
+        // phase is active. This runs BEFORE the per-phase advance loop so it
+        // wins over intermediate-phase advancement: without it, an early phase
+        // flowing faster than expected could push cumulative weight past the
+        // intended final yield before the shot reaches the terminal volumetric
+        // phase where the stop target lives. On the terminal phase this fires at
+        // the same weight the per-phase stop already would (same ceiling, same
+        // predictive math), so it never stops later than today — only earlier.
+        // Disabled when the scale is unavailable (see GlobalWeightCutoffPolicy.h).
+        if (isGlobalWeightCutoffReached()) {
+            processPhase = ProcessPhase::FINISHED;
+            finished = millis();
+            return;
+        }
         while (isCurrentPhaseFinished() && processPhase == ProcessPhase::RUNNING) {
             previousPhaseFinished = millis();
             if (phaseIndex + 1 < profile.phases.size()) {
