@@ -239,9 +239,16 @@ function phaseAxisValue(phase, axis, prev) {
 }
 
 // Temperature is a PHASE-LEVEL field (phase.temperature), NOT phase.pump.*.
-// Mirrors ExtendedProfileChart: `Number.parseFloat(phase.temperature) || profileTemperature`.
-// A missing / non-positive / NaN value means "use current value" — we carry the
-// previous sample forward (the anchor seeds it with the profile-level temperature).
+// A missing / non-positive / NaN value carries the PREVIOUS sample forward
+// (mirroring the phaseAxisValue pump-axis -1/null sentinel on this same curve),
+// seeded by the anchor with the profile-level temperature (fallback
+// STANDBY_CURVE_TEMP_FALLBACK = 93 when the profile has none).
+//
+// NOTE: this DIVERGES from ExtendedProfileChart.prepareTemperatureData, which
+// RESETS to the profile temperature on each unset phase. Here the carry-forward
+// is intentional — it produces a target-hold preview (an override on one phase
+// keeps holding until a later phase overrides it again), which is consistent
+// with the pump-axis carry-forward on this mini-curve. See PRO-433.
 function phaseTemperatureValue(phase, prev) {
   const raw = Number.parseFloat(phase?.temperature);
   if (Number.isFinite(raw) && raw > 0) return Math.max(0, raw);

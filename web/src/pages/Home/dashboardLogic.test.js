@@ -369,6 +369,30 @@ test('standby curve carries the profile temperature through phases with no tempe
   expect(ys[1]).toBe(ys[2]);
 });
 
+test('standby curve carries a mid-profile temperature override forward (diverges from ExtendedProfileChart reset)', () => {
+  // PRO-433: profile default 93 °C; phase 1 overrides to a higher 100 °C; phase 2
+  // has NO temperature. The mini-curve CARRIES the phase-1 override FORWARD
+  // (target-hold preview) rather than RESETTING to the profile temperature the
+  // way ExtendedProfileChart.prepareTemperatureData does. Pin that divergence:
+  // phase 2's sample must equal phase 1's override, NOT the profile anchor.
+  const profile = {
+    temperature: 93,
+    phases: [
+      { duration: 10, temperature: 100, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+      { duration: 10, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+    ],
+  };
+  const curve = buildStandbyProfileCurve(profile, { width: 102, height: 42, padding: 2 });
+  expect(curve).not.toBeNull();
+  const ys = curve.temperature.split(' ').map(p => p.split(',')[1]);
+  // 3 points: anchor (profile 93), end phase 1 (override 100), end phase 2 (carry-forward).
+  expect(ys).toHaveLength(3);
+  // Phase 2 carries phase 1's override forward, so its y matches phase 1...
+  expect(ys[2]).toBe(ys[1]);
+  // ...and is NOT reset to the profile anchor (which would be the ExtendedProfileChart behavior).
+  expect(ys[2]).not.toBe(ys[0]);
+});
+
 test('standby curve omits the temperature line when no temperature data exists', () => {
   // Neither the profile nor any phase carries a usable temperature.
   const profile = {
