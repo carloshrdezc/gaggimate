@@ -429,7 +429,9 @@ void ShotHistoryPlugin::handleCompletedShot() {
     // Track whether a notes file exists so appendCompletedShotToIndex can set SHOT_FLAG_HAS_NOTES
     // without an extra fs->exists() stat call.
     bool hasNotes = false;
-    if (!currentBeanName.isEmpty() || !currentGrinderName.isEmpty()) {
+    // PRO-441: a shot with only a machine grind TARGET (no bean/grinder selected) must still write notes.
+    bool hasGrindTarget = (currentGrindTargetIsVolumetric ? currentGrindTargetVolume > 0 : currentGrindTargetDuration > 0);
+    if (!currentBeanName.isEmpty() || !currentGrinderName.isEmpty() || hasGrindTarget) {
         JsonDocument previousNotes;
         JsonDocument autoNotes;
         loadNotes(currentId, previousNotes);
@@ -456,6 +458,19 @@ void ShotHistoryPlugin::handleCompletedShot() {
             autoNotes["grinderName"] = currentGrinderName;
             notesChanged = true;
         }
+        // PRO-441: stamp the device-recorded machine grind TARGET, mirroring grinderName. Same
+        // fill-only-if-absent guard so a user-entered value is never clobbered. The field name
+        // "grindTarget" is DISTINCT from the user-editable "grindSetting" dial: grindTarget is
+        // "what the machine was set to auto-grind" (device-authoritative), grindSetting stays the
+        // user's editable value. The label string is formatted to match ProcessControls.jsx
+        // formatTarget(): volumetric -> "18.0g" (formatNumber = 1 decimal), time -> "25s"
+        // (Math.round(ms/1000)). Guarded by hasGrindTarget so we never stamp a zero/empty target.
+        if (hasGrindTarget && (autoNotes["grindTarget"].isNull() || autoNotes["grindTarget"].as<String>().isEmpty())) {
+            String gt = currentGrindTargetIsVolumetric ? String(currentGrindTargetVolume, 1) + "g"
+                                                       : String((int)lround(currentGrindTargetDuration / 1000.0)) + "s";
+            autoNotes["grindTarget"] = gt;
+            notesChanged = true;
+        }
         if (notesChanged) {
             hasNotes = saveNotes(currentId, autoNotes);
             if (hasNotes && !applyBeanUsageDelta(previousNotes, autoNotes)) {
@@ -465,7 +480,7 @@ void ShotHistoryPlugin::handleCompletedShot() {
             hasNotes = true; // WebUI already wrote notes that include beanType/beanId/grinderName
         }
     } else {
-        // No bean or grinder selected — WebUI may still have written dose-only notes.
+        // No bean, grinder, or grind target — WebUI may still have written dose-only notes.
         hasNotes = fs->exists("/h/" + currentId + ".json");
     }
 
@@ -713,7 +728,13 @@ void ShotHistoryPlugin::startRecording() {
 
     // Capture initial volumetric mode state (brew by weight vs brew by time)
     shotStartedVolumetric = controller->getSettings().isVolumetricTarget();
-    
+
+    // PRO-441: snapshot the machine grind TARGET at brew start, mirroring the grinderName capture above.
+    // These are read authoritatively across clients by stamping notes "grindTarget" at shot end.
+    currentGrindTargetIsVolumetric = controller->getSettings().isVolumetricTarget();
+    currentGrindTargetVolume = controller->getSettings().getTargetGrindVolume();
+    currentGrindTargetDuration = controller->getSettings().getTargetGrindDuration();
+
     xSemaphoreGive(stateMutex);
 }
 
