@@ -323,6 +323,15 @@ class Settings {
     // mutable. Not itself thread-safe against a truly simultaneous first call from
     // two tasks, but the first accesses happen during single-threaded setup.
     SemaphoreHandle_t ensureSelectedNameMutex() const;
+    // PRO-427: shared take/copy/give and take/assign/give helpers so the four
+    // selected-name accessors don't each open-code the mutex machinery (keeps the
+    // guard's flash footprint down; a null handle degrades to lock-free). noexcept:
+    // Arduino String uses a no-throw allocation model (a failed grow invalidates the
+    // String and yields empty, it never throws), so these can't propagate — marking
+    // them lets the compiler drop the String-copy exception unwind tables, which is
+    // what keeps display-headless-4m under its 2 MB app partition.
+    String copyUnderSelectedNameLock(const String &member) const noexcept;
+    void assignUnderSelectedNameLock(String &member, String &&value) noexcept;
     xTaskHandle taskHandle = nullptr;
     [[noreturn]] static void loopTask(void *arg);
 };
