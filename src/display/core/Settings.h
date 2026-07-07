@@ -328,8 +328,8 @@ class Settings {
     // guard's flash footprint down; a null handle degrades to lock-free). noexcept:
     // Arduino String uses a no-throw allocation model (a failed grow invalidates the
     // String and yields empty, it never throws), so these can't propagate — marking
-    // them lets the compiler drop the String-copy exception unwind tables, which is
-    // what keeps display-headless-4m under its 2 MB app partition.
+    // them lets the compiler drop the String-copy exception unwind tables, keeping the
+    // guard's flash footprint minimal.
     String copyUnderSelectedNameLock(const String &member) const noexcept;
     void assignUnderSelectedNameLock(String &member, String &&value) noexcept;
     xTaskHandle taskHandle = nullptr;
