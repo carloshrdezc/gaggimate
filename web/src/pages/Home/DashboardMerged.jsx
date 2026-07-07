@@ -25,8 +25,10 @@ import {
   MANUAL_TEMP_MAX,
   MANUAL_TEMP_MIN,
   MODE_MANUAL,
+  MODE_STANDBY,
   MODE_STEAM,
   MODE_GRIND,
+  buildStandbyProfileCurve,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
@@ -51,6 +53,9 @@ const FLOW_MAX = 6;
 const RING_TOTAL_ARC = 300;
 const RING_START_ANGLE = 210;
 const YIELD_SEGMENTS = Array.from({ length: 40 }, (_, i) => i);
+// PRO-426: standby profile mini-curve viewBox (SVG stretches to its container).
+const STANDBY_CURVE_VB_W = 300;
+const STANDBY_CURVE_VB_H = 90;
 const MANUAL_TARGET_OPTIONS = [
   { id: MANUAL_TARGET_PRESSURE, label: 'PRESSURE' },
   { id: MANUAL_TARGET_FLOW, label: 'FLOW' },
@@ -282,6 +287,175 @@ TargetBar.propTypes = {
   frac: PropTypes.number,
   tgtFrac: PropTypes.number,
 };
+
+// PRO-426: Standby shot-card block. Replaces the live target bars + yield bar
+// when the machine is idle (mode 0, non-manual). Surfaces the active grinder,
+// grind setting, and a dark-themed hand-rolled mini-curve of the selected
+// profile — no Chart.js. Every field degrades to a themed empty-state string
+// (never NaN / "undefined" / broken UI).
+function StandbyStat({ label, value, empty }) {
+  const has = value != null && value !== '';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+      <span
+        style={{
+          fontFamily: 'var(--dm-font-mono)',
+          fontSize: 9,
+          letterSpacing: '0.18em',
+          color: 'var(--dm-fg-dim)',
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontFamily: 'var(--dm-font-display)',
+          fontSize: 15,
+          fontWeight: 700,
+          lineHeight: 1.1,
+          color: has ? 'var(--dm-fg)' : 'var(--dm-fg-faint)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {has ? value : empty}
+      </span>
+    </div>
+  );
+}
+
+StandbyStat.propTypes = {
+  label: PropTypes.string,
+  value: PropTypes.string,
+  empty: PropTypes.string,
+};
+
+function StandbyBlock({ grinder, grindLabel, profileName, curve }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      {/* Grinder + grind setting — styled like the recipe labels. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <StandbyStat label='GRINDER' value={grinder} empty='No grinder selected' />
+        <StandbyStat
+          label='GRIND SETTING'
+          value={grindLabel}
+          empty='No grind target'
+        />
+      </div>
+
+      {/* Selected-profile mini-curve. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'var(--dm-font-mono)',
+              fontSize: 9,
+              letterSpacing: '0.18em',
+              color: 'var(--dm-fg-dim)',
+            }}
+          >
+            PROFILE
+          </span>
+          {curve && (
+            <span style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-good)' }}>
+                ▬ PRESSURE
+              </span>
+              <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-warn)' }}>
+                ▬ FLOW
+              </span>
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            border: '1px solid var(--dm-line)',
+            borderRadius: 8,
+            background: 'var(--dm-bg-0)',
+            overflow: 'hidden',
+            height: 92,
+          }}
+        >
+          {curve ? (
+            <svg
+              viewBox={`0 0 ${STANDBY_CURVE_VB_W} ${STANDBY_CURVE_VB_H}`}
+              preserveAspectRatio='none'
+              style={{ width: '100%', height: '100%', display: 'block' }}
+            >
+              {/* Faint horizontal grid lines (quarters) */}
+              {[0.25, 0.5, 0.75].map(f => (
+                <line
+                  key={f}
+                  x1='0'
+                  x2={STANDBY_CURVE_VB_W}
+                  y1={(STANDBY_CURVE_VB_H * f).toFixed(1)}
+                  y2={(STANDBY_CURVE_VB_H * f).toFixed(1)}
+                  stroke='rgba(255,255,255,0.06)'
+                  strokeDasharray='2 4'
+                />
+              ))}
+              {/* Flow (amber) then pressure (green) on top */}
+              <polyline
+                points={curve.flow}
+                fill='none'
+                stroke='var(--dm-warn)'
+                strokeWidth='1.5'
+                strokeLinejoin='round'
+                strokeLinecap='round'
+                vectorEffect='non-scaling-stroke'
+              />
+              <polyline
+                points={curve.pressure}
+                fill='none'
+                stroke='var(--dm-good)'
+                strokeWidth='2'
+                strokeLinejoin='round'
+                strokeLinecap='round'
+                vectorEffect='non-scaling-stroke'
+              />
+            </svg>
+          ) : (
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'var(--dm-font-mono)',
+                fontSize: 10,
+                letterSpacing: '0.2em',
+                color: 'var(--dm-fg-faint)',
+                border: '1px dashed rgba(232,232,232,0.15)',
+                borderRadius: 8,
+              }}
+            >
+              {profileName ? 'NO CURVE DATA' : 'NO PROFILE SELECTED'}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+StandbyBlock.propTypes = {
+  grinder: PropTypes.string,
+  grindLabel: PropTypes.string,
+  profileName: PropTypes.string,
+  curve: PropTypes.shape({
+    pressure: PropTypes.string,
+    flow: PropTypes.string,
+  }),
+};
+
 
 function ManualSlider({ label, value, actual, unit, min, max, step, color, onChange, onEditingChange }) {
   const handleInput = useCallback(
@@ -1085,6 +1259,10 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const isManualAvailable = machine.value.capabilities.pressure === true;
   const isSteamMode = mode === MODE_STEAM;
   const isManualMode = mode === MODE_MANUAL;
+  // PRO-426: standby (mode 0, non-manual) swaps the live-shot widgets (target
+  // bars + yield bar) for a standby block (grinder + grind setting + selected
+  // profile mini-curve).
+  const isStandby = mode === MODE_STANDBY;
   const processKind = getProcessKindForMode(mode, isGrindAvailable, isManualAvailable);
   const availableModes = useMemo(
     () => getAvailableModeOptions(isGrindAvailable, isManualAvailable),
@@ -1203,7 +1381,15 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     wasManualModeRef.current = true;
   }, [isManualAvailable, isManualMode, manualDraft, sendManualPayload]);
 
-  const { profileData } = useProfileData(api, s.mode === 1, s.selectedProfileId);
+  // PRO-426: also fetch profile data in standby (mode 0) so the standby shot
+  // card can render the selected-profile mini-curve. The `brew` gate here drives
+  // the profiles-LIST fetch; the selected profile itself is fetched off
+  // selectedProfileId regardless of mode.
+  const { profileData } = useProfileData(
+    api,
+    brew || s.mode === MODE_STANDBY,
+    s.selectedProfileId
+  );
 
   // Connected scale name
   const [scaleName, setScaleName] = useState(null);
@@ -1429,6 +1615,19 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     }
     return [];
   }, [profileData]);
+
+  // PRO-426: dark-themed selected-profile mini-curve for the standby block.
+  // Built off the same phase schema the ExtendedProfileChart consumes, but as a
+  // hand-rolled SVG (no Chart.js). Fixed viewBox; the SVG stretches to fit.
+  const standbyCurve = useMemo(
+    () =>
+      buildStandbyProfileCurve(profileData, {
+        width: STANDBY_CURVE_VB_W,
+        height: STANDBY_CURVE_VB_H,
+        padding: 3,
+      }),
+    [profileData]
+  );
 
   // Index of current phase in profile list (case-insensitive)
   const currentPhaseIdx = currentPhaseLabel && profilePhases.length > 0
@@ -2103,7 +2302,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
             </div>
           </div>
 
-          {/* Target bars */}
+          {/* Target bars (live shot widgets — hidden in standby, PRO-426) */}
+          {!isStandby && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
             <TargetBar
               color='var(--dm-good)'
@@ -2133,8 +2333,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               tgtFrac={temperatureRing.targetFraction}
             />
           </div>
+          )}
 
-          {/* Yield bar + action button */}
+          {/* Bottom row + action button.
+              Standby (PRO-426): grinder + grind setting + selected-profile
+              mini-curve. All other modes: the live yield fill bar. */}
           <div
             style={{
               display: 'grid',
@@ -2144,6 +2347,14 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               marginTop: 'auto',
             }}
           >
+            {isStandby ? (
+              <StandbyBlock
+                grinder={s.selectedGrinder}
+                grindLabel={grindTargetLabel}
+                profileName={s.selectedProfile}
+                curve={standbyCurve}
+              />
+            ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div
                 style={{
@@ -2195,6 +2406,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 ))}
               </div>
             </div>
+            )}
 
             <button
               type='button'
