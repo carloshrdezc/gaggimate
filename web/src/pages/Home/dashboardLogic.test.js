@@ -326,3 +326,62 @@ test('standby curve treats -1 sentinel as carry-over of previous value', () => {
   expect(pPts[1].split(',')[1]).toBe(pPts[2].split(',')[1]);
 });
 
+// PRO-432: standby profile mini-curve now includes a target-temperature line.
+test('standby curve maps per-phase target temperature to viewBox points', () => {
+  // Profile default 93 °C; phase 1 overrides to 92, phase 2 to 96. Max = 110.
+  const profile = {
+    temperature: 93,
+    phases: [
+      { duration: 10, temperature: 92, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+      { duration: 20, temperature: 96, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+    ],
+  };
+  const curve = buildStandbyProfileCurve(profile, { width: 102, height: 42, padding: 2 });
+  expect(curve).not.toBeNull();
+  const tPts = curve.temperature.split(' ');
+  // 3 points: anchor (profile default), end phase 1, end phase 2.
+  expect(tPts).toHaveLength(3);
+  // Anchor uses the profile temperature (93). innerH = 38, padding 2.
+  // y = 2 + (1 - 93/110)*38 = 2 + 0.15454*38 = 7.9 (1 d.p.).
+  expect(tPts[0].split(',')[1]).toBe('7.9');
+  // End of phase 1 (92 °C): y = 2 + (1 - 92/110)*38 = 8.2.
+  expect(tPts[1].split(',')[1]).toBe('8.2');
+  // End of phase 2 (96 °C): y = 2 + (1 - 96/110)*38 = 6.8.
+  expect(tPts[2].split(',')[1]).toBe('6.8');
+});
+
+test('standby curve carries the profile temperature through phases with no temperature (sentinel)', () => {
+  // No per-phase temperature -> "use current value" falls back to the profile
+  // temperature (95) and holds it flat across both phases.
+  const profile = {
+    temperature: 95,
+    phases: [
+      { duration: 5, pump: { target: 'pressure', pressure: 6, flow: 2 } },
+      { duration: 5, temperature: -1, pump: { target: 'pressure', pressure: 6, flow: 2 } },
+    ],
+  };
+  const curve = buildStandbyProfileCurve(profile, { width: 100, height: 40 });
+  const tPts = curve.temperature.split(' ');
+  expect(tPts).toHaveLength(3);
+  // All three temperature samples share the same y (95 °C carried through).
+  const ys = tPts.map(p => p.split(',')[1]);
+  expect(ys[0]).toBe(ys[1]);
+  expect(ys[1]).toBe(ys[2]);
+});
+
+test('standby curve omits the temperature line when no temperature data exists', () => {
+  // Neither the profile nor any phase carries a usable temperature.
+  const profile = {
+    phases: [
+      { duration: 10, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+      { duration: 20, pump: { target: 'pressure', pressure: 9, flow: 0 } },
+    ],
+  };
+  const curve = buildStandbyProfileCurve(profile, { width: 100, height: 40 });
+  expect(curve).not.toBeNull();
+  // Temperature line is empty, but pressure + flow still render.
+  expect(curve.temperature).toBe('');
+  expect(curve.pressure).not.toBe('');
+  expect(curve.flow).not.toBe('');
+});
+

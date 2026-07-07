@@ -226,6 +226,8 @@ export function shouldFireAutoSteamOnStop({ lastActiveWasBrew, autoSteamEnabled 
 // coordinates. Pure + unit-testable; returns null when there is nothing to draw.
 const STANDBY_CURVE_PRESSURE_MAX = 12; // bar (matches dashboard PRESSURE_MAX)
 const STANDBY_CURVE_FLOW_MAX = 6; // g/s (matches dashboard FLOW_MAX)
+const STANDBY_CURVE_TEMP_MAX = 110; // °C (matches dashboard TEMP_GRAPH_MAX)
+const STANDBY_CURVE_TEMP_FALLBACK = 93; // profile-default when nothing usable (matches ExtendedProfileChart)
 
 function phaseAxisValue(phase, axis, prev) {
   const pump = phase?.pump ?? {};
@@ -234,6 +236,16 @@ function phaseAxisValue(phase, axis, prev) {
   if (raw === -1 || raw == null) raw = prev;
   const num = Number(raw);
   return Number.isFinite(num) ? Math.max(0, num) : 0;
+}
+
+// Temperature is a PHASE-LEVEL field (phase.temperature), NOT phase.pump.*.
+// Mirrors ExtendedProfileChart: `Number.parseFloat(phase.temperature) || profileTemperature`.
+// A missing / non-positive / NaN value means "use current value" — we carry the
+// previous sample forward (the anchor seeds it with the profile-level temperature).
+function phaseTemperatureValue(phase, prev) {
+  const raw = Number.parseFloat(phase?.temperature);
+  if (Number.isFinite(raw) && raw > 0) return Math.max(0, raw);
+  return prev;
 }
 
 export function buildStandbyProfileCurve(profileData, { width, height, padding = 2 } = {}) {
@@ -265,24 +277,44 @@ export function buildStandbyProfileCurve(profileData, { width, height, padding =
   // the previous phase's end) and its end point.
   const pressurePts = [];
   const flowPts = [];
+  const tempPts = [];
   let elapsed = 0;
   let prevPressure = phaseAxisValue(phases[0], 'pressure', 0);
   let prevFlow = phaseAxisValue(phases[0], 'flow', 0);
 
+  // Temperature is profile-level with a per-phase override (phase.temperature).
+  // Determine whether the profile carries any usable temperature at all; if not,
+  // the temperature line is omitted (empty string) so the curve still renders
+  // pressure + flow without a bogus flat line.
+  const profileTemp = Number.parseFloat(profileData?.temperature);
+  const hasProfileTemp = Number.isFinite(profileTemp) && profileTemp > 0;
+  const hasPhaseTemp = phases.some(p => {
+    const t = Number.parseFloat(p?.temperature);
+    return Number.isFinite(t) && t > 0;
+  });
+  const hasTempData = hasProfileTemp || hasPhaseTemp;
+  // Anchor temperature at the profile default (falling back to 93 like
+  // ExtendedProfileChart) so the first phase can carry it forward.
+  let prevTemp = hasProfileTemp ? profileTemp : STANDBY_CURVE_TEMP_FALLBACK;
+
   // Anchor at t=0.
   pressurePts.push([xAt(0), yAt(prevPressure, STANDBY_CURVE_PRESSURE_MAX)]);
   flowPts.push([xAt(0), yAt(prevFlow, STANDBY_CURVE_FLOW_MAX)]);
+  if (hasTempData) tempPts.push([xAt(0), yAt(prevTemp, STANDBY_CURVE_TEMP_MAX)]);
 
   phases.forEach((phase, i) => {
     const dur = durations[i];
     if (dur <= 0) return;
     const endPressure = phaseAxisValue(phase, 'pressure', prevPressure);
     const endFlow = phaseAxisValue(phase, 'flow', prevFlow);
+    const endTemp = phaseTemperatureValue(phase, prevTemp);
     elapsed += dur;
     pressurePts.push([xAt(elapsed), yAt(endPressure, STANDBY_CURVE_PRESSURE_MAX)]);
     flowPts.push([xAt(elapsed), yAt(endFlow, STANDBY_CURVE_FLOW_MAX)]);
+    if (hasTempData) tempPts.push([xAt(elapsed), yAt(endTemp, STANDBY_CURVE_TEMP_MAX)]);
     prevPressure = endPressure;
     prevFlow = endFlow;
+    prevTemp = endTemp;
   });
 
   const toPointsAttr = pts => pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
@@ -290,6 +322,7 @@ export function buildStandbyProfileCurve(profileData, { width, height, padding =
   return {
     pressure: toPointsAttr(pressurePts),
     flow: toPointsAttr(flowPts),
+    temperature: toPointsAttr(tempPts),
     totalDuration,
     phaseCount: phases.length,
   };
