@@ -31,6 +31,27 @@ constexpr int16_t FLOW_MAX_VALUE = 2000;  //  20.00 ml/s
 // Shots shorter than this are considered failed/flushes and are excluded
 constexpr unsigned long MIN_VALID_SHOT_DURATION_MS = 7500;
 
+// PRO-441: fill-only-if-absent stamp of a device-recorded value onto shot notes. Returns true
+// when it wrote (so the caller can OR into notesChanged). Deduped from four near-identical
+// inline stamps (beanType/beanId/grinderName/grindTarget) so the JsonVariant isNull/isEmpty +
+// assignment machinery is emitted ONCE, not per call site — this keeps the flash-budget-critical
+// display-headless-4m image under its 2 MB app partition (PRO-427/441). The parameter is a raw
+// `const char *` (callers pass String::c_str() or a stack buffer) so no String temporary is
+// copy-constructed at any call site; ArduinoJson copies the value into the document pool, so a
+// pointer into caller-owned storage is safe. `noexcept` drops the copy exception unwind tables.
+// A user-entered value is never clobbered.
+bool stampNoteIfAbsent(JsonDocument &notes, const char *key, const char *value) noexcept {
+    // Treat an existing value as "present" only when it is a non-empty string. Read it as a raw
+    // const char* (points into the document pool — no String temporary/dtor/unwind emitted here) so
+    // this helper stays small; it is the flash-budget-sensitive path (PRO-441).
+    const char *existing = notes[key].as<const char *>();
+    if (!value || !*value || (existing && *existing)) {
+        return false;
+    }
+    notes[key] = value;
+    return true;
+}
+
 uint16_t encodeUnsigned(float value, float scale, uint16_t maxValue) {
     if (!std::isfinite(value)) {
         return 0;
@@ -430,46 +451,51 @@ void ShotHistoryPlugin::handleCompletedShot() {
     // without an extra fs->exists() stat call.
     bool hasNotes = false;
     // PRO-441: a shot with only a machine grind TARGET (no bean/grinder selected) must still write notes.
-    bool hasGrindTarget = (currentGrindTargetIsVolumetric ? currentGrindTargetVolume > 0 : currentGrindTargetDuration > 0);
+    bool hasGrindTarget = (shotStartedVolumetric ? currentGrindTargetVolume > 0 : currentGrindTargetDuration > 0);
     if (!currentBeanName.isEmpty() || !currentGrinderName.isEmpty() || hasGrindTarget) {
         JsonDocument previousNotes;
         JsonDocument autoNotes;
         loadNotes(currentId, previousNotes);
         loadNotes(currentId, autoNotes);
-        // PRO-422: stamp the device-recorded bean onto the shot notes so every web
-        // client reads the same authoritative bean. Write beanType (name) and, when
-        // we resolved one at brew start, the stable beanId. We only fill fields the
-        // WebUI hasn't already written, so a user-entered bean is never clobbered.
+        // PRO-422/428/441: stamp device-recorded fields fill-only-if-absent (never clobber a
+        // user-entered value). beanType/beanId (PRO-422), grinderName (PRO-428, the contract
+        // PRO-430's isGrinderRecordedForShot keys off; no grinder-id analog — name-only in
+        // Settings), and grindTarget (PRO-441) all route through stampNoteIfAbsent so every web
+        // client reads the same authoritative values.
         bool notesChanged = false;
-        if (!currentBeanName.isEmpty() && (autoNotes["beanType"].isNull() || autoNotes["beanType"].as<String>().isEmpty())) {
-            autoNotes["beanType"] = currentBeanName;
-            notesChanged = true;
-        }
-        if (!currentBeanId.isEmpty() && (autoNotes["beanId"].isNull() || autoNotes["beanId"].as<String>().isEmpty())) {
-            autoNotes["beanId"] = currentBeanId;
-            notesChanged = true;
-        }
-        // PRO-428: stamp the device-recorded grinder NAME, mirroring beanType. Same
-        // fill-only-if-absent guard so a user-entered grinder is never clobbered. The
-        // field name "grinderName" is the contract PRO-430's isGrinderRecordedForShot
-        // guard keys off. There is no grinder-id analog (name-only in Settings).
-        if (!currentGrinderName.isEmpty() &&
-            (autoNotes["grinderName"].isNull() || autoNotes["grinderName"].as<String>().isEmpty())) {
-            autoNotes["grinderName"] = currentGrinderName;
-            notesChanged = true;
-        }
-        // PRO-441: stamp the device-recorded machine grind TARGET, mirroring grinderName. Same
-        // fill-only-if-absent guard so a user-entered value is never clobbered. The field name
-        // "grindTarget" is DISTINCT from the user-editable "grindSetting" dial: grindTarget is
-        // "what the machine was set to auto-grind" (device-authoritative), grindSetting stays the
-        // user's editable value. The label string is formatted to match ProcessControls.jsx
-        // formatTarget(): volumetric -> "18.0g" (formatNumber = 1 decimal), time -> "25s"
-        // (Math.round(ms/1000)). Guarded by hasGrindTarget so we never stamp a zero/empty target.
-        if (hasGrindTarget && (autoNotes["grindTarget"].isNull() || autoNotes["grindTarget"].as<String>().isEmpty())) {
-            String gt = currentGrindTargetIsVolumetric ? String(currentGrindTargetVolume, 1) + "g"
-                                                       : String((int)lround(currentGrindTargetDuration / 1000.0)) + "s";
-            autoNotes["grindTarget"] = gt;
-            notesChanged = true;
+        notesChanged |= stampNoteIfAbsent(autoNotes, "beanType", currentBeanName.c_str());
+        notesChanged |= stampNoteIfAbsent(autoNotes, "beanId", currentBeanId.c_str());
+        notesChanged |= stampNoteIfAbsent(autoNotes, "grinderName", currentGrinderName.c_str());
+        // PRO-441: the machine grind TARGET is DISTINCT from the user-editable "grindSetting" dial
+        // — grindTarget is "what the machine was set to auto-grind" (device-authoritative). The
+        // label matches ProcessControls.jsx formatTarget() EXACTLY: volumetric -> "18.0g"
+        // (formatNumber = toFixed(1)), time -> "25s" (Math.round(ms/1000)). Only built when present.
+        if (hasGrindTarget) {
+            // Format via a single snprintf call site (integer math, no float->String/dtostrf
+            // machinery) to match ProcessControls.jsx formatTarget() EXACTLY: volumetric -> "18.0g"
+            // (toFixed(1)), time -> "25s" (Math.round(ms/1000)). Both cases feed the same call; the
+            // time format "%lds" simply ignores the trailing fractional arg (valid in C). Collapsing
+            // to one snprintf (vs one per branch) trims the last bytes for the 2 MB partition.
+            char gt[16];
+            long whole;
+            long frac = 0;
+            const char *fmt;
+            if (shotStartedVolumetric) {
+                // Tenths of a gram. tgv is entered in 0.1g steps and is positive here (guarded by
+                // hasGrindTarget), so (long)(v*10 + 0.5) is round-half-up == JS toFixed(1) across the
+                // reachable value domain, and avoids pulling lround (this feature is its only user).
+                long tenths = static_cast<long>(currentGrindTargetVolume * 10.0 + 0.5);
+                whole = tenths / 10;
+                frac = tenths % 10;
+                fmt = "%ld.%ldg";
+            } else {
+                // Integer round-half-up: currentGrindTargetDuration is non-negative ms (guarded by
+                // hasGrindTarget), so (ms + 500) / 1000 == JS Math.round(ms/1000) exactly.
+                whole = (currentGrindTargetDuration + 500) / 1000;
+                fmt = "%lds";
+            }
+            snprintf(gt, sizeof(gt), fmt, whole, frac);
+            notesChanged |= stampNoteIfAbsent(autoNotes, "grindTarget", gt);
         }
         if (notesChanged) {
             hasNotes = saveNotes(currentId, autoNotes);
@@ -730,8 +756,8 @@ void ShotHistoryPlugin::startRecording() {
     shotStartedVolumetric = controller->getSettings().isVolumetricTarget();
 
     // PRO-441: snapshot the machine grind TARGET at brew start, mirroring the grinderName capture above.
-    // These are read authoritatively across clients by stamping notes "grindTarget" at shot end.
-    currentGrindTargetIsVolumetric = controller->getSettings().isVolumetricTarget();
+    // These are read authoritatively across clients by stamping notes "grindTarget" at shot end. The
+    // volumetric-vs-time mode is shotStartedVolumetric (captured just above from the same call).
     currentGrindTargetVolume = controller->getSettings().getTargetGrindVolume();
     currentGrindTargetDuration = controller->getSettings().getTargetGrindDuration();
 
