@@ -10,6 +10,7 @@ import { useAutoSteam } from '../../hooks/useAutoSteam.js';
 import { useShotDoseRecorder } from '../../hooks/useShotDoseRecorder.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
 import { listBeans, recordBeanSelection, parseQuantity } from '../../utils/beanManager.js';
+import { listGrinders, recordGrinderSelection } from '../../utils/grinderManager.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
@@ -25,6 +26,7 @@ import {
   MANUAL_TEMP_MIN,
   MODE_MANUAL,
   MODE_STEAM,
+  MODE_GRIND,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
@@ -828,6 +830,17 @@ EditableNumBlock.propTypes = {
   lockedHint: PropTypes.string,
 };
 
+// Format the current grind target for display. Mirrors ProcessControls'
+// formatTarget: grindTarget === 1 means a volumetric (grams) target, otherwise
+// a time (seconds) target. Returns null when no target is set so the caller can
+// render a clean empty state ("No grind target").
+function formatGrindTarget(grindTarget, grindTargetVolume, grindTargetDuration) {
+  if (grindTarget === 1) {
+    return grindTargetVolume > 0 ? `${Number(grindTargetVolume).toFixed(1)}g` : null;
+  }
+  return grindTargetDuration > 0 ? `${Math.round(grindTargetDuration / 1000)}s` : null;
+}
+
 // Inline dropdown for profile / bean selection
 function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loading, error, onClose }) {
   return (
@@ -1266,8 +1279,12 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const [loadingBeans, setLoadingBeans] = useState(false);
   const [profileError, setProfileError] = useState(null);
   const [beanError, setBeanError] = useState(null);
+  const [grinderOptions, setGrinderOptions] = useState([]);
+  const [loadingGrinders, setLoadingGrinders] = useState(false);
+  const [grinderError, setGrinderError] = useState(null);
   const profilesLoadedRef = useRef(false);
   const beansLoadedRef = useRef(false);
+  const grindersLoadedRef = useRef(false);
 
   const loadProfiles = useCallback(async () => {
     if (profilesLoadedRef.current) return;
@@ -1291,6 +1308,19 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     finally { setLoadingBeans(false); }
   }, [api]);
 
+  const loadGrinders = useCallback(async () => {
+    if (grindersLoadedRef.current) return;
+    grindersLoadedRef.current = true;
+    setLoadingGrinders(true); setGrinderError(null);
+    try {
+      const grinders = await listGrinders(api);
+      // listGrinders returns an ordered array of name strings; SelectDropdown
+      // reads `opt.name`/`opt.label` and keys on `opt.id || opt.name`.
+      setGrinderOptions((grinders || []).map(name => ({ name })));
+    } catch { setGrinderError('Failed to load'); grindersLoadedRef.current = false; }
+    finally { setLoadingGrinders(false); }
+  }, [api]);
+
   const openProfileDropdown = useCallback(() => {
     loadProfiles();
     setActiveDropdown(d => d === 'profile' ? null : 'profile');
@@ -1300,6 +1330,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     loadBeans();
     setActiveDropdown(d => d === 'bean' ? null : 'bean');
   }, [loadBeans]);
+
+  const openGrinderDropdown = useCallback(() => {
+    loadGrinders();
+    setActiveDropdown(d => d === 'grinder' ? null : 'grinder');
+  }, [loadGrinders]);
 
   const handleProfileSelect = useCallback(async opt => {
     try {
@@ -1318,6 +1353,24 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       });
       setActiveDropdown(null);
     } catch { console.error('bean select failed'); }
+  }, [api]);
+
+  const handleGrinderSelect = useCallback(opt => {
+    try {
+      // Persist the selection on the device (firmware handler from PRO-424) and
+      // record a per-browser selection event so a subsequent shot's notes
+      // pre-fill the grinder + current grind-setting label. Mirrors
+      // handleBeanSelect / recordBeanSelection.
+      api.send({ tp: 'req:grinders:select', name: opt.name });
+      const st = machine.value.status;
+      recordGrinderSelection({
+        profileId: st.selectedProfileId,
+        profileLabel: st.selectedProfile,
+        grinder: opt.name,
+        grindSetting: formatGrindTarget(st.grindTarget, st.grindTargetVolume, st.grindTargetDuration),
+      });
+      setActiveDropdown(null);
+    } catch { console.error('grinder select failed'); }
   }, [api]);
 
   // Close dropdown when clicking outside
@@ -1358,6 +1411,10 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const targetShotSecs = s.brewTargetDuration > 0
     ? Math.round(s.brewTargetDuration / 1000)
     : 32;
+
+  // Current grind target label for the recipe panel (null when unset → empty
+  // state). PRO-425.
+  const grindTargetLabel = formatGrindTarget(s.grindTarget, s.grindTargetVolume, s.grindTargetDuration);
 
   // Elapsed time
   const elapsedSecs = Math.round((processInfo?.e || 0) / 1000);
@@ -1887,6 +1944,65 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, color: 'var(--dm-fg-faint)' }}>▾</span>
             </div>
 
+            {/* Grinder + grind-setting row (PRO-425) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+              <button
+                type='button'
+                onClick={openGrinderDropdown}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: 'var(--dm-font-mono)',
+                  fontSize: 10,
+                  color: s.selectedGrinder ? 'var(--dm-fg-dim)' : 'var(--dm-fg-faint)',
+                  borderBottom: `1px dashed ${activeDropdown === 'grinder' ? 'var(--dm-accent)' : 'transparent'}`,
+                }}
+              >
+                {s.selectedGrinder || 'No grinder selected'}
+              </button>
+              <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, color: 'var(--dm-fg-faint)' }}>▾</span>
+              {isGrindAvailable ? (
+                <button
+                  type='button'
+                  onClick={e => {
+                    e.stopPropagation();
+                    // Edit the grind target via its EXISTING home: switch to
+                    // GRIND mode where the established raise/lower control
+                    // (GrindTargetBar → req:change-grind-target) lives. No new
+                    // endpoint, single set path. PRO-425.
+                    onModeSelect(MODE_GRIND);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    fontFamily: 'var(--dm-font-mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.06em',
+                    color: 'var(--dm-fg-faint)',
+                    borderBottom: '1px dashed rgba(232,232,232,0.2)',
+                  }}
+                >
+                  {grindTargetLabel ? `GRIND · ${grindTargetLabel}` : 'No grind target'}
+                </button>
+              ) : (
+                <span
+                  style={{
+                    fontFamily: 'var(--dm-font-mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.06em',
+                    color: 'var(--dm-fg-faint)',
+                  }}
+                >
+                  {grindTargetLabel ? `GRIND · ${grindTargetLabel}` : 'No grind target'}
+                </span>
+              )}
+            </div>
+
             {/* Bean dropdown */}
             {activeDropdown === 'bean' && (
               <SelectDropdown
@@ -1909,6 +2025,19 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleProfileSelect}
                 loading={loadingProfiles}
                 error={profileError}
+                onClose={() => setActiveDropdown(null)}
+              />
+            )}
+
+            {/* Grinder dropdown (PRO-425) */}
+            {activeDropdown === 'grinder' && (
+              <SelectDropdown
+                label='SELECT GRINDER'
+                options={grinderOptions}
+                activeLabel={s.selectedGrinder}
+                onSelect={handleGrinderSelect}
+                loading={loadingGrinders}
+                error={grinderError}
                 onClose={() => setActiveDropdown(null)}
               />
             )}

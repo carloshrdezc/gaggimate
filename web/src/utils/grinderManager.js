@@ -279,3 +279,89 @@ export async function recordGrinder(apiService, name) {
     return nextLegacy;
   }
 }
+
+// --- Grinder selection events (PRO-425) --------------------------------------
+//
+// Mirrors beanManager's recordBeanSelection / resolveSelectionEventForShot /
+// inferBeanForShot: a per-browser localStorage log of "which grinder + grind
+// setting was selected on the dashboard, for which profile, when". Shot Notes
+// uses it to PRE-FILL (not lock) the grinder / grindSetting fields for a shot
+// pulled by the same profile after the selection. The device does not persist
+// a per-shot grinder, so — like beans' legacy fallback — this log is the only
+// source for the auto-fill until firmware records it on the shot itself.
+
+const GRINDER_SELECTION_EVENTS_KEY = 'gaggimate-grinder-selection-events';
+const ACTIVE_GRINDER_SELECTION_KEY = 'gaggimate-active-grinder-selection';
+
+function createSelectionId() {
+  return `grinder-selection-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Records a dashboard grinder selection for the active profile. `grinder` is
+ * the selected grinder name; `grindSetting` is the human-readable current
+ * grind-target label (e.g. "18g" or "28s") captured at selection time so a
+ * later shot's notes can default to it. No-ops for a blank grinder name.
+ * Returns the recorded event (or null).
+ */
+export function recordGrinderSelection({ profileId, profileLabel, grinder, grindSetting }) {
+  const name = String(grinder || '').trim();
+  if (!name) return null;
+
+  const events = readJson(GRINDER_SELECTION_EVENTS_KEY, []);
+  const nextEvent = {
+    id: createSelectionId(),
+    profileId: String(profileId || ''),
+    profileLabel: String(profileLabel || ''),
+    grinder: name,
+    grindSetting: String(grindSetting || ''),
+    selectedAtMs: Date.now(),
+  };
+
+  const nextEvents = [nextEvent, ...(Array.isArray(events) ? events : [])].slice(0, 500);
+  writeJson(GRINDER_SELECTION_EVENTS_KEY, nextEvents);
+  writeJson(ACTIVE_GRINDER_SELECTION_KEY, nextEvent);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('grinder-selection-changed', { detail: nextEvent }));
+  }
+  return nextEvent;
+}
+
+export function getCurrentGrinderSelection() {
+  return readJson(ACTIVE_GRINDER_SELECTION_KEY, null);
+}
+
+// Resolve the most recent grinder-selection event that (a) matches the shot's
+// profile and (b) happened at or before the shot was pulled. Mirrors
+// beanManager.resolveSelectionEventForShot exactly.
+function resolveGrinderSelectionForShot(shot) {
+  const events = readJson(GRINDER_SELECTION_EVENTS_KEY, []);
+  const shotProfile = normalize(shot?.profile || shot?.profileName || '');
+  const shotTimestampMs = Number(shot?.timestamp || 0) * 1000;
+
+  if (!shotProfile || !Number.isFinite(shotTimestampMs) || shotTimestampMs <= 0) {
+    return null;
+  }
+
+  return (
+    (Array.isArray(events) ? events : [])
+      .filter(event => normalize(event.profileLabel) === shotProfile)
+      .filter(event => Number(event.selectedAtMs || 0) <= shotTimestampMs)
+      .sort((a, b) => Number(b.selectedAtMs || 0) - Number(a.selectedAtMs || 0))[0] || null
+  );
+}
+
+// PRE-FILL default for a shot's `grinder` notes field: an explicit value on the
+// shot / its notes wins; otherwise fall back to the selection-event log.
+export function inferGrinderForShot(shot) {
+  if (shot?.notes?.grinder) return shot.notes.grinder;
+  if (shot?.grinder) return shot.grinder;
+  return resolveGrinderSelectionForShot(shot)?.grinder || '';
+}
+
+// PRE-FILL default for a shot's `grindSetting` notes field, same precedence.
+export function inferGrindSettingForShot(shot) {
+  if (shot?.notes?.grindSetting) return shot.notes.grindSetting;
+  if (shot?.grindSetting) return shot.grindSetting;
+  return resolveGrinderSelectionForShot(shot)?.grindSetting || '';
+}

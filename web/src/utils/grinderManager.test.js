@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { listGrinders, recordGrinder } from './grinderManager.js';
+import {
+  listGrinders,
+  recordGrinder,
+  recordGrinderSelection,
+  getCurrentGrinderSelection,
+  inferGrinderForShot,
+  inferGrindSettingForShot,
+} from './grinderManager.js';
 
 const GRINDERS_STORAGE_KEY = 'gaggimate-grinders';
 const GRINDERS_PENDING_STORAGE_KEY = 'gaggimate-grinders-pending';
@@ -254,6 +261,66 @@ describe('grinderManager', () => {
       const result = await listGrinders(api);
       expect(result).toEqual(['Cached']);
       expect(api.request).not.toHaveBeenCalled();
+    });
+  });
+
+  // PRO-425: dashboard grinder-selection log used to pre-fill Shot Notes.
+  describe('grinder selection events (PRO-425)', () => {
+    it('records a selection and exposes it as the current selection', () => {
+      const evt = recordGrinderSelection({
+        profileId: 'p1',
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '18.0g',
+      });
+      expect(evt).toMatchObject({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '18.0g',
+      });
+      expect(getCurrentGrinderSelection()).toMatchObject({ grinder: 'Niche Zero' });
+    });
+
+    it('no-ops for a blank grinder name', () => {
+      expect(recordGrinderSelection({ grinder: '   ' })).toBeNull();
+      expect(getCurrentGrinderSelection()).toBeNull();
+    });
+
+    it('infers grinder + grindSetting for a later shot of the same profile', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
+      // Shot timestamp is in Unix SECONDS; selection is in ms. Use a shot pulled
+      // just after the selection.
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrinderForShot(shot)).toBe('Niche Zero');
+      expect(inferGrindSettingForShot(shot)).toBe('28s');
+    });
+
+    it('does not infer a selection recorded AFTER the shot was pulled', () => {
+      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) - 60 };
+      expect(inferGrinderForShot(shot)).toBe('');
+      expect(inferGrindSettingForShot(shot)).toBe('');
+    });
+
+    it('prefers an explicit value on the shot / its notes over the selection log', () => {
+      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grinder: 'Saved Grinder', grindSetting: 'Saved Setting' },
+      };
+      expect(inferGrinderForShot(shot)).toBe('Saved Grinder');
+      expect(inferGrindSettingForShot(shot)).toBe('Saved Setting');
+    });
+
+    it('does not cross profiles', () => {
+      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      const shot = { profile: 'Filter', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrinderForShot(shot)).toBe('');
     });
   });
 });
