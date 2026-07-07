@@ -429,7 +429,7 @@ void ShotHistoryPlugin::handleCompletedShot() {
     // Track whether a notes file exists so appendCompletedShotToIndex can set SHOT_FLAG_HAS_NOTES
     // without an extra fs->exists() stat call.
     bool hasNotes = false;
-    if (!currentBeanName.isEmpty()) {
+    if (!currentBeanName.isEmpty() || !currentGrinderName.isEmpty()) {
         JsonDocument previousNotes;
         JsonDocument autoNotes;
         loadNotes(currentId, previousNotes);
@@ -439,12 +439,21 @@ void ShotHistoryPlugin::handleCompletedShot() {
         // we resolved one at brew start, the stable beanId. We only fill fields the
         // WebUI hasn't already written, so a user-entered bean is never clobbered.
         bool notesChanged = false;
-        if (autoNotes["beanType"].isNull() || autoNotes["beanType"].as<String>().isEmpty()) {
+        if (!currentBeanName.isEmpty() && (autoNotes["beanType"].isNull() || autoNotes["beanType"].as<String>().isEmpty())) {
             autoNotes["beanType"] = currentBeanName;
             notesChanged = true;
         }
         if (!currentBeanId.isEmpty() && (autoNotes["beanId"].isNull() || autoNotes["beanId"].as<String>().isEmpty())) {
             autoNotes["beanId"] = currentBeanId;
+            notesChanged = true;
+        }
+        // PRO-428: stamp the device-recorded grinder NAME, mirroring beanType. Same
+        // fill-only-if-absent guard so a user-entered grinder is never clobbered. The
+        // field name "grinderName" is the contract PRO-430's isGrinderRecordedForShot
+        // guard keys off. There is no grinder-id analog (name-only in Settings).
+        if (!currentGrinderName.isEmpty() &&
+            (autoNotes["grinderName"].isNull() || autoNotes["grinderName"].as<String>().isEmpty())) {
+            autoNotes["grinderName"] = currentGrinderName;
             notesChanged = true;
         }
         if (notesChanged) {
@@ -453,10 +462,10 @@ void ShotHistoryPlugin::handleCompletedShot() {
                 ESP_LOGW("ShotHistoryPlugin", "Failed to update bean usage for completed shot %s", currentId.c_str());
             }
         } else {
-            hasNotes = true; // WebUI already wrote notes that include beanType/beanId
+            hasNotes = true; // WebUI already wrote notes that include beanType/beanId/grinderName
         }
     } else {
-        // No bean selected — WebUI may still have written dose-only notes.
+        // No bean or grinder selected — WebUI may still have written dose-only notes.
         hasNotes = fs->exists("/h/" + currentId + ".json");
     }
 
@@ -689,6 +698,10 @@ void ShotHistoryPlugin::startRecording() {
     // browser. Empty when no bean is selected or the name no longer matches a
     // stored bean (older/deleted bean) — the shot then carries name-only, as before.
     currentBeanId = resolveSelectedBeanId(currentBeanName);
+    // PRO-428: capture the selected grinder NAME at brew start, mirroring the bean
+    // capture above. Settings stores only the name (req:grinders:select carries no
+    // id), so there is no grinder-id analog to beanId; name-only is the payload.
+    currentGrinderName = controller->getSettings().getSelectedGrinder();
     recording = true;
     extendedRecording = false;
     indexEntryCreated = false; // Reset flag for new shot
