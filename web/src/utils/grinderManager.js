@@ -462,18 +462,29 @@ export function isGrinderRecordedForShot(shot) {
   );
 }
 
+// PRO-441: true when the machine grind TARGET on this shot was recorded by the
+// DEVICE (the firmware `grindTarget` notes field — a display label like "18.0g"
+// or "25s"), rather than guessed from the per-browser localStorage selection
+// log. Mirrors isGrinderRecordedForShot: only a device-recorded target is
+// authoritative. `grindTarget` is the firmware contract stamped by PRO-441 and
+// is DISTINCT from the user-editable `grindSetting` dial value.
+export function isGrindTargetRecordedForShot(shot) {
+  return Boolean(shot?.notes?.grindTarget);
+}
+
 // PRE-FILL default for a shot's `grindSetting` notes field.
 //
-// Precedence (PRO-431): a saved note always wins; then an explicit value on the
-// shot; then the MANUAL grinder-dial number the user typed on the dashboard
-// (recordManualGrindSetting) — this deliberately outranks the machine
+// Precedence (PRO-431 / PRO-441): a saved note always wins; then an explicit
+// value on the shot; then the MANUAL grinder-dial number the user typed on the
+// dashboard (recordManualGrindSetting) — this deliberately outranks the machine
 // grind-TARGET label so a real dial setting is preferred over the auto-grind
-// target; finally, fall back to the machine target label captured in the
-// grinder-selection log when no manual value was entered.
+// target; then the DEVICE-recorded machine target (`shot.notes.grindTarget`,
+// PRO-441 — device-authoritative, reads the same in every browser); finally the
+// per-browser localStorage grinder-selection log.
 export function inferGrindSettingForShot(shot) {
   if (shot?.notes?.grindSetting) return shot.notes.grindSetting;
   if (shot?.grindSetting) return shot.grindSetting;
   const manual = resolveManualGrindSettingForShot(shot)?.grindSetting;
   if (manual) return manual;
-  return resolveGrinderSelectionForShot(shot)?.grindSetting || '';
+  return shot?.notes?.grindTarget || resolveGrinderSelectionForShot(shot)?.grindSetting || '';
 }

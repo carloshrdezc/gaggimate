@@ -8,6 +8,7 @@ import {
   inferGrinderForShot,
   inferGrindSettingForShot,
   isGrinderRecordedForShot,
+  isGrindTargetRecordedForShot,
   resolveGrinderPrefill,
 } from './grinderManager.js';
 
@@ -537,6 +538,46 @@ describe('grinderManager', () => {
 
     it('returns an empty string when no source has a grinder', () => {
       expect(resolveGrinderPrefill({ grinder: '' }, {}, {})).toBe('');
+    });
+  });
+
+  // PRO-441: the DEVICE stamps the machine grind TARGET (auto-grind grams/seconds)
+  // onto shot notes as `grindTarget` (a display label). It is device-authoritative
+  // (reads the same in every browser) and DISTINCT from the user-editable
+  // grindSetting dial. inferGrindSettingForShot prefers it over the per-browser
+  // localStorage selection-log fallback, but a real manual dial number still wins.
+  describe('device grind TARGET on shot notes (PRO-441)', () => {
+    it('prefers the device-recorded notes.grindTarget over the localStorage selection-log fallback', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'LStore Guess',
+        grindSetting: '28s',
+      });
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindTarget: '18.0g' },
+      };
+      // The selection log WOULD infer '28s', but the device target is authoritative.
+      expect(inferGrindSettingForShot(shot)).toBe('18.0g');
+    });
+
+    it('lets a MANUAL dial value outrank the device grindTarget (no regression)', () => {
+      recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindTarget: '18.0g' },
+      };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
+    it('isGrindTargetRecordedForShot is true only when notes.grindTarget is set', () => {
+      expect(isGrindTargetRecordedForShot({ notes: { grindTarget: '25s' } })).toBe(true);
+      expect(isGrindTargetRecordedForShot({ notes: { grindSetting: '3.2' } })).toBe(false);
+      expect(isGrindTargetRecordedForShot({ notes: {} })).toBe(false);
+      expect(isGrindTargetRecordedForShot({})).toBe(false);
+      expect(isGrindTargetRecordedForShot(null)).toBe(false);
     });
   });
 });
