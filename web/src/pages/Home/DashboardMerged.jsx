@@ -324,6 +324,11 @@ function StandbyBlock({ profileName, curve }) {
               <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-warn)' }}>
                 ▬ FLOW
               </span>
+              {curve.temperature && (
+                <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-accent)' }}>
+                  ▬ TEMP
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -354,6 +359,18 @@ function StandbyBlock({ profileName, curve }) {
                   strokeDasharray='2 4'
                 />
               ))}
+              {/* Temperature (accent/red) under flow + pressure; pressure stays on top */}
+              {curve.temperature && (
+                <polyline
+                  points={curve.temperature}
+                  fill='none'
+                  stroke='var(--dm-accent)'
+                  strokeWidth='1.5'
+                  strokeLinejoin='round'
+                  strokeLinecap='round'
+                  vectorEffect='non-scaling-stroke'
+                />
+              )}
               {/* Flow (amber) then pressure (green) on top */}
               <polyline
                 points={curve.flow}
@@ -404,6 +421,7 @@ StandbyBlock.propTypes = {
   curve: PropTypes.shape({
     pressure: PropTypes.string,
     flow: PropTypes.string,
+    temperature: PropTypes.string,
   }),
 };
 
