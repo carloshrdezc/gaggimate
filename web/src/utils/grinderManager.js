@@ -419,12 +419,31 @@ function resolveGrinderSelectionForShot(shot) {
   );
 }
 
-// PRE-FILL default for a shot's `grinder` notes field: an explicit value on the
-// shot / its notes wins; otherwise fall back to the selection-event log.
+// PRE-FILL default for a shot's `grinder` notes field. The DEVICE-RECORDED
+// grinder wins over the per-browser localStorage guess: PRO-428 firmware now
+// stamps the selected grinder NAME into a shot's notes under `grinderName`
+// (name-only — Settings stores grinder by name, there is no grinder-id analog),
+// so that authoritative value must outrank the localStorage selection-event log.
+// Precedence: device-recorded notes.grinderName -> shot.grinderName ->
+// existing user-entered notes.grinder -> shot.grinder -> localStorage guess.
 export function inferGrinderForShot(shot) {
+  if (shot?.notes?.grinderName) return shot.notes.grinderName;
+  if (shot?.grinderName) return shot.grinderName;
   if (shot?.notes?.grinder) return shot.notes.grinder;
   if (shot?.grinder) return shot.grinder;
   return resolveGrinderSelectionForShot(shot)?.grinder || '';
+}
+
+// PRO-430: true when the grinder on this shot was recorded by the DEVICE
+// (the PRO-428 firmware `grinderName` field — or an explicit shot grinder —
+// present on the shot record or its notes), rather than guessed from the
+// per-browser localStorage selection-event log. Mirrors isBeanRecordedForShot:
+// only a device-recorded grinder is authoritative, never the localStorage
+// fallback. `grinderName` is the firmware contract stamped by PRO-428.
+export function isGrinderRecordedForShot(shot) {
+  return Boolean(
+    shot?.notes?.grinderName || shot?.grinderName || shot?.notes?.grinder || shot?.grinder,
+  );
 }
 
 // PRE-FILL default for a shot's `grindSetting` notes field.
