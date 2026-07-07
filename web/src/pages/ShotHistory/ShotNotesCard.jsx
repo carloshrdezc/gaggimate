@@ -8,7 +8,7 @@ import { faEdit } from '@fortawesome/free-solid-svg-icons/faEdit';
 import { faSave } from '@fortawesome/free-solid-svg-icons/faSave';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans } from '../../utils/beanManager.js';
-import { listGrinders, recordGrinder } from '../../utils/grinderManager.js';
+import { listGrinders, recordGrinder, resolveGrinderPrefill } from '../../utils/grinderManager.js';
 import { formatTenPointRating } from '../../utils/ratings.js';
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
@@ -73,12 +73,16 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         const savedNotes = await notesService.loadNotes(notesKey, shot.source || 'gaggimate');
         loadedNotes = { ...loadedNotes, ...savedNotes, id: notesKey };
 
-        // PRO-425: pre-fill grinder / grindSetting from the enriched shot
-        // (dashboard selection log) ONLY when the saved notes have no value —
-        // these are editable defaults, never a clobber of a saved entry.
-        if (!loadedNotes.grinder && shot.grinder) {
-          loadedNotes.grinder = shot.grinder;
-        }
+        // PRO-425 / PRO-438: pre-fill grinder / grindSetting from the enriched
+        // shot ONLY when the saved notes have no value — these are editable
+        // defaults, never a clobber of a saved entry.
+        //
+        // PRO-438: the device firmware stamps the selected grinder under
+        // `grinderName` (PRO-428 contract) but the form field binds to
+        // `grinder`, so surface it here. Precedence (see resolveGrinderPrefill):
+        // existing saved grinder > device savedNotes.grinderName >
+        // localStorage selection-log guess shot.grinder.
+        loadedNotes.grinder = resolveGrinderPrefill(loadedNotes, savedNotes, shot);
         if (!loadedNotes.grindSetting && shot.grindSetting) {
           loadedNotes.grindSetting = shot.grindSetting;
         }
