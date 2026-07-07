@@ -10,7 +10,7 @@ import { useAutoSteam } from '../../hooks/useAutoSteam.js';
 import { useShotDoseRecorder } from '../../hooks/useShotDoseRecorder.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
 import { listBeans, recordBeanSelection, parseQuantity } from '../../utils/beanManager.js';
-import { listGrinders, recordGrinderSelection } from '../../utils/grinderManager.js';
+import { listGrinders, recordGrinderSelection, recordManualGrindSetting } from '../../utils/grinderManager.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
@@ -47,6 +47,12 @@ import {
 const DOSE_KEY = 'gaggimate-dose-grams';
 const DEFAULT_DOSE = 18.0;
 const DEFAULT_YIELD = 36.0;
+
+// Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history of
+// the physical grinder dial number; NEVER sent to the device (unlike DOSE_KEY,
+// which also fires req:dose:set). Default 0 = "not set yet".
+const MANUAL_GRIND_KEY = 'gaggimate-manual-grind-setting';
+const DEFAULT_MANUAL_GRIND = 0;
 
 const PRESSURE_MAX = 12;
 const FLOW_MAX = 6;
@@ -1391,6 +1397,35 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     }
   }, [api]);
 
+  // Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history
+  // ONLY — seeded from localStorage like `cachedDose` above, but with NO device
+  // send: this is the physical dial number, not a machine parameter. Committing
+  // a value also records a per-profile manual-grind event so a later shot of the
+  // active profile pre-fills its Shot Notes grindSetting with it (taking
+  // precedence over the machine grind-TARGET label — see grinderManager.js).
+  const [manualGrind, setManualGrindState] = useState(() => {
+    try { return parseQuantity(localStorage.getItem(MANUAL_GRIND_KEY)) ?? DEFAULT_MANUAL_GRIND; } catch { return DEFAULT_MANUAL_GRIND; }
+  });
+  const setManualGrind = useCallback(val => {
+    // Permissive range: grinder dials vary enormously (0–10 with decimals on a
+    // Niche, 0–40+ clicks on a DF64, arbitrary worm-drive numbers), so clamp
+    // only to a wide, neutral [0, 100] band rather than any grinder-specific
+    // scale. step=0.1 supports decimal dials.
+    const v = Math.max(0, Math.min(100, val));
+    setManualGrindState(v);
+    try { localStorage.setItem(MANUAL_GRIND_KEY, String(v)); } catch {}
+    // Record for Shot Notes pre-fill (per-profile, per-browser). Skip 0 — that
+    // is the "not set" sentinel and should not shadow the machine target label.
+    if (v > 0) {
+      const st = machine.value.status;
+      recordManualGrindSetting({
+        profileId: st.selectedProfileId,
+        profileLabel: st.selectedProfile,
+        grindSetting: String(v),
+      });
+    }
+  }, []);
+
   // Auto-attach dose and bean to shot notes as soon as the shot becomes active
   useShotDoseRecorder(api, dose);
 
@@ -2211,11 +2246,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
             )}
           </div>
 
-          {/* Dose → Yield → Scales */}
+          {/* Grind → Dose → Yield → Scales */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr auto 1fr auto 1fr',
+              gridTemplateColumns: '1fr auto 1fr auto 1fr auto 1fr',
               gap: 10,
               alignItems: 'center',
               padding: '12px 0',
@@ -2223,6 +2258,20 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               borderBottom: '1px solid var(--dm-line)',
             }}
           >
+            {/* Manual grinder-dial setting (PRO-431). Edits exactly like DOSE
+                (tap → type → commit) but is per-browser localStorage only and is
+                never sent to the device. Separate from the machine grind-TARGET
+                "GRIND · Xs" label above, which is unchanged. */}
+            <EditableNumBlock
+              label='GRIND'
+              value={manualGrind}
+              unit=''
+              step={0.1}
+              min={0}
+              max={100}
+              onCommit={setManualGrind}
+            />
+            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
             <EditableNumBlock
               label='DOSE'
               value={dose}

@@ -331,6 +331,74 @@ export function getCurrentGrinderSelection() {
   return readJson(ACTIVE_GRINDER_SELECTION_KEY, null);
 }
 
+// --- Manual grind-setting log (PRO-431) --------------------------------------
+//
+// A per-browser localStorage log of the manual grinder-dial setting the user
+// typed into the standby dashboard's GRIND field, keyed to the active profile.
+// This is the physical grinder dial number (decimals, clicks, worm-drive, …) —
+// UX history only, NEVER sent to the device (mirrors the DOSE_KEY localStorage
+// seed in DashboardMerged, minus the `req:dose:set` device send).
+//
+// It has the SAME shape as the grinder-selection log above but a SEPARATE key,
+// so a manually-entered dial number takes clean PRECEDENCE over the machine
+// grind-TARGET label (formatGrindTarget, recorded in the selection log) when a
+// shot's Shot Notes grindSetting is pre-filled — see inferGrindSettingForShot.
+
+const MANUAL_GRIND_SETTING_EVENTS_KEY = 'gaggimate-manual-grind-setting-events';
+
+function createManualGrindId() {
+  return `manual-grind-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Records the manually-entered grinder-dial setting for the active profile so a
+ * later shot of that profile pre-fills its Shot Notes grindSetting with it.
+ * `grindSetting` is the raw number the user typed (stored as a string, matching
+ * the selection log). No-ops for a blank/whitespace value. Per-browser
+ * localStorage only — never touches the device. Returns the recorded event (or
+ * null).
+ */
+export function recordManualGrindSetting({ profileId, profileLabel, grindSetting }) {
+  const value = String(grindSetting ?? '').trim();
+  if (!value) return null;
+
+  const events = readJson(MANUAL_GRIND_SETTING_EVENTS_KEY, []);
+  const nextEvent = {
+    id: createManualGrindId(),
+    profileId: String(profileId || ''),
+    profileLabel: String(profileLabel || ''),
+    grindSetting: value,
+    selectedAtMs: Date.now(),
+  };
+
+  const nextEvents = [nextEvent, ...(Array.isArray(events) ? events : [])].slice(0, 500);
+  writeJson(MANUAL_GRIND_SETTING_EVENTS_KEY, nextEvents);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('manual-grind-setting-changed', { detail: nextEvent }));
+  }
+  return nextEvent;
+}
+
+// Resolve the most recent manual grind-setting event that (a) matches the
+// shot's profile and (b) happened at or before the shot was pulled. Same
+// profile/timestamp matching as resolveGrinderSelectionForShot.
+function resolveManualGrindSettingForShot(shot) {
+  const events = readJson(MANUAL_GRIND_SETTING_EVENTS_KEY, []);
+  const shotProfile = normalize(shot?.profile || shot?.profileName || '');
+  const shotTimestampMs = Number(shot?.timestamp || 0) * 1000;
+
+  if (!shotProfile || !Number.isFinite(shotTimestampMs) || shotTimestampMs <= 0) {
+    return null;
+  }
+
+  return (
+    (Array.isArray(events) ? events : [])
+      .filter(event => normalize(event.profileLabel) === shotProfile)
+      .filter(event => Number(event.selectedAtMs || 0) <= shotTimestampMs)
+      .sort((a, b) => Number(b.selectedAtMs || 0) - Number(a.selectedAtMs || 0))[0] || null
+  );
+}
+
 // Resolve the most recent grinder-selection event that (a) matches the shot's
 // profile and (b) happened at or before the shot was pulled. Mirrors
 // beanManager.resolveSelectionEventForShot exactly.
@@ -359,9 +427,18 @@ export function inferGrinderForShot(shot) {
   return resolveGrinderSelectionForShot(shot)?.grinder || '';
 }
 
-// PRE-FILL default for a shot's `grindSetting` notes field, same precedence.
+// PRE-FILL default for a shot's `grindSetting` notes field.
+//
+// Precedence (PRO-431): a saved note always wins; then an explicit value on the
+// shot; then the MANUAL grinder-dial number the user typed on the dashboard
+// (recordManualGrindSetting) — this deliberately outranks the machine
+// grind-TARGET label so a real dial setting is preferred over the auto-grind
+// target; finally, fall back to the machine target label captured in the
+// grinder-selection log when no manual value was entered.
 export function inferGrindSettingForShot(shot) {
   if (shot?.notes?.grindSetting) return shot.notes.grindSetting;
   if (shot?.grindSetting) return shot.grindSetting;
+  const manual = resolveManualGrindSettingForShot(shot)?.grindSetting;
+  if (manual) return manual;
   return resolveGrinderSelectionForShot(shot)?.grindSetting || '';
 }

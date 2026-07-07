@@ -3,6 +3,7 @@ import {
   listGrinders,
   recordGrinder,
   recordGrinderSelection,
+  recordManualGrindSetting,
   getCurrentGrinderSelection,
   inferGrinderForShot,
   inferGrindSettingForShot,
@@ -321,6 +322,85 @@ describe('grinderManager', () => {
       recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
       const shot = { profile: 'Filter', timestamp: Math.floor(Date.now() / 1000) + 5 };
       expect(inferGrinderForShot(shot)).toBe('');
+    });
+  });
+
+  // PRO-431: manual grinder-dial setting typed on the dashboard, pre-filled into
+  // Shot Notes with precedence over the machine grind-TARGET label.
+  describe('manual grind-setting (PRO-431)', () => {
+    it('records a manual grind setting and infers it for a later shot of the same profile', () => {
+      const evt = recordManualGrindSetting({
+        profileId: 'p1',
+        profileLabel: 'Espresso',
+        grindSetting: '2.5',
+      });
+      expect(evt).toMatchObject({ profileLabel: 'Espresso', grindSetting: '2.5' });
+
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('2.5');
+    });
+
+    it('no-ops for a blank / whitespace value', () => {
+      expect(recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '   ' })).toBeNull();
+      expect(recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '' })).toBeNull();
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('');
+    });
+
+    it('takes PRECEDENCE over the machine grind-TARGET label from the selection log', () => {
+      // Machine target label recorded via the grinder-selection log …
+      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      // … and a manual dial number recorded afterwards. The manual value wins.
+      recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
+    it('wins even when the machine target was recorded AFTER the manual value', () => {
+      // Precedence is by SOURCE (manual > machine target), not merely recency:
+      // a machine-target selection recorded after the manual entry must not
+      // shadow it.
+      recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
+    it('falls back to the machine target label when no manual value was entered', () => {
+      recordGrinderSelection({ profileLabel: 'Espresso', grinder: 'Niche Zero', grindSetting: '28s' });
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('28s');
+    });
+
+    it('never clobbers a saved note or an explicit shot value', () => {
+      recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      const shotWithNote = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindSetting: 'Saved Setting' },
+      };
+      expect(inferGrindSettingForShot(shotWithNote)).toBe('Saved Setting');
+
+      const shotWithExplicit = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        grindSetting: 'Explicit Setting',
+      };
+      expect(inferGrindSettingForShot(shotWithExplicit)).toBe('Explicit Setting');
+    });
+
+    it('does not infer a manual value recorded AFTER the shot was pulled', () => {
+      recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) - 60 };
+      expect(inferGrindSettingForShot(shot)).toBe('');
+    });
+
+    it('does not cross profiles', () => {
+      recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      const shot = { profile: 'Filter', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('');
     });
   });
 });
