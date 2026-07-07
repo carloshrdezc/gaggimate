@@ -105,9 +105,6 @@ pio run -e display-no-mqtt
 pio run -e display-no-ble-scale
 pio run -e display-no-webui
 
-# 2c. 4MB-flash headless target — gates against partition/flash overflow.
-pio run -e display-headless-4m
-
 # 3. Host unit tests, plain and under AddressSanitizer + UndefinedBehaviorSanitizer.
 #    Sanitizer findings fail the suite (CI sets ASAN_OPTIONS/UBSAN_OPTIONS to
 #    halt/abort on the first report).

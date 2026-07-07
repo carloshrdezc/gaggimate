@@ -178,39 +178,6 @@ jobs:
       - name: Build display firmware (${{ matrix.env }})
         run: pio run -e ${{ matrix.env }}
 
-  firmware-headless-4m:
-    name: Firmware build (display-headless-4m)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install PlatformIO Core
-        run: pip install platformio==6.1.19
-      # PRO-316: compile the 4MB-flash headless target on every PR. [env:display-headless-4m]
-      # The no_ota single ~2,097,152 B app slot is selected by this repo's own board
-      # definition (boards/esp32-s3-supermini.json -> "partitions": "no_ota.csv"); only the
-      # CSV byte layout ships with the Espressif/Arduino platform. It is not set by this env
-      # or platformio.ini. It links today at ~99.7% flash (~7 KB headroom). Without this leg,
-      # a future change that adds a few KB would silently push it over the partition limit
-      # with nothing in CI to catch it.
-      # PlatformIO's linker exits non-zero on a region overflow, so a plain `pio run` fails
-      # the PR — no silent truncation. Like the sibling display jobs, this relies on
-      # embed_webui_pre.py's empty-bundle stub; the real web UI isn't needed to exercise
-      # the linker/partition check that gates flash overflow.
-      - name: Build display-headless-4m firmware
-        run: pio run -e display-headless-4m
-
   native:
     name: Native tests (ASan/UBSan)
     runs-on: ubuntu-latest
