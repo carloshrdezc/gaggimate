@@ -73,6 +73,16 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
         const savedNotes = await notesService.loadNotes(notesKey, shot.source || 'gaggimate');
         loadedNotes = { ...loadedNotes, ...savedNotes, id: notesKey };
 
+        // PRO-425: pre-fill grinder / grindSetting from the enriched shot
+        // (dashboard selection log) ONLY when the saved notes have no value —
+        // these are editable defaults, never a clobber of a saved entry.
+        if (!loadedNotes.grinder && shot.grinder) {
+          loadedNotes.grinder = shot.grinder;
+        }
+        if (!loadedNotes.grindSetting && shot.grindSetting) {
+          loadedNotes.grindSetting = shot.grindSetting;
+        }
+
         // Pre-populate doseOut with shot.volume if it's empty and shot.volume exists
         if (!loadedNotes.doseOut && shot.volume) {
           loadedNotes.doseOut = shot.volume.toFixed(1);
