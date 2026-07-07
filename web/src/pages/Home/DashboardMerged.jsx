@@ -27,7 +27,6 @@ import {
   MODE_MANUAL,
   MODE_STANDBY,
   MODE_STEAM,
-  MODE_GRIND,
   buildStandbyProfileCurve,
   clampManualFlow,
   clampManualPressure,
@@ -1602,10 +1601,6 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     ? Math.round(s.brewTargetDuration / 1000)
     : 32;
 
-  // Current grind target label for the recipe panel (null when unset → empty
-  // state). PRO-425.
-  const grindTargetLabel = formatGrindTarget(s.grindTarget, s.grindTargetVolume, s.grindTargetDuration);
-
   // Elapsed time
   const elapsedSecs = Math.round((processInfo?.e || 0) / 1000);
 
@@ -2167,43 +2162,6 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 {s.selectedGrinder || 'No grinder selected'}
               </button>
               <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, color: 'var(--dm-fg-faint)' }}>▾</span>
-              {isGrindAvailable ? (
-                <button
-                  type='button'
-                  onClick={e => {
-                    e.stopPropagation();
-                    // Edit the grind target via its EXISTING home: switch to
-                    // GRIND mode where the established raise/lower control
-                    // (GrindTargetBar → req:change-grind-target) lives. No new
-                    // endpoint, single set path. PRO-425.
-                    onModeSelect(MODE_GRIND);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    cursor: 'pointer',
-                    fontFamily: 'var(--dm-font-mono)',
-                    fontSize: 9,
-                    letterSpacing: '0.06em',
-                    color: 'var(--dm-fg-faint)',
-                    borderBottom: '1px dashed rgba(232,232,232,0.2)',
-                  }}
-                >
-                  {grindTargetLabel ? `GRIND · ${grindTargetLabel}` : 'No grind target'}
-                </button>
-              ) : (
-                <span
-                  style={{
-                    fontFamily: 'var(--dm-font-mono)',
-                    fontSize: 9,
-                    letterSpacing: '0.06em',
-                    color: 'var(--dm-fg-faint)',
-                  }}
-                >
-                  {grindTargetLabel ? `GRIND · ${grindTargetLabel}` : 'No grind target'}
-                </span>
-              )}
             </div>
 
             {/* Bean dropdown */}
@@ -2260,8 +2218,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
           >
             {/* Manual grinder-dial setting (PRO-431). Edits exactly like DOSE
                 (tap → type → commit) but is per-browser localStorage only and is
-                never sent to the device. Separate from the machine grind-TARGET
-                "GRIND · Xs" label above, which is unchanged. */}
+                never sent to the device. */}
             <EditableNumBlock
               label='GRIND'
               value={manualGrind}
