@@ -289,61 +289,14 @@ TargetBar.propTypes = {
 };
 
 // PRO-426: Standby shot-card block. Replaces the live target bars + yield bar
-// when the machine is idle (mode 0, non-manual). Surfaces the active grinder,
-// grind setting, and a dark-themed hand-rolled mini-curve of the selected
-// profile — no Chart.js. Every field degrades to a themed empty-state string
-// (never NaN / "undefined" / broken UI).
-function StandbyStat({ label, value, empty }) {
-  const has = value != null && value !== '';
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-      <span
-        style={{
-          fontFamily: 'var(--dm-font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.18em',
-          color: 'var(--dm-fg-dim)',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontFamily: 'var(--dm-font-display)',
-          fontSize: 15,
-          fontWeight: 700,
-          lineHeight: 1.1,
-          color: has ? 'var(--dm-fg)' : 'var(--dm-fg-faint)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {has ? value : empty}
-      </span>
-    </div>
-  );
-}
-
-StandbyStat.propTypes = {
-  label: PropTypes.string,
-  value: PropTypes.string,
-  empty: PropTypes.string,
-};
-
-function StandbyBlock({ grinder, grindLabel, profileName, curve }) {
+// when the machine is idle (mode 0, non-manual). Surfaces a dark-themed
+// hand-rolled mini-curve of the selected profile — no Chart.js. Grinder + grind
+// setting are NOT duplicated here: the recipe row already renders them as
+// editable dropdowns in all modes (incl. standby). Every field degrades to a
+// themed empty-state string (never NaN / "undefined" / broken UI).
+function StandbyBlock({ profileName, curve }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      {/* Grinder + grind setting — styled like the recipe labels. */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <StandbyStat label='GRINDER' value={grinder} empty='No grinder selected' />
-        <StandbyStat
-          label='GRIND SETTING'
-          value={grindLabel}
-          empty='No grind target'
-        />
-      </div>
-
       {/* Selected-profile mini-curve. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
         <div
@@ -447,8 +400,6 @@ function StandbyBlock({ grinder, grindLabel, profileName, curve }) {
 }
 
 StandbyBlock.propTypes = {
-  grinder: PropTypes.string,
-  grindLabel: PropTypes.string,
   profileName: PropTypes.string,
   curve: PropTypes.shape({
     pressure: PropTypes.string,
@@ -2349,8 +2300,6 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
           >
             {isStandby ? (
               <StandbyBlock
-                grinder={s.selectedGrinder}
-                grindLabel={grindTargetLabel}
                 profileName={s.selectedProfile}
                 curve={standbyCurve}
               />
