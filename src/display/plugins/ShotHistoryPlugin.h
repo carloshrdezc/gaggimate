@@ -150,6 +150,14 @@ class ShotHistoryPlugin : public Plugin {
     String currentProfileName;
     String currentBeanName;
     String currentBeanId; // PRO-422: BeanManager id of the selected bean at brew start ("" if none/unknown)
+    String currentGrinderName; // PRO-428: selected grinder name at brew start ("" if none); stamped as notes "grinderName"
+    // PRO-441: snapshot the MACHINE GRIND TARGET (auto-grind grams/seconds) at brew start, mirroring the
+    // grinderName capture. Stamped as notes "grindTarget" (a display label string) so every web client reads
+    // the same device-authoritative target instead of a per-browser localStorage selection log. tgv/tgd are
+    // already Settings/NVS-persisted — no new NVS key, no new WebSocket message. The volumetric-vs-time mode
+    // reuses shotStartedVolumetric (same isVolumetricTarget() snapshot) rather than a second copy.
+    double currentGrindTargetVolume = 0; // grams
+    int currentGrindTargetDuration = 0;  // milliseconds
 
     // Phase transition tracking (v5+)
     uint8_t lastRecordedPhase = 0xFF; // Invalid initial value to detect first phase
