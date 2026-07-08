@@ -1,5 +1,6 @@
 #include "WebUIPlugin.h"
 #include "OtaChannelSwitchPolicy.h"
+#include "OtaIntentState.h"
 #include "OtaUpdateCheckPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
@@ -290,7 +291,8 @@ void WebUIPlugin::loop() {
     // while in AP mode / before the server is up).
     if (pendingOtaStart) {
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            updateComponent = pendingUpdateComponent;
+            const OtaDeferredDrainResult drained = drainOtaDeferredIntent(pendingOtaStart, pendingUpdateComponent.c_str());
+            updateComponent = drained.payload.c_str();
             pendingUpdateComponent = "";
             pendingOtaStart = false;
             updating = true;
@@ -400,7 +402,8 @@ void WebUIPlugin::loop() {
         }
         bool updateSucceeded = false;
         if (tagResolved) {
-            updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
+            const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
+            updateSucceeded = ota->update(componentSelection.updateController, componentSelection.updateDisplay, force);
         }
         pluginManager->trigger("ota:update:end");
         updating = false;
@@ -438,7 +441,8 @@ void WebUIPlugin::loop() {
         bool emptyHandoff = false;
         bool have = false;
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            url = pendingReleaseUrl;
+            const OtaDeferredDrainResult drained = drainOtaDeferredIntent(pendingReleaseUrlChange, pendingReleaseUrl.c_str());
+            url = drained.payload.c_str();
             emptyHandoff = url.isEmpty();
             pendingReleaseUrl = ""; // release the copy; the flag is the source of truth
             pendingReleaseUrlChange = false;
@@ -1380,21 +1384,7 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
 // "tag:<semver>" (validated against STABLE_VERSIONS allow-list) -> "tag/<semver>"
 // anything else -> "latest"
 static String resolveReleaseUrl(const String &channel) {
-    if (channel == "beta") {
-        return RELEASE_URL + "tag/beta";
-    }
-    if (channel == "nightly") {
-        return RELEASE_URL + "tag/nightly";
-    }
-    if (channel.startsWith("tag:")) {
-        const String tag = channel.substring(4);
-        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
-            if (tag == STABLE_VERSIONS[i]) {
-                return RELEASE_URL + "tag/" + tag;
-            }
-        }
-    }
-    return RELEASE_URL + "latest";
+    return String(resolveOtaReleaseUrl(channel.c_str(), RELEASE_URL.c_str(), STABLE_VERSIONS, STABLE_VERSIONS_COUNT).c_str());
 }
 
 // Normalize an incoming channel to the value we persist in settings.
@@ -1403,17 +1393,7 @@ static String resolveReleaseUrl(const String &channel) {
 // to "latest" so a malformed websocket payload can never poison the stored
 // setting.
 static String normalizeChannel(const String &channel) {
-    if (channel == "beta") return "beta";
-    if (channel == "nightly") return "nightly";
-    if (channel.startsWith("tag:")) {
-        const String tag = channel.substring(4);
-        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
-            if (tag == STABLE_VERSIONS[i]) {
-                return channel;
-            }
-        }
-    }
-    return "latest";
+    return String(normalizeOtaChannel(channel.c_str(), STABLE_VERSIONS, STABLE_VERSIONS_COUNT).c_str());
 }
 
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
@@ -1436,8 +1416,9 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
             controller->getSettings().setOTAChannel(normalized);
             const String url = resolveReleaseUrl(normalized);
             if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                pendingReleaseUrl = url;
-                pendingReleaseUrlChange = true;
+                const OtaDeferredStringIntent posted = postOtaDeferredIntent(url.c_str());
+                pendingReleaseUrl = posted.payload.c_str();
+                pendingReleaseUrlChange = posted.pending;
                 xSemaphoreGive(otaIntentMutex);
             } else {
                 // Should be effectively impossible — the lock is only ever held
@@ -1446,7 +1427,8 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
                 // loop-task drain re-resolves the URL from the persisted channel
                 // when no explicit URL was handed off (emptyHandoff), so the new
                 // channel still reaches `ota` on the next loop iteration.
-                pendingReleaseUrlChange = true;
+                const OtaDeferredStringIntent posted = postOtaDeferredIntentFlagOnly();
+                pendingReleaseUrlChange = posted.pending;
                 ESP_LOGW("WebUIPlugin", "OTA release-URL handoff contended; channel persisted, loop will re-resolve");
             }
         }
@@ -1468,15 +1450,17 @@ void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
     // concurrent ota-start requests are not a supported workflow.
     const String component = request["cp"].is<String>() ? request["cp"].as<String>() : String("");
     if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        pendingUpdateComponent = component;
-        pendingOtaStart = true;
+        const OtaDeferredStringIntent posted = postOtaDeferredIntent(component.c_str());
+        pendingUpdateComponent = posted.payload.c_str();
+        pendingOtaStart = posted.pending;
         xSemaphoreGive(otaIntentMutex);
     } else {
         // Effectively impossible (the lock only ever wraps a few trivial
         // assignments), but never drop a start request silently. Raise the flag
         // anyway; loop() finds an empty pendingUpdateComponent and defaults to a
         // full update (both display and controller) — the safe superset.
-        pendingOtaStart = true;
+        const OtaDeferredStringIntent posted = postOtaDeferredIntentFlagOnly();
+        pendingOtaStart = posted.pending;
         ESP_LOGW("WebUIPlugin", "OTA-start handoff contended; defaulting to full update");
     }
 }
