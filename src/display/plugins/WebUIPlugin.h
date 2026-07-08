@@ -11,6 +11,7 @@
 
 #include "../core/constants.h"
 #include "GitHubOTA.h"
+#include "OtaAsyncResolvePolicy.h"
 #include "WebUiLifecycleDeferPolicy.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
@@ -138,6 +139,92 @@ class WebUIPlugin : public Plugin {
     // onto the loop task before the update runs, exactly like the release-URL handoff.
     String pendingUpdateComponent = ""; // guarded by otaIntentMutex
     volatile bool pendingOtaStart = false;
+
+    // PRO-13: async resolve of the forced-tag / channel-switch OTA path.
+    //
+    // Previously, when `updating` became true with a pinned tag or a channel
+    // switch selected, loop() called `ota->checkForUpdates()` SYNCHRONOUSLY
+    // right there before the flash, blocking the Arduino main loop task (and
+    // therefore the 200ms evt:status broadcast) for however long the blocking
+    // HTTPS GET to github.com/api.github.com takes (1-5s+ on a slow/congested
+    // link). This hoists that resolve into a one-shot FreeRTOS task, mirroring
+    // the resolve-intent latch/drain idiom already used for pendingOtaStart /
+    // pendingReleaseUrl above (CAR-178/CAR-377) rather than inventing a new
+    // pattern.
+    //
+    // otaResolveState is loop-task-owned (only loop() reads/writes it); the
+    // resolve task NEVER touches it directly. Instead the resolve task posts
+    // its outcome into otaResolveResult under otaIntentMutex (reused rather
+    // than adding a dedicated mutex, per point 7 of the PRO-13 brief — the
+    // resolve task's critical section is exactly as trivial as the existing
+    // release-URL/OTA-start handoffs it mirrors) and raises
+    // otaResolveResultReady; loop() drains both under the same mutex on its
+    // next iteration.
+    OtaResolveState otaResolveState = OtaResolveState::Idle;
+    // millis() timestamp of when the current resolve started RESOLVING;
+    // compared against kOtaResolveTimeoutMs each loop() tick via
+    // otaResolveTimedOut() (OtaAsyncResolvePolicy.h) for the soft 10s bound.
+    unsigned long otaResolveStartMs = 0;
+    static constexpr unsigned long kOtaResolveTimeoutMs = 10000;
+    // Generation counter: bumped by loop() whenever it spawns a fresh resolve
+    // task AND whenever it abandons one (timeout). The resolve task captures
+    // the generation it was spawned with and stamps it onto its posted
+    // result; loop() drops any result whose generation no longer matches
+    // (otaResolveResultIsCurrent()), so a late/stale task's outcome — one
+    // that arrives after loop() already gave up on it — is safely ignored
+    // rather than acted on. NOTE (design assumption, PRO-13 point 7): the
+    // abandoned task is never force-killed and keeps running `ota->
+    // checkForUpdates()` to completion in the background; its result is
+    // dropped via this generation check, but it could theoretically still be
+    // touching `ota` for a few more seconds after the timeout fires. This
+    // mirrors the brief's own "let it finish, drop its result" design and is
+    // accepted as a rare edge case (see PR body).
+    std::atomic<uint32_t> otaResolveGeneration{0};
+    // Inputs for the in-flight (or just-completed) resolve, latched ONCE when
+    // `updating` transitions Idle -> Resolving/ReadyToFlash (channel/isTag/
+    // channelSwitch/previousInstalledChannel can all change again via a
+    // settings update while the resolve task is running; the flash decision
+    // must be made against what was true AT SPAWN TIME, matching the
+    // original inline code's single-pass read).
+    String otaResolveChannel = "";
+    String otaResolvePinnedTag = "";
+    bool otaResolveIsTag = false;
+    bool otaResolveChannelSwitch = false;
+    String otaResolvePreviousInstalledChannel = "";
+    // Populated from the drained OtaResolveTaskResult (or left at defaults
+    // for the timeout/task-spawn-failure Failed paths, which never got a
+    // resolve result at all).
+    String otaResolveResolvedVersion = "";
+    bool otaResolveResolveFailed = false;
+    // True only when the Failed transition came from the soft 10s timeout
+    // (not from a genuine decideOtaFlash Refuse) — selects the distinct
+    // "Could not verify release ... — check network" UI status/log instead
+    // of the pre-existing refuse messages.
+    bool otaResolveTimedOutFlag = false;
+
+    // Posted by the resolve task under otaIntentMutex; drained by loop().
+    struct OtaResolveTaskResult {
+        uint32_t generation = 0;
+        OtaFlashDecision decision = OtaFlashDecision::Refuse;
+        String resolvedVersion = "";
+        bool resolveFailed = false;
+    };
+    OtaResolveTaskResult otaResolveResult; // guarded by otaIntentMutex
+    volatile bool otaResolveResultReady = false;
+    static void otaResolveTask(void *arg);
+    // Parameter block handed to the one-shot resolve task. The task's ONLY
+    // access to `this` is via `plugin` (for `ota` and the mutex/result
+    // slot); every decision input is captured by value up front so a
+    // concurrent loop()-side settings change can't be observed mid-resolve.
+    struct OtaResolveTaskParams {
+        WebUIPlugin *plugin;
+        uint32_t generation;
+        bool isTag;
+        String pinnedTag;
+        bool selectedEqInstalled;
+        bool installedEmpty;
+    };
+
     AsyncWebServer server;
     // INVARIANT (PRO-313): every access to `ws` that walks or mutates its
     // internal client list MUST hold `wsMutex` for the duration of the call.
