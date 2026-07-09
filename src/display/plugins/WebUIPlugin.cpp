@@ -210,6 +210,49 @@ void WebUIPlugin::relayLoopTask(void *arg) {
     }
 }
 
+// PRO-13: one-shot resolve task for the forced-tag/channel-switch OTA path.
+// Runs `ota->checkForUpdates()` (the blocking HTTPS GET) OFF the loop task,
+// then posts the resolved OtaFlashDecision back under otaIntentMutex and
+// self-deletes. `ota` itself is not otherwise touched concurrently while
+// this task runs: the periodic background checkForUpdates() call (line
+// ~485, PRO-411) and the release-URL/status-push drains above it all run on
+// the loop task, and loop() never calls into `ota` again for THIS forced
+// update until it observes ReadyToFlash/Failed and this task has already
+// returned — so there is exactly one task touching `ota` at any given
+// instant, matching the pre-PRO-13 single-task-owns-ota invariant.
+void WebUIPlugin::otaResolveTask(void *arg) {
+    auto *params = static_cast<OtaResolveTaskParams *>(arg);
+    WebUIPlugin *plugin = params->plugin;
+    GitHubOTA *ota = plugin->ota;
+
+    ota->checkForUpdates();
+    const String resolved = ota->getCurrentVersion();
+    // resolveFailed at this layer == the last checkForUpdates() failed to
+    // resolve a head (network error / GitHub redirect quirk / malformed
+    // channel). We consult the AUTHORITATIVE failure flag
+    // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+    // resolve getCurrentVersion() returns the STALE version string from a
+    // prior successful check, so a periodic check that already populated a
+    // version would otherwise mask a failed channel-switch resolve and
+    // force-flash against a stale _latest_url. Keep the || isEmpty() as a
+    // belt-and-suspenders guard (empty is untrustworthy).
+    const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+    const OtaFlashDecision decision =
+        decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled, params->installedEmpty,
+                       resolved.c_str(), resolveFailed);
+
+    if (plugin->otaIntentMutex != nullptr && xSemaphoreTake(plugin->otaIntentMutex, portMAX_DELAY) == pdTRUE) {
+        plugin->otaResolveResult.generation = params->generation;
+        plugin->otaResolveResult.decision = decision;
+        plugin->otaResolveResult.resolvedVersion = resolved;
+        plugin->otaResolveResult.resolveFailed = resolveFailed;
+        plugin->otaResolveResultReady = true;
+        xSemaphoreGive(plugin->otaIntentMutex);
+    }
+    delete params;
+    vTaskDelete(nullptr);
+}
+
 namespace {
 // Shared RAII guard for a non-recursive FreeRTOS mutex (PRO-314, unifying the
 // former WsClientsLock from PRO-313 and RelayLifecycleLock from CAR-259). Takes
@@ -330,7 +373,6 @@ void WebUIPlugin::loop() {
         }
     }
     if (updating) {
-        pluginManager->trigger("ota:update:start");
         // PRO-400: force-flash whenever the user pinned a specific tag
         // (e.g. "tag:2.0.8") OR switched channels (stable <-> beta <-> nightly).
         // A tag bypasses the upgrade-only guard so re-flashing the same version
@@ -339,92 +381,182 @@ void WebUIPlugin::loop() {
         // direction (beta->stable / nightly->stable are lower/equal semver and
         // would otherwise stall on the upgrade-only guard), while upgrades
         // WITHIN a channel still run the guard. See OtaChannelSwitchPolicy.h.
+        //
+        // PRO-13: a tag pin OR a channel switch needs a resolve + confirm
+        // before we can trust what would be flashed (this also defeats the
+        // stale-_latest_url race the tag: path documents: a WS client can
+        // send `req:ota-settings <channel>` then `req:ota-start` before the
+        // throttled checkForUpdates() in this same loop runs). That resolve
+        // used to run SYNCHRONOUSLY on this task via ota->checkForUpdates(),
+        // blocking loop() (and the 200ms evt:status broadcast) for however
+        // long the blocking HTTPS GET to github.com takes. It now runs on a
+        // one-shot FreeRTOS task; this block only ever calls ota->update()
+        // once that task reports READY_TO_FLASH (or runs the plain
+        // upgrade-only path immediately when neither a tag nor a channel
+        // switch is in play — that path never touched checkForUpdates() here
+        // to begin with, so it is unaffected by this change).
         Settings &settings = controller->getSettings();
         const String channel = settings.getOTAChannel();
         const String previousInstalledChannel = settings.getInstalledChannel();
         const bool isTag = channel.startsWith("tag:");
         const bool channelSwitch = !isTag && channel != previousInstalledChannel;
-        // A tag pin OR a channel switch needs a synchronous resolve + confirm
-        // before we can trust what would be flashed. This also defeats the
-        // stale-_latest_url race the tag: path documents: a WS client can send
-        // `req:ota-settings <channel>` then `req:ota-start` before the throttled
-        // checkForUpdates() in this same loop runs, so `_latest_url` may still
-        // hold the previous channel's resolved URL.
-        bool tagResolved = true;
-        bool forceChannelSwitch = false;
-        if (isTag || channelSwitch) {
-            ota->checkForUpdates();
-            const String resolved = ota->getCurrentVersion();
-            // resolveFailed at this layer == the last checkForUpdates() failed
-            // to resolve a head (network error / GitHub redirect quirk /
-            // malformed channel). We consult the AUTHORITATIVE failure flag
-            // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
-            // resolve getCurrentVersion() returns the STALE version string from
-            // a prior successful check, so a periodic check that already
-            // populated a version would otherwise mask a failed channel-switch
-            // resolve and force-flash against a stale _latest_url. Keep the
-            // || isEmpty() as a belt-and-suspenders guard (empty is untrustworthy).
-            const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
-            const String pinned = isTag ? channel.substring(4) : String("");
-            const OtaFlashDecision decision =
-                decideOtaFlash(isTag, pinned.c_str(), /*selectedEqInstalled=*/!channelSwitch,
-                               /*installedEmpty=*/previousInstalledChannel.isEmpty(), resolved.c_str(), resolveFailed);
-            switch (decision) {
-            case OtaFlashDecision::ForceMatchTag:
-                // pinned tag confirmed (leading-`v` tolerant) — force flash.
-                break;
-            case OtaFlashDecision::ForceChannelSwitch:
-                // new channel head resolved — force flash regardless of semver
-                // direction.
-                forceChannelSwitch = true;
-                break;
-            case OtaFlashDecision::Refuse:
-            default:
-                // tag mismatch, or a switch whose new-channel resolve failed /
-                // came back empty: never flash something we can't confirm.
-                if (isTag) {
-                    ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s", pinned.c_str(),
-                             resolved.c_str());
-                } else {
-                    ESP_LOGE("WebUIPlugin", "Refusing channel-switch OTA to %s: resolve failed", channel.c_str());
-                }
-                tagResolved = false;
-                break;
-            }
-        }
-        // force=true for a confirmed tag pin OR a confirmed channel switch.
-        const bool force = isTag || forceChannelSwitch;
-        // On a confirmed channel switch, persist installedChannel = otaChannel
-        // BEFORE update() (the success path reboots via GitHubOTA and never
-        // returns). Restored below if update() returns false (no reboot).
-        if (forceChannelSwitch) {
-            settings.setInstalledChannel(channel);
-        }
-        bool updateSucceeded = false;
-        if (tagResolved) {
+
+        if (!(isTag || channelSwitch)) {
+            // Plain within-channel upgrade: no resolve needed, run exactly the
+            // pre-existing immediate path (unaffected by PRO-13).
+            pluginManager->trigger("ota:update:start");
             const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
-            updateSucceeded = ota->update(componentSelection.updateController, componentSelection.updateDisplay, force);
-        }
-        pluginManager->trigger("ota:update:end");
-        updating = false;
-        if (!updateSucceeded) {
-            // update() returned (no reboot) — restore the previous
-            // installedChannel so a failed switch doesn't leave the persisted
-            // installed marker ahead of what is actually flashed.
-            //
-            // PRO-403: but only when NO component was actually flashed. On the
-            // default two-component flash the controller can flash OK and the
-            // display then fail; update() returns false while the controller is
-            // already running the new channel's head. installedChannel is a
-            // whole-device marker feeding the next channel-switch decision and
-            // the PRO-401 pending-switch UI hint, so on such a partial flash we
-            // must KEEP installedChannel = channel (the new one) to reflect the
-            // controller's actual on-device state. Only restore when the
-            // controller was not flashed (the old channel is still what runs).
-            if (forceChannelSwitch && !ota->didFlashControllerLastUpdate()) {
-                settings.setInstalledChannel(previousInstalledChannel);
+            const bool updateSucceeded =
+                ota->update(componentSelection.updateController, componentSelection.updateDisplay, /*force=*/false);
+            pluginManager->trigger("ota:update:end");
+            updating = false;
+            if (!updateSucceeded) {
+                updateOTAStatus("Update failed");
             }
-            updateOTAStatus(tagResolved ? "Update failed" : "Update failed (tag not resolved)");
+        } else {
+            switch (otaResolveState) {
+            case OtaResolveState::Idle: {
+                // First loop() iteration of this forced-tag/channel-switch OTA:
+                // latch the decision inputs at spawn time and kick off the
+                // one-shot resolve task. "ota:update:start" fires here (not
+                // only on the eventual flash) so the UI's updateActive/standby
+                // transition (DefaultUI's ota:update:start handler) still
+                // engages immediately, matching pre-PRO-13 behavior.
+                pluginManager->trigger("ota:update:start");
+                otaResolveChannel = channel;
+                otaResolvePinnedTag = isTag ? channel.substring(4) : String("");
+                otaResolveIsTag = isTag;
+                otaResolveChannelSwitch = channelSwitch;
+                otaResolvePreviousInstalledChannel = previousInstalledChannel;
+                otaResolveResolvedVersion = "";
+                otaResolveResolveFailed = false;
+                otaResolveTimedOutFlag = false;
+                otaResolveStartMs = static_cast<uint32_t>(millis());
+                const uint32_t generation = otaResolveGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
+
+                auto *params = new OtaResolveTaskParams{
+                    this, generation, isTag, otaResolvePinnedTag, /*selectedEqInstalled=*/!channelSwitch,
+                    /*installedEmpty=*/previousInstalledChannel.isEmpty()};
+                TaskHandle_t createdHandle = nullptr;
+                const BaseType_t created =
+                    xTaskCreatePinnedToCore(otaResolveTask, "OtaResolve", 8192, params, 1, &createdHandle, 1);
+                if (created != pdPASS) {
+                    // OOM spawning the resolve task: fail closed exactly like a
+                    // resolve failure would, rather than getting stuck IDLE
+                    // forever with `updating` latched true.
+                    ESP_LOGE("WebUIPlugin", "Failed to create OTA resolve task (OOM)");
+                    delete params;
+                    otaResolveResolveFailed = true;
+                    otaResolveState = OtaResolveState::Failed;
+                } else {
+                    otaResolveState = OtaResolveState::Resolving;
+                    updateOTAStatus("Verifying release...");
+                }
+                break;
+            }
+            case OtaResolveState::Resolving: {
+                // Drain a posted resolve-task result (if any) under otaIntentMutex,
+                // mirroring the existing release-URL/OTA-start intent handoffs.
+                bool haveResult = false;
+                OtaResolveTaskResult drainedResult;
+                if (otaResolveResultReady && otaIntentMutex != nullptr &&
+                    xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    if (otaResolveResultReady) {
+                        drainedResult = otaResolveResult;
+                        otaResolveResultReady = false;
+                        haveResult = true;
+                    }
+                    xSemaphoreGive(otaIntentMutex);
+                }
+                if (haveResult && otaResolveResultIsCurrent(drainedResult.generation,
+                                                            otaResolveGeneration.load(std::memory_order_relaxed))) {
+                    otaResolveResolvedVersion = drainedResult.resolvedVersion;
+                    otaResolveResolveFailed = drainedResult.resolveFailed;
+                    otaResolveState = otaResolveStateForDecision(drainedResult.decision);
+                    if (otaResolveState == OtaResolveState::Failed) {
+                        if (otaResolveIsTag) {
+                            ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s",
+                                     otaResolvePinnedTag.c_str(), otaResolveResolvedVersion.c_str());
+                        } else {
+                            ESP_LOGE("WebUIPlugin", "Refusing channel-switch OTA to %s: resolve failed",
+                                     otaResolveChannel.c_str());
+                        }
+                    }
+                } else if (otaResolveTimedOut(otaResolveStartMs, static_cast<uint32_t>(millis()), kOtaResolveTimeoutMs)) {
+                    // Soft 10s timeout: abandon the in-flight resolve. Bump the
+                    // generation so the task's eventual (late) result is
+                    // recognized as stale and dropped when/if it arrives.
+                    otaResolveGeneration.fetch_add(1, std::memory_order_relaxed);
+                    otaResolveTimedOutFlag = true;
+                    otaResolveResolveFailed = true;
+                    otaResolveState = OtaResolveState::Failed;
+                    const String &verifyTarget = otaResolveIsTag ? otaResolvePinnedTag : otaResolveChannel;
+                    ESP_LOGE("WebUIPlugin", "OTA resolve timed out after %lums verifying %s", kOtaResolveTimeoutMs,
+                             verifyTarget.c_str());
+                }
+                // else: still resolving, no result yet, not timed out — stay in
+                // RESOLVING and re-check next loop() tick. "Verifying release..."
+                // was already pushed once on the Idle->Resolving transition
+                // above, so nothing more to push here (not spammed every tick).
+                break;
+            }
+            case OtaResolveState::ReadyToFlash: {
+                // force=true for a confirmed tag pin OR a confirmed channel
+                // switch — the async resolve path is only ever entered for one
+                // of those two, so force is unconditionally true here.
+                const bool forceChannelSwitch = otaResolveChannelSwitch;
+                const bool force = true;
+                // On a confirmed channel switch, persist installedChannel =
+                // otaChannel BEFORE update() (the success path reboots via
+                // GitHubOTA and never returns). Restored below if update()
+                // returns false (no reboot).
+                if (forceChannelSwitch) {
+                    settings.setInstalledChannel(otaResolveChannel);
+                }
+                const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
+                const bool updateSucceeded =
+                    ota->update(componentSelection.updateController, componentSelection.updateDisplay, force);
+                pluginManager->trigger("ota:update:end");
+                updating = false;
+                otaResolveState = OtaResolveState::Idle;
+                if (!updateSucceeded) {
+                    // update() returned (no reboot) — restore the previous
+                    // installedChannel so a failed switch doesn't leave the
+                    // persisted installed marker ahead of what is actually
+                    // flashed.
+                    //
+                    // PRO-403: but only when NO component was actually flashed.
+                    // On the default two-component flash the controller can
+                    // flash OK and the display then fail; update() returns
+                    // false while the controller is already running the new
+                    // channel's head. installedChannel is a whole-device
+                    // marker feeding the next channel-switch decision and the
+                    // PRO-401 pending-switch UI hint, so on such a partial
+                    // flash we must KEEP installedChannel = channel (the new
+                    // one) to reflect the controller's actual on-device state.
+                    // Only restore when the controller was not flashed (the
+                    // old channel is still what runs).
+                    if (forceChannelSwitch && !ota->didFlashControllerLastUpdate()) {
+                        settings.setInstalledChannel(otaResolvePreviousInstalledChannel);
+                    }
+                    updateOTAStatus("Update failed");
+                }
+                break;
+            }
+            case OtaResolveState::Failed:
+            default: {
+                pluginManager->trigger("ota:update:end");
+                updating = false;
+                otaResolveState = OtaResolveState::Idle;
+                if (otaResolveTimedOutFlag) {
+                    const String verifyTarget = otaResolveIsTag ? otaResolvePinnedTag : otaResolveChannel;
+                    updateOTAStatus("Could not verify release " + verifyTarget + " — check network");
+                } else {
+                    updateOTAStatus("Update failed (tag not resolved)");
+                }
+                break;
+            }
+            }
         }
     }
 
