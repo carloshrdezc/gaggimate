@@ -1,5 +1,6 @@
 import Card from '../../components/Card.jsx';
 import { useCallback, useState, useContext } from 'preact/hooks';
+import { useComputed } from '@preact/signals';
 import { HistoryChart } from './HistoryChart.jsx';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -47,11 +48,11 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const [isExporting, setIsExporting] = useState(false);
 
   // Reactive comparison state — read signal value to subscribe to updates
-  const inComparison = isInComparison(shot.id);
-  const comparisonFull = comparisonShots.value.length >= 4 && !inComparison;
+  const inComparison = useComputed(() => isInComparison(shot.id));
+  const comparisonFull = useComputed(() => comparisonShots.value.length >= 4 && !inComparison.value);
 
   const handleCompare = useCallback(() => {
-    if (inComparison) {
+    if (inComparison.value) {
       removeFromComparison(shot.id);
     } else {
       addToComparison(shot);
@@ -260,11 +261,11 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   </button>
                   <button
                     onClick={handleCompare}
-                    disabled={comparisonFull}
-                    className={`nd-action-btn${inComparison ? ' nd-action-btn--active' : ''}${comparisonFull ? ' opacity-40 cursor-not-allowed' : ''}`}
+                    disabled={comparisonFull.value}
+                    className={`nd-action-btn${inComparison.value ? ' nd-action-btn--active' : ''}${comparisonFull.value ? ' opacity-40 cursor-not-allowed' : ''}`}
                     style={{ width: '32px', height: '32px' }}
-                    aria-label={inComparison ? 'Remove from comparison' : 'Add to comparison'}
-                    title={inComparison ? 'Remove from comparison' : 'Add to comparison'}
+                    aria-label={inComparison.value ? 'Remove from comparison' : 'Add to comparison'}
+                    title={inComparison.value ? 'Remove from comparison' : 'Add to comparison'}
                   >
                     <FontAwesomeIcon icon={faChartLine} className='text-[12px]' />
                   </button>
