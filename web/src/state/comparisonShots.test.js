@@ -88,6 +88,11 @@ describe('comparisonShots', () => {
       removeFromComparison('does-not-exist');
       expect(comparisonShots.value.map(s => s.id)).toEqual(['s1']);
     });
+
+    it('is a no-op on an empty list', () => {
+      removeFromComparison('ghost');
+      expect(comparisonShots.value).toEqual([]);
+    });
   });
 
   describe('clearComparison', () => {
