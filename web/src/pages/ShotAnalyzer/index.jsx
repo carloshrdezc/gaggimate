@@ -133,6 +133,10 @@ export function ShotAnalyzer() {
   const [analysisResults, setAnalysisResults] = useState(null);
   const [pendingMobileAnalysisScroll, setPendingMobileAnalysisScroll] = useState(false);
   const [comparisonData, setComparisonData] = useState({});
+  const comparisonDataRef = useRef(comparisonData);
+  useEffect(() => {
+    comparisonDataRef.current = comparisonData;
+  }, [comparisonData]);
   const analysisSectionRef = useRef(null);
   const profileMatchIdRef = useRef(0);
   const analysisIdRef = useRef(0);
@@ -167,7 +171,7 @@ export function ShotAnalyzer() {
   useSignalEffect(() => {
     const shots = comparisonShots.value;
     shots.forEach(async shot => {
-      if (comparisonData[shot.id]) return;
+      if (comparisonDataRef.current[shot.id]) return;
       try {
         const loaded = await libraryService.loadShot(shot.id, shot.source || 'gaggimate');
         if (loaded?.samples) {
