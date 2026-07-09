@@ -42,7 +42,14 @@ export function Autotune() {
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
-      const [kp, ki, kd, kf] = msg.pid.split(',').map(Number);
+      const pid = msg?.pid;
+      if (!pid) return;
+      const [kp, ki, kd, kf] = pid.split(',').map(Number);
+      if ([kp, ki, kd, kf].some(isNaN)) {
+        setActive(false);
+        setError('Received invalid PID data from device.');
+        return;
+      }
       setActive(false);
       setResult({ kp, ki, kd, kf });
     });
