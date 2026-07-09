@@ -5,10 +5,12 @@
  */
 
 import { useState, useEffect, useContext, useRef } from 'preact/hooks';
+import { useSignalEffect } from '@preact/signals';
 import { useRoute } from 'preact-iso';
 import { LibraryPanel } from './components/LibraryPanel';
 import { AnalysisTable } from './components/AnalysisTable';
 import { ShotChart } from './components/ShotChart';
+import { ComparisonChart } from './components/ComparisonChart';
 import { calculateShotMetrics, detectAutoDelay } from './services/AnalyzerService';
 import { libraryService } from './services/LibraryService';
 import { notesService } from './services/NotesService';
@@ -20,6 +22,7 @@ import {
   loadFromStorage,
 } from './utils/analyzerUtils';
 import { buildStatisticsProfileHref } from '../Statistics/utils/statisticsRoute';
+import { comparisonShots, clearComparison } from '../../state/comparisonShots';
 
 import { EmptyState } from './components/EmptyState.jsx';
 
@@ -129,6 +132,7 @@ export function ShotAnalyzer() {
 
   const [analysisResults, setAnalysisResults] = useState(null);
   const [pendingMobileAnalysisScroll, setPendingMobileAnalysisScroll] = useState(false);
+  const [comparisonData, setComparisonData] = useState({});
   const analysisSectionRef = useRef(null);
   const profileMatchIdRef = useRef(0);
   const analysisIdRef = useRef(0);
@@ -158,6 +162,22 @@ export function ShotAnalyzer() {
       if (profileSearchTimerRef.current) clearTimeout(profileSearchTimerRef.current);
     };
   }, []);
+
+  // Load sample data for comparison shots that haven't been loaded yet
+  useSignalEffect(() => {
+    const shots = comparisonShots.value;
+    shots.forEach(async shot => {
+      if (comparisonData[shot.id]) return;
+      try {
+        const loaded = await libraryService.loadShot(shot.id, shot.source || 'gaggimate');
+        if (loaded?.samples) {
+          setComparisonData(prev => ({ ...prev, [shot.id]: loaded }));
+        }
+      } catch (e) {
+        console.warn('Failed to load comparison shot', shot.id, e);
+      }
+    });
+  });
 
   // --- DEEP LINK HANDLER ---
   useEffect(() => {
@@ -413,6 +433,23 @@ export function ShotAnalyzer() {
             <div className='nd-card p-5'>
               <ShotChart shotData={currentShot} results={analysisResults} />
             </div>
+
+            {comparisonShots.value.length >= 2 && (
+              <div className='nd-card p-5 mt-4'>
+                <div className='flex items-center justify-between mb-3'>
+                  <h3 className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)] m-0'>
+                    Comparison ({comparisonShots.value.length} shots)
+                  </h3>
+                  <button
+                    className='nd-action-btn nd-action-btn--text font-nd-mono text-[12px] px-3'
+                    onClick={clearComparison}
+                  >
+                    Clear
+                  </button>
+                </div>
+                <ComparisonChart shots={comparisonShots.value} comparisonData={comparisonData} />
+              </div>
+            )}
 
             {analysisResults && (
               <div className='mt-2'>

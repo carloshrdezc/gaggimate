@@ -13,6 +13,12 @@ import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
 import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus';
 import { faMagnifyingGlassChart } from '@fortawesome/free-solid-svg-icons/faMagnifyingGlassChart';
 import { faCodeBranch } from '@fortawesome/free-solid-svg-icons/faCodeBranch';
+import { faChartLine } from '@fortawesome/free-solid-svg-icons/faChartLine';
+import {
+  addToComparison,
+  removeFromComparison,
+  comparisonShots,
+} from '../../state/comparisonShots';
 import ShotNotesCard from './ShotNotesCard.jsx';
 import { useConfirmAction } from '../../hooks/useConfirmAction.js';
 
@@ -38,6 +44,19 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Reactive comparison state — read signal value to subscribe to updates
+  const inComparison = comparisonShots.value.some(s => s.id === shot.id);
+  const comparisonFull = comparisonShots.value.length >= 4 && !inComparison;
+
+  const handleCompare = useCallback(() => {
+    if (inComparison) {
+      removeFromComparison(shot.id);
+    } else {
+      addToComparison(shot);
+      location.route('/analyzer');
+    }
+  }, [inComparison, shot, location]);
 
   const date = new Date(shot.timestamp * 1000);
   const effectiveRating = shotNotes?.rating ?? shot.rating ?? 0;
@@ -237,6 +256,16 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                     aria-label='Upload to visualizer.coffee'
                   >
                     <FontAwesomeIcon icon={faUpload} className='text-[12px]' />
+                  </button>
+                  <button
+                    onClick={handleCompare}
+                    disabled={comparisonFull}
+                    className={`nd-action-btn${inComparison ? ' nd-action-btn--active' : ''}${comparisonFull ? ' opacity-40 cursor-not-allowed' : ''}`}
+                    style={{ width: '32px', height: '32px' }}
+                    aria-label={inComparison ? 'Remove from comparison' : 'Add to comparison'}
+                    title={inComparison ? 'Remove from comparison' : 'Add to comparison'}
+                  >
+                    <FontAwesomeIcon icon={faChartLine} className='text-[12px]' />
                   </button>
                   {isManualShot && shot.source !== 'browser' && (
                     <button
