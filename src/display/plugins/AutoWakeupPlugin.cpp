@@ -14,7 +14,7 @@ void AutoWakeupPlugin::setup(Controller *controller, PluginManager *pluginManage
     ESP_LOGI(LOG_TAG.c_str(), "Auto-wakeup plugin initialized");
 
     // Listen for settings changes to log configuration
-    pluginManager->on("settings:changed", [this](const Event &event) {
+    pluginManager->on(EventIds::SETTINGS_CHANGED, [this](const Event &event) {
         if (settings->isAutoWakeupEnabled()) {
             ESP_LOGI(LOG_TAG.c_str(), "Auto-wakeup enabled with %d schedule(s)", settings->getAutoWakeupSchedules().size());
         } else {
@@ -64,7 +64,7 @@ void AutoWakeupPlugin::checkAutoWakeup() {
             controller->setMode(MODE_BREW);
 
             // Trigger plugin events
-            pluginManager->trigger("autowakeup:activated", "time", schedule.time);
+            pluginManager->trigger(EventIds::AUTOWAKEUP_ACTIVATED, "time", schedule.time);
 
             return; // Only trigger once per minute
         }

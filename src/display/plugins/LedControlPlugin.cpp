@@ -4,13 +4,13 @@
 
 void LedControlPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
-    pluginManager->on("controller:ready", [this](Event const) { initialized = true; });
+    pluginManager->on(EventIds::CONTROLLER_READY, [this](Event const) { initialized = true; });
     // `controller:ready` is one-shot (gated by Controller::loaded), so it does not
     // re-fire on a BLE reconnect. `controller:bluetooth:connect` fires on every
     // successful connectToServer(), including reconnects, so re-arm a full resend
     // there: sendLedControl is a no-op while disconnected, and the last_* cache may
     // still match the desired state, leaving controller-side LEDs stale otherwise.
-    pluginManager->on("controller:bluetooth:connect", [this](Event const &) { firstSend = true; });
+    pluginManager->on(EventIds::CONTROLLER_BLUETOOTH_CONNECT, [this](Event const &) { firstSend = true; });
 }
 
 void LedControlPlugin::loop() {

@@ -115,7 +115,7 @@ void HomekitPlugin::initializeHomekit() {
 void HomekitPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
 
-    pluginManager->on("controller:wifi:connect", [this](Event &event) {
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event &event) {
         if (event.getInt("AP"))
             return;
 
@@ -127,19 +127,19 @@ void HomekitPlugin::setup(Controller *controller, PluginManager *pluginManager) 
         syncAccessoryState();
     });
 
-    pluginManager->on("boiler:targetTemperature:change", [this](Event const &event) {
+    pluginManager->on(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, [this](Event const &event) {
         if (accessory == nullptr)
             return;
         accessory->setTargetTemperature(event.getFloat("value"));
     });
 
-    pluginManager->on("boiler:currentTemperature:change", [this](Event const &event) {
+    pluginManager->on(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, [this](Event const &event) {
         if (accessory == nullptr)
             return;
         accessory->setCurrentTemperature(event.getFloat("value"));
     });
 
-    pluginManager->on("controller:mode:change", [this](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_MODE_CHANGE, [this](Event const &event) {
         if (accessory == nullptr)
             return;
         accessory->setState(event.getInt("value") != MODE_STANDBY);

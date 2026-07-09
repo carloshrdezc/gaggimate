@@ -72,8 +72,8 @@ void DiagnosticLogPlugin::setup(Controller *controller, PluginManager *pluginMan
     instance = this;
     // Create the install mutex once here, before any WiFi/server events can fire,
     // so the check-and-install in tryInstall() is serialized across the three
-    // tasks that can reach it (loop(), AsyncTCP "settings:changed", arduino_events
-    // "controller:wifi:connect"). See tryInstall() (PRO-271; CAR-259 precedent).
+    // tasks that can reach it (loop(), AsyncTCP EventIds::SETTINGS_CHANGED, arduino_events
+    // EventIds::CONTROLLER_WIFI_CONNECT). See tryInstall() (PRO-271; CAR-259 precedent).
     if (installMutex == nullptr) {
         installMutex = xSemaphoreCreateMutex();
     }
@@ -84,21 +84,21 @@ void DiagnosticLogPlugin::setup(Controller *controller, PluginManager *pluginMan
     // reboot required:
     //   * loop()  — the backbone: re-checked every Controller iteration, so a
     //               setting flip or a late WiFi association always converges.
-    //   * "controller:wifi:connect" — fast path: arm the moment STA gets an IP.
-    //   * "settings:changed"        — fast path: arm the moment the user flips
+    //   * EventIds::CONTROLLER_WIFI_CONNECT — fast path: arm the moment STA gets an IP.
+    //   * EventIds::SETTINGS_CHANGED        — fast path: arm the moment the user flips
     //                                 the flag on while already connected.
     // When the flag is off we never touch esp_log_set_vprintf(), so the hot
     // logging path is untouched (zero cost while default-OFF).
-    pluginManager->on("controller:wifi:connect", [this](Event const &) { tryInstall(); });
-    pluginManager->on("settings:changed", [this](Event const &) { tryInstall(); });
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event const &) { tryInstall(); });
+    pluginManager->on(EventIds::SETTINGS_CHANGED, [this](Event const &) { tryInstall(); });
 }
 
 void DiagnosticLogPlugin::loop() { tryInstall(); }
 
 void DiagnosticLogPlugin::tryInstall() {
     // Serialize the check-and-install. tryInstall() is reachable concurrently
-    // from three FreeRTOS tasks (loop(), AsyncTCP "settings:changed",
-    // arduino_events "controller:wifi:connect"); without this lock two of them
+    // from three FreeRTOS tasks (loop(), AsyncTCP EventIds::SETTINGS_CHANGED,
+    // arduino_events EventIds::CONTROLLER_WIFI_CONNECT); without this lock two of them
     // could both pass the `installed` guard and run the irreversible install
     // twice — leaking a 16 KiB drain task + queue and capturing our own
     // teeVprintf as previousVprintf (self-recursion / stack overflow). The lock

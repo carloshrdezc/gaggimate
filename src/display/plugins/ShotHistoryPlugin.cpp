@@ -206,20 +206,20 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         return;
     }
     
-    pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
-    pm->on("controller:brew:end", [this](Event const &) { endRecording(); });
-    pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
-    pm->on("controller:process:start", [this](Event const &) {
+    pm->on(EventIds::CONTROLLER_BREW_START, [this](Event const &) { startRecording(); });
+    pm->on(EventIds::CONTROLLER_BREW_END, [this](Event const &) { endRecording(); });
+    pm->on(EventIds::CONTROLLER_BREW_CLEAR, [this](Event const &) { endExtendedRecording(); });
+    pm->on(EventIds::CONTROLLER_PROCESS_START, [this](Event const &) {
         if (controller != nullptr && controller->getProcessType() == MODE_MANUAL) {
             startRecording();
         }
     });
-    pm->on("controller:process:end", [this](Event const &event) {
+    pm->on(EventIds::CONTROLLER_PROCESS_END, [this](Event const &event) {
         if (event.getInt("processType") == MODE_MANUAL) {
             endRecording(false);
         }
     });
-    pm->on("controller:volumetric-measurement:estimation:change",
+    pm->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_ESTIMATION_CHANGE,
            [this](Event const &event) {
                if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                    currentEstimatedWeight = event.getFloat("value");
@@ -228,7 +228,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
                    ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
                }
            });
-    pm->on("controller:volumetric-measurement:bluetooth:change", [this](Event const &event) {
+    pm->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE, [this](Event const &event) {
         // PRO-367: coalesce-latest instead of drop-on-timeout so the recorded
         // yield matches the settled weight. The scale weight is monotonic
         // cumulative, so latch the freshest value and apply it (plus any value a
@@ -244,7 +244,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
             ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
         }
     });
-    pm->on("boiler:currentTemperature:change", [this](Event const &event) {
+    pm->on(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, [this](Event const &event) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentTemperature = event.getFloat("value");
             xSemaphoreGive(stateMutex);
@@ -252,7 +252,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
             ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for temperature update");
         }
     });
-    pm->on("pump:puck-resistance:change", [this](Event const &event) {
+    pm->on(EventIds::PUMP_PUCK_RESISTANCE_CHANGE, [this](Event const &event) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentPuckResistance = event.getFloat("value");
             xSemaphoreGive(stateMutex);
@@ -1401,7 +1401,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
     // Send scanning event
     if (pluginManager) {
         Event startEvent;
-        startEvent.id = "evt:history-rebuild-progress";
+        startEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         startEvent.setInt("total", 0);
         startEvent.setInt("current", 0);
         startEvent.setString("status", "scanning");
@@ -1417,7 +1417,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
         // Emit error event
         if (pluginManager) {
             Event errorEvent;
-            errorEvent.id = "evt:history-rebuild-progress";
+            errorEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
             errorEvent.setInt("total", 0);
             errorEvent.setInt("current", 0);
             errorEvent.setString("status", "error");
@@ -1432,7 +1432,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
         // Emit completion event even if no directory exists
         if (pluginManager) {
             Event completedEvent;
-            completedEvent.id = "evt:history-rebuild-progress";
+            completedEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
             completedEvent.setInt("total", 0);
             completedEvent.setInt("current", 0);
             completedEvent.setString("status", "completed");
@@ -1461,7 +1461,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
     // Emit start event with total file count
     if (pluginManager) {
         Event startEvent;
-        startEvent.id = "evt:history-rebuild-progress";
+        startEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         startEvent.setInt("total", (int)slogFiles.size());
         startEvent.setInt("current", 0);
         startEvent.setString("status", "started");
@@ -1545,7 +1545,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
         int updateFrequency = slogFiles.size() <= 20 ? 1 : (slogFiles.size() <= 100 ? 3 : 5);
         if (pluginManager && (currentIndex % updateFrequency == 0 || currentIndex == slogFiles.size())) {
             Event progressEvent;
-            progressEvent.id = "evt:history-rebuild-progress";
+            progressEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
             progressEvent.setInt("total", (int)slogFiles.size());
             progressEvent.setInt("current", currentIndex);
             progressEvent.setString("status", "processing");
@@ -1560,7 +1560,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
     // Emit completion event
     if (pluginManager) {
         Event completionEvent;
-        completionEvent.id = "evt:history-rebuild-progress";
+        completionEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         completionEvent.setInt("total", (int)slogFiles.size());
         completionEvent.setInt("current", (int)slogFiles.size());
         completionEvent.setString("status", "completed");

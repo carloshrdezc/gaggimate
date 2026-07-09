@@ -508,46 +508,46 @@ String buildContextLine(const String &profile, const String &bean) {
 void DefaultUI::init() {
     profileManager = controller->getProfileManager();
     auto triggerRender = [this](Event const &) { rerender = true; };
-    pluginManager->on("boiler:currentTemperature:change", [=](Event const &event) {
+    pluginManager->on(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, [=](Event const &event) {
         int newTemp = static_cast<int>(event.getFloat("value"));
         if (newTemp != currentTemp) {
             currentTemp = newTemp;
             rerender = true;
         }
     });
-    pluginManager->on("boiler:pressure:change", [=](Event const &event) {
+    pluginManager->on(EventIds::BOILER_PRESSURE_CHANGE, [=](Event const &event) {
         float newPressure = event.getFloat("value");
         if (round(newPressure * 10.0f) != round(pressure * 10.0f)) {
             pressure = newPressure;
             rerender = true;
         }
     });
-    pluginManager->on("boiler:targetTemperature:change", [=](Event const &event) {
+    pluginManager->on(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, [=](Event const &event) {
         int newTemp = static_cast<int>(event.getFloat("value"));
         if (newTemp != targetTemp) {
             targetTemp = newTemp;
             rerender = true;
         }
     });
-    pluginManager->on("controller:targetVolume:change", [=](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_TARGET_VOLUME_CHANGE, [=](Event const &event) {
         targetVolume = event.getFloat("value");
         rerender = true;
     });
-    pluginManager->on("controller:targetDuration:change", [=](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_TARGET_DURATION_CHANGE, [=](Event const &event) {
         targetDuration = event.getFloat("value");
         rerender = true;
     });
-    pluginManager->on("controller:grindDuration:change", [=](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_GRIND_DURATION_CHANGE, [=](Event const &event) {
         grindDuration = event.getInt("value");
         rerender = true;
     });
-    pluginManager->on("controller:grindVolume:change", [=](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_GRIND_VOLUME_CHANGE, [=](Event const &event) {
         grindVolume = event.getFloat("value");
         rerender = true;
     });
-    pluginManager->on("controller:process:end", triggerRender);
-    pluginManager->on("controller:process:start", triggerRender);
-    pluginManager->on("controller:mode:change", [this](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_PROCESS_END, triggerRender);
+    pluginManager->on(EventIds::CONTROLLER_PROCESS_START, triggerRender);
+    pluginManager->on(EventIds::CONTROLLER_MODE_CHANGE, [this](Event const &event) {
         mode = event.getInt("value");
         switch (mode) {
         case MODE_STANDBY:
@@ -573,24 +573,24 @@ void DefaultUI::init() {
             break;
         };
     });
-    pluginManager->on("controller:brew:start",
+    pluginManager->on(EventIds::CONTROLLER_BREW_START,
                       [this](Event const &event) { changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init); });
-    pluginManager->on("controller:brew:clear", [this](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_BREW_CLEAR, [this](Event const &event) {
         if (lv_scr_act() == ui_StatusScreen) {
             changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
         }
     });
-    pluginManager->on("controller:brew:end", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_BREW_END, [this](Event const &) {
         if (autoSteamEnabled) {
             pendingAutoSteam = true;
             rerender = true;
         }
     });
-    pluginManager->on("controller:bluetooth:waiting", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_BLUETOOTH_WAITING, [this](Event const &) {
         waitingForController = true;
         rerender = true;
     });
-    pluginManager->on("controller:bluetooth:connect", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_BLUETOOTH_CONNECT, [this](Event const &) {
         waitingForController = false;
         rerender = true;
         initialized = true;
@@ -604,38 +604,38 @@ void DefaultUI::init() {
         }
         pressureAvailable = controller->getSystemInfo().capabilities.pressure;
     });
-    pluginManager->on("controller:bluetooth:disconnect", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT, [this](Event const &) {
         waitingForController = true;
         rerender = true;
     });
-    pluginManager->on("controller:wifi:connect", [this](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event const &event) {
         rerender = true;
         apActive = event.getInt("AP");
     });
-    pluginManager->on("ota:update:start", [this](Event const &) {
+    pluginManager->on(EventIds::OTA_UPDATE_START, [this](Event const &) {
         updateActive = true;
         rerender = true;
         changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
     });
-    pluginManager->on("ota:update:end", [this](Event const &) {
+    pluginManager->on(EventIds::OTA_UPDATE_END, [this](Event const &) {
         updateActive = false;
         rerender = true;
         changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
     });
-    pluginManager->on("ota:update:status", [this](Event const &event) {
+    pluginManager->on(EventIds::OTA_UPDATE_STATUS, [this](Event const &event) {
         rerender = true;
         updateAvailable = event.getInt("value");
     });
-    pluginManager->on("controller:error", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_ERROR, [this](Event const &) {
         rerender = true;
         changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
     });
-    pluginManager->on("controller:autotune:start",
+    pluginManager->on(EventIds::CONTROLLER_AUTOTUNE_START,
                       [this](Event const &) { changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init); });
-    pluginManager->on("controller:autotune:result",
+    pluginManager->on(EventIds::CONTROLLER_AUTOTUNE_RESULT,
                       [this](Event const &) { changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init); });
 
-    pluginManager->on("profiles:profile:select", [this](Event const &event) {
+    pluginManager->on(EventIds::PROFILES_PROFILE_SELECT, [this](Event const &event) {
         profileManager->loadSelectedProfile(selectedProfile);
         selectedProfileId = event.getString("id");
         targetDuration = profileManager->getSelectedProfile().getTotalDuration();
@@ -644,21 +644,21 @@ void DefaultUI::init() {
         reloadProfiles();
         rerender = true;
     });
-    pluginManager->on("profiles:profile:favorite", [this](Event const &event) { reloadProfiles(); });
-    pluginManager->on("profiles:profile:unfavorite", [this](Event const &event) { reloadProfiles(); });
-    pluginManager->on("profiles:profile:save", [this](Event const &event) { reloadProfiles(); });
-    pluginManager->on("beans:selected", [this](Event const &event) {
+    pluginManager->on(EventIds::PROFILES_PROFILE_FAVORITE, [this](Event const &event) { reloadProfiles(); });
+    pluginManager->on(EventIds::PROFILES_PROFILE_UNFAVORITE, [this](Event const &event) { reloadProfiles(); });
+    pluginManager->on(EventIds::PROFILES_PROFILE_SAVE, [this](Event const &event) { reloadProfiles(); });
+    pluginManager->on(EventIds::BEANS_SELECTED, [this](Event const &event) {
         selectedBean = event.getString("name");
         rerender = true;
     });
     // PRO-428: mirror the beans:selected listener for grinders. The firmware already
     // fires grinders:selected with a "name" string (WebUIPlugin.cpp) but had zero
     // on-device subscribers until now. Surfaced on the GrindScreen next to the bean.
-    pluginManager->on("grinders:selected", [this](Event const &event) {
+    pluginManager->on(EventIds::GRINDERS_SELECTED, [this](Event const &event) {
         selectedGrinder = event.getString("name");
         rerender = true;
     });
-    pluginManager->on("controller:volumetric-measurement:bluetooth:change", [=](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE, [=](Event const &event) {
         double newWeight = event.getFloat("value");
         if (round(newWeight * 10.0) != round(bluetoothWeight * 10.0)) {
             bluetoothWeight = newWeight;
@@ -2500,9 +2500,9 @@ void DefaultUI::beanItemCb(lv_event_t *e) {
     uintptr_t idx = (uintptr_t)lv_obj_get_user_data(target);
 
     if (idx != (uintptr_t)(UINT32_MAX) && idx < ui->cachedBeans.size()) {
-        ui->pluginManager->trigger("beans:selected", "name", ui->cachedBeans[idx].name);
+        ui->pluginManager->trigger(EventIds::BEANS_SELECTED, "name", ui->cachedBeans[idx].name);
     } else {
-        ui->pluginManager->trigger("beans:selected", "name", String(""));
+        ui->pluginManager->trigger(EventIds::BEANS_SELECTED, "name", String(""));
     }
 
     ui->beanSelectActive = false;
