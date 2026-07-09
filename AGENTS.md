@@ -116,7 +116,7 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 
 **Shot Analyzer uses IndexedDB**: `IndexedDBService` stores shot data locally. `AnalyzerService` has predictive window of 4 seconds (`PREDICTIVE_WINDOW_MS`) for phase exit detection.
 
-**Extended profiles use adaptive transitions**: Phase transitions can be `"instant"`, `"linear"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"` with optional `adaptive` flag (0 or 1).
+**Extended profiles use adaptive transitions**: Phase transitions can be `"instant"`, `"linear"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"` with optional `adaptive` flag (`true` or `false`).
 
 **When to make persistence firmware-authoritative (CAR-371 / CAR-372)**: Several
 web stores (`beanManager.js`, `grinderManager.js`) persist to the device over the
