@@ -60,6 +60,16 @@ describe('comparisonShots', () => {
       expect(comparisonShots.value.length).toBe(4);
       expect(comparisonShots.value.map(s => s.id)).toEqual(['s1', 's2', 's3', 's4']);
     });
+
+    it('dedup is a no-op even when at capacity', () => {
+      addToComparison(makeShot({ id: 's1' }));
+      addToComparison(makeShot({ id: 's2' }));
+      addToComparison(makeShot({ id: 's3' }));
+      addToComparison(makeShot({ id: 's4' }));
+      addToComparison(makeShot({ id: 's1' })); // duplicate while at cap
+
+      expect(comparisonShots.value.length).toBe(4);
+    });
   });
 
   describe('removeFromComparison', () => {
