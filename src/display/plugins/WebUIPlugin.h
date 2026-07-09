@@ -164,8 +164,8 @@ class WebUIPlugin : public Plugin {
     // millis() timestamp of when the current resolve started RESOLVING;
     // compared against kOtaResolveTimeoutMs each loop() tick via
     // otaResolveTimedOut() (OtaAsyncResolvePolicy.h) for the soft 10s bound.
-    unsigned long otaResolveStartMs = 0;
-    static constexpr unsigned long kOtaResolveTimeoutMs = 10000;
+    uint32_t otaResolveStartMs = 0;
+    static constexpr uint32_t kOtaResolveTimeoutMs = 10000;
     // Generation counter: bumped by loop() whenever it spawns a fresh resolve
     // task AND whenever it abandons one (timeout). The resolve task captures
     // the generation it was spawned with and stamps it onto its posted

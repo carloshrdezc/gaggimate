@@ -55,7 +55,14 @@ constexpr OtaResolveState otaResolveStateForDecision(OtaFlashDecision decision) 
 // this firmware does (see BeanManager), because unsigned wraparound makes
 // `nowMs - startMs` compute the correct elapsed duration even when nowMs has
 // wrapped past startMs.
-constexpr bool otaResolveTimedOut(unsigned long startMs, unsigned long nowMs, unsigned long timeoutMs) {
+// PRO-13 fix: these are millis()-flavored uint32_t, not `unsigned long`.
+// `unsigned long` is 32-bit on the ESP32 Arduino target (matching millis()'s
+// real 32-bit rollover) but 64-bit on the [env:native] host test target, so
+// the rollover static_assert below (0xFFFFFFFF wrapping to 5) only holds if
+// the subtraction is explicitly 32-bit-wide on BOTH platforms. Mirrors
+// OtaUpdateCheckPolicy.h's otaBackoffInterval, which already uses uint32_t
+// for the same millis()-math reason.
+constexpr bool otaResolveTimedOut(uint32_t startMs, uint32_t nowMs, uint32_t timeoutMs) {
     return (nowMs - startMs) >= timeoutMs;
 }
 

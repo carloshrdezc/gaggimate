@@ -431,7 +431,7 @@ void WebUIPlugin::loop() {
                 otaResolveResolvedVersion = "";
                 otaResolveResolveFailed = false;
                 otaResolveTimedOutFlag = false;
-                otaResolveStartMs = millis();
+                otaResolveStartMs = static_cast<uint32_t>(millis());
                 const uint32_t generation = otaResolveGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 
                 auto *params = new OtaResolveTaskParams{
@@ -482,7 +482,7 @@ void WebUIPlugin::loop() {
                                      otaResolveChannel.c_str());
                         }
                     }
-                } else if (otaResolveTimedOut(otaResolveStartMs, millis(), kOtaResolveTimeoutMs)) {
+                } else if (otaResolveTimedOut(otaResolveStartMs, static_cast<uint32_t>(millis()), kOtaResolveTimeoutMs)) {
                     // Soft 10s timeout: abandon the in-flight resolve. Bump the
                     // generation so the task's eventual (late) result is
                     // recognized as stale and dropped when/if it arrives.
