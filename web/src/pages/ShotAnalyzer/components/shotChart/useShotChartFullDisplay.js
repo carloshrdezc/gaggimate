@@ -43,37 +43,30 @@ export function useShotChartFullDisplay({
     const documentElement = document.documentElement;
     const body = document.body;
     const previousDocumentOverflow = documentElement.style.overflow;
-    const previousBodyOverflow = body.style.overflow;
     const previousBodyOverscroll = body.style.overscrollBehavior;
 
     const handleViewportResize = () => {
       setFullDisplayViewportHeight(getFullDisplayViewportHeight());
     };
 
-    const handleKeyDown = event => {
-      if (event.key !== 'Escape' || isControlsLocked) return;
-      setIsFullDisplay(false);
-    };
-
     // Rendered via a portal, the overlay must own page scrolling while it is open.
+    // Body scroll lock and Esc-to-close are owned by the Dialog primitive that now
+    // wraps the overlay (PRO-17); this effect only locks the extra viewport chrome
+    // Dialog doesn't touch (documentElement overflow + overscroll-behavior).
     documentElement.style.overflow = 'hidden';
-    body.style.overflow = 'hidden';
     body.style.overscrollBehavior = 'contain';
 
     handleViewportResize();
     window.addEventListener('resize', handleViewportResize);
     window.visualViewport?.addEventListener('resize', handleViewportResize);
-    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       documentElement.style.overflow = previousDocumentOverflow;
-      body.style.overflow = previousBodyOverflow;
       body.style.overscrollBehavior = previousBodyOverscroll;
       window.removeEventListener('resize', handleViewportResize);
       window.visualViewport?.removeEventListener('resize', handleViewportResize);
-      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isControlsLocked, isFullDisplay]);
+  }, [isFullDisplay]);
 
   const toggleFullDisplay = () => {
     if (isControlsLocked) return;
