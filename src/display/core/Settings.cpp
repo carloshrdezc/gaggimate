@@ -606,11 +606,9 @@ void Settings::setCloudRelayEnabled(bool enabled) {
 }
 
 // PRO-23: setManualTargetType/setManualPressure/setManualFlow/setManualTemperature
-// intentionally do NOT call save() themselves. They are always invoked together as a
-// batch from Controller::updateManualTargets(), which is driven by UI drag-ticks and
-// can fire multiple times per second. Saving after each individual setter meant one
-// drag-tick produced 4 NVS writes; the caller now calls settings.save() once after all
-// four setters have run, cutting that to 1 write per batch.
+// no longer call save() individually; updateManualTargets() calls save() once
+// after all four. NOTE: setManualTemperature has one additional call site
+// (Controller::setTargetTemp MODE_MANUAL) which calls save() explicitly.
 void Settings::setManualTargetType(int target_type) {
     manualTargetType = target_type == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE;
 }

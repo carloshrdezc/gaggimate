@@ -810,6 +810,7 @@ void Controller::setTargetTemp(float temperature) {
         break;
     case MODE_MANUAL:
         settings.setManualTemperature(static_cast<int>(temperature));
+        settings.save(); // PRO-23: setter no longer self-saves; persist here (setTargetTemp has a standalone call site outside updateManualTargets)
         break;
     default:;
     }
