@@ -1,6 +1,7 @@
 #include "DiagnosticLogPlugin.h"
 #include "../core/Controller.h"
 #include "../core/Event.h"
+#include "../core/EventIds.h"
 #include "../core/PluginManager.h"
 #include "DiagLogFormat.h"
 #include <SD_MMC.h>

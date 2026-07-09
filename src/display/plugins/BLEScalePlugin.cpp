@@ -5,6 +5,7 @@
 #include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
+#include <display/core/EventIds.h>
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <display/core/Controller.h>

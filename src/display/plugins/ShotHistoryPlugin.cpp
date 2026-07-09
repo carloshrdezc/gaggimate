@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/utils.h>
@@ -610,7 +611,7 @@ void ShotHistoryPlugin::record() {
         // Trigger error event to notify user
         if (pluginManager) {
             Event errorEvent;
-            errorEvent.id = "evt:shot-recording-error";
+            errorEvent.id = EventIds::EVT_SHOT_RECORDING_ERROR;
             errorEvent.setString("error", "Failed to open shot log file");
             pluginManager->trigger(errorEvent);
         }

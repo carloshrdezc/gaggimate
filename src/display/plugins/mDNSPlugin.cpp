@@ -2,6 +2,7 @@
 #include "../config/features.h"
 #include "../core/Controller.h"
 #include "../core/Event.h"
+#include "../core/EventIds.h"
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_log.h>

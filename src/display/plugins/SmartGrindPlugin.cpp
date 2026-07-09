@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <display/core/Controller.h>
 #include <display/core/Event.h>
+#include <display/core/EventIds.h>
 
 void SmartGrindPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;

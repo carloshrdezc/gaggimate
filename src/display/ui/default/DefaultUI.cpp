@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/Process.h>
 #include <display/core/zones.h>

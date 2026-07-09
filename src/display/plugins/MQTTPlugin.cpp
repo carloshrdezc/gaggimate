@@ -1,5 +1,6 @@
 #include "MQTTPlugin.h"
 #include "../core/Controller.h"
+#include "../core/EventIds.h"
 #include "MqttConnectPolicy.h"
 #include <ArduinoJson.h>
 #include <ctime>

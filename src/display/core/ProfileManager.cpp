@@ -1,5 +1,6 @@
 #include "ProfileManager.h"
 #include <ArduinoJson.h>
+#include <display/core/EventIds.h>
 
 #include <algorithm>
 

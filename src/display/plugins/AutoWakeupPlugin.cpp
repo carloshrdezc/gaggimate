@@ -1,4 +1,5 @@
 #include "AutoWakeupPlugin.h"
+#include <display/core/EventIds.h>
 #include <display/core/constants.h>
 #include <esp_log.h>
 

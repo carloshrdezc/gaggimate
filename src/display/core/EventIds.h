@@ -100,6 +100,7 @@ inline constexpr const char *OTA_UPDATE_STATUS = "ota:update:status";
 
 // Shot history
 inline constexpr const char *EVT_HISTORY_REBUILD_PROGRESS = "evt:history-rebuild-progress";
+inline constexpr const char *EVT_SHOT_RECORDING_ERROR = "evt:shot-recording-error";
 
 } // namespace EventIds
 

@@ -1,6 +1,7 @@
 #include "LedControlPlugin.h"
 #include <display/core/Controller.h>
 #include <display/core/Event.h>
+#include <display/core/EventIds.h>
 
 void LedControlPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;

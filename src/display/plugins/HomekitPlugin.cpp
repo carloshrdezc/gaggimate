@@ -1,5 +1,6 @@
 #include "HomekitPlugin.h"
 #include "../core/Controller.h"
+#include "../core/EventIds.h"
 #include "../core/constants.h"
 #include "../../version.h"
 #include <cmath>

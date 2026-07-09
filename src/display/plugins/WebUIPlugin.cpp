@@ -5,6 +5,7 @@
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
