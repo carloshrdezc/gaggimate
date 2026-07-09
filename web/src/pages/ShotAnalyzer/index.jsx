@@ -432,28 +432,31 @@ export function ShotAnalyzer() {
           />
         </div>
 
+        {/* Comparison overlay — rendered outside the currentShot guard so that a user
+            who navigates to /analyzer from the Compare button always sees the chart even
+            when no primary shot is loaded yet. */}
+        {comparisonShots.value.length >= 2 && (
+          <div className='nd-card p-5 mt-4'>
+            <div className='flex items-center justify-between mb-3'>
+              <h3 className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)] m-0'>
+                Comparison ({comparisonShots.value.length} shots)
+              </h3>
+              <button
+                className='nd-action-btn nd-action-btn--text font-nd-mono text-[12px] px-3'
+                onClick={clearComparison}
+              >
+                Clear
+              </button>
+            </div>
+            <ComparisonChart shots={comparisonShots.value} comparisonData={comparisonData} />
+          </div>
+        )}
+
         {currentShot ? (
           <div ref={analysisSectionRef} className='mt-8'>
             <div className='nd-card p-5'>
               <ShotChart shotData={currentShot} results={analysisResults} />
             </div>
-
-            {comparisonShots.value.length >= 2 && (
-              <div className='nd-card p-5 mt-4'>
-                <div className='flex items-center justify-between mb-3'>
-                  <h3 className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)] m-0'>
-                    Comparison ({comparisonShots.value.length} shots)
-                  </h3>
-                  <button
-                    className='nd-action-btn nd-action-btn--text font-nd-mono text-[12px] px-3'
-                    onClick={clearComparison}
-                  >
-                    Clear
-                  </button>
-                </div>
-                <ComparisonChart shots={comparisonShots.value} comparisonData={comparisonData} />
-              </div>
-            )}
 
             {analysisResults && (
               <div className='mt-2'>

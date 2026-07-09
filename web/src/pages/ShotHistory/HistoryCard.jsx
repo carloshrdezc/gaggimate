@@ -18,6 +18,7 @@ import {
   addToComparison,
   removeFromComparison,
   comparisonShots,
+  isInComparison,
 } from '../../state/comparisonShots';
 import ShotNotesCard from './ShotNotesCard.jsx';
 import { useConfirmAction } from '../../hooks/useConfirmAction.js';
@@ -46,7 +47,7 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const [isExporting, setIsExporting] = useState(false);
 
   // Reactive comparison state — read signal value to subscribe to updates
-  const inComparison = comparisonShots.value.some(s => s.id === shot.id);
+  const inComparison = isInComparison(shot.id);
   const comparisonFull = comparisonShots.value.length >= 4 && !inComparison;
 
   const handleCompare = useCallback(() => {
