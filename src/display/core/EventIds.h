@@ -62,8 +62,7 @@ inline constexpr const char *CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE 
     "controller:volumetric-measurement:bluetooth:change";
 inline constexpr const char *CONTROLLER_VOLUMETRIC_MEASUREMENT_ESTIMATION_CHANGE =
     "controller:volumetric-measurement:estimation:change";
-inline constexpr const char *CONTROLLER_VOLUMETRIC_MEASUREMENT_SOURCE_CHANGE =
-    "controller:volumetric-measurement:source:change";
+inline constexpr const char *CONTROLLER_VOLUMETRIC_MEASUREMENT_SOURCE_CHANGE = "controller:volumetric-measurement:source:change";
 
 // Boiler
 inline constexpr const char *BOILER_CURRENT_TEMPERATURE_CHANGE = "boiler:currentTemperature:change";
@@ -99,6 +98,7 @@ inline constexpr const char *OTA_UPDATE_PROGRESS = "ota:update:progress";
 inline constexpr const char *OTA_UPDATE_STATUS = "ota:update:status";
 
 // Shot history
+// Also used verbatim as the WebSocket tp field — internal PM event and WS surface share the same string by design
 inline constexpr const char *EVT_HISTORY_REBUILD_PROGRESS = "evt:history-rebuild-progress";
 inline constexpr const char *EVT_SHOT_RECORDING_ERROR = "evt:shot-recording-error";
 
