@@ -1,5 +1,6 @@
 #include "ProfileManager.h"
 #include <ArduinoJson.h>
+#include <display/core/EventIds.h>
 
 #include <algorithm>
 
@@ -429,7 +430,7 @@ bool ProfileManager::saveProfile(Profile &profile) {
         loadSelectedProfile(selectedProfile);
     }
     selectProfile(_settings.getSelectedProfile());
-    _plugin_manager->trigger("profiles:profile:save", "id", profile.id);
+    _plugin_manager->trigger(EventIds::PROFILES_PROFILE_SAVE, "id", profile.id);
     if (isNew) {
         addFavoritedProfile(profile.id);
     }
@@ -468,7 +469,7 @@ void ProfileManager::selectProfile(const String &uuid) {
     _settings.setSelectedProfile(uuid);
     selectedProfile = Profile{};
     loadSelectedProfile(selectedProfile);
-    _plugin_manager->trigger("profiles:profile:select", "id", uuid);
+    _plugin_manager->trigger(EventIds::PROFILES_PROFILE_SELECT, "id", uuid);
 }
 
 Profile &ProfileManager::getSelectedProfile() { return selectedProfile; }
@@ -511,10 +512,10 @@ std::vector<String> ProfileManager::getFavoritedProfiles(bool validate) {
 
 void ProfileManager::removeFavoritedProfile(String id) {
     _settings.removeFavoritedProfile(id);
-    _plugin_manager->trigger("profiles:profile:unfavorite", "id", id);
+    _plugin_manager->trigger(EventIds::PROFILES_PROFILE_UNFAVORITE, "id", id);
 }
 
 void ProfileManager::addFavoritedProfile(String id) {
     _settings.addFavoritedProfile(id);
-    _plugin_manager->trigger("profiles:profile:favorite", "id", id);
+    _plugin_manager->trigger(EventIds::PROFILES_PROFILE_FAVORITE, "id", id);
 }

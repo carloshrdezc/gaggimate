@@ -5,6 +5,7 @@
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
@@ -97,15 +98,15 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         BUILD_GIT_VERSION, controller->getSystemInfo().version,
         resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
-            pluginManager->trigger("ota:update:phase", "phase", phase);
+            pluginManager->trigger(EventIds::OTA_UPDATE_PHASE, "phase", phase);
             updateOTAProgress(phase, 0);
         },
         [this](uint8_t phase, int progress) {
-            pluginManager->trigger("ota:update:progress", "progress", progress);
+            pluginManager->trigger(EventIds::OTA_UPDATE_PROGRESS, "progress", progress);
             updateOTAProgress(phase, progress);
         },
         "display-firmware.bin", "display-filesystem.bin", "board-firmware.bin");
-    pluginManager->on("controller:wifi:connect", [this](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event const &event) {
         // PRO-417: do NOT call start() inline — this runs on the arduino_events
         // WiFi-event task. Latch the desired Start intent and let loop() (Arduino
         // loop task) run the actual start() off this task.
@@ -119,7 +120,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
             latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), startIntentForApMode(event.getInt("AP") != 0)),
             std::memory_order_relaxed);
     });
-    pluginManager->on("controller:wifi:disconnect", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_WIFI_DISCONNECT, [this](Event const &) {
         // PRO-417: do NOT call stop() inline — stop()/stopRelay() blocks the
         // WiFi-event task (~500 ms spin-wait + ws.closeAll() under wsMutex) once
         // per ASSOC_LEAVE, stalling core 0 while WPA-supplicant re-associates.
@@ -128,16 +129,16 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
             latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Stop),
             std::memory_order_relaxed);
     });
-    pluginManager->on("controller:ready", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_READY, [this](Event const &) {
         ota->setControllerVersion(controller->getSystemInfo().version);
         ota->init(controller->getClientController()->getClient());
     });
-    pluginManager->on("controller:autotune:result", [this](Event const &event) { sendAutotuneResult(); });
+    pluginManager->on(EventIds::CONTROLLER_AUTOTUNE_RESULT, [this](Event const &event) { sendAutotuneResult(); });
 
     // Forward shot history rebuild progress events to WebSocket clients
-    pluginManager->on("evt:history-rebuild-progress", [this](Event const &event) {
+    pluginManager->on(EventIds::EVT_HISTORY_REBUILD_PROGRESS, [this](Event const &event) {
         JsonDocument doc;
-        doc["tp"] = "evt:history-rebuild-progress";
+        doc["tp"] = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         doc["total"] = event.getInt("total");
         doc["current"] = event.getInt("current");
         doc["status"] = event.getString("status");
@@ -145,7 +146,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     });
 
     // Subscribe to Bluetooth scale weight updates
-    pluginManager->on("controller:volumetric-measurement:bluetooth:change",
+    pluginManager->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE,
                       [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
 
     // Create the relay lifecycle mutex once here, before any WiFi/server events
@@ -404,11 +405,11 @@ void WebUIPlugin::loop() {
         if (!(isTag || channelSwitch)) {
             // Plain within-channel upgrade: no resolve needed, run exactly the
             // pre-existing immediate path (unaffected by PRO-13).
-            pluginManager->trigger("ota:update:start");
+            pluginManager->trigger(EventIds::OTA_UPDATE_START);
             const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
             const bool updateSucceeded =
                 ota->update(componentSelection.updateController, componentSelection.updateDisplay, /*force=*/false);
-            pluginManager->trigger("ota:update:end");
+            pluginManager->trigger(EventIds::OTA_UPDATE_END);
             updating = false;
             if (!updateSucceeded) {
                 updateOTAStatus("Update failed");
@@ -418,11 +419,11 @@ void WebUIPlugin::loop() {
             case OtaResolveState::Idle: {
                 // First loop() iteration of this forced-tag/channel-switch OTA:
                 // latch the decision inputs at spawn time and kick off the
-                // one-shot resolve task. "ota:update:start" fires here (not
+                // one-shot resolve task. EventIds::OTA_UPDATE_START fires here (not
                 // only on the eventual flash) so the UI's updateActive/standby
                 // transition (DefaultUI's ota:update:start handler) still
                 // engages immediately, matching pre-PRO-13 behavior.
-                pluginManager->trigger("ota:update:start");
+                pluginManager->trigger(EventIds::OTA_UPDATE_START);
                 otaResolveChannel = channel;
                 otaResolvePinnedTag = isTag ? channel.substring(4) : String("");
                 otaResolveIsTag = isTag;
@@ -516,7 +517,7 @@ void WebUIPlugin::loop() {
                 const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
                 const bool updateSucceeded =
                     ota->update(componentSelection.updateController, componentSelection.updateDisplay, force);
-                pluginManager->trigger("ota:update:end");
+                pluginManager->trigger(EventIds::OTA_UPDATE_END);
                 updating = false;
                 otaResolveState = OtaResolveState::Idle;
                 if (!updateSucceeded) {
@@ -545,7 +546,7 @@ void WebUIPlugin::loop() {
             }
             case OtaResolveState::Failed:
             default: {
-                pluginManager->trigger("ota:update:end");
+                pluginManager->trigger(EventIds::OTA_UPDATE_END);
                 updating = false;
                 otaResolveState = OtaResolveState::Idle;
                 if (otaResolveTimedOutFlag) {
@@ -622,7 +623,7 @@ void WebUIPlugin::loop() {
         } else {
             otaCheckFailureCount = 0;
         }
-        pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
+        pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
     }
@@ -1450,7 +1451,7 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
         controller->getSettings().setSelectedBean(beanName);
-        pluginManager->trigger("beans:selected", "name", beanName);
+        pluginManager->trigger(EventIds::BEANS_SELECTED, "name", beanName);
     } else if (msgType == "req:history:rebuild") {
         JsonDocument resp;
         resp["tp"] = "res:history:rebuild";
@@ -1740,7 +1741,7 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
         }
         if (auto bean = beanManager->loadBean(id); bean && controller->getSettings().getSelectedBean() == bean->name) {
             controller->getSettings().setSelectedBean("");
-            pluginManager->trigger("beans:selected", "name", "");
+            pluginManager->trigger(EventIds::BEANS_SELECTED, "name", "");
         }
         if (!beanManager->deleteBean(id)) {
             response["error"] = F("Delete failed");
@@ -1791,7 +1792,7 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
                 bool stillPresent = std::find(grinders.begin(), grinders.end(), selected) != grinders.end();
                 if (!stillPresent) {
                     controller->getSettings().setSelectedGrinder("");
-                    pluginManager->trigger("grinders:selected", "name", String(""));
+                    pluginManager->trigger(EventIds::GRINDERS_SELECTED, "name", String(""));
                 }
             }
             auto arr = response["grinders"].to<JsonArray>();
@@ -1805,7 +1806,7 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
         // (and the status payload's "gr" key) reflects the new selection.
         String grinderName = request["name"].is<String>() ? request["name"].as<String>() : String("");
         controller->getSettings().setSelectedGrinder(grinderName);
-        pluginManager->trigger("grinders:selected", "name", grinderName);
+        pluginManager->trigger(EventIds::GRINDERS_SELECTED, "name", grinderName);
         response["name"] = grinderName;
     }
 
@@ -1844,7 +1845,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             settings->setSmartGrindActive(request->hasArg("smartGrindActive"));
             // PRO-266: diagnostic UDP log tee, default OFF. Checkbox semantics —
             // present means enabled. PRO-271: takes effect immediately while
-            // online — the "settings:changed" trigger below arms the tee without
+            // online — the EventIds::SETTINGS_CHANGED trigger below arms the tee without
             // a reboot (DiagnosticLogPlugin::tryInstall, also driven from loop()).
             settings->setDiagnosticLogEnabled(request->hasArg("diagnosticLog"));
             if (request->hasArg("smartGrindIp"))
@@ -1955,7 +1956,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setCloudRelayEnabled(request->arg("cloudRelayEnabled") == "1");
             settings->save(true);
         });
-        pluginManager->trigger("settings:changed");
+        pluginManager->trigger(EventIds::SETTINGS_CHANGED);
         controller->setTargetTemp(controller->getTargetTemp());
         controller->setPumpModelCoeffs();
         if (request->hasArg("cloudRelayUrl") || request->hasArg("cloudRelayToken") || request->hasArg("cloudRelayEnabled")) {

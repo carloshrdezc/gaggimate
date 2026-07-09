@@ -18,6 +18,7 @@
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/EventIds.h>
 #include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/SteamButtonPolicy.h>
 #include <display/core/constants.h>
@@ -158,14 +159,14 @@ void Controller::setup() {
 #endif
     pluginManager->setup(this);
 
-    pluginManager->on("profiles:profile:save", [this](Event const &event) {
+    pluginManager->on(EventIds::PROFILES_PROFILE_SAVE, [this](Event const &event) {
         String id = event.getString("id");
         if (id == profileManager->getSelectedProfile().id) {
             this->handleProfileUpdate();
         }
     });
 
-    pluginManager->on("profiles:profile:select", [this](Event const &event) { this->handleProfileUpdate(); });
+    pluginManager->on(EventIds::PROFILES_PROFILE_SELECT, [this](Event const &event) { this->handleProfileUpdate(); });
 
 #ifndef GAGGIMATE_HEADLESS
     ui->init();
@@ -187,12 +188,12 @@ void Controller::connect() {
         return;
     lastPing = millis();
     connectStartTime = millis();
-    pluginManager->trigger("controller:startup");
+    pluginManager->trigger(EventIds::CONTROLLER_STARTUP);
 
     setupWifi();
     setupBluetooth();
-    pluginManager->on("ota:update:start", [this](Event const &) { this->updating = true; });
-    pluginManager->on("ota:update:end", [this](Event const &) { this->updating = false; });
+    pluginManager->on(EventIds::OTA_UPDATE_START, [this](Event const &) { this->updating = true; });
+    pluginManager->on(EventIds::OTA_UPDATE_END, [this](Event const &) { this->updating = false; });
 
     updateLastAction();
     initialized = true;
@@ -259,7 +260,7 @@ void Controller::setupBluetooth() {
     clientController.initClient();
     clientController.registerDisconnectCallback([this]() {
         if (initialized) {
-            pluginManager->trigger("controller:bluetooth:disconnect");
+            pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT);
             waitingForController = true;
             // Restart the grace clock so the next scan/reconnect attempt gets a
             // full CONTROLLER_WAITING_TIMEOUT_MS window (PRO-3).
@@ -273,10 +274,10 @@ void Controller::setupBluetooth() {
             this->pressure = pressure;
             this->currentPuckFlow = puckFlow;
             this->currentPumpFlow = pumpFlow;
-            pluginManager->trigger("boiler:pressure:change", "value", pressure);
-            pluginManager->trigger("pump:puck-flow:change", "value", puckFlow);
-            pluginManager->trigger("pump:flow:change", "value", pumpFlow);
-            pluginManager->trigger("pump:puck-resistance:change", "value", puckResistance);
+            pluginManager->trigger(EventIds::BOILER_PRESSURE_CHANGE, "value", pressure);
+            pluginManager->trigger(EventIds::PUMP_PUCK_FLOW_CHANGE, "value", puckFlow);
+            pluginManager->trigger(EventIds::PUMP_FLOW_CHANGE, "value", pumpFlow);
+            pluginManager->trigger(EventIds::PUMP_PUCK_RESISTANCE_CHANGE, "value", puckResistance);
         });
     clientController.registerBrewBtnCallback([this](const int brewButtonStatus) { handleBrewButton(brewButtonStatus); });
     clientController.registerSteamBtnCallback([this](const int steamButtonStatus) { handleSteamButton(steamButtonStatus); });
@@ -285,7 +286,7 @@ void Controller::setupBluetooth() {
             this->error = error;
             deactivate();
             setMode(MODE_STANDBY);
-            pluginManager->trigger(F("controller:error"));
+            pluginManager->trigger(EventIds::CONTROLLER_ERROR);
             ESP_LOGE(LOG_TAG, "Received error %d", error);
         }
     });
@@ -295,7 +296,7 @@ void Controller::setupBluetooth() {
         // Store in simplified format with combined Kf
         snprintf(pid, sizeof(pid), "%.3f,%.3f,%.3f,%.3f", Kp, Ki, Kd, Kf);
         settings.setPid(String(pid));
-        pluginManager->trigger("controller:autotune:result");
+        pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_RESULT);
         autotuning = false;
     });
     clientController.registerVolumetricMeasurementCallback(
@@ -303,9 +304,9 @@ void Controller::setupBluetooth() {
     clientController.registerTofMeasurementCallback([this](const int value) {
         tofDistance = value;
         ESP_LOGV(LOG_TAG, "Received new TOF distance: %d", value);
-        pluginManager->trigger("controller:tof:change", "value", value);
+        pluginManager->trigger(EventIds::CONTROLLER_TOF_CHANGE, "value", value);
     });
-    pluginManager->trigger("controller:bluetooth:init");
+    pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_INIT);
 }
 
 void Controller::setupInfos() {
@@ -374,13 +375,13 @@ void Controller::setupWifi() {
         if (WiFi.status() == WL_CONNECTED) {
             ESP_LOGI(LOG_TAG, "Connected to %s with IP address %s", settings.getWifiSsid().c_str(),
                      WiFi.localIP().toString().c_str());
-            WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger("controller:wifi:connect", "AP", 0); },
+            WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger(EventIds::CONTROLLER_WIFI_CONNECT, "AP", 0); },
                          WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
             WiFi.onEvent(
                 [this](WiFiEvent_t, WiFiEventInfo_t info) {
                     ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
                              WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
-                    pluginManager->trigger("controller:wifi:disconnect");
+                    pluginManager->trigger(EventIds::CONTROLLER_WIFI_DISCONNECT);
                 },
                 WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
             configTzTime(resolve_timezone(settings.getTimezone()), NTP_SERVER);
@@ -404,10 +405,10 @@ void Controller::setupWifi() {
         ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
     }
 
-    pluginManager->on("ota:update:start", [this](Event const &) { this->updating = true; });
-    pluginManager->on("ota:update:end", [this](Event const &) { this->updating = false; });
+    pluginManager->on(EventIds::OTA_UPDATE_START, [this](Event const &) { this->updating = true; });
+    pluginManager->on(EventIds::OTA_UPDATE_END, [this](Event const &) { this->updating = false; });
 
-    pluginManager->trigger("controller:wifi:connect", "AP", isApConnection ? 1 : 0);
+    pluginManager->trigger(EventIds::CONTROLLER_WIFI_CONNECT, "AP", isApConnection ? 1 : 0);
 }
 
 void Controller::loop() {
@@ -424,7 +425,7 @@ void Controller::loop() {
     if (!waitingForController && initialized && !clientController.isConnected() &&
         (long)(now - connectStartTime) > CONTROLLER_WAITING_TIMEOUT_MS) {
         waitingForController = true;
-        pluginManager->trigger("controller:bluetooth:waiting");
+        pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_WAITING);
     }
 
     if (clientController.isReadyForConnection() && clientController.connectToServer()) {
@@ -442,9 +443,9 @@ void Controller::loop() {
             if (settings.getStartupMode() == MODE_STANDBY)
                 activateStandby();
 
-            pluginManager->trigger("controller:ready");
+            pluginManager->trigger(EventIds::CONTROLLER_READY);
         }
-        pluginManager->trigger("controller:bluetooth:connect");
+        pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_CONNECT);
     }
 
     if (isErrorState()) {
@@ -576,7 +577,7 @@ void Controller::autotune(int testTime, int samples) {
     }
     autotuning = true;
     clientController.sendAutotune(testTime, samples);
-    pluginManager->trigger("controller:autotune:start");
+    pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_START);
 }
 
 void Controller::startProcess(Process *process) {
@@ -605,11 +606,11 @@ void Controller::startProcess(Process *process) {
         xSemaphoreGive(processMutex);
         delete process;
         if (endedProcessType == MODE_BREW) {
-            pluginManager->trigger("controller:brew:end");
+            pluginManager->trigger(EventIds::CONTROLLER_BREW_END);
         } else if (endedProcessType == MODE_GRIND) {
-            pluginManager->trigger("controller:grind:end");
+            pluginManager->trigger(EventIds::CONTROLLER_GRIND_END);
         }
-        pluginManager->trigger("controller:process:end", "processType", endedProcessType);
+        pluginManager->trigger(EventIds::CONTROLLER_PROCESS_END, "processType", endedProcessType);
         updateLastAction();
         return;
     }
@@ -619,7 +620,7 @@ void Controller::startProcess(Process *process) {
     
     xSemaphoreGive(processMutex);
     
-    pluginManager->trigger("controller:process:start");
+    pluginManager->trigger(EventIds::CONTROLLER_PROCESS_START);
     updateLastAction();
 }
 
@@ -797,7 +798,7 @@ bool Controller::hasTargetFlow() const {
 }
 
 void Controller::setTargetTemp(float temperature) {
-    pluginManager->trigger("boiler:targetTemperature:change", "value", temperature);
+    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", temperature);
     switch (mode) {
     case MODE_BREW:
         profileManager->getSelectedProfile().temperature = temperature;
@@ -832,13 +833,13 @@ void Controller::setPumpModelCoeffs(void) {
 int Controller::getTargetGrindDuration() const { return settings.getTargetGrindDuration(); }
 
 void Controller::setTargetGrindDuration(int duration) {
-    Event event = pluginManager->trigger("controller:grindDuration:change", "value", duration);
+    Event event = pluginManager->trigger(EventIds::CONTROLLER_GRIND_DURATION_CHANGE, "value", duration);
     settings.setTargetGrindDuration(event.getInt("value"));
     updateLastAction();
 }
 
 void Controller::setTargetGrindVolume(double volume) {
-    Event event = pluginManager->trigger("controller:grindVolume:change", "value", static_cast<float>(volume));
+    Event event = pluginManager->trigger(EventIds::CONTROLLER_GRIND_VOLUME_CHANGE, "value", static_cast<float>(volume));
     settings.setTargetGrindVolume(event.getFloat("value"));
     updateLastAction();
 }
@@ -1114,7 +1115,7 @@ void Controller::activate() {
             currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
 #endif
             if (mode == MODE_BREW) {
-                pluginManager->trigger("controller:brew:prestart");
+                pluginManager->trigger(EventIds::CONTROLLER_BREW_PRESTART);
             }
         }
         // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
@@ -1153,7 +1154,7 @@ void Controller::activate() {
     }
     
     if (isBrewProcess) {
-        pluginManager->trigger("controller:brew:start");
+        pluginManager->trigger(EventIds::CONTROLLER_BREW_START);
     }
 }
 
@@ -1175,11 +1176,11 @@ void Controller::deactivate() {
     
     xSemaphoreGive(processMutex);
     if (endedProcessType == MODE_BREW) {
-        pluginManager->trigger("controller:brew:end");
+        pluginManager->trigger(EventIds::CONTROLLER_BREW_END);
     } else if (endedProcessType == MODE_GRIND) {
-        pluginManager->trigger("controller:grind:end");
+        pluginManager->trigger(EventIds::CONTROLLER_GRIND_END);
     }
-    pluginManager->trigger("controller:process:end", "processType", endedProcessType);
+    pluginManager->trigger(EventIds::CONTROLLER_PROCESS_END, "processType", endedProcessType);
     updateLastAction();
 }
 
@@ -1193,7 +1194,7 @@ void Controller::clear() {
     }
     
     if (lastProcess != nullptr && lastProcess->getType() == MODE_BREW) {
-        pluginManager->trigger("controller:brew:clear");
+        pluginManager->trigger(EventIds::CONTROLLER_BREW_CLEAR);
     }
     delete lastProcess;
     lastProcess = nullptr;
@@ -1213,7 +1214,7 @@ void Controller::clear() {
 void Controller::activateGrind() {
     if (!isGrindAvailable())
         return;
-    pluginManager->trigger("controller:grind:start");
+    pluginManager->trigger(EventIds::CONTROLLER_GRIND_START);
     if (isGrindActive())
         return;
     clear();
@@ -1456,7 +1457,7 @@ void Controller::setMode(int newMode) {
         return;
     if (newMode == MODE_MANUAL && !isManualAvailable())
         return;
-    Event modeEvent = pluginManager->trigger("controller:mode:change", "value", newMode);
+    Event modeEvent = pluginManager->trigger(EventIds::CONTROLLER_MODE_CHANGE, "value", newMode);
     mode = modeEvent.getInt("value");
     steamReady = false;
 
@@ -1469,7 +1470,7 @@ void Controller::setMode(int newMode) {
 
 void Controller::onTempRead(float temperature) {
     float temp = temperature - static_cast<float>(settings.getTemperatureOffset());
-    Event event = pluginManager->trigger("boiler:currentTemperature:change", "value", temp);
+    Event event = pluginManager->trigger(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, "value", temp);
     currentTemp = event.getFloat("value");
 }
 
@@ -1493,8 +1494,8 @@ void Controller::onProfileSaveAsNew() {
 
 void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source) {
     pluginManager->trigger(source == VolumetricMeasurementSource::FLOW_ESTIMATION
-                               ? F("controller:volumetric-measurement:estimation:change")
-                               : F("controller:volumetric-measurement:bluetooth:change"),
+                               ? EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_ESTIMATION_CHANGE
+                               : EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE,
                            "value", static_cast<float>(measurement));
     if (source == VolumetricMeasurementSource::BLUETOOTH) {
         lastBluetoothMeasurement.store(millis(), std::memory_order_release);
@@ -1518,7 +1519,7 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         currentVolumetricSource.store(VolumetricMeasurementSource::FLOW_ESTIMATION, std::memory_order_release);
         latched = VolumetricMeasurementSource::FLOW_ESTIMATION;
         ESP_LOGW(LOG_TAG, "BLE scale unhealthy mid-shot; falling back volumetric source to flow-estimation");
-        pluginManager->trigger(F("controller:volumetric-measurement:source:change"), "value",
+        pluginManager->trigger(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_SOURCE_CHANGE, "value",
                                static_cast<int>(VolumetricMeasurementSource::FLOW_ESTIMATION));
     }
 
@@ -1564,7 +1565,7 @@ void Controller::onFlush() {
     Profile flushProfile = FLUSH_PROFILE;
     flushProfile.phases[0].duration = settings.getFlushDuration() / 1000.0f;
     startProcess(new BrewProcess(flushProfile, ProcessTarget::TIME, settings.getBrewDelay()));
-    pluginManager->trigger("controller:brew:start");
+    pluginManager->trigger(EventIds::CONTROLLER_BREW_START);
 }
 
 void Controller::onVolumetricDelete() {
@@ -1637,9 +1638,9 @@ void Controller::handleSteamButton(int steamButtonStatus) {
 }
 
 void Controller::handleProfileUpdate() {
-    pluginManager->trigger("boiler:targetTemperature:change", "value", profileManager->getSelectedProfile().temperature);
-    pluginManager->trigger("controller:targetDuration:change", "value", profileManager->getSelectedProfile().getTotalDuration());
-    pluginManager->trigger("controller:targetVolume:change", "value", profileManager->getSelectedProfile().getTotalVolume());
+    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", profileManager->getSelectedProfile().temperature);
+    pluginManager->trigger(EventIds::CONTROLLER_TARGET_DURATION_CHANGE, "value", profileManager->getSelectedProfile().getTotalDuration());
+    pluginManager->trigger(EventIds::CONTROLLER_TARGET_VOLUME_CHANGE, "value", profileManager->getSelectedProfile().getTotalVolume());
 }
 
 void Controller::loopTask(void *arg) {

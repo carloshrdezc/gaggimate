@@ -5,6 +5,7 @@
 #include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
+#include <display/core/EventIds.h>
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <display/core/Controller.h>
@@ -82,14 +83,14 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
         return;
     }
 
-    manager->on("controller:bluetooth:connect", [this](Event const &) {
+    manager->on(EventIds::CONTROLLER_BLUETOOTH_CONNECT, [this](Event const &) {
         if (this->controller != nullptr && shouldScanForBleScaleMode(this->controller->getMode())) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
         }
     });
-    manager->on("controller:bluetooth:disconnect", [this](Event const &) {
+    manager->on(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT, [this](Event const &) {
         ESP_LOGW("BLEScalePlugin", "Controller disconnected, stopping BLE scan");
         // Clear any in-flight steam grace so a BLE disconnect during the window
         // doesn't leave the pending flag dangling until the deadline.
@@ -103,9 +104,9 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
             scanner->stopAsyncScan();
         }
     });
-    manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
-    manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
-    manager->on("controller:mode:change", [this](Event const &event) {
+    manager->on(EventIds::CONTROLLER_BREW_PRESTART, [this](Event const &) { onProcessStart(); });
+    manager->on(EventIds::CONTROLLER_GRIND_START, [this](Event const &) { onProcessStart(); });
+    manager->on(EventIds::CONTROLLER_MODE_CHANGE, [this](Event const &event) {
         const int newMode = event.getInt("value");
         const int oldMode = previousMode;
         previousMode = newMode;

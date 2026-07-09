@@ -4,11 +4,12 @@
 #include <WiFi.h>
 #include <display/core/Controller.h>
 #include <display/core/Event.h>
+#include <display/core/EventIds.h>
 
 void SmartGrindPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
-    pluginManager->on("controller:grind:start", [this](Event const &event) { start(); });
-    pluginManager->on("controller:grind:end", [this](Event const &event) { stop(); });
+    pluginManager->on(EventIds::CONTROLLER_GRIND_START, [this](Event const &event) { start(); });
+    pluginManager->on(EventIds::CONTROLLER_GRIND_END, [this](Event const &event) { stop(); });
 }
 
 void SmartGrindPlugin::start() {
