@@ -21,7 +21,7 @@ export function ComparisonChart({ shots, comparisonData }) {
       const color = SHOT_COLORS[i % SHOT_COLORS.length];
       const label =
         new Date(shot.timestamp * 1000).toLocaleDateString() +
-        (shot.profile ? ' \u00b7 ' + shot.profile : '');
+        (shot.profile ? ' · ' + shot.profile : '');
       const samples = data.samples;
       const pressureData = samples.map(s => ({ x: s.t, y: s.cp ?? s.tp ?? null }));
       const flowData = samples.map(s => ({ x: s.t, y: s.fl ?? null }));
@@ -48,6 +48,9 @@ export function ComparisonChart({ shots, comparisonData }) {
         yAxisID: 'yFlow',
       });
     });
+
+    // Don't render an empty chart if no shot data has loaded yet
+    if (datasets.length === 0) return;
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'line',
@@ -88,8 +91,26 @@ export function ComparisonChart({ shots, comparisonData }) {
     };
   }, [shots, comparisonData]);
 
+  // Determine how many shots are still loading vs failed
+  const loadedCount = shots.filter(s => comparisonData[s.id]?.samples).length;
+  const isLoading = shots.length >= 2 && loadedCount < shots.length;
+
   return (
     <div style={{ height: 320, position: 'relative' }}>
+      {isLoading && loadedCount === 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'
+        >
+          Loading comparison data…
+        </div>
+      )}
       <canvas ref={canvasRef} />
     </div>
   );

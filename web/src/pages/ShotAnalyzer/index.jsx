@@ -137,6 +137,9 @@ export function ShotAnalyzer() {
   useEffect(() => {
     comparisonDataRef.current = comparisonData;
   }, [comparisonData]);
+  // Tracks IDs whose loads are already in-flight so rapid signal re-fires don't
+  // launch duplicate fetches before comparisonDataRef.current syncs on the next render.
+  const loadingIdsRef = useRef(new Set());
   const analysisSectionRef = useRef(null);
   const profileMatchIdRef = useRef(0);
   const analysisIdRef = useRef(0);
@@ -178,9 +181,20 @@ export function ShotAnalyzer() {
       for (const id of currentIds) if (prev[id]) next[id] = prev[id];
       return next;
     });
-    // Load data for any newly-added shots
+    // Also evict stale in-flight markers for removed shots
+    for (const id of loadingIdsRef.current) {
+      if (!currentIds.has(id)) loadingIdsRef.current.delete(id);
+    }
+    // Load data for any newly-added shots.
+    // NOTE: useSignalEffect does not support returning a cleanup function, so
+    // in-flight fetches cannot be cancelled via AbortController here. The
+    // loadingIdsRef dedup guard ensures we never fire more than one fetch per
+    // shot ID at a time; on unmount any in-flight fetch simply resolves into
+    // a setComparisonData call on an unmounted component (harmless no-op in Preact).
     shots.forEach(async shot => {
       if (comparisonDataRef.current[shot.id]) return;
+      if (loadingIdsRef.current.has(shot.id)) return; // already in-flight
+      loadingIdsRef.current.add(shot.id);
       try {
         const loaded = await libraryService.loadShot(shot.id, shot.source || 'gaggimate');
         if (loaded?.samples) {
@@ -188,6 +202,8 @@ export function ShotAnalyzer() {
         }
       } catch (e) {
         console.warn('Failed to load comparison shot', shot.id, e);
+      } finally {
+        loadingIdsRef.current.delete(shot.id);
       }
     });
   });
