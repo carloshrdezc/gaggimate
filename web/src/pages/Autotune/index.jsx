@@ -48,6 +48,10 @@ export function Autotune() {
     });
     return () => {
       apiService.off('evt:autotune-result', listenerId);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
   }, [apiService]);
 
