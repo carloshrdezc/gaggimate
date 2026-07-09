@@ -43,7 +43,11 @@ export function Autotune() {
         timeoutRef.current = null;
       }
       const pid = msg?.pid;
-      if (!pid) return;
+      if (!pid) {
+        setActive(false);
+        setError('Received invalid PID data from device.');
+        return;
+      }
       const [kp, ki, kd, kf] = pid.split(',').map(Number);
       if ([kp, ki, kd, kf].some(isNaN)) {
         setActive(false);
