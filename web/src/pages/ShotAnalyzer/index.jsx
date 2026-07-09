@@ -167,9 +167,18 @@ export function ShotAnalyzer() {
     };
   }, []);
 
-  // Load sample data for comparison shots that haven't been loaded yet
+  // Load sample data for comparison shots that haven't been loaded yet;
+  // evict entries for shots that have been removed from the comparison set.
   useSignalEffect(() => {
     const shots = comparisonShots.value;
+    const currentIds = new Set(shots.map(s => s.id));
+    // Evict removed shots so stale cache entries don't persist or get re-served
+    setComparisonData(prev => {
+      const next = {};
+      for (const id of currentIds) if (prev[id]) next[id] = prev[id];
+      return next;
+    });
+    // Load data for any newly-added shots
     shots.forEach(async shot => {
       if (comparisonDataRef.current[shot.id]) return;
       try {
