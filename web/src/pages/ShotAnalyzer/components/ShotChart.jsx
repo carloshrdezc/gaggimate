@@ -452,7 +452,7 @@ export function ShotChart({ shotData, results }) {
     // remains the "Close full display" button rendered by ShotChartControls.
     return createPortal(
       <Dialog
-        open={isFullDisplay}
+        open
         onClose={() => {
           if (!isControlsLocked) toggleFullDisplay();
         }}
