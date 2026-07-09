@@ -405,9 +405,6 @@ void Controller::setupWifi() {
         ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
     }
 
-    pluginManager->on(EventIds::OTA_UPDATE_START, [this](Event const &) { this->updating = true; });
-    pluginManager->on(EventIds::OTA_UPDATE_END, [this](Event const &) { this->updating = false; });
-
     pluginManager->trigger(EventIds::CONTROLLER_WIFI_CONNECT, "AP", isApConnection ? 1 : 0);
 }
 
