@@ -810,6 +810,7 @@ void Controller::setTargetTemp(float temperature) {
         break;
     case MODE_MANUAL:
         settings.setManualTemperature(static_cast<int>(temperature));
+        settings.save(); // PRO-23: setter no longer self-saves; persist here (setTargetTemp has a standalone call site outside updateManualTargets)
         break;
     default:;
     }
@@ -847,6 +848,9 @@ void Controller::updateManualTargets(int targetType, float pressure, float flow,
     settings.setManualPressure(pressure);
     settings.setManualFlow(flow);
     settings.setManualTemperature(temperature);
+    // PRO-23: the four setters above no longer save() individually (see Settings.cpp);
+    // save once here for the whole batch instead of once per setter.
+    settings.save();
     setTargetTemp(settings.getManualTemperature());
 
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {

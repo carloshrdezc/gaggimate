@@ -605,24 +605,24 @@ void Settings::setCloudRelayEnabled(bool enabled) {
     save();
 }
 
+// PRO-23: setManualTargetType/setManualPressure/setManualFlow/setManualTemperature
+// no longer call save() individually; updateManualTargets() calls save() once
+// after all four. NOTE: setManualTemperature has one additional call site
+// (Controller::setTargetTemp MODE_MANUAL) which calls save() explicitly.
 void Settings::setManualTargetType(int target_type) {
     manualTargetType = target_type == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE;
-    save();
 }
 
 void Settings::setManualPressure(float pressure) {
     manualPressure = std::clamp(pressure, MIN_MANUAL_PRESSURE, MAX_MANUAL_PRESSURE);
-    save();
 }
 
 void Settings::setManualFlow(float flow) {
     manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW);
-    save();
 }
 
 void Settings::setManualTemperature(int temperature) {
     manualTemperature = std::clamp(temperature, MIN_MANUAL_TEMPERATURE, MAX_MANUAL_TEMPERATURE);
-    save();
 }
 
 void Settings::setSunriseR(int sunrise_r) {
