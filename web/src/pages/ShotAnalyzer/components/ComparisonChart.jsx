@@ -111,6 +111,19 @@ export function ComparisonChart({ shots, comparisonData }) {
           Loading comparison data…
         </div>
       )}
+      {loadedCount > 0 && loadedCount < shots.length && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 4,
+            left: 8,
+            pointerEvents: 'none',
+          }}
+          className='font-nd-mono text-[10px] text-[var(--text-secondary,#999)]'
+        >
+          Loading {loadedCount} of {shots.length} shots…
+        </div>
+      )}
       <canvas ref={canvasRef} />
     </div>
   );
