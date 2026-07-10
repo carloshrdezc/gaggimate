@@ -113,7 +113,7 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 **Preact with signals**: Uses `@preact/signals` for state management, NOT React hooks for global state
 - **Signals convention — `computed()` vs `useComputed()`**:
   - **Module-level `computed(...)`**: for shared derived state used by multiple components (created once at module scope, lives outside component lifecycle). Use this for global/cross-component derived signals.
-  - **`useComputed(...)` inside a component body**: for per-component reactive subscriptions — the correct pattern when a signal needs to be read inside a component *and* the component should re-render on signal change. Example: `HistoryCard.jsx` uses `useComputed` for per-shot comparison state.
+  - **`useComputed(...)` inside a component body**: for per-component reactive subscriptions — the correct pattern when a signal needs to be read inside a component *and* the component should re-render on signal change. Example: `web/src/pages/ShotHistory/HistoryCard.jsx` uses `useComputed` for per-shot comparison state.
 - `ApiService` manages WebSocket with exponential backoff (1s to 30s max delay)
 - WebSocket auto-reconnects on close/error with `_scheduleReconnect()`
 
