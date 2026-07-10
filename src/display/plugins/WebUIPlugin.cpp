@@ -16,6 +16,7 @@
 #include <esp_err.h>
 #include <esp_partition.h>
 #include <esp_system.h>
+#include <inttypes.h>
 
 #include <SD_MMC.h>
 #include <algorithm>
@@ -492,7 +493,7 @@ void WebUIPlugin::loop() {
                     otaResolveResolveFailed = true;
                     otaResolveState = OtaResolveState::Failed;
                     const String &verifyTarget = otaResolveIsTag ? otaResolvePinnedTag : otaResolveChannel;
-                    ESP_LOGE("WebUIPlugin", "OTA resolve timed out after %lums verifying %s", kOtaResolveTimeoutMs,
+                    ESP_LOGE("WebUIPlugin", "OTA resolve timed out after %" PRIu32 "ms verifying %s", kOtaResolveTimeoutMs,
                              verifyTarget.c_str());
                 }
                 // else: still resolving, no result yet, not timed out — stay in
