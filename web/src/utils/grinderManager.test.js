@@ -550,6 +550,13 @@ describe('grinderManager', () => {
       const shot = {};
       expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('Device Df64');
     });
+
+    it('treats a whitespace-only loadedNotes.grinder as empty so device grinderName wins', () => {
+      const loadedNotes = { grinder: '   ' };
+      const savedNotes = { grinderName: 'Device Df64' };
+      const shot = { grinder: 'LStore Guess' };
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('Device Df64');
+    });
   });
 
   // PRO-441: the DEVICE stamps the machine grind TARGET (auto-grind grams/seconds)
