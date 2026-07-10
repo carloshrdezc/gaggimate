@@ -121,7 +121,7 @@ export function ComparisonChart({ shots, comparisonData }) {
           }}
           className='font-nd-mono text-[10px] text-[var(--text-secondary,#999)]'
         >
-          Loading {loadedCount} of {shots.length} shots…
+          {loadedCount} of {shots.length} shots loaded…
         </div>
       )}
       <canvas ref={canvasRef} />
