@@ -383,8 +383,7 @@ void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
     // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
     // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
     if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
-        assignUnderSelectedNameLock(this->homeAssistantTopic,
-                                     homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH));
+        assignUnderSelectedNameLock(this->homeAssistantTopic, homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH));
     } else {
         assignUnderSelectedNameLock(this->homeAssistantTopic, String(homeAssistantTopic));
     }
