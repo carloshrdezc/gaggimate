@@ -70,7 +70,8 @@ void test_set_controller_version_reassign_sequence(void) {
     TEST_ASSERT_EQUAL_STRING("rc1", controller_version.prerelease);
 
     // setControllerVersion() reassign #2: prerelease -> build metadata only
-    // (from_string strips build metadata and leaves prerelease NULL). This is
+    // (from_string strips build metadata; the input has no prerelease
+    // component, so prerelease is NULL — not removed, simply absent). This is
     // the round-trip the PRO-21 fix must get right: the malloc'd "rc1"
     // prerelease from the PREVIOUS value must be freed here, not leaked.
     semver_free(&controller_version);
