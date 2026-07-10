@@ -397,6 +397,18 @@ void WebUIPlugin::loop() {
         // upgrade-only path immediately when neither a tag nor a channel
         // switch is in play — that path never touched checkForUpdates() here
         // to begin with, so it is unaffected by this change).
+        // PRO-448: these live reads re-run on EVERY loop() tick while `updating`
+        // is true, but they only matter in two places: (1) the plain
+        // within-channel-upgrade path just below, which runs this block fresh
+        // each tick since it never enters the resolve state machine; and (2) the
+        // Idle case of the switch below, which latches channel/previousInstalledChannel/
+        // isTag/channelSwitch into the otaResolve* fields once, at spawn time.
+        // Once otaResolveState leaves Idle (Resolving/ReadyToFlash/Failed), the
+        // state machine is driven entirely by those latched otaResolve* fields —
+        // these live locals are computed again on every tick but ignored for the
+        // rest of the resolve lifecycle. Note `settings` itself is NOT idle-only:
+        // it's also referenced in the ReadyToFlash case (~line 516) to persist
+        // installedChannel, so it can't be scoped inside an Idle-only block.
         Settings &settings = controller->getSettings();
         const String channel = settings.getOTAChannel();
         const String previousInstalledChannel = settings.getInstalledChannel();
