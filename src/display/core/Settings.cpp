@@ -266,27 +266,27 @@ void Settings::setStandbyTimeout(int standby_timeout) {
 }
 
 void Settings::setPid(const String &pid) {
-    this->pid = pid;
+    assignUnderSelectedNameLock(this->pid, String(pid));
     save();
 }
 
 void Settings::setPumpModelCoeffs(const String &pumpModelCoeffs) {
-    this->pumpModelCoeffs = pumpModelCoeffs;
+    assignUnderSelectedNameLock(this->pumpModelCoeffs, String(pumpModelCoeffs));
     save();
 }
 
 void Settings::setWifiSsid(const String &wifiSsid) {
-    this->wifiSsid = wifiSsid;
+    assignUnderSelectedNameLock(this->wifiSsid, String(wifiSsid));
     save();
 }
 
 void Settings::setWifiPassword(const String &wifiPassword) {
-    this->wifiPassword = wifiPassword;
+    assignUnderSelectedNameLock(this->wifiPassword, String(wifiPassword));
     save();
 }
 
 void Settings::setMdnsName(const String &mdnsName) {
-    this->mdnsName = mdnsName;
+    assignUnderSelectedNameLock(this->mdnsName, String(mdnsName));
     save();
 }
 
@@ -316,17 +316,17 @@ void Settings::setDoseGrams(double dose_grams) {
 }
 
 void Settings::setOTAChannel(const String &otaChannel) {
-    this->otaChannel = otaChannel;
+    assignUnderSelectedNameLock(this->otaChannel, String(otaChannel));
     save();
 }
 
 void Settings::setInstalledChannel(const String &installedChannel) {
-    this->installedChannel = installedChannel;
+    assignUnderSelectedNameLock(this->installedChannel, String(installedChannel));
     save();
 }
 
 void Settings::setSavedScale(const String &savedScale) {
-    this->savedScale = savedScale;
+    assignUnderSelectedNameLock(this->savedScale, String(savedScale));
     save();
 }
 
@@ -356,7 +356,7 @@ void Settings::setDiagnosticLogEnabled(bool diagnostic_log_enabled) {
 }
 
 void Settings::setSmartGrindIp(String smart_grind_ip) {
-    this->smartGrindIp = std::move(smart_grind_ip);
+    assignUnderSelectedNameLock(this->smartGrindIp, std::move(smart_grind_ip));
     save();
 }
 
@@ -371,7 +371,7 @@ void Settings::setHomeAssistant(const bool homeAssistant) {
 }
 
 void Settings::setHomeAssistantIP(const String &homeAssistantIP) {
-    this->homeAssistantIP = homeAssistantIP;
+    assignUnderSelectedNameLock(this->homeAssistantIP, String(homeAssistantIP));
     save();
 }
 
@@ -383,18 +383,19 @@ void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
     // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
     // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
     if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
-        this->homeAssistantTopic = homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH);
+        assignUnderSelectedNameLock(this->homeAssistantTopic,
+                                    homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH));
     } else {
-        this->homeAssistantTopic = homeAssistantTopic;
+        assignUnderSelectedNameLock(this->homeAssistantTopic, String(homeAssistantTopic));
     }
     save();
 }
 void Settings::setHomeAssistantUser(const String &homeAssistantUser) {
-    this->homeAssistantUser = homeAssistantUser;
+    assignUnderSelectedNameLock(this->homeAssistantUser, String(homeAssistantUser));
     save();
 }
 void Settings::setHomeAssistantPassword(const String &homeAssistantPassword) {
-    this->homeAssistantPassword = homeAssistantPassword;
+    assignUnderSelectedNameLock(this->homeAssistantPassword, String(homeAssistantPassword));
     save();
 }
 
@@ -404,7 +405,7 @@ void Settings::setMomentaryButtons(bool momentary_buttons) {
 }
 
 void Settings::setTimezone(String timezone) {
-    this->timezone = std::move(timezone);
+    assignUnderSelectedNameLock(this->timezone, std::move(timezone));
     save();
 }
 
@@ -414,7 +415,7 @@ void Settings::setClockFormat(bool clock_24h_format) {
 }
 
 void Settings::setSelectedProfile(String selected_profile) {
-    this->selectedProfile = std::move(selected_profile);
+    assignUnderSelectedNameLock(this->selectedProfile, std::move(selected_profile));
     save();
 }
 
@@ -458,6 +459,42 @@ void Settings::assignUnderSelectedNameLock(String &member, String &&value) noexc
         xSemaphoreGive(mutex);
     }
 }
+
+// PRO-478: out-of-line getters for the String members guarded by
+// selectedNameMutex — mirrors getSelectedBean()/getSelectedGrinder() (PRO-427).
+String Settings::getPid() const { return copyUnderSelectedNameLock(pid); }
+
+String Settings::getPumpModelCoeffs() const { return copyUnderSelectedNameLock(pumpModelCoeffs); }
+
+String Settings::getWifiSsid() const { return copyUnderSelectedNameLock(wifiSsid); }
+
+String Settings::getWifiPassword() const { return copyUnderSelectedNameLock(wifiPassword); }
+
+String Settings::getMdnsName() const { return copyUnderSelectedNameLock(mdnsName); }
+
+String Settings::getOTAChannel() const { return copyUnderSelectedNameLock(otaChannel); }
+
+String Settings::getInstalledChannel() const { return copyUnderSelectedNameLock(installedChannel); }
+
+String Settings::getSavedScale() const { return copyUnderSelectedNameLock(savedScale); }
+
+String Settings::getSmartGrindIp() const { return copyUnderSelectedNameLock(smartGrindIp); }
+
+String Settings::getHomeAssistantIP() const { return copyUnderSelectedNameLock(homeAssistantIP); }
+
+String Settings::getHomeAssistantUser() const { return copyUnderSelectedNameLock(homeAssistantUser); }
+
+String Settings::getHomeAssistantPassword() const { return copyUnderSelectedNameLock(homeAssistantPassword); }
+
+String Settings::getHomeAssistantTopic() const { return copyUnderSelectedNameLock(homeAssistantTopic); }
+
+String Settings::getTimezone() const { return copyUnderSelectedNameLock(timezone); }
+
+String Settings::getSelectedProfile() const { return copyUnderSelectedNameLock(selectedProfile); }
+
+String Settings::getCloudRelayUrl() const { return copyUnderSelectedNameLock(cloudRelayUrl); }
+
+String Settings::getCloudRelayToken() const { return copyUnderSelectedNameLock(cloudRelayToken); }
 
 String Settings::getSelectedBean() const { return copyUnderSelectedNameLock(selectedBean); }
 
@@ -591,12 +628,12 @@ void Settings::setFlushDuration(int flush_duration) {
 }
 
 void Settings::setCloudRelayUrl(const String &url) {
-    cloudRelayUrl = url;
+    assignUnderSelectedNameLock(cloudRelayUrl, String(url));
     save();
 }
 
 void Settings::setCloudRelayToken(const String &token) {
-    cloudRelayToken = token;
+    assignUnderSelectedNameLock(cloudRelayToken, String(token));
     save();
 }
 
@@ -617,9 +654,7 @@ void Settings::setManualPressure(float pressure) {
     manualPressure = std::clamp(pressure, MIN_MANUAL_PRESSURE, MAX_MANUAL_PRESSURE);
 }
 
-void Settings::setManualFlow(float flow) {
-    manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW);
-}
+void Settings::setManualFlow(float flow) { manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW); }
 
 void Settings::setManualTemperature(int temperature) {
     manualTemperature = std::clamp(temperature, MIN_MANUAL_TEMPERATURE, MAX_MANUAL_TEMPERATURE);
@@ -681,15 +716,43 @@ void Settings::doSave() {
     }
     dirty = false;
 
-    // PRO-437: snapshot selectedBean/selectedGrinder under the same lock the
-    // guarded getters/setters use (PRO-427). doSave() runs on the deferred flush
-    // task while setSelectedBean()/setSelectedGrinder() run on the WebSocket-handler
-    // task; reading the members directly here was the same torn-String-read hazard
-    // PRO-427 fixed for the getters, just left uncovered on this path. Snapshotting
-    // here (rather than holding the lock across the whole preferences block below)
-    // keeps the critical section short and avoids widening it over a flash write.
-    String beanSnap = copyUnderSelectedNameLock(selectedBean);
-    String grinderSnap = copyUnderSelectedNameLock(selectedGrinder);
+    // PRO-478: doSave() runs on the deferred flush task, while every String member
+    // below is written from the AsyncTCP/WebSocket-handler task via the setters
+    // (which already assign under selectedNameMutex per PRO-427/PRO-437 for
+    // selectedBean/selectedGrinder — this extends the same guard to the rest).
+    // Snapshot ALL String members under a single lock acquisition up front, then
+    // use the snapshots (not the live members) for every putString() below. This
+    // keeps the critical section short (no lock held across the flash-write
+    // preferences block) while eliminating the torn-String-read hazard on every
+    // member, not just selectedBean/selectedGrinder.
+    SemaphoreHandle_t stringLock = ensureSelectedNameMutex();
+    if (stringLock != nullptr) {
+        xSemaphoreTake(stringLock, portMAX_DELAY);
+    }
+    String pidSnap = pid;
+    String pumpModelCoeffsSnap = pumpModelCoeffs;
+    String wifiSsidSnap = wifiSsid;
+    String wifiPasswordSnap = wifiPassword;
+    String mdnsNameSnap = mdnsName;
+    String otaChannelSnap = otaChannel;
+    String installedChannelSnap = installedChannel;
+    String savedScaleSnap = savedScale;
+    String smartGrindIpSnap = smartGrindIp;
+    String homeAssistantIPSnap = homeAssistantIP;
+    String homeAssistantTopicSnap = homeAssistantTopic;
+    String homeAssistantUserSnap = homeAssistantUser;
+    String homeAssistantPasswordSnap = homeAssistantPassword;
+    String timezoneSnap = timezone;
+    String selectedProfileSnap = selectedProfile;
+    String beanSnap = selectedBean;
+    String grinderSnap = selectedGrinder;
+    String favoritedProfilesSnap = implode(favoritedProfiles, ",");
+    String profileOrderSnap = implode(profileOrder, ",");
+    String cloudRelayUrlSnap = cloudRelayUrl;
+    String cloudRelayTokenSnap = cloudRelayToken;
+    if (stringLock != nullptr) {
+        xSemaphoreGive(stringLock);
+    }
 
     ESP_LOGI("Settings", "Saving settings");
     preferences.begin(PREFERENCES_KEY, false);
@@ -703,42 +766,42 @@ void Settings::doSave() {
     preferences.putBool("del_ad", delayAdjust);
     preferences.putInt("to", temperatureOffset);
     preferences.putFloat("ps", pressureScaling);
-    preferences.putString("pid", pid);
-    preferences.putString("pmc", pumpModelCoeffs);
-    preferences.putString("ws", wifiSsid);
-    preferences.putString("wp", wifiPassword);
-    preferences.putString("mn", mdnsName);
+    preferences.putString("pid", pidSnap);
+    preferences.putString("pmc", pumpModelCoeffsSnap);
+    preferences.putString("ws", wifiSsidSnap);
+    preferences.putString("wp", wifiPasswordSnap);
+    preferences.putString("mn", mdnsNameSnap);
     preferences.putBool("hk", homekit);
     preferences.putBool("vt", volumetricTarget);
     preferences.putBool("ayo", allowYieldOverride);
     preferences.putBool("autosteam", autoSteamEnabled);
     preferences.putDouble("dosegrams", doseGrams);
-    preferences.putString("oc", otaChannel);
-    preferences.putString("ic", installedChannel);
-    preferences.putString("ssc", savedScale);
+    preferences.putString("oc", otaChannelSnap);
+    preferences.putString("ic", installedChannelSnap);
+    preferences.putString("ssc", savedScaleSnap);
     preferences.putBool("bf_a", boilerFillActive);
     preferences.putInt("bf_su", startupFillTime);
     preferences.putInt("bf_st", steamFillTime);
     preferences.putBool("sg_a", smartGrindActive);
     preferences.putBool("diag_log", diagnosticLogEnabled);
-    preferences.putString("sg_i", smartGrindIp);
+    preferences.putString("sg_i", smartGrindIpSnap);
     preferences.putBool("sg_t", smartGrindToggle);
     preferences.putInt("sg_m", smartGrindMode);
     preferences.putBool("ha_a", homeAssistant);
-    preferences.putString("ha_i", homeAssistantIP);
+    preferences.putString("ha_i", homeAssistantIPSnap);
     preferences.putInt("ha_p", homeAssistantPort);
-    preferences.putString("ha_t", homeAssistantTopic);
-    preferences.putString("ha_u", homeAssistantUser);
-    preferences.putString("ha_pw", homeAssistantPassword);
-    preferences.putString("tz", timezone);
+    preferences.putString("ha_t", homeAssistantTopicSnap);
+    preferences.putString("ha_u", homeAssistantUserSnap);
+    preferences.putString("ha_pw", homeAssistantPasswordSnap);
+    preferences.putString("tz", timezoneSnap);
     preferences.putBool("clk_24h", clock24hFormat);
-    preferences.putString("sp", selectedProfile);
+    preferences.putString("sp", selectedProfileSnap);
     preferences.putString("sb", beanSnap);
     preferences.putString("sg", grinderSnap);
     preferences.putInt("sbt", standbyTimeout);
     preferences.putBool("mb", momentaryButtons);
-    preferences.putString("fp", implode(favoritedProfiles, ","));
-    preferences.putString("po", implode(profileOrder, ","));
+    preferences.putString("fp", favoritedProfilesSnap);
+    preferences.putString("po", profileOrderSnap);
     preferences.putFloat("spp", steamPumpPercentage);
     preferences.putFloat("spc", steamPumpCutoff);
     preferences.putInt("hi", historyIndex);
@@ -780,8 +843,8 @@ void Settings::doSave() {
     preferences.putInt("sr_fd", fullTankDistance);
     preferences.putInt("alt_relay", altRelayFunction);
     preferences.putBool("alt_set", altRelayConfigured);
-    preferences.putString("cr_url", cloudRelayUrl);
-    preferences.putString("cr_token", cloudRelayToken);
+    preferences.putString("cr_url", cloudRelayUrlSnap);
+    preferences.putString("cr_token", cloudRelayTokenSnap);
     preferences.putBool("cr_enabled", cloudRelayEnabled);
 
     preferences.end();
