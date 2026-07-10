@@ -444,7 +444,7 @@ export function inferGrinderForShot(shot) {
 // device-recorded savedNotes.grinderName -> localStorage selection-log guess
 // shot.grinder. Returns an editable pre-fill, never authoritative-locked.
 export function resolveGrinderPrefill(loadedNotes, savedNotes, shot) {
-  if (loadedNotes?.grinder) return loadedNotes.grinder;
+  if (loadedNotes?.grinder?.trim()) return loadedNotes.grinder;
   if (savedNotes?.grinderName) return savedNotes.grinderName;
   if (shot?.grinder) return shot.grinder;
   return '';
