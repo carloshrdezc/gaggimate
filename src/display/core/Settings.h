@@ -308,9 +308,11 @@ class Settings {
     // selectedNameMutex there would self-deadlock (FreeRTOS mutexes here are
     // not created recursive). A dedicated vectorMutex, taken only around the
     // vector snapshot/mutation, avoids that path while still serializing
-    // every vector accessor against doSave()'s implode() read. Same
-    // lazy-init-on-first-use pattern as selectedNameMutex; a null handle
-    // degrades to lock-free.
+    // every vector accessor against doSave()'s implode() read. mutable so
+    // the const getters can lock it. PRO-486: created eagerly in load(),
+    // before the loop task (the first concurrent caller) starts -- not
+    // lazily on first use; a null handle (creation failed) degrades to
+    // lock-free, same as before.
     mutable SemaphoreHandle_t vectorMutex = nullptr;
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering
@@ -360,9 +362,9 @@ class Settings {
     // guard's flash footprint minimal.
     String copyUnderSelectedNameLock(const String &member) const noexcept;
     void assignUnderSelectedNameLock(String &member, String &&value) noexcept;
-    // PRO-481: lazily create vectorMutex on first use, mirroring
-    // ensureSelectedNameMutex(). const because the const vector getters need
-    // to lock; the handle is mutable.
+    // PRO-486: vectorMutex is created eagerly in Settings::load(); this just
+    // returns the handle (may be null if creation there failed, in which case
+    // callers degrade to lock-free access, same as before PRO-486).
     SemaphoreHandle_t ensureVectorMutex() const;
     // PRO-481: shared take/copy/give and take/assign/give helpers for the
     // vector<String> members, mirroring copyUnderSelectedNameLock /
