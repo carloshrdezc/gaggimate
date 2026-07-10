@@ -539,6 +539,17 @@ describe('grinderManager', () => {
     it('returns an empty string when no source has a grinder', () => {
       expect(resolveGrinderPrefill({ grinder: '' }, {}, {})).toBe('');
     });
+
+    it('returns empty string when all args are undefined (null-safety)', () => {
+      expect(resolveGrinderPrefill(undefined, undefined, undefined)).toBe('');
+    });
+
+    it('uses savedNotes.grinderName when shot has no grinder and loadedNotes has no grinder', () => {
+      const loadedNotes = { grinder: '' };
+      const savedNotes = { grinderName: 'Device Df64' };
+      const shot = {};
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('Device Df64');
+    });
   });
 
   // PRO-441: the DEVICE stamps the machine grind TARGET (auto-grind grams/seconds)
