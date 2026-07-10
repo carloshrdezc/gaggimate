@@ -186,11 +186,17 @@ export function ShotAnalyzer() {
       if (!currentIds.has(id)) loadingIdsRef.current.delete(id);
     }
     // Load data for any newly-added shots.
-    // NOTE: useSignalEffect does not support returning a cleanup function, so
-    // in-flight fetches cannot be cancelled via AbortController here. The
-    // loadingIdsRef dedup guard ensures we never fire more than one fetch per
-    // shot ID at a time; on unmount any in-flight fetch simply resolves into
-    // a setComparisonData call on an unmounted component (harmless no-op in Preact).
+    // NOTE: While useSignalEffect does support returning a cleanup function
+    // (the underlying signal effect() contract forwards it), we intentionally
+    // omit an AbortController here: rapid signal re-fires may queue redundant
+    // fetches, but the loadingIdsRef in-flight dedup guard (prevents firing more
+    // than one fetch per shot ID at a time) and the comparisonDataRef already-loaded
+    // guard, together with the idempotent setComparisonData setter, make them
+    // harmless — a stale response just overwrites the same key with equivalent
+    // data (or resolves into a no-op on an unmounted component). A proper cancel
+    // would require an AbortController per shot plus tracked in-flight request
+    // IDs — a significant refactor that isn't warranted for this low-frequency,
+    // self-correcting code path.
     Promise.allSettled(shots.map(async shot => {
       if (comparisonDataRef.current[shot.id]) return;
       if (loadingIdsRef.current.has(shot.id)) return; // already in-flight
