@@ -110,7 +110,7 @@ export function Autotune() {
               <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>{error}</span>
             </div>
             <button className='nd-action-btn' onClick={() => setError(null)}>
-              <FontAwesomeIcon icon={faArrowLeft} /> Try Again
+              <FontAwesomeIcon icon={faArrowLeft} /> Back
             </button>
           </div>
         )}
