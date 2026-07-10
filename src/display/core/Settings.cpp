@@ -680,6 +680,17 @@ void Settings::doSave() {
         return;
     }
     dirty = false;
+
+    // PRO-437: snapshot selectedBean/selectedGrinder under the same lock the
+    // guarded getters/setters use (PRO-427). doSave() runs on the deferred flush
+    // task while setSelectedBean()/setSelectedGrinder() run on the WebSocket-handler
+    // task; reading the members directly here was the same torn-String-read hazard
+    // PRO-427 fixed for the getters, just left uncovered on this path. Snapshotting
+    // here (rather than holding the lock across the whole preferences block below)
+    // keeps the critical section short and avoids widening it over a flash write.
+    String beanSnap = copyUnderSelectedNameLock(selectedBean);
+    String grinderSnap = copyUnderSelectedNameLock(selectedGrinder);
+
     ESP_LOGI("Settings", "Saving settings");
     preferences.begin(PREFERENCES_KEY, false);
     preferences.putInt("sm", startupMode);
@@ -722,8 +733,8 @@ void Settings::doSave() {
     preferences.putString("tz", timezone);
     preferences.putBool("clk_24h", clock24hFormat);
     preferences.putString("sp", selectedProfile);
-    preferences.putString("sb", selectedBean);
-    preferences.putString("sg", selectedGrinder);
+    preferences.putString("sb", beanSnap);
+    preferences.putString("sg", grinderSnap);
     preferences.putInt("sbt", standbyTimeout);
     preferences.putBool("mb", momentaryButtons);
     preferences.putString("fp", implode(favoritedProfiles, ","));
