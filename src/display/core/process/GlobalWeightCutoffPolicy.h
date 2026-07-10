@@ -57,6 +57,9 @@ inline constexpr bool isGlobalWeightCutoffReached(ProcessTarget target, bool vol
         return false;
     }
     const double effectiveVolume = currentVolume + predictedAddedVolume;
+    // effectiveVolume is a monotonically-increasing cumulative weight; the ceiling is
+    // always a "reach-or-exceed" (GTE) target. An LTE volumetric target is not a valid
+    // configuration, so >= is the correct and only meaningful comparison here.
     return effectiveVolume >= ceiling;
 }
 
