@@ -56,7 +56,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
       removeFromComparison(shot.id);
     } else {
       addToComparison(shot);
-      if (location.path !== '/analyzer') location.route('/analyzer');
+      if (location.path !== '/analyzer') {
+        location.route('/analyzer');
+      }
     }
   }, [inComparison, shot, location]);
 
