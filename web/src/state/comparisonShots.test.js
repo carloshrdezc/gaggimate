@@ -69,6 +69,7 @@ describe('comparisonShots', () => {
       addToComparison(makeShot({ id: 's1' })); // duplicate while at cap
 
       expect(comparisonShots.value.length).toBe(4);
+      expect(comparisonShots.value.map(s => s.id)).toEqual(['s1', 's2', 's3', 's4']);
     });
   });
 
