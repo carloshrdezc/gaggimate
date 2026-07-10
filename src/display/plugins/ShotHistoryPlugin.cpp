@@ -35,8 +35,8 @@ constexpr unsigned long MIN_VALID_SHOT_DURATION_MS = 7500;
 // PRO-441: fill-only-if-absent stamp of a device-recorded value onto shot notes. Returns true
 // when it wrote (so the caller can OR into notesChanged). Deduped from four near-identical
 // inline stamps (beanType/beanId/grinderName/grindTarget) so the JsonVariant isNull/isEmpty +
-// assignment machinery is emitted ONCE, not per call site — this keeps the flash-budget-critical
-// display-headless-4m image under its 2 MB app partition (PRO-427/441). The parameter is a raw
+// assignment machinery is emitted ONCE, not per call site — this keeps flash usage down on
+// size-constrained firmware builds (PRO-427/441). The parameter is a raw
 // `const char *` (callers pass String::c_str() or a stack buffer) so no String temporary is
 // copy-constructed at any call site; ArduinoJson copies the value into the document pool, so a
 // pointer into caller-owned storage is safe. `noexcept` drops the copy exception unwind tables.
