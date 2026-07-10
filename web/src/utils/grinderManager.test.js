@@ -544,7 +544,7 @@ describe('grinderManager', () => {
       expect(resolveGrinderPrefill(undefined, undefined, undefined)).toBe('');
     });
 
-    it('uses savedNotes.grinderName when shot has no grinder and loadedNotes has no grinder', () => {
+    it('uses savedNotes.grinderName when shot has no grinder and loadedNotes has no truthy grinder', () => {
       const loadedNotes = { grinder: '' };
       const savedNotes = { grinderName: 'Device Df64' };
       const shot = {};
