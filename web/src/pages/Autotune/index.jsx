@@ -96,7 +96,7 @@ export function Autotune() {
               </div>
               <div className='border-l-2 border-[var(--color-warning,#d4a843)] pl-4'>
                 <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>
-                  Please wait while the system optimizes your PID settings. This may take up to 30 seconds.
+                  Please wait while the system optimizes your PID settings. This may take up to 60 seconds.
                 </span>
               </div>
             </div>
