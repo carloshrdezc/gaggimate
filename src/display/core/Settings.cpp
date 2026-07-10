@@ -599,16 +599,25 @@ void Settings::addFavoritedProfile(String profile) {
 void Settings::removeFavoritedProfile(String profile) {
     // PRO-481: guard the erase+shrink_to_fit under vectorMutex; both mutate
     // the vector's storage and must not race a concurrent implode() read.
+    // PRO-487: save() is only called when a profile was actually erased,
+    // mirroring the bool-added guard in addFavoritedProfile.
+    bool erased = false;
     SemaphoreHandle_t mutex = ensureVectorMutex();
     if (mutex != nullptr) {
         xSemaphoreTake(mutex, portMAX_DELAY);
     }
-    favoritedProfiles.erase(std::remove(favoritedProfiles.begin(), favoritedProfiles.end(), profile), favoritedProfiles.end());
-    favoritedProfiles.shrink_to_fit();
+    auto newEnd = std::remove(favoritedProfiles.begin(), favoritedProfiles.end(), profile);
+    if (newEnd != favoritedProfiles.end()) {
+        favoritedProfiles.erase(newEnd, favoritedProfiles.end());
+        favoritedProfiles.shrink_to_fit();
+        erased = true;
+    }
     if (mutex != nullptr) {
         xSemaphoreGive(mutex);
     }
-    save();
+    if (erased) {
+        save();
+    }
 }
 
 void Settings::setProfileOrder(std::vector<String> profile_order) {
