@@ -195,6 +195,12 @@ void Settings::load() {
 
     preferences.end();
 
+    // PRO-486: create vectorMutex here, eagerly, before the loop task (and
+    // therefore any other task) can reach a vector accessor. Closes the
+    // theoretical lazy-init double-create race in ensureVectorMutex() —
+    // load() runs single-threaded, so there is no concurrent caller to race.
+    vectorMutex = xSemaphoreCreateMutex();
+
     xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
 }
 
@@ -460,11 +466,13 @@ void Settings::assignUnderSelectedNameLock(String &member, String &&value) noexc
 }
 
 SemaphoreHandle_t Settings::ensureVectorMutex() const {
-    if (vectorMutex == nullptr) {
-        // Out of memory creating the mutex: degrade to lock-free (pre-PRO-481
-        // behavior). A null handle makes the accessors below skip locking.
-        vectorMutex = xSemaphoreCreateMutex();
-    }
+    // PRO-486: vectorMutex is created eagerly in Settings::load(), before the
+    // loop task (the first possible concurrent caller) starts. No lazy-init
+    // here anymore -- this removes the theoretical double-create race from
+    // PRO-481 where two concurrent first-callers could both observe nullptr
+    // and each call xSemaphoreCreateMutex(), leaking one handle. A null
+    // handle (creation failed in load(), e.g. out of memory) still degrades
+    // accessors to lock-free, same as before.
     return vectorMutex;
 }
 
