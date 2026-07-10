@@ -475,6 +475,14 @@ void WebUIPlugin::loop() {
                 OtaResolveTaskResult drainedResult;
                 if (otaResolveResultReady && otaIntentMutex != nullptr &&
                     xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    // Re-check under the lock: the outer check above is a fast-path
+                    // skip (avoid taking the mutex when there's obviously nothing to
+                    // drain), not a guarantee. otaResolveResultReady is volatile, so
+                    // this inner read is the authoritative TOCTOU guard. In practice
+                    // the resolve task is the only writer (sets it once, then
+                    // self-deletes) and loop() is the only clearer, so the flag
+                    // cannot flip between the two checks today — but the guard is
+                    // cheap and keeps the drain correct if that ever changes.
                     if (otaResolveResultReady) {
                         drainedResult = otaResolveResult;
                         otaResolveResultReady = false;
