@@ -127,8 +127,14 @@ class Settings {
     // that mutates these members must serialize to avoid a torn String read.
     String getSelectedBean() const;
     String getSelectedGrinder() const;
-    std::vector<String> getFavoritedProfiles() const { return favoritedProfiles; }
-    std::vector<String> getProfileOrder() const { return profileOrder; }
+    // PRO-481: declared out-of-line (defined in Settings.cpp) and copy the
+    // vector under vectorMutex, mirroring the String getters guarded by
+    // selectedNameMutex above. favoritedProfiles/profileOrder are written by
+    // the WS-handler task's setters below and read here plus imploded in
+    // doSave() on the deferred flush task; an inline by-value return would
+    // race a concurrent setter's vector mutation (torn iterator/reallocation).
+    std::vector<String> getFavoritedProfiles() const;
+    std::vector<String> getProfileOrder() const;
     int getMainBrightness() const { return mainBrightness; }
     int getStandbyBrightness() const { return standbyBrightness; }
     int getStandbyBrightnessTimeout() const { return standbyBrightnessTimeout; }
@@ -294,6 +300,18 @@ class Settings {
     // created on first use (robust to static-init order); a null handle degrades
     // to lock-free.
     mutable SemaphoreHandle_t selectedNameMutex = nullptr;
+    // PRO-481: separate mutex guarding favoritedProfiles/profileOrder vector
+    // mutations. NOT reused as selectedNameMutex: doSave() already holds
+    // selectedNameMutex across its String snapshot block and additionally
+    // calls implode(favoritedProfiles/profileOrder) inside that same
+    // critical section (see doSave() below) — nesting a second take of
+    // selectedNameMutex there would self-deadlock (FreeRTOS mutexes here are
+    // not created recursive). A dedicated vectorMutex, taken only around the
+    // vector snapshot/mutation, avoids that path while still serializing
+    // every vector accessor against doSave()'s implode() read. Same
+    // lazy-init-on-first-use pattern as selectedNameMutex; a null handle
+    // degrades to lock-free.
+    mutable SemaphoreHandle_t vectorMutex = nullptr;
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering
     float steamPumpPercentage = DEFAULT_STEAM_PUMP_PERCENTAGE;
@@ -342,6 +360,17 @@ class Settings {
     // guard's flash footprint minimal.
     String copyUnderSelectedNameLock(const String &member) const noexcept;
     void assignUnderSelectedNameLock(String &member, String &&value) noexcept;
+    // PRO-481: lazily create vectorMutex on first use, mirroring
+    // ensureSelectedNameMutex(). const because the const vector getters need
+    // to lock; the handle is mutable.
+    SemaphoreHandle_t ensureVectorMutex() const;
+    // PRO-481: shared take/copy/give and take/assign/give helpers for the
+    // vector<String> members, mirroring copyUnderSelectedNameLock /
+    // assignUnderSelectedNameLock so the guard logic isn't duplicated per
+    // accessor (keeps flash footprint down). A null handle degrades to a
+    // lock-free copy/assign.
+    std::vector<String> copyUnderVectorLock(const std::vector<String> &member) const noexcept;
+    void assignUnderVectorLock(std::vector<String> &member, std::vector<String> &&value) noexcept;
     xTaskHandle taskHandle = nullptr;
     [[noreturn]] static void loopTask(void *arg);
 };

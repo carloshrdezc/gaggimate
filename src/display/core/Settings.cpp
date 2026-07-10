@@ -383,8 +383,7 @@ void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
     // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
     // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
     if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
-        assignUnderSelectedNameLock(this->homeAssistantTopic,
-                                    homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH));
+        assignUnderSelectedNameLock(this->homeAssistantTopic, homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH));
     } else {
         assignUnderSelectedNameLock(this->homeAssistantTopic, String(homeAssistantTopic));
     }
@@ -460,6 +459,45 @@ void Settings::assignUnderSelectedNameLock(String &member, String &&value) noexc
     }
 }
 
+SemaphoreHandle_t Settings::ensureVectorMutex() const {
+    if (vectorMutex == nullptr) {
+        // Out of memory creating the mutex: degrade to lock-free (pre-PRO-481
+        // behavior). A null handle makes the accessors below skip locking.
+        vectorMutex = xSemaphoreCreateMutex();
+    }
+    return vectorMutex;
+}
+
+std::vector<String> Settings::copyUnderVectorLock(const std::vector<String> &member) const noexcept {
+    // PRO-481: copy the vector into a local under the lock, then return the
+    // local so the copy cannot race a concurrent setter's mutation/reallocation.
+    // A null handle degrades to a lock-free copy. Mirrors
+    // copyUnderSelectedNameLock's single-copy-site structure.
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
+    }
+    std::vector<String> copy = member;
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+    return copy;
+}
+
+void Settings::assignUnderVectorLock(std::vector<String> &member, std::vector<String> &&value) noexcept {
+    // PRO-481: assign under the shared lock so a concurrent copy-read (or
+    // doSave()'s implode()) never observes the vector mid-mutation. Mirrors
+    // assignUnderSelectedNameLock's single-assign-site structure.
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
+    }
+    member = std::move(value);
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+}
+
 // PRO-478: out-of-line getters for the String members guarded by
 // selectedNameMutex — mirrors getSelectedBean()/getSelectedGrinder() (PRO-427).
 String Settings::getPid() const { return copyUnderSelectedNameLock(pid); }
@@ -500,6 +538,12 @@ String Settings::getSelectedBean() const { return copyUnderSelectedNameLock(sele
 
 String Settings::getSelectedGrinder() const { return copyUnderSelectedNameLock(selectedGrinder); }
 
+// PRO-481: out-of-line vector getters guarded by vectorMutex — mirrors the
+// String getters guarded by selectedNameMutex above.
+std::vector<String> Settings::getFavoritedProfiles() const { return copyUnderVectorLock(favoritedProfiles); }
+
+std::vector<String> Settings::getProfileOrder() const { return copyUnderVectorLock(profileOrder); }
+
 void Settings::setSelectedBean(String selected_bean) {
     // save() is intentionally left OUTSIDE the lock scope: it only sets dirty=true
     // (the deferred flush task calls doSave() later), so holding the lock across it
@@ -514,7 +558,7 @@ void Settings::setSelectedGrinder(String selected_grinder) {
 }
 
 void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
-    favoritedProfiles = cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles");
+    assignUnderVectorLock(favoritedProfiles, cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles"));
     save();
 }
 
@@ -522,24 +566,60 @@ void Settings::addFavoritedProfile(String profile) {
     if (!isSafeId(profile)) {
         return;
     }
-    if (std::find(favoritedProfiles.begin(), favoritedProfiles.end(), profile) != favoritedProfiles.end()) {
-        return;
+    // PRO-481: guard the whole find+emplace under vectorMutex so a concurrent
+    // doSave() implode() (or another setter) never observes the vector
+    // mid-mutation. save() is only called when a profile was actually added,
+    // matching the pre-guard behavior, and is left outside the lock scope for
+    // the same reason assignUnderSelectedNameLock's callers leave it out.
+    bool added = false;
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
     }
-    favoritedProfiles.emplace_back(profile);
-    save();
+    if (std::find(favoritedProfiles.begin(), favoritedProfiles.end(), profile) == favoritedProfiles.end()) {
+        favoritedProfiles.emplace_back(profile);
+        added = true;
+    }
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+    if (added) {
+        save();
+    }
 }
 
 void Settings::removeFavoritedProfile(String profile) {
+    // PRO-481: guard the erase+shrink_to_fit under vectorMutex; both mutate
+    // the vector's storage and must not race a concurrent implode() read.
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
+    }
     favoritedProfiles.erase(std::remove(favoritedProfiles.begin(), favoritedProfiles.end(), profile), favoritedProfiles.end());
     favoritedProfiles.shrink_to_fit();
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
     save();
 }
 
 void Settings::setProfileOrder(std::vector<String> profile_order) {
-    profileOrder = cleanProfileIds(std::move(profile_order), "profileOrder");
+    assignUnderVectorLock(profileOrder, cleanProfileIds(std::move(profile_order), "profileOrder"));
     save();
 }
 
+// PRO-481: migrateProfileIds() (including the direct `selectedProfile = ...`
+// assignments below and the favoritedProfiles/profileOrder assignments further
+// down) runs exactly once, synchronously, from ProfileManager::setup() during
+// Controller::setup() -- BEFORE pluginManager->registerPlugin(new
+// WebUIPlugin()) and BEFORE xTaskCreatePinnedToCore() spin up the loop task.
+// No AsyncTCP/WebSocket-handler task or deferred-flush task exists yet at
+// this point, so there is no concurrent accessor to race against and neither
+// selectedNameMutex nor vectorMutex is needed here. Do not remove this
+// assertion when touching this function -- if migrateProfileIds() is ever
+// called after setup() (e.g. from a runtime "re-scan profiles" feature), the
+// assignments below must be routed through assignUnderSelectedNameLock /
+// assignUnderVectorLock instead.
 void Settings::migrateProfileIds(const std::vector<std::pair<String, String>> &migrations) {
     preferences.begin(PREFERENCES_KEY, true);
 
@@ -746,12 +826,31 @@ void Settings::doSave() {
     String selectedProfileSnap = selectedProfile;
     String beanSnap = selectedBean;
     String grinderSnap = selectedGrinder;
-    String favoritedProfilesSnap = implode(favoritedProfiles, ",");
-    String profileOrderSnap = implode(profileOrder, ",");
+    // PRO-481: cloudRelayUrl/cloudRelayToken are also guarded by
+    // selectedNameMutex (see getCloudRelayUrl/getCloudRelayToken +
+    // setCloudRelayUrl/setCloudRelayToken). Snapshot them inside the
+    // same stringLock block so doSave() never observes them torn.
     String cloudRelayUrlSnap = cloudRelayUrl;
     String cloudRelayTokenSnap = cloudRelayToken;
     if (stringLock != nullptr) {
         xSemaphoreGive(stringLock);
+    }
+
+    // PRO-481: favoritedProfiles/profileOrder are guarded by the separate
+    // vectorMutex (not selectedNameMutex — see the vectorMutex declaration in
+    // Settings.h for why the two mutexes must stay independent). Take it only
+    // around the implode() calls so the vector iterator stays consistent
+    // against a concurrent setFavoritedProfiles()/addFavoritedProfile()/
+    // removeFavoritedProfile()/setProfileOrder() call from the WS-handler
+    // task, then release before the flash-write preferences block below.
+    SemaphoreHandle_t vecLock = ensureVectorMutex();
+    if (vecLock != nullptr) {
+        xSemaphoreTake(vecLock, portMAX_DELAY);
+    }
+    String favoritedProfilesSnap = implode(favoritedProfiles, ",");
+    String profileOrderSnap = implode(profileOrder, ",");
+    if (vecLock != nullptr) {
+        xSemaphoreGive(vecLock);
     }
 
     ESP_LOGI("Settings", "Saving settings");
