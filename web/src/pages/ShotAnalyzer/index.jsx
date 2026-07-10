@@ -191,7 +191,7 @@ export function ShotAnalyzer() {
     // loadingIdsRef dedup guard ensures we never fire more than one fetch per
     // shot ID at a time; on unmount any in-flight fetch simply resolves into
     // a setComparisonData call on an unmounted component (harmless no-op in Preact).
-    shots.forEach(async shot => {
+    Promise.allSettled(shots.map(async shot => {
       if (comparisonDataRef.current[shot.id]) return;
       if (loadingIdsRef.current.has(shot.id)) return; // already in-flight
       loadingIdsRef.current.add(shot.id);
@@ -205,7 +205,7 @@ export function ShotAnalyzer() {
       } finally {
         loadingIdsRef.current.delete(shot.id);
       }
-    });
+    }));
   });
 
   // --- DEEP LINK HANDLER ---
