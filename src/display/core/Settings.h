@@ -78,23 +78,30 @@ class Settings {
     double getBrewDelay() const { return brewDelay; }
     double getGrindDelay() const { return grindDelay; }
     bool isDelayAdjust() const { return delayAdjust; }
-    String getPid() const { return pid; }
-    String getPumpModelCoeffs() const { return pumpModelCoeffs; }
-    String getWifiSsid() const { return wifiSsid; }
-    String getWifiPassword() const { return wifiPassword; }
-    String getMdnsName() const { return mdnsName; }
+    // PRO-478: the String getters below are declared out-of-line (defined in
+    // Settings.cpp) and copy the member under selectedNameMutex, the same shared
+    // lock PRO-427 introduced for getSelectedBean()/getSelectedGrinder(). Each of
+    // these members is written from the AsyncTCP/WebSocket-handler task while
+    // other tasks (display/loop, deferred flush) copy-read them; an inline
+    // by-value return would race a concurrent setter's buffer realloc (torn
+    // String read).
+    String getPid() const;
+    String getPumpModelCoeffs() const;
+    String getWifiSsid() const;
+    String getWifiPassword() const;
+    String getMdnsName() const;
     bool isHomekit() const { return homekit; }
     bool isVolumetricTarget() const { return volumetricTarget; }
     bool isAllowYieldOverride() const { return allowYieldOverride; }
     bool isAutoSteamEnabled() const { return autoSteamEnabled; }
     double getDoseGrams() const { return doseGrams; }
-    String getOTAChannel() const { return otaChannel; }
+    String getOTAChannel() const;
     // PRO-400: the channel whose resolved head is believed to be flashed on the
     // device. Distinct from getOTAChannel() (the SELECTED channel) so a channel
     // switch can force-flash the new channel's head. Empty means "never stored"
     // (pre-migration device); Settings::load() backfills it to otaChannel.
-    String getInstalledChannel() const { return installedChannel; }
-    String getSavedScale() const { return savedScale; }
+    String getInstalledChannel() const;
+    String getSavedScale() const;
     bool isBoilerFillActive() const { return boilerFillActive; }
     int getStartupFillTime() const { return startupFillTime; }
     int getSteamFillTime() const { return steamFillTime; }
@@ -103,17 +110,17 @@ class Settings {
     bool getDiagnosticLogEnabled() const { return diagnosticLogEnabled; }
     bool isSmartGrindActive() const { return smartGrindActive; }
     int getSmartGrindMode() const { return smartGrindMode; }
-    String getSmartGrindIp() const { return smartGrindIp; }
+    String getSmartGrindIp() const;
     bool isHomeAssistant() const { return homeAssistant; }
-    String getHomeAssistantIP() const { return homeAssistantIP; }
-    String getHomeAssistantUser() const { return homeAssistantUser; }
-    String getHomeAssistantPassword() const { return homeAssistantPassword; }
+    String getHomeAssistantIP() const;
+    String getHomeAssistantUser() const;
+    String getHomeAssistantPassword() const;
     int getHomeAssistantPort() const { return homeAssistantPort; }
-    String getHomeAssistantTopic() const { return homeAssistantTopic; }
+    String getHomeAssistantTopic() const;
     bool isMomentaryButtons() const { return momentaryButtons; }
-    String getTimezone() const { return timezone; }
+    String getTimezone() const;
     bool isClock24hFormat() const { return clock24hFormat; }
-    String getSelectedProfile() const { return selectedProfile; }
+    String getSelectedProfile() const;
     // PRO-427: getSelectedBean/getSelectedGrinder copy the String member under
     // selectedNameMutex (see Settings.cpp). Declared out-of-line so the guarded
     // copy is not exposed as inline; the read task and the WebSocket-handler task
@@ -141,8 +148,8 @@ class Settings {
     bool isAutoWakeupEnabled() const { return autowakeupEnabled; }
     std::vector<AutoWakeupSchedule> getAutoWakeupSchedules() const { return autowakeupSchedules; }
     int getFlushDuration() const { return flushDuration; }
-    String getCloudRelayUrl() const { return cloudRelayUrl; }
-    String getCloudRelayToken() const { return cloudRelayToken; }
+    String getCloudRelayUrl() const;
+    String getCloudRelayToken() const;
     bool isCloudRelayEnabled() const { return cloudRelayEnabled; }
     int getManualTargetType() const { return manualTargetType; }
     float getManualPressure() const { return manualPressure; }
@@ -276,13 +283,16 @@ class Settings {
     String installedChannel = DEFAULT_OTA_CHANNEL;
     String selectedBean;
     String selectedGrinder;
-    // PRO-427: guards cross-task access to selectedBean/selectedGrinder. The
-    // display/loop task copy-reads these (status payload, shot-history capture)
-    // while the WebSocket-handler task (async_tcp) mutates them; on a dual-core
-    // ESP32 a concurrent set reallocates the String buffer under a copy-read
-    // (torn read). One shared mutex serializes all four selected-name accessors.
-    // mutable so the const getters can lock it; lazily created on first use
-    // (robust to static-init order); a null handle degrades to lock-free.
+    // PRO-427/PRO-478: guards cross-task access to every String member that is
+    // (a) written by a setter on the AsyncTCP/WebSocket-handler task and (b) read
+    // elsewhere (getters, or doSave() on the deferred flush task). A concurrent
+    // set reallocates the String buffer under a copy-read on a dual-core ESP32
+    // (torn read) without this guard. One shared mutex serializes all such
+    // accessors — kept as one lock (not per-member) to keep the flash footprint
+    // down; contention is negligible since sets/saves are infrequent relative to
+    // the mutex hold time. mutable so the const getters can lock it; lazily
+    // created on first use (robust to static-init order); a null handle degrades
+    // to lock-free.
     mutable SemaphoreHandle_t selectedNameMutex = nullptr;
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering
@@ -323,8 +333,8 @@ class Settings {
     // mutable. Not itself thread-safe against a truly simultaneous first call from
     // two tasks, but the first accesses happen during single-threaded setup.
     SemaphoreHandle_t ensureSelectedNameMutex() const;
-    // PRO-427: shared take/copy/give and take/assign/give helpers so the four
-    // selected-name accessors don't each open-code the mutex machinery (keeps the
+    // PRO-427/PRO-478: shared take/copy/give and take/assign/give helpers so every
+    // guarded String accessor doesn't each open-code the mutex machinery (keeps the
     // guard's flash footprint down; a null handle degrades to lock-free). noexcept:
     // Arduino String uses a no-throw allocation model (a failed grow invalidates the
     // String and yields empty, it never throws), so these can't propagate — marking
