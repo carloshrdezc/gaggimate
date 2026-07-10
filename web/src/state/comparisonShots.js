@@ -1,5 +1,7 @@
 import { signal } from '@preact/signals';
 
+// TODO: persist to sessionStorage so the comparison set survives page refresh within the same session (PRO-467)
+// Currently in-memory only — resets on page refresh. Intentional for first version.
 export const comparisonShots = signal([]); // array of shot objects, max 4
 
 export const addToComparison = shot => {
