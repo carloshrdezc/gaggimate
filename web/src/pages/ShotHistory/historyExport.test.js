@@ -89,4 +89,21 @@ describe('exportShotsAsCsv', () => {
       `id,timestamp,profile,duration_s,dose_in_g,dose_out_g,ratio,peak_pressure_bar,avg_pressure_bar,peak_flow_ml_s,avg_temp_c,notes\n${expectedRow}`,
     );
   });
+
+  test('escapeCsv: \r triggers quoting (RFC 4180)', async () => {
+    const shot = {
+      id: 4,
+      profile: 'Test',
+      timestamp: 1735689600,
+      duration: 5,
+      notes: { notes: 'line1\rline2' },
+      samples: [],
+    };
+
+    exportShotsAsCsv([shot], 'test.csv');
+    const csv = await csvFromLastCall();
+    const [, row] = csv.split('\n');
+    // notes field should be quoted because it contains \r
+    expect(row).toContain('"line1\rline2"');
+  });
 });

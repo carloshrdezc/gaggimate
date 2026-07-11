@@ -17,7 +17,7 @@ const CSV_COLUMNS = [
 
 function escapeCsv(value) {
   const str = String(value ?? '');
-  if (/[",\n]/.test(str)) {
+  if (/[",\n\r]/.test(str)) {
     return `"${str.replaceAll('"', '""')}"`;
   }
   return str;
