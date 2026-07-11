@@ -30,12 +30,14 @@ import { parseBinaryIndex, indexToShotList } from './parseBinaryIndex.js';
 import { indexedDBService } from '../ShotAnalyzer/services/IndexedDBService.js';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { buildShotHistoryArchive, importShotHistoryArchive } from './historyArchive.js';
+import { exportShotsAsCsv } from './historyExport.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
 import { faSort } from '@fortawesome/free-solid-svg-icons/faSort';
 import { faFilter } from '@fortawesome/free-solid-svg-icons/faFilter';
 import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
+import { faFileCsv } from '@fortawesome/free-solid-svg-icons/faFileCsv';
 import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
@@ -73,6 +75,7 @@ export function ShotHistory() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('date');
   const [sortOrder, setSortOrder] = useState('desc');
@@ -382,7 +385,7 @@ export function ShotHistory() {
     [loadHistory],
   );
 
-  const { paginatedHistory, totalPages, totalFilteredItems } = useMemo(() => {
+  const { paginatedHistory, filteredHistory, totalPages, totalFilteredItems } = useMemo(() => {
     let filtered = applyShotFilters(history, filters);
 
     if (searchTerm.trim()) {
@@ -461,10 +464,25 @@ export function ShotHistory() {
 
     return {
       paginatedHistory: paginated,
+      filteredHistory: filtered,
       totalPages: pages,
       totalFilteredItems: totalFiltered,
     };
   }, [history, filters, searchTerm, filterBy, sortBy, sortOrder, currentPage, allBeans]);
+
+  const handleExportCsv = useCallback(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `gaggimate-shots-${today}.csv`;
+    setCsvBusy(true);
+    try {
+      exportShotsAsCsv(filteredHistory, filename);
+    } catch (error) {
+      console.error('Failed to export CSV:', error);
+      alert(`CSV export failed: ${error.message}`);
+    } finally {
+      setCsvBusy(false);
+    }
+  }, [filteredHistory]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -507,6 +525,15 @@ export function ShotHistory() {
             aria-expanded={filtersOpen}
           >
             <FontAwesomeIcon icon={faFilter} />
+          </button>
+          <button
+            onClick={handleExportCsv}
+            className='nd-action-btn'
+            disabled={csvBusy || history.length === 0}
+            title='Export CSV'
+            aria-label='Export CSV'
+          >
+            <FontAwesomeIcon icon={faFileCsv} />
           </button>
           <button
             onClick={handleExportAll}
