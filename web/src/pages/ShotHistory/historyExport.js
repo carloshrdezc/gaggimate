@@ -44,7 +44,7 @@ function shotToRow(shot) {
 
   return [
     shot.id,
-    new Date(shot.timestamp * 1000).toISOString(),
+    shot.timestamp ? new Date(shot.timestamp * 1000).toISOString() : '',
     shot.profile,
     shot.duration,
     shot.notes?.doseIn || '',

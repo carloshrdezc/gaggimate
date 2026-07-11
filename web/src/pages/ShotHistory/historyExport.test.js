@@ -106,4 +106,39 @@ describe('exportShotsAsCsv', () => {
     // notes field should be quoted because it contains \r
     expect(row).toContain('"line1\rline2"');
   });
+
+  test('shotToRow: null/undefined timestamp produces empty string', async () => {
+    const shot = {
+      id: 5,
+      profile: 'Test',
+      timestamp: null,
+      duration: 10,
+      notes: {},
+      samples: [],
+    };
+
+    exportShotsAsCsv([shot], 'test.csv');
+    const csv = await csvFromLastCall();
+    const [, row] = csv.split('\n');
+    // timestamp column (index 1) should be empty string, not 'Invalid Date'
+    const cols = row.split(',');
+    expect(cols[1]).toBe('');
+  });
+
+  test('shotToRow: undefined timestamp produces empty string', async () => {
+    const shot = {
+      id: 6,
+      profile: 'Test',
+      timestamp: undefined,
+      duration: 10,
+      notes: {},
+      samples: [],
+    };
+
+    exportShotsAsCsv([shot], 'test.csv');
+    const csv = await csvFromLastCall();
+    const [, row] = csv.split('\n');
+    const cols = row.split(',');
+    expect(cols[1]).toBe('');
+  });
 });
