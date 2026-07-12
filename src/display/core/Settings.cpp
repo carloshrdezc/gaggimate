@@ -205,7 +205,13 @@ void Settings::load() {
         vectorMutex = xSemaphoreCreateMutex();
     }
 
-    xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
+    // PRO-492: guard against double-init if load() is ever called twice,
+    // mirroring the vectorMutex guard above (PRO-488). Without this, a
+    // second call would spawn a duplicate Settings::loop task and
+    // overwrite taskHandle, leaking the original task.
+    if (taskHandle == nullptr) {
+        xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
+    }
 }
 
 void Settings::batchUpdate(const SettingsCallback &callback) {
