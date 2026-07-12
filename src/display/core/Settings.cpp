@@ -201,8 +201,9 @@ void Settings::load() {
     // load() runs single-threaded, so there is no concurrent caller to race.
     // PRO-488: guard against double-init if load() is ever called twice
     // (e.g. in a future test harness). No-op when mutex already created.
-    if (vectorMutex == nullptr)
+    if (vectorMutex == nullptr) {
         vectorMutex = xSemaphoreCreateMutex();
+    }
 
     xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
 }
