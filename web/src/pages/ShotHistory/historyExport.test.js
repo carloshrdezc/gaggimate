@@ -141,4 +141,22 @@ describe('exportShotsAsCsv', () => {
     const cols = row.split(',');
     expect(cols[1]).toBe('');
   });
+
+  test('shotToRow: timestamp=0 exports epoch ISO string (not empty — 0 != null)', async () => {
+    const shot = {
+      id: 7,
+      profile: 'Test',
+      timestamp: 0,
+      duration: 10,
+      notes: {},
+      samples: [],
+    };
+
+    exportShotsAsCsv([shot], 'test.csv');
+    const csv = await csvFromLastCall();
+    const [, row] = csv.split('\n');
+    const cols = row.split(',');
+    // timestamp=0 is not null/undefined — should produce epoch ISO string
+    expect(cols[1]).toBe('1970-01-01T00:00:00.000Z');
+  });
 });
