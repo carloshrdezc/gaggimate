@@ -15,7 +15,24 @@ vi.mock('../ShotAnalyzer/services/NotesService', () => ({
   },
 }));
 
-import { importShotHistoryArchive } from './historyArchive.js';
+import { importShotHistoryArchive, buildShotHistoryArchive } from './historyArchive.js';
+
+describe('buildShotHistoryArchive — id serialization', () => {
+  test('serializes id=0 as "0", not as ""', () => {
+    const archive = buildShotHistoryArchive([{ id: 0, timestamp: 1000, profile: 'Test', samples: [] }]);
+    expect(archive.shots[0].id).toBe('0');
+  });
+
+  test('serializes positive id correctly', () => {
+    const archive = buildShotHistoryArchive([{ id: 42, timestamp: 1000, profile: 'Test', samples: [] }]);
+    expect(archive.shots[0].id).toBe('42');
+  });
+
+  test('serializes null id as ""', () => {
+    const archive = buildShotHistoryArchive([{ id: null, timestamp: 1000, profile: 'Test', samples: [] }]);
+    expect(archive.shots[0].id).toBe('');
+  });
+});
 
 describe('importShotHistoryArchive — hasCoreHistoryFields guard', () => {
   beforeEach(() => {

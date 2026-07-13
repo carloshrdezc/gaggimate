@@ -43,7 +43,7 @@ export function buildShotHistoryArchive(shots) {
     shotCount: shots.length,
     shots: shots.map(shot => ({
       ...shot,
-      id: String(shot.id || ''),
+      id: shot.id != null ? String(shot.id) : '',
       source: undefined,
       loaded: true,
       samples: Array.isArray(shot.samples) ? shot.samples.map(normalizeSample) : [],
