@@ -79,6 +79,9 @@ void Controller::setup() {
     // every value silently falls back to its default (WiFi never connects).
     // setup() runs after nvs init, so the read here succeeds.
     settings.load();
+    // TODO(PRO-494): no re-init path exists yet. If one ever needs to reload
+    // settings post-boot, call settings.unload() before this settings.load()
+    // to tear down the existing loop task and vectorMutex first.
 
     mode = settings.getStartupMode();
 

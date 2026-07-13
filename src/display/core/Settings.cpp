@@ -214,6 +214,25 @@ void Settings::load() {
     }
 }
 
+// PRO-494: teardown counterpart to load(), so the PRO-492 double-init guard
+// stays logically complete -- if a future re-init path ever clears taskHandle
+// externally, it must go through here first, or the FreeRTOS task started by
+// load() would leak as a zombie. Only tears down resources load() explicitly
+// creates: the loop task and vectorMutex (created eagerly at PRO-486/PRO-488).
+// selectedNameMutex is intentionally left alone -- it is lazily created by
+// ensureSelectedNameMutex() on first use, not by load(), so it is out of
+// scope for this teardown.
+void Settings::unload() {
+    if (taskHandle != nullptr) {
+        vTaskDelete(taskHandle);
+        taskHandle = nullptr;
+    }
+    if (vectorMutex != nullptr) {
+        vSemaphoreDelete(vectorMutex);
+        vectorMutex = nullptr;
+    }
+}
+
 void Settings::batchUpdate(const SettingsCallback &callback) {
     callback(this);
     save();
