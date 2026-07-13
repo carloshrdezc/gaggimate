@@ -68,6 +68,8 @@ class Settings {
     // sees the PRO-492 guard as unset and can safely re-init. No re-init path
     // calls this yet (PRO-494) -- see the TODO at the call site in
     // Controller.cpp.
+    // Flushes any pending dirty write before tearing down the loop task, so
+    // no in-flight settings change is silently discarded on teardown.
     void unload();
 
     void batchUpdate(const SettingsCallback &callback);
