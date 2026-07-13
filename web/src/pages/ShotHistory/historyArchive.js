@@ -79,7 +79,12 @@ export async function importShotHistoryArchive(payload) {
     }
 
     // Generate unique ID: prefer id (original), then timestamp, then Date.now() fallback
-    let shotId = String(rawShot.id || rawShot.timestamp || Date.now());
+    let shotId =
+      rawShot.id != null
+        ? String(rawShot.id)
+        : rawShot.timestamp != null
+          ? String(rawShot.timestamp)
+          : String(Date.now());
     let storageKey = `history-${shotId}.json`;
 
     // Check for collision and generate new ID if needed
