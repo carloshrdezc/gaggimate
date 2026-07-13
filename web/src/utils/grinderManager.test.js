@@ -355,6 +355,29 @@ describe('grinderManager', () => {
       expect(inferGrindSettingForShot(shot)).toBe('2.5');
     });
 
+    // PRO-503: EditableNumBlock's onClick fires onTap (which re-commits the
+    // current value) BEFORE entering edit mode, so tapping the GRIND field
+    // and tapping away WITHOUT typing/pressing Enter still records a fresh
+    // event. This pins the function-level contract this depends on: calling
+    // recordManualGrindSetting again with the SAME grindSetting must produce
+    // a new, later event rather than being a no-op or being deduped away —
+    // the fix relies on this to make a re-commit of an unchanged value count.
+    it('records a fresh event when the same grindSetting is re-committed (tap-away without Enter)', async () => {
+      const first = recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      // Ensure a distinguishable timestamp between the two events.
+      await new Promise(resolve => setTimeout(resolve, 2));
+      const second = recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      expect(second.id).not.toBe(first.id);
+      expect(second.selectedAtMs).toBeGreaterThanOrEqual(first.selectedAtMs);
+
+      // A shot pulled after the re-commit still resolves the (unchanged) value.
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
     it('no-ops for a blank / whitespace value', () => {
       expect(
         recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '   ' }),
