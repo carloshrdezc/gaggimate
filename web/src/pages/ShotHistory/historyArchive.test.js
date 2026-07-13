@@ -43,10 +43,25 @@ describe('importShotHistoryArchive — hasCoreHistoryFields guard', () => {
     expect(result[0].id).toBe('1');
   });
 
-  test('accepts shot with id=0 (0 != null)', async () => {
+  test('accepts shot with id=0 and round-trips shotId as "0" (not replaced by timestamp)', async () => {
     const shot = { id: 0, timestamp: 1000, profile: 'Test' };
     const result = await importShotHistoryArchive([shot]);
     expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('0');
+  });
+
+  test('accepts shot with timestamp=0 and non-zero id (hasCoreHistoryFields still passes)', async () => {
+    const shot = { id: 5, timestamp: 0, profile: 'Test' };
+    const result = await importShotHistoryArchive([shot]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('5');
+  });
+
+  test('accepts shot with id=0 AND timestamp=0 (profile set) — shotId uses id "0"', async () => {
+    const shot = { id: 0, timestamp: 0, profile: 'Test' };
+    const result = await importShotHistoryArchive([shot]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('0');
   });
 
   test('accepts shot with only samples (no core fields required)', async () => {
