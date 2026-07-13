@@ -223,6 +223,16 @@ void Settings::load() {
 // ensureSelectedNameMutex() on first use, not by load(), so it is out of
 // scope for this teardown.
 void Settings::unload() {
+    // Keep this in sync with Settings::load() — it must tear down every
+    // resource load() creates (loop task via vTaskDelete, vectorMutex via
+    // vSemaphoreDelete, etc.). selectedNameMutex is intentionally excluded:
+    // it is lazily created by ensureSelectedNameMutex(), not by load().
+    // Flush any pending dirty write BEFORE killing the deferred-flush task,
+    // otherwise a settings change made shortly before unload() would be
+    // silently discarded when the loop task is deleted.
+    if (dirty) {
+        doSave();
+    }
     if (taskHandle != nullptr) {
         vTaskDelete(taskHandle);
         taskHandle = nullptr;
