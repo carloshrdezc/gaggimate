@@ -72,7 +72,7 @@ export async function importShotHistoryArchive(payload) {
 
   for (const rawShot of rawShots) {
     const hasSamples = Array.isArray(rawShot?.samples) && rawShot.samples.length > 0;
-    const hasCoreHistoryFields = rawShot?.id && rawShot?.timestamp && rawShot?.profile;
+    const hasCoreHistoryFields = rawShot?.id != null && rawShot?.timestamp != null && rawShot?.profile != null;
 
     if (!hasSamples && !hasCoreHistoryFields) {
       continue;
