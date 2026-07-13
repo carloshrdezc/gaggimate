@@ -33,7 +33,7 @@ describe('buildShotHistoryArchive — id serialization', () => {
     expect(archive.shots[0].id).toBe('');
   });
 
-  test('serializes undefined id as "" (undefined != null is false — same fallback as null)', () => {
+  test('serializes undefined id as "" (undefined != null is false, same empty-string fallback as null)', () => {
     const archive = buildShotHistoryArchive([{ id: undefined, timestamp: 1000, profile: 'Test', samples: [] }]);
     expect(archive.shots[0].id).toBe('');
   });
