@@ -63,6 +63,13 @@ class Settings {
     // (PRO-331).
     void load();
 
+    // Tears down what load() created: deletes the Settings::loop task (if
+    // running) and resets taskHandle to nullptr, so a future call to load()
+    // sees the PRO-492 guard as unset and can safely re-init. No re-init path
+    // calls this yet (PRO-494) -- see the TODO at the call site in
+    // Controller.cpp.
+    void unload();
+
     void batchUpdate(const SettingsCallback &callback);
     void save(bool noDelay = false);
 
