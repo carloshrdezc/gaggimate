@@ -806,7 +806,7 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, disabled = false, lockedHint }) {
+function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
 
@@ -901,7 +901,15 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span
-            onClick={() => { setEditing(true); }}
+            onClick={() => {
+              // PRO-503: fire onTap BEFORE entering edit mode so a tap-away
+              // without typing/Enter still records a fresh "confirmed" event
+              // (mobile onBlur is unreliable). Distinct from onCommit — most
+              // callers don't need this and it must not re-run their commit
+              // side effects (e.g. DOSE's req:dose:set) on every open-tap.
+              onTap?.();
+              setEditing(true);
+            }}
             style={{
               fontFamily: 'var(--dm-font-display)',
               fontSize: 28,
@@ -974,6 +982,7 @@ EditableNumBlock.propTypes = {
   min: PropTypes.number,
   max: PropTypes.number,
   onCommit: PropTypes.func,
+  onTap: PropTypes.func,
   disabled: PropTypes.bool,
   lockedHint: PropTypes.string,
 };
@@ -2227,6 +2236,10 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               min={0}
               max={100}
               onCommit={setManualGrind}
+              // PRO-503: re-commit the current value on tap-to-open so a
+              // tap-away without typing/Enter still records a fresh
+              // recordManualGrindSetting event (mobile onBlur is unreliable).
+              onTap={() => setManualGrind(manualGrind)}
             />
             <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
             <EditableNumBlock
