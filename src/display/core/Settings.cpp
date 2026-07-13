@@ -230,6 +230,11 @@ void Settings::unload() {
     // Flush any pending dirty write BEFORE killing the deferred-flush task,
     // otherwise a settings change made shortly before unload() would be
     // silently discarded when the loop task is deleted.
+    // Note: the loop task may fire a concurrent doSave() in the brief window
+    // between this check and vTaskDelete below. The ESP32 NVS Preferences
+    // library serializes begin() internally, so the worst case is a redundant
+    // write — not data corruption. This is a pre-existing design constraint,
+    // not a regression of this teardown; see PRO-499 for context.
     if (dirty) {
         doSave();
     }
