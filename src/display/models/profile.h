@@ -250,7 +250,8 @@ struct Profile {
 
     void adjustVolumetricTarget(float amount) {
         float max = getTotalVolume();
-        if (max <= 0.0f) return; // no volumetric target configured; nothing to scale
+        if (max <= 0.0f)
+            return; // no volumetric target configured; nothing to scale
         float adjustedMax = max + amount;
         float adjustment = adjustedMax / max;
         // Scale every phase that carries a volumetric target. This MUST match
@@ -272,9 +273,11 @@ struct Profile {
     // profile has no volumetric target, do nothing — caller should check
     // `isVolumetric()` first or fall back to a different code path.
     void setVolumetricTarget(float value) {
-        if (value <= 0.0f) return;
+        if (value <= 0.0f)
+            return;
         float current = getTotalVolume();
-        if (current <= 0.0f) return; // no volumetric target configured
+        if (current <= 0.0f)
+            return; // no volumetric target configured
         float ratio = value / current;
         // Scale the SAME phases that getTotalVolume() and Phase::isFinished
         // read (every phase with a volumetric target), not just PHASE_TYPE_BREW

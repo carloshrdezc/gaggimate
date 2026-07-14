@@ -5,10 +5,10 @@
 #include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
-#include <display/core/EventIds.h>
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <scales/acaia.h>
 #include <scales/bookoo.h>
 #include <scales/decent.h>
@@ -265,6 +265,17 @@ void BLEScalePlugin::scan() const {
 }
 
 void BLEScalePlugin::disconnect() {
+    // PRO-504: claim exclusive ownership of the teardown before touching
+    // `scale`. compare_exchange_strong atomically flips tearingDown from
+    // false->true for exactly one caller; every other concurrent/re-entrant
+    // caller sees it already true and bails without touching `scale`. See the
+    // `tearingDown` comment in the header for why this must be a real
+    // cross-task claim, not a plain bool.
+    bool expected = false;
+    if (!tearingDown.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
     if (scale != nullptr) {
         // PRO-351: order matters for the cross-task lifetime handshake.
         // 1. active=false was already set by the teardown caller, so any callback
@@ -290,6 +301,8 @@ void BLEScalePlugin::disconnect() {
         doConnect = false;
         reconnectionTries = 0;
     }
+
+    tearingDown.store(false, std::memory_order_release);
 }
 
 void BLEScalePlugin::waitForCallbacksToDrain() {
