@@ -322,9 +322,9 @@ void BLEScalePlugin::disconnect() {
         reconnectionTries = 0;
     }
 
-    // release suffices here: the CAS at entry (default seq_cst, an acquire on
-    // success) synchronizes-with this release-store on the same variable, so
-    // the next caller is guaranteed to observe everything written above.
+    // release suffices here: the next caller's CAS at entry (default seq_cst,
+    // an acquire on success) synchronizes-with this release-store on the same
+    // variable, so the next caller is guaranteed to observe everything written above.
     tearingDown.store(false, std::memory_order_release);
 }
 
