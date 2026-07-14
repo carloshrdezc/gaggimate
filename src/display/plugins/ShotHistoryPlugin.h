@@ -149,7 +149,7 @@ class ShotHistoryPlugin : public Plugin {
     float currentPuckResistance = 0.0f;
     String currentProfileName;
     String currentBeanName;
-    String currentBeanId; // PRO-422: BeanManager id of the selected bean at brew start ("" if none/unknown)
+    String currentBeanId;      // PRO-422: BeanManager id of the selected bean at brew start ("" if none/unknown)
     String currentGrinderName; // PRO-428: selected grinder name at brew start ("" if none); stamped as notes "grinderName"
     // PRO-441: snapshot the MACHINE GRIND TARGET (auto-grind grams/seconds) at brew start, mirroring the
     // grinderName capture. Stamped as notes "grindTarget" (a display label string) so every web client reads

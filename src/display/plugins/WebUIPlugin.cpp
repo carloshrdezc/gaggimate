@@ -54,8 +54,13 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) { host = hostPort; port = 443; }
-        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
+        if (colonIdx < 0) {
+            host = hostPort;
+            port = 443;
+        } else {
+            host = hostPort.substring(0, colonIdx);
+            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
+        }
         return true;
     }
     if (url.startsWith("ws://")) {
@@ -65,8 +70,13 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) { host = hostPort; port = 80; }
-        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
+        if (colonIdx < 0) {
+            host = hostPort;
+            port = 80;
+        } else {
+            host = hostPort.substring(0, colonIdx);
+            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
+        }
         return true;
     }
     return false;
@@ -96,8 +106,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
     this->ota = new GitHubOTA(
-        BUILD_GIT_VERSION, controller->getSystemInfo().version,
-        resolveReleaseUrl(controller->getSettings().getOTAChannel()),
+        BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
             pluginManager->trigger(EventIds::OTA_UPDATE_PHASE, "phase", phase);
             updateOTAProgress(phase, 0);
@@ -126,9 +135,8 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         // WiFi-event task (~500 ms spin-wait + ws.closeAll() under wsMutex) once
         // per ASSOC_LEAVE, stalling core 0 while WPA-supplicant re-associates.
         // Latch a Stop intent; loop() drains it on the Arduino loop task.
-        pendingLifecycle.store(
-            latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Stop),
-            std::memory_order_relaxed);
+        pendingLifecycle.store(latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Stop),
+                               std::memory_order_relaxed);
     });
     pluginManager->on(EventIds::CONTROLLER_READY, [this](Event const &) {
         ota->setControllerVersion(controller->getSystemInfo().version);
@@ -239,9 +247,8 @@ void WebUIPlugin::otaResolveTask(void *arg) {
     // force-flash against a stale _latest_url. Keep the || isEmpty() as a
     // belt-and-suspenders guard (empty is untrustworthy).
     const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
-    const OtaFlashDecision decision =
-        decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled, params->installedEmpty,
-                       resolved.c_str(), resolveFailed);
+    const OtaFlashDecision decision = decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled,
+                                                     params->installedEmpty, resolved.c_str(), resolveFailed);
 
     if (plugin->otaIntentMutex != nullptr && xSemaphoreTake(plugin->otaIntentMutex, portMAX_DELAY) == pdTRUE) {
         plugin->otaResolveResult.generation = params->generation;
@@ -448,9 +455,12 @@ void WebUIPlugin::loop() {
                 otaResolveStartMs = static_cast<uint32_t>(millis());
                 const uint32_t generation = otaResolveGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 
-                auto *params = new OtaResolveTaskParams{
-                    this, generation, isTag, otaResolvePinnedTag, /*selectedEqInstalled=*/!channelSwitch,
-                    /*installedEmpty=*/previousInstalledChannel.isEmpty()};
+                auto *params = new OtaResolveTaskParams{this,
+                                                        generation,
+                                                        isTag,
+                                                        otaResolvePinnedTag,
+                                                        /*selectedEqInstalled=*/!channelSwitch,
+                                                        /*installedEmpty=*/previousInstalledChannel.isEmpty()};
                 TaskHandle_t createdHandle = nullptr;
                 const BaseType_t created =
                     xTaskCreatePinnedToCore(otaResolveTask, "OtaResolve", 8192, params, 1, &createdHandle, 1);
@@ -490,8 +500,8 @@ void WebUIPlugin::loop() {
                     }
                     xSemaphoreGive(otaIntentMutex);
                 }
-                if (haveResult && otaResolveResultIsCurrent(drainedResult.generation,
-                                                            otaResolveGeneration.load(std::memory_order_relaxed))) {
+                if (haveResult &&
+                    otaResolveResultIsCurrent(drainedResult.generation, otaResolveGeneration.load(std::memory_order_relaxed))) {
                     otaResolveResolvedVersion = drainedResult.resolvedVersion;
                     otaResolveResolveFailed = drainedResult.resolveFailed;
                     otaResolveState = otaResolveStateForDecision(drainedResult.decision);
@@ -719,7 +729,7 @@ void WebUIPlugin::loop() {
         // BLE scale compiled out (CAR-382): always report disconnected / zero
         // weight. Volumetric still works via flow estimation; that value flows
         // through the process snapshot, not these BLE-specific status fields.
-        doc["cw"] = 0; // current bluetooth weight
+        doc["cw"] = 0;     // current bluetooth weight
         doc["bc"] = false; // bluetooth scale connected status
 #endif
 
@@ -741,8 +751,8 @@ void WebUIPlugin::loop() {
                 pObj["s"] = proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "brew" : "infusion";
                 pObj["l"] = proc.isActive ? proc.phaseName.c_str() : "Finished";
                 pObj["e"] = ts - proc.started;
-                const bool isVolumetric = proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
-                                          controller->isVolumetricAvailable();
+                const bool isVolumetric =
+                    proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget && controller->isVolumetricAvailable();
                 pObj["tt"] = isVolumetric ? "volumetric" : "time";
                 if (isVolumetric) {
                     pObj["pt"] = proc.volumetricTargetValue;
@@ -774,7 +784,7 @@ void WebUIPlugin::loop() {
                 pObj["tt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? "flow" : "pressure";
                 pObj["pt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? proc.manualFlow : proc.manualPressure;
                 pObj["pp"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? controller->getCurrentPumpFlow()
-                                                                          : controller->getCurrentPressure();
+                                                                         : controller->getCurrentPressure();
             }
         }
 
@@ -994,8 +1004,7 @@ void WebUIPlugin::setupServer() {
             } else if (type == WS_EVT_DISCONNECT) {
                 {
                     SemaphoreGuard lock(wsMutex);
-                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)",
-                             server->getClients().size());
+                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
             } else if (type == WS_EVT_DATA) {
@@ -1072,7 +1081,8 @@ void WebUIPlugin::startRelay() {
     SemaphoreGuard lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
-    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
+    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled())
+        return;
 
     bool useSSL;
     String host, basePath;
@@ -1118,27 +1128,26 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/")
-        ? "/connect?token=" + relayToken + "&role=device"
-        : basePath + "/connect?token=" + relayToken + "&role=device";
+    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?token=" + relayToken + "&role=device"
+                                                          : basePath + "/connect?token=" + relayToken + "&role=device";
 
     relayWs.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
         switch (type) {
-            case WStype_CONNECTED:
-                relayConnected = true;
-                ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
-                break;
-            case WStype_DISCONNECTED:
-                relayConnected = false;
-                ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
-                break;
-            case WStype_TEXT: {
-                String msg = String((char *)payload, length);
-                processWebSocketMessage(RELAY_CLIENT_ID, msg);
-                break;
-            }
-            default:
-                break;
+        case WStype_CONNECTED:
+            relayConnected = true;
+            ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
+            break;
+        case WStype_DISCONNECTED:
+            relayConnected = false;
+            ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
+            break;
+        case WStype_TEXT: {
+            String msg = String((char *)payload, length);
+            processWebSocketMessage(RELAY_CLIENT_ID, msg);
+            break;
+        }
+        default:
+            break;
         }
     });
 
@@ -1185,7 +1194,8 @@ void WebUIPlugin::stopRelay() {
     // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
     // (yields the CPU) and is strictly bounded.
     SemaphoreGuard lock(relayLifecycleMutex);
-    if (!relayEnabled) return;
+    if (!relayEnabled)
+        return;
     relayEnabled = false;
     relayConnected = false;
     if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
@@ -1257,7 +1267,8 @@ void WebUIPlugin::broadcastAll(const String &msg) {
 }
 
 void WebUIPlugin::broadcastRelayMsg(const String &msg) {
-    if (!relayEnabled || relayMutex == nullptr) return;
+    if (!relayEnabled || relayMutex == nullptr)
+        return;
     if (xSemaphoreTake(relayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         if (relayOutBuffer.size() < 64) {
             relayOutBuffer.push_back(msg);
@@ -1291,12 +1302,12 @@ void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
 }
 
 void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) {
-    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s",
-             clientId == RELAY_CLIENT_ID ? "relay" : "local",
+    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s", clientId == RELAY_CLIENT_ID ? "relay" : "local",
              (int)msg.length(), msg.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, msg.c_str());
-    if (err) return;
+    if (err)
+        return;
 
     String msgType = doc["tp"].as<String>();
     if (msgType.startsWith("req:profiles:")) {
@@ -1353,11 +1364,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         JsonVariantConst pressureValue = doc["pressure"];
         JsonVariantConst flowValue = doc["flow"];
         JsonVariantConst temperatureValue = doc["temperature"];
-        float pressure = pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>()
-                                                                              : controller->getManualPressure();
+        float pressure =
+            pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>() : controller->getManualPressure();
         float flow = flowValue.is<float>() || flowValue.is<int>() ? flowValue.as<float>() : controller->getManualFlow();
         int temperature = temperatureValue.is<int>() || temperatureValue.is<float>() ? temperatureValue.as<int>()
-                                                                                    : controller->getManualTemperature();
+                                                                                     : controller->getManualTemperature();
         controller->updateManualTargets(targetType, pressure, flow, temperature);
     } else if (msgType == "req:change-mode") {
         if (doc["mode"].is<uint8_t>()) {
@@ -1476,7 +1487,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:history:rebuild") {
         JsonDocument resp;
         resp["tp"] = "res:history:rebuild";
-        if (doc["rid"].is<const char *>()) resp["rid"] = doc["rid"];
+        if (doc["rid"].is<const char *>())
+            resp["rid"] = doc["rid"];
         resp["msg"] = "Rebuild started";
         sendResponse(clientId, resp);
         ShotHistory.startAsyncRebuild();
@@ -1924,7 +1936,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
             if (request->hasArg("altRelayFunction"))
                 settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
-            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") && request->arg("autowakeupEnabled").length() > 0);
+            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") &&
+                                           request->arg("autowakeupEnabled").length() > 0);
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
                 String schedulesStr = request->arg("autowakeupSchedules");

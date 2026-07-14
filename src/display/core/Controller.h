@@ -9,11 +9,11 @@
 #include "VolumetricMeasurementSource.h"
 #include <WiFi.h>
 #include <atomic>
-#include <freertos/semphr.h>
 #include <display/core/BeanManager.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
+#include <freertos/semphr.h>
 
 // Thread-safe snapshot of process state for UI/plugins
 struct ProcessSnapshot {
@@ -23,7 +23,7 @@ struct ProcessSnapshot {
     int type = -1;
     unsigned long started = 0;
     unsigned long finished = 0;
-    
+
     // Brew-specific fields
     bool isBrew = false;
     uint8_t phaseIndex = 0;
@@ -40,7 +40,7 @@ struct ProcessSnapshot {
     float brewVolume = 0.0f;
     bool isAdvancedPump = false;
     float pumpPressure = 0.0f;
-    
+
     // Grind-specific fields
     bool isGrind = false;
     float grindVolume = 0.0f;
@@ -119,25 +119,29 @@ class Controller {
 
     void autotune(int testTime, int samples);
     void startProcess(Process *process);
-    
+
     // DEPRECATED: Direct pointer access is unsafe due to race conditions.
     // Use getProcessSnapshot() or other thread-safe accessor methods instead.
     // This method will be removed in a future version.
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
-    Process *getProcess() const { return currentProcess; }
-    
+    Process *getProcess() const {
+        return currentProcess;
+    }
+
     // DEPRECATED: Direct pointer access is unsafe due to race conditions.
     // Use getProcessSnapshot() or other thread-safe accessor methods instead.
     // This method will be removed in a future version.
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
-    Process *getLastProcess() const { return lastProcess; }
-    
+    Process *getLastProcess() const {
+        return lastProcess;
+    }
+
     // Thread-safe methods to get process info without exposing raw pointer
     int getProcessType() const;
     uint8_t getBrewProcessPhaseIndex() const;
     bool isBrewProcessVolumetric() const;
     bool isBrewProcessUtility() const;
-    
+
     // Thread-safe snapshot of current process state
     ProcessSnapshot getProcessSnapshot() const;
     Settings &getSettings() { return settings; }

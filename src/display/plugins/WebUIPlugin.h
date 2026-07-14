@@ -128,7 +128,7 @@ class WebUIPlugin : public Plugin {
     // volatile handoffs (a missed-by-one-tick drain is harmless — loop() runs
     // every ~2 ms and re-checks every iteration).
     SemaphoreHandle_t otaIntentMutex = nullptr;
-    String pendingReleaseUrl = "";        // guarded by otaIntentMutex
+    String pendingReleaseUrl = ""; // guarded by otaIntentMutex
     volatile bool pendingReleaseUrlChange = false;
     volatile bool pendingOtaStatusPush = false;
     // Deferred OTA-start intent (CAR-377). handleOTAStart runs on the AsyncTCP /
@@ -376,7 +376,8 @@ class WebUIPlugin : public Plugin {
 
 // PRO-286: enforce at compile time the invariant the comment above documents — the
 // pendingModeChangeTarget default-0 initializer only reads as "standby" if MODE_STANDBY == 0.
-static_assert(MODE_STANDBY == 0,
-              "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
+static_assert(
+    MODE_STANDBY == 0,
+    "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
 
 #endif // WEBUIPLUGIN_H

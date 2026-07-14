@@ -62,9 +62,7 @@ constexpr OtaResolveState otaResolveStateForDecision(OtaFlashDecision decision) 
 // the subtraction is explicitly 32-bit-wide on BOTH platforms. Mirrors
 // OtaUpdateCheckPolicy.h's otaBackoffInterval, which already uses uint32_t
 // for the same millis()-math reason.
-constexpr bool otaResolveTimedOut(uint32_t startMs, uint32_t nowMs, uint32_t timeoutMs) {
-    return (nowMs - startMs) >= timeoutMs;
-}
+constexpr bool otaResolveTimedOut(uint32_t startMs, uint32_t nowMs, uint32_t timeoutMs) { return (nowMs - startMs) >= timeoutMs; }
 
 // Staleness guard: a resolve task stamps the generation it was handed at
 // spawn time onto its posted result. loop() bumps its own generation counter
@@ -97,7 +95,8 @@ static_assert(otaResolveTimedOut(0, 10001, 10000), "PRO-13: past the timeout bou
 static_assert(!otaResolveTimedOut(1000, 1000, 10000), "PRO-13: zero elapsed has not timed out");
 // millis() rollover: startMs just before wraparound, nowMs just after — the
 // unsigned subtraction still yields the true (small) elapsed duration.
-static_assert(!otaResolveTimedOut(4294967295u, 5u, 10000), "PRO-13: elapsed survives a millis() rollover without a false timeout");
+static_assert(!otaResolveTimedOut(4294967295u, 5u, 10000),
+              "PRO-13: elapsed survives a millis() rollover without a false timeout");
 
 static_assert(otaResolveResultIsCurrent(3, 3), "PRO-13: matching generations are current");
 static_assert(!otaResolveResultIsCurrent(2, 3), "PRO-13: a stale (older) generation is not current");

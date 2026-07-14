@@ -1,8 +1,8 @@
 #include "BoilerFillPlugin.h"
 #include <WiFi.h>
 #include <display/core/Controller.h>
-#include <display/core/EventIds.h>
 #include <display/core/Event.h>
+#include <display/core/EventIds.h>
 #include <display/core/process/PumpProcess.h>
 
 void BoilerFillPlugin::setup(Controller *controller, PluginManager *pluginManager) {

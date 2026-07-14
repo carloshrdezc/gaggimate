@@ -127,6 +127,29 @@ class BLEScalePlugin : public Plugin {
     RemoteScalesScanner *scanner = nullptr;
     std::unique_ptr<RemoteScales> scale = nullptr;
 
+    // PRO-504: disconnect() is reachable from several independent call sites
+    // that run on DIFFERENT FreeRTOS tasks — the max-reconnection-tries path
+    // in update() (controller loop task), the CONTROLLER_BLUETOOTH_DISCONNECT
+    // handler (dispatched synchronously from the client's onDisconnect(),
+    // which NimBLE invokes on the NimBLE host task), tearDownScale() (loop()/
+    // mode-change handler, controller loop task), and the destructor. It is
+    // NOT reentrancy-safe: it waits (waitForCallbacksToDrain(), up to 100ms)
+    // before touching `scale`, which is a std::unique_ptr<RemoteScales> whose
+    // destructor tears down the underlying NimBLEClient. If two call sites
+    // race onto disconnect() concurrently from different tasks (e.g. a
+    // scale-initiated BLE disconnect fires the NimBLE-host-task path the same
+    // tick update() trips the reconnection-tries teardown on the loop task),
+    // the second caller can observe `scale` as still non-null, start its own
+    // drain wait, and then run scale->disconnect()/scale=nullptr on an object
+    // the first caller is concurrently freeing — a use-after-free on the
+    // underlying NimBLEClient (crash signature: LoadProhibited in
+    // xTimerIsTimerActive, reached via NimBLEClient::disconnect() on an
+    // already-freed client). std::atomic + compare_exchange gives disconnect()
+    // a real cross-task single-owner claim: the first caller in wins and tears
+    // down; any caller that arrives while a teardown is already in flight
+    // returns immediately instead of touching `scale` a second time.
+    std::atomic<bool> tearingDown{false};
+
     // PRO-351: set true while a NimBLE weight-updated callback is executing on
     // the NimBLE host task; teardown waits for this to clear before freeing the
     // scale. atomic so the set (host task) and the read (teardown task) are a

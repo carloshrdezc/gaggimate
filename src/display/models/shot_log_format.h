@@ -19,7 +19,7 @@
 static constexpr uint32_t SHOT_LOG_MAGIC = 0x544F4853; // 'S''H''O''T' little-endian 0x54 0x4F 0x48 0x53
 static constexpr uint8_t SHOT_LOG_VERSION = 5;
 static constexpr uint16_t SHOT_LOG_HEADER_SIZE = 512;
-static constexpr uint8_t MAX_PHASE_TRANSITIONS = 12; // Maximum phase transitions to record
+static constexpr uint8_t MAX_PHASE_TRANSITIONS = 12;         // Maximum phase transitions to record
 static constexpr uint16_t SHOT_LOG_SAMPLE_INTERVAL_MS = 250; // nominal recording interval
 static constexpr uint32_t SHOT_LOG_FIELDS_MASK_ALL = 0x1FFF; // 13 fields present (removed phase number)
 static constexpr uint32_t SHOT_LOG_SAMPLE_SIZE = 26;
@@ -68,7 +68,7 @@ struct ShotLogHeader {
 
     // Version 5+ phase tracking
     PhaseTransition phaseTransitions[MAX_PHASE_TRANSITIONS]; // 12 × 29 = 348 bytes
-    uint8_t phaseTransitionCount;         // 1 byte
+    uint8_t phaseTransitionCount;                            // 1 byte
 
     // Future expansion - pad to 512 bytes total
     uint8_t reserved_v5[53]; // Manual padding to reach 512 bytes
