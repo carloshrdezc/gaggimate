@@ -11,6 +11,7 @@
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <atomic>
+#include <mutex>
 
 void on_ble_measurement(float value);
 
@@ -126,6 +127,22 @@ class BLEScalePlugin : public Plugin {
     RemoteScalesPluginRegistry *pluginRegistry = nullptr;
     RemoteScalesScanner *scanner = nullptr;
     std::unique_ptr<RemoteScales> scale = nullptr;
+
+    // PRO-459: scale->update() (invoked from update() on the controller loop
+    // task) can run for hundreds of milliseconds while a scale driver
+    // performs its connection handshake (e.g. myscale::performConnectionHandshake).
+    // PRO-351/PRO-504's callbackInFlight/tearingDown machinery protects the
+    // async weight-callback path and re-entrant disconnect() calls, but NOT
+    // this call itself: a concurrent disconnect() (CONTROLLER_BLUETOOTH_DISCONNECT
+    // or CONTROLLER_MODE_CHANGE, both reachable from other tasks/contexts) can
+    // reset `scale` to nullptr — freeing the RemoteScales object — while
+    // scale->update() is still executing inside it, producing a use-after-free
+    // (confirmed via coredump: StoreProhibitedCause, this=0x6 in RemoteScales::log
+    // reached through TimemoreScales::tare() during the handshake). A
+    // recursive_mutex (not a plain mutex) is required because disconnect() is
+    // itself called from within update() on the same task (max-reconnection-tries
+    // path), which must be able to re-enter the lock without deadlocking.
+    mutable std::recursive_mutex scaleMutex_;
 
     // PRO-504: disconnect() is reachable from several independent call sites
     // that run on DIFFERENT FreeRTOS tasks — the max-reconnection-tries path

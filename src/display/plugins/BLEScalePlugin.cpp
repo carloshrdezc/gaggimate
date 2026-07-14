@@ -209,7 +209,19 @@ void BLEScalePlugin::update() {
 
     if (scale != nullptr) {
         // Call scale update with error checking
-        scale->update();
+        // PRO-459: hold scaleMutex_ for the FULL scale->update() call. A
+        // scale driver's handshake (e.g. myscale::performConnectionHandshake)
+        // can run for hundreds of ms inside update(); without this lock a
+        // concurrent disconnect() from another task/context can free `scale`
+        // mid-call (use-after-free, confirmed via coredump). Re-check
+        // scale != nullptr after acquiring the lock — disconnect() may have
+        // cleared it while this task waited.
+        {
+            std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
+            if (scale != nullptr) {
+                scale->update();
+            }
+        }
         // PRO-5: route the counter through nextReconnectionTries() (tested in
         // test_ble_scale_scan_policy) so it measures CONSECUTIVE failed reconnect
         // ticks. A healthy tick resets it to 0; without that reset the counter was
@@ -282,6 +294,14 @@ void BLEScalePlugin::disconnect() {
         //    that started before the flag flipped is the only one that can still
         //    be touching `scale`. Wait (bounded) for it to drain.
         waitForCallbacksToDrain();
+
+        // PRO-459: scaleMutex_ guards against a concurrent update() call
+        // (different task) that may still be executing scale->update()'s
+        // driver handshake. Acquiring the lock here blocks until that call
+        // returns, so `scale` is never freed while update() is inside it.
+        // waitForCallbacksToDrain() stays OUTSIDE this lock — it must not
+        // block the weight-callback path, which does not take scaleMutex_.
+        std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
 
         // 2. Now that no weight callback is in flight, it is safe to disconnect
         //    and free the scale.
