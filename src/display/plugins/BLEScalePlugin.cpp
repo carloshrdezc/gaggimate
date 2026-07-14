@@ -356,12 +356,14 @@ void BLEScalePlugin::tearDownScale() {
 }
 
 void BLEScalePlugin::onProcessStart() const {
+    std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
     if (scale != nullptr && scale->isConnected()) {
-        // Double tare with validation
+        // PRO-509: hold scaleMutex_ for the full tare sequence. A concurrent
+        // disconnect() from another task/context can free `scale` while tare()
+        // is executing (use-after-free). Re-check scale != nullptr after
+        // acquiring the lock — disconnect() may have cleared it while we waited.
         scale->tare();
         delay(50);
-
-        // Check if scale is still connected before second tare
         if (scale != nullptr && scale->isConnected()) {
             scale->tare();
         }
