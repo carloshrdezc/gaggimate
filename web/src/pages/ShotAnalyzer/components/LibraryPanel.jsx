@@ -96,6 +96,8 @@ export function LibraryPanel({
   const sentinelRef = useRef(null);
   const barRef = useRef(null);
   const refreshIdRef = useRef(0);
+  const rafPendingRef = useRef(false);
+  const rafIdRef = useRef(null);
 
   // UI State
   const [isStuck, setIsStuck] = useState(false);
@@ -186,12 +188,32 @@ export function LibraryPanel({
 
   // Sync dimensions for fixed positioning
   const updateRect = useCallback(() => {
-    if (!sentinelRef.current) return;
-    const rect = sentinelRef.current.getBoundingClientRect();
-    setBarRect({
-      width: rect.width,
-      left: rect.left,
-      height: barRef.current?.offsetHeight || 64,
+    if (rafPendingRef.current) return;
+
+    rafPendingRef.current = true;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafPendingRef.current = false;
+      rafIdRef.current = null;
+
+      if (!sentinelRef.current) return;
+      const rect = sentinelRef.current.getBoundingClientRect();
+      const nextRect = {
+        width: Math.round(rect.width),
+        left: Math.round(rect.left),
+        height: barRef.current?.offsetHeight || 64,
+      };
+
+      setBarRect(prev => {
+        if (
+          prev.width === nextRect.width &&
+          prev.left === nextRect.left &&
+          prev.height === nextRect.height
+        ) {
+          return prev;
+        }
+
+        return nextRect;
+      });
     });
   }, []);
 
@@ -202,12 +224,17 @@ export function LibraryPanel({
     return () => {
       window.removeEventListener('resize', updateRect);
       window.removeEventListener('scroll', updateRect);
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      rafPendingRef.current = false;
     };
   }, [updateRect]);
 
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined') return;
-    const resizeObserver = new ResizeObserver(() => updateRect());
+    const resizeObserver = new ResizeObserver(updateRect);
     if (barRef.current) resizeObserver.observe(barRef.current);
     if (sentinelRef.current) resizeObserver.observe(sentinelRef.current);
     return () => resizeObserver.disconnect();
