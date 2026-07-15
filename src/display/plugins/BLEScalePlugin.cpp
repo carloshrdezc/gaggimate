@@ -194,15 +194,7 @@ void BLEScalePlugin::update() {
         return;
     }
 
-    // Don't update volumetric override if scale access might fail
     bool hasConnectedScale = false;
-    if (scale != nullptr) {
-        // Check if scale pointer is valid before accessing
-        hasConnectedScale = scale->isConnected();
-    }
-
-    if (controller->isVolumetricAvailable())
-        controller->setVolumetricOverride(hasConnectedScale);
 
     if (!active)
         return;
@@ -216,12 +208,27 @@ void BLEScalePlugin::update() {
         // mid-call (use-after-free, confirmed via coredump). Re-check
         // scale != nullptr after acquiring the lock — disconnect() may have
         // cleared it while this task waited.
+        //
+        // PRO-511: hasConnectedScale is read here too, inside the same lock,
+        // instead of via an unguarded scale->isConnected() before the lock
+        // (the old code read it up front, before the !active check). That
+        // pre-lock read raced disconnect() (which also takes scaleMutex_
+        // before nulling scale), so a disconnect landing between the read
+        // and this block could leave hasConnectedScale stale for a tick —
+        // same TOCTOU class as PRO-459/PRO-510, just on the isConnected()
+        // read rather than update(). hasConnectedScale is a local bool copy,
+        // so using it after the lock releases below is safe.
         {
             std::lock_guard<std::mutex> lg(scaleMutex_);
             if (scale != nullptr) {
+                hasConnectedScale = scale->isConnected();
                 scale->update();
             }
         }
+
+        if (controller->isVolumetricAvailable())
+            controller->setVolumetricOverride(hasConnectedScale);
+
         // PRO-5: route the counter through nextReconnectionTries() (tested in
         // test_ble_scale_scan_policy) so it measures CONSECUTIVE failed reconnect
         // ticks. A healthy tick resets it to 0; without that reset the counter was
