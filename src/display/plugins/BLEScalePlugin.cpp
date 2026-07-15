@@ -217,7 +217,7 @@ void BLEScalePlugin::update() {
         // scale != nullptr after acquiring the lock — disconnect() may have
         // cleared it while this task waited.
         {
-            std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
+            std::lock_guard<std::mutex> lg(scaleMutex_);
             if (scale != nullptr) {
                 scale->update();
             }
@@ -301,7 +301,7 @@ void BLEScalePlugin::disconnect() {
         // returns, so `scale` is never freed while update() is inside it.
         // waitForCallbacksToDrain() stays OUTSIDE this lock — it must not
         // block the weight-callback path, which does not take scaleMutex_.
-        std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
+        std::lock_guard<std::mutex> lg(scaleMutex_);
 
         // 2. Now that no weight callback is in flight, it is safe to disconnect
         //    and free the scale.
@@ -365,7 +365,7 @@ void BLEScalePlugin::onProcessStart() const {
     // the UAF-prevention guarantee requires holding the lock until both tares
     // complete. Callers contending on scaleMutex_ (disconnect(), update())
     // will block for up to this duration on brew/grind start.
-    std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
+    std::lock_guard<std::mutex> lg(scaleMutex_);
     if (scale != nullptr && scale->isConnected()) {
         scale->tare();
         delay(50);

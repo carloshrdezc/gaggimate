@@ -138,11 +138,16 @@ class BLEScalePlugin : public Plugin {
     // reset `scale` to nullptr — freeing the RemoteScales object — while
     // scale->update() is still executing inside it, producing a use-after-free
     // (confirmed via coredump: StoreProhibitedCause, this=0x6 in RemoteScales::log
-    // reached through TimemoreScales::tare() during the handshake). A
-    // recursive_mutex (not a plain mutex) is required because disconnect() is
-    // itself called from within update() on the same task (max-reconnection-tries
-    // path), which must be able to re-enter the lock without deadlocking.
-    mutable std::recursive_mutex scaleMutex_;
+    // reached through TimemoreScales::tare() during the handshake). PRO-508: a
+    // plain mutex is sufficient — every acquisition here is non-re-entrant.
+    // update()'s lock scope releases before it calls disconnect() on the
+    // max-reconnection-tries path (the lock guard is scoped to the inner
+    // scale->update() call only), and onProcessStart()/tare() acquire the
+    // lock independently rather than while already holding it. A plain
+    // std::mutex gives identical protection with less overhead and turns any
+    // future re-entrant-acquisition bug into a visible deadlock instead of
+    // silently succeeding.
+    mutable std::mutex scaleMutex_;
 
     // PRO-504: disconnect() is reachable from several independent call sites
     // that run on DIFFERENT FreeRTOS tasks — the max-reconnection-tries path
