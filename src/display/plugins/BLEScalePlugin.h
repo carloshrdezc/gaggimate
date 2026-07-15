@@ -44,7 +44,7 @@ class BLEScalePlugin : public Plugin {
     void loop() override;
     ;
 
-    void connect(const std::string &uuid);
+    bool connect(const std::string &uuid);
     void scan() const;
     void disconnect();
     void onMeasurement(float value) const;

@@ -2116,10 +2116,32 @@ void WebUIPlugin::handleBLEScaleConnect(AsyncWebServerRequest *request) {
         request->send(404);
         return;
     }
-    BLEScales.connect(request->arg("uuid").c_str());
+
+    const String uuid = request->arg("uuid");
     JsonDocument doc;
-    doc["success"] = true;
+    if (uuid.isEmpty()) {
+        doc["success"] = false;
+        doc["error"] = "Missing or empty UUID";
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        response->setCode(400);
+        addCorsHeaders(response);
+        serializeJson(doc, *response);
+        request->send(response);
+        return;
+    }
+
+    const bool accepted = BLEScales.connect(uuid.c_str());
+    doc["success"] = accepted;
+    if (accepted) {
+        doc["accepted"] = true;
+        doc["message"] = "Connection attempt accepted";
+    } else {
+        doc["error"] = "Connection failed";
+    }
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    if (!accepted) {
+        response->setCode(400);
+    }
     addCorsHeaders(response);
     serializeJson(doc, *response);
     request->send(response);

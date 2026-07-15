@@ -257,19 +257,20 @@ void BLEScalePlugin::update() {
     }
 }
 
-void BLEScalePlugin::connect(const std::string &uuid) {
+bool BLEScalePlugin::connect(const std::string &uuid) {
     if (uuid.empty()) {
         ESP_LOGE("BLEScalePlugin", "Cannot connect with empty UUID");
-        return;
+        return false;
     }
     if (controller == nullptr) {
         ESP_LOGE("BLEScalePlugin", "Controller is null, cannot save scale setting");
-        return;
+        return false;
     }
 
     doConnect = true;
     this->uuid = uuid;
     controller->getSettings().setSavedScale(uuid.data());
+    return true;
 }
 
 void BLEScalePlugin::scan() const {
