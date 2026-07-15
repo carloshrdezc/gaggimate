@@ -36,6 +36,7 @@ function getRssiStatusClass(rssi) {
 
 export function Scales() {
   const [isScanning, setIsScanning] = useState(false);
+  const [connectError, setConnectError] = useState('');
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const refreshKey = useAutoRefresh(10000) + manualRefreshKey;
   const mode = machine.value.status.mode;
@@ -74,16 +75,23 @@ export function Scales() {
 
   const onConnect = useCallback(
     async uuid => {
+      setConnectError('');
       try {
         const formData = new FormData();
         formData.append('uuid', uuid);
-        await fetch('/api/scales/connect', {
+        const res = await fetch('/api/scales/connect', {
           method: 'post',
           body: formData,
         });
+        const body = await res.json();
+        if (!res.ok || !body.success) {
+          setConnectError(body.error || 'Connection failed');
+          return;
+        }
         setManualRefreshKey(Date.now());
       } catch (error) {
         console.error('Connection failed:', error);
+        setConnectError('Connection failed');
       }
     },
     []
@@ -126,6 +134,13 @@ export function Scales() {
             scaleData={scaleData}
             onConnect={onConnect}
           />
+        )}
+        {connectError && (
+          <div className='mt-4 border-l-2 border-[var(--color-error,#d71921)] pl-4'>
+            <span className='font-nd-mono text-[11px] text-[var(--color-error,#d71921)]'>
+              {connectError}
+            </span>
+          </div>
         )}
         <div className='mt-4 border-l-2 border-[var(--color-warning,#d4a843)] pl-4'>
           <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>
