@@ -377,6 +377,40 @@ void BLEScalePlugin::onProcessStart() const {
 
 void BLEScalePlugin::tare() const { onProcessStart(); }
 
+// PRO-510: WebUIPlugin.cpp calls these four status readers from the
+// async_tcp task while the loop task may concurrently run disconnect()
+// (freeing `scale`) — take scaleMutex_ for the duration of the `scale`
+// access, mirroring update() (PRO-459) and onProcessStart() (PRO-509), and
+// return a copy taken while the lock is held.
+bool BLEScalePlugin::isConnected() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    return scale != nullptr && scale->isConnected();
+}
+
+std::string BLEScalePlugin::getName() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    if (scale != nullptr && scale->isConnected()) {
+        return scale->getDeviceName();
+    }
+    return "";
+}
+
+std::string BLEScalePlugin::getUUID() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    if (scale != nullptr && scale->isConnected()) {
+        return scale->getDeviceAddress();
+    }
+    return "";
+}
+
+int BLEScalePlugin::getRSSI() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    if (scale != nullptr && scale->isConnected()) {
+        return scale->getRSSI();
+    }
+    return 0;
+}
+
 void BLEScalePlugin::establishConnection() {
     if (uuid.empty()) {
         ESP_LOGE("BLEScalePlugin", "Cannot establish connection with empty UUID");

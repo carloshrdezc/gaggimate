@@ -48,25 +48,16 @@ class BLEScalePlugin : public Plugin {
     void scan() const;
     void disconnect();
     void onMeasurement(float value) const;
-    bool isConnected() { return scale != nullptr && scale->isConnected(); };
-    std::string getName() {
-        if (scale != nullptr && scale->isConnected()) {
-            return scale->getDeviceName();
-        }
-        return "";
-    };
-    std::string getUUID() {
-        if (scale != nullptr && scale->isConnected()) {
-            return scale->getDeviceAddress();
-        }
-        return "";
-    };
-    int getRSSI() {
-        if (scale != nullptr && scale->isConnected()) {
-            return scale->getRSSI();
-        }
-        return 0;
-    };
+    // PRO-510: these four inline readers were the last unguarded access to
+    // `scale` (see PR #506/PRO-459 for update() and PR #508/PRO-509 for
+    // onProcessStart()) — WebUIPlugin.cpp calls them from the async_tcp task
+    // while the loop task may be running disconnect() (freeing `scale`)
+    // concurrently. Moved out-of-line to BLEScalePlugin.cpp so each can take
+    // scaleMutex_ for the duration of the `scale` access, mirroring update().
+    bool isConnected();
+    std::string getName();
+    std::string getUUID();
+    int getRSSI();
 
     std::vector<DiscoveredDevice> getDiscoveredScales() const;
     void tare() const;
