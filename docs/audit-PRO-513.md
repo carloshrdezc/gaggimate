@@ -16,7 +16,7 @@ No hardcoded production API keys, private keys, or credential files were found i
 
 ## Methodology
 
-Reviewed current `dev-master` head `20b73b33 refactor(firmware): guard scale->isConnected() TOCTOU in scan() (PRO-512) (#512)` from a fresh clone at `/home/carlos/work/gaggimate-pro513`.
+Reviewed current `dev-master` head `20b73b33 refactor(firmware): guard scale->isConnected() TOCTOU in scan() (PRO-512) (#512)` from a fresh clone at dev-master HEAD `20b73b33`.
 
 Files/subsystems reviewed:
 
@@ -51,7 +51,7 @@ Limitations:
 ### [Medium] Visualizer.coffee password can be remembered as plaintext browser storage while copy says only username is remembered
 
 - **Location**: `web/src/components/VisualizerUploadModal.jsx:31-39`, `web/src/components/VisualizerUploadModal.jsx:60-72`, `web/src/components/VisualizerUploadModal.jsx:212-215`
-- **Description**: When `Remember credentials` is checked, the modal stores both `visualizer_username` and `visualizer_password` directly in `localStorage`. On subsequent opens it repopulates the password field from storage. The explanatory copy says credentials are stored locally only if the user chooses to remember the username, not the password. Impact: browser-local plaintext password exposure, especially on shared machines, backups, browser profile sync, XSS, or shoulder-surfing after auto-fill; misleading UX makes users underestimate the security tradeoff.
+- **Description**: When `Remember credentials` is checked, the modal stores both `visualizer_username` and `visualizer_password` directly in `localStorage`. On subsequent opens it repopulates the password field from storage. The explanatory copy says credentials are stored locally only if the user chooses to remember the username; it does not mention password storage at all, leaving users without disclosure that their password is also persisted. Impact: browser-local plaintext password exposure, especially on shared machines, backups, browser profile sync, XSS, or shoulder-surfing after auto-fill; misleading UX makes users underestimate the security tradeoff.
 - **Remediation**: Do not persist the password. Remember only username, or use a scoped access token/OAuth-style upload token if Visualizer.coffee supports it. Update copy to state exactly what is stored. If password persistence remains, require explicit text such as “Remember username and password on this browser” and provide a clear “forget credentials” action.
 
 ### [Medium] Settings persistence still lacks a coherent transaction lock for scalar fields and the dirty flag
@@ -96,19 +96,19 @@ Limitations:
 - **Description**: `LibraryPanel` registers `scroll` and `resize` listeners that call `getBoundingClientRect()` and `setBarRect(...)` on each event. A ResizeObserver also updates dimensions. On scroll-heavy analyzer sessions this can force layout and component state updates more often than needed. Impact: potential jank on lower-powered mobile browsers, especially with large shot libraries/charts.
 - **Remediation**: Throttle scroll/resize updates with `requestAnimationFrame`, only set state when width/left/height materially changed, and rely on CSS sticky where possible. Keep ResizeObserver for true size changes.
 
-### [Low] Clean finding: plugin event bus has strong concurrency hardening
+### [Positive] Clean finding: plugin event bus has strong concurrency hardening
 
 - **Location**: `src/display/core/PluginManager.h:22-73`, `src/display/core/PluginManager.cpp:99-181`, `src/display/core/EventIds.h:19-88`
 - **Description**: The event bus uses a mutex-protected copy-on-write listener map and releases the lock before invoking callbacks. Missing-key triggers are read-only, event IDs are centralized as `EventIds::*` constants, and dispatch stops on `event.stopPropagation`. This reduces prior typo, map mutation, and callback reentrancy hazards. Impact: plugin architecture is in comparatively good shape for current firmware concurrency.
 - **Remediation**: Continue moving literal event IDs to `EventIds`. Add optional payload contract helpers if event payload types grow beyond simple int/float/String entries.
 
-### [Low] Clean finding: WebSocket reassembly and BLE scale lifetime have important recent safeguards
+### [Positive] Clean finding: WebSocket reassembly and BLE scale lifetime have important recent safeguards
 
 - **Location**: `src/display/plugins/WebUIPlugin.cpp:1504-1543`, `src/display/plugins/BLEScalePlugin.cpp:295-345`, `src/display/plugins/BLEScalePlugin.cpp:396-428`, `src/display/plugins/BLEScalePlugin.cpp:470-536`
 - **Description**: WebSocket message reassembly is capped and closes oversize clients. BLE scale teardown uses atomic single-owner claims, mutex-guarded `scale` accessors, and a bounded callback-drain flag. These are meaningful protections against heap growth and cross-task use-after-free classes. Impact: no immediate follow-up needed for these specific previously-risky paths beyond hardware stress validation.
 - **Remediation**: Preserve these invariants when adding scale drivers or WS message types. Run native policy tests and on-device BLE disconnect/reconnect stress tests after touching this subsystem.
 
-### [Low] Clean finding: no committed production secrets were found in the audited source sweep
+### [Positive] Clean finding: no committed production secrets were found in the audited source sweep
 
 - **Location**: repo-wide secret sweep; representative runtime secret storage in `src/display/core/Settings.cpp:67-68`, `src/display/core/Settings.cpp:104-105`, `src/display/core/Settings.cpp:192-194`, `src/display/plugins/WebUIPlugin.cpp:2019-2022`, `src/display/plugins/WebUIPlugin.cpp:2058-2059`
 - **Description**: The filename sweep did not find committed `.env`, private key, PEM, or credential files. Grep hits were code references to runtime Wi-Fi/Home Assistant/relay/Visualizer credentials, test tokens, or generated package-lock tokenizers. Firmware masks Wi-Fi, Home Assistant password, and cloud relay token in `/api/settings` GET responses. Impact: no hardcoded production API key/private key finding from source.
