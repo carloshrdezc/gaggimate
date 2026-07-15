@@ -273,8 +273,17 @@ void BLEScalePlugin::connect(const std::string &uuid) {
 }
 
 void BLEScalePlugin::scan() const {
-    if (scale != nullptr && scale->isConnected()) {
-        return;
+    // PRO-512: scan() is called from both the controller loop task
+    // (CONTROLLER_BLUETOOTH_CONNECT/CONTROLLER_MODE_CHANGE handlers) and the
+    // async_tcp task (WebUIPlugin::handleBLEScaleScan), same cross-task shape
+    // as PRO-510/PRO-459/PRO-509. disconnect() can null `scale` between the
+    // nullptr check and the isConnected() call on another task, so read both
+    // under scaleMutex_ to eliminate the TOCTOU/UAF window.
+    {
+        std::lock_guard<std::mutex> lg(scaleMutex_);
+        if (scale != nullptr && scale->isConnected()) {
+            return;
+        }
     }
     if (scanner == nullptr) {
         ESP_LOGE("BLEScalePlugin", "Scanner not initialized, cannot start scan");
