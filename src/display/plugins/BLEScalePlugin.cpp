@@ -356,12 +356,19 @@ void BLEScalePlugin::tearDownScale() {
 }
 
 void BLEScalePlugin::onProcessStart() const {
+    // PRO-509: hold scaleMutex_ for the full tare sequence. A concurrent
+    // disconnect() from another task/context can free `scale` while tare()
+    // is executing (use-after-free). Re-check scale != nullptr after
+    // acquiring the lock — disconnect() may have cleared it while we waited.
+    // Note: the lock is held for the entire tare sequence (~50–150ms including
+    // the inter-tare delay(50) and BLE call latency). This is intentional:
+    // the UAF-prevention guarantee requires holding the lock until both tares
+    // complete. Callers contending on scaleMutex_ (disconnect(), update())
+    // will block for up to this duration on brew/grind start.
+    std::lock_guard<std::recursive_mutex> lg(scaleMutex_);
     if (scale != nullptr && scale->isConnected()) {
-        // Double tare with validation
         scale->tare();
         delay(50);
-
-        // Check if scale is still connected before second tare
         if (scale != nullptr && scale->isConnected()) {
             scale->tare();
         }
