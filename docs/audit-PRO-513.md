@@ -16,7 +16,7 @@ No hardcoded production API keys, private keys, or credential files were found i
 
 ## Methodology
 
-Reviewed current `dev-master` head `20b73b33 refactor(firmware): guard scale->isConnected() TOCTOU in scan() (PRO-512) (#512)` from a fresh clone at dev-master HEAD `20b73b33`.
+Reviewed current `dev-master` head `20b73b33 refactor(firmware): guard scale->isConnected() TOCTOU in scan() (PRO-512) (#512)` from a fresh clone (dev-master HEAD at time of analysis).
 
 Files/subsystems reviewed:
 
