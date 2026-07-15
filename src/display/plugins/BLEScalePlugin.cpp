@@ -2,6 +2,7 @@
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
+#include "BLEScaleConnectPolicy.h"
 #include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
@@ -258,7 +259,7 @@ void BLEScalePlugin::update() {
 }
 
 bool BLEScalePlugin::connect(const std::string &uuid) {
-    if (uuid.empty()) {
+    if (!isValidBleScaleConnectUuid(uuid)) {
         ESP_LOGE("BLEScalePlugin", "Cannot connect with empty UUID");
         return false;
     }
