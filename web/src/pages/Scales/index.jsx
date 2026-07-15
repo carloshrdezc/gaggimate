@@ -41,6 +41,12 @@ export function Scales() {
   const refreshKey = useAutoRefresh(10000) + manualRefreshKey;
   const mode = machine.value.status.mode;
 
+  useEffect(() => {
+    if (mode === 0) {
+      setConnectError('');
+    }
+  }, [mode]);
+
   const {
     isLoading,
     isError,

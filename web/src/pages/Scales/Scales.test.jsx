@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { h } from 'preact';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/preact';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/preact';
 
 vi.mock('@fortawesome/react-fontawesome', () => ({
   FontAwesomeIcon: () => h('span', { 'data-testid': 'fa-icon' }),
@@ -48,6 +48,35 @@ describe('Scales', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Missing or empty UUID')).toBeTruthy();
+    });
+  });
+
+  test('clears connect errors when scale mode changes to standby', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      json: async () => ({ success: false, error: 'Missing or empty UUID' }),
+    });
+
+    render(h(Scales, {}));
+
+    fireEvent.click(screen.getAllByRole('button')[1]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Missing or empty UUID')).toBeTruthy();
+    });
+
+    act(() => {
+      machine.value = {
+        ...machine.value,
+        status: {
+          ...machine.value.status,
+          mode: 0,
+        },
+      };
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Missing or empty UUID')).toBeNull();
     });
   });
 });
