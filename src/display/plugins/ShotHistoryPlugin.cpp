@@ -3,6 +3,7 @@
 #include "BeanResolutionPolicy.h"
 #include "ExtendedRecordingPolicy.h"
 #include "ShotIndexMetadataPolicy.h"
+#include "ShotNotesPersistencePolicy.h"
 #include <LittleFS.h>
 #include <SD_MMC.h>
 #include <algorithm>
@@ -195,6 +196,15 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     stateMutex = xSemaphoreCreateMutex();
     if (stateMutex == nullptr) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create state mutex");
+        return;
+    }
+
+    // Notes requests can perform LittleFS/SD I/O. Keep them serialized separately
+    // from the recording state lock so live measurement callbacks never wait for
+    // storage.
+    notesMutex = xSemaphoreCreateMutex();
+    if (notesMutex == nullptr) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to create notes mutex");
         return;
     }
 
@@ -443,7 +453,15 @@ void ShotHistoryPlugin::handleCompletedShot() {
 
     controller->getSettings().setHistoryIndex(controller->getSettings().getHistoryIndex() + 1);
 
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire notes mutex for completed shot");
+        cleanupHistory();
+        appendCompletedShotToIndex();
+        return;
+    }
+
     // Auto-save bean name to notes, merging with any dose/notes the WebUI may have already written.
+    // Serialize with WebUI note writes so its load/merge/save cannot clobber them.
     // Track whether a notes file exists so appendCompletedShotToIndex can set SHOT_FLAG_HAS_NOTES
     // without an extra fs->exists() stat call.
     bool hasNotes = false;
@@ -507,6 +525,7 @@ void ShotHistoryPlugin::handleCompletedShot() {
         hasNotes = fs->exists("/h/" + currentId + ".json");
     }
 
+    xSemaphoreGive(notesMutex);
     cleanupHistory();
     appendCompletedShotToIndex(hasNotes);
 }
@@ -568,7 +587,14 @@ void ShotHistoryPlugin::record() {
     // then correctly observes isFileOpen == false. The close runs once at end-of-
     // shot when no live samples for that shot remain, so holding the lock here does
     // not reintroduce the steady-state sample-drop the lock-free path fixed.
+    // Acquire notesMutex before stateMutex so active-shot fills and recording
+    // identity transitions share one lock order. On the active sample path the
+    // notes lock is released with stateMutex before any filesystem I/O.
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        return;
+    }
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        xSemaphoreGive(notesMutex);
         return;
     }
 
@@ -589,10 +615,12 @@ void ShotHistoryPlugin::record() {
             closeLogFile(snapBluetoothWeight);
         }
         xSemaphoreGive(stateMutex);
+        xSemaphoreGive(notesMutex);
         return;
     }
 
     xSemaphoreGive(stateMutex);
+    xSemaphoreGive(notesMutex);
 
     // ---- Everything below runs WITHOUT stateMutex (active-shot path) ----
 
@@ -701,20 +729,29 @@ String ShotHistoryPlugin::resolveSelectedBeanId(const String &beanName) {
 }
 
 void ShotHistoryPlugin::startRecording() {
+    // Take notesMutex first: active-shot note fills use the same order before
+    // checking currentId, so a fill cannot attach across this identity change.
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire notes mutex for startRecording");
+        return;
+    }
     // Acquire mutex to protect shared state
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for startRecording");
+        xSemaphoreGive(notesMutex);
         return;
     }
 
     if (!controller) {
         xSemaphoreGive(stateMutex);
+        xSemaphoreGive(notesMutex);
         return;
     }
 
     // Use thread-safe method to check process type and utility status
     if (controller->getProcessType() == MODE_BREW && controller->isBrewProcessUtility()) {
         xSemaphoreGive(stateMutex);
+        xSemaphoreGive(notesMutex);
         return;
     }
     currentId = padId((uint32_t)getTime());
@@ -758,6 +795,7 @@ void ShotHistoryPlugin::startRecording() {
     currentGrindTargetDuration = controller->getSettings().getTargetGrindDuration();
 
     xSemaphoreGive(stateMutex);
+    xSemaphoreGive(notesMutex);
 }
 
 unsigned long ShotHistoryPlugin::getTime() {
@@ -767,9 +805,16 @@ unsigned long ShotHistoryPlugin::getTime() {
 }
 
 void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
+    // See startRecording(): identity transitions serialize with active-shot fills
+    // through notesMutex, while stateMutex remains free of filesystem I/O.
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire notes mutex for endRecording");
+        return;
+    }
     // Acquire mutex to protect shared state
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endRecording");
+        xSemaphoreGive(notesMutex);
         return;
     }
 
@@ -806,6 +851,7 @@ void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
     recording = false;
 
     xSemaphoreGive(stateMutex);
+    xSemaphoreGive(notesMutex);
 }
 
 void ShotHistoryPlugin::endExtendedRecording() {
@@ -1039,37 +1085,50 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
         response["notes"] = notes;
     } else if (type == "req:history:notes:fill-missing") {
         auto id = request["id"].as<String>();
-        // `currentId` and the recording flag change together under stateMutex.
-        // Hold that lock through the conditional write so a stale Dashboard
-        // request can neither attach to the next shot nor race end/start.
-        if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
-            response["error"] = "Active shot unavailable";
-        } else if (!recording.load(std::memory_order_relaxed) || currentId != id) {
-            response["saved"] = false;
-            xSemaphoreGive(stateMutex);
+        // Notes I/O is serialized independently from the recording state. start/end
+        // take notesMutex before stateMutex, so this lock keeps currentId stable
+        // through the read/conditional-write without holding stateMutex for storage.
+        if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+            response["error"] = "Notes unavailable";
         } else {
-            JsonDocument existingNotes;
-            loadNotes(id, existingNotes);
-            const String existingGrindSetting = existingNotes["grindSetting"] | "";
             const String requestedGrindSetting = request["notes"]["grindSetting"] | "";
-            if (existingGrindSetting.length() > 0 || requestedGrindSetting.length() == 0) {
+            bool active = false;
+            if (stateMutex != nullptr && xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+                active = recording.load(std::memory_order_relaxed) && currentId == id;
+                xSemaphoreGive(stateMutex);
+            }
+
+            if (!active || requestedGrindSetting.length() == 0) {
                 response["saved"] = false;
             } else {
-                existingNotes["grindSetting"] = requestedGrindSetting;
-                if (!saveNotes(id, existingNotes)) {
-                    response["error"] = "Save failed";
+                JsonDocument existingNotes;
+                loadNotes(id, existingNotes);
+                if (shot_notes::hasValue(existingNotes["grindSetting"])) {
+                    response["saved"] = false;
                 } else {
-                    response["saved"] = true;
+                    existingNotes["grindSetting"] = requestedGrindSetting;
+                    if (!saveNotes(id, existingNotes)) {
+                        response["error"] = "Save failed";
+                    } else {
+                        response["saved"] = true;
+                    }
                 }
             }
-            xSemaphoreGive(stateMutex);
+            xSemaphoreGive(notesMutex);
         }
     } else if (type == "req:history:notes:save") {
         auto id = request["id"].as<String>();
+        if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+            response["error"] = "Notes unavailable";
+            return;
+        }
         JsonDocument notes; // explicit document: variant->const JsonDocument& is ambiguous on clang
         notes.set(request["notes"]);
         JsonDocument previousNotes;
         loadNotes(id, previousNotes);
+        // A normal editor save can be based on a stale GET. Preserve a Dashboard
+        // fill that landed after that read unless this payload explicitly edits it.
+        shot_notes::preservePersistedGrindSetting(notes, previousNotes);
         const bool notesSaved = saveNotes(id, notes);
         bool beanUsageSaved = false;
         if (!notesSaved) {
@@ -1100,6 +1159,7 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
 
             response["msg"] = "Ok";
         }
+        xSemaphoreGive(notesMutex);
     } else if (type == "req:history:rebuild") {
         // Rebuild is now handled asynchronously by WebUIPlugin
         // This path shouldn't be reached, but handle it just in case
