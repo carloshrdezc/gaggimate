@@ -437,6 +437,21 @@ describe('grinderManager', () => {
       expect(inferGrindSettingForShot(shot)).toBe('3.2');
     });
 
+    it('uses the current Dashboard manual setting over the grinder-selection fallback', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
+
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(shot.notes?.grindTarget).toBeUndefined();
+      expect(inferGrindSettingForShot(shot)).toBe('28s');
+
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '3.2');
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
     it('never clobbers a saved note or an explicit shot value', () => {
       recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
       localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '4.1');
