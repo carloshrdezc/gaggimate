@@ -4,11 +4,11 @@
 #include "../../core/constants.h"
 #include <cstdint>
 
-// PRO-539: physical restart is intentionally fail-closed. `activeSafe` must be
-// Controller::isActiveSafe(), whose mutex-timeout result is true (assume active).
-constexpr bool shouldRestartDisplay(bool activeSafe, bool updating, bool autotuning, bool errorState, uint8_t mode,
+// PRO-539: physical restart is intentionally fail-closed. `processActive` is
+// read by Controller under processMutex; a mutex timeout denies restart.
+constexpr bool shouldRestartDisplay(bool processActive, bool updating, bool autotuning, bool errorState, uint8_t mode,
                                     bool grindActive) {
-    return !activeSafe && !updating && !autotuning && !errorState && mode != MODE_WATER && mode != MODE_GRIND && !grindActive;
+    return !processActive && !updating && !autotuning && !errorState && mode != MODE_WATER && mode != MODE_GRIND && !grindActive;
 }
 
 static_assert(shouldRestartDisplay(false, false, false, false, MODE_BREW, false), "PRO-539: idle brew mode may restart");

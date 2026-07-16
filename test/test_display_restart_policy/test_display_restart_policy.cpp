@@ -2,8 +2,9 @@
 #include <unity.h>
 
 // PRO-539: the physical display restart action is deliberately fail-closed.
-// `activeSafe` is Controller::isActiveSafe(), which reports true when the
-// process mutex times out, so a timeout is treated as an active process.
+// Controller evaluates this policy while holding processMutex. It keeps that
+// mutex until ESP.restart(), so a physical-button activation either wins first
+// (and is observed as active here) or blocks in startProcess until reset begins.
 static_assert(shouldRestartDisplay(false, false, false, false, MODE_BREW, false), "idle brew mode may restart");
 static_assert(!shouldRestartDisplay(true, false, false, false, MODE_BREW, false), "active process blocks restart");
 static_assert(!shouldRestartDisplay(false, true, false, false, MODE_BREW, false), "firmware update blocks restart");
@@ -19,6 +20,10 @@ void tearDown(void) {}
 void test_allows_idle_brew_mode(void) { TEST_ASSERT_TRUE(shouldRestartDisplay(false, false, false, false, MODE_BREW, false)); }
 
 void test_blocks_an_active_process_including_mutex_timeout(void) {
+    TEST_ASSERT_FALSE(shouldRestartDisplay(true, false, false, false, MODE_BREW, false));
+}
+
+void test_blocks_a_process_that_activates_before_restart_authorization(void) {
     TEST_ASSERT_FALSE(shouldRestartDisplay(true, false, false, false, MODE_BREW, false));
 }
 
@@ -38,6 +43,7 @@ static int runDisplayRestartPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_allows_idle_brew_mode);
     RUN_TEST(test_blocks_an_active_process_including_mutex_timeout);
+    RUN_TEST(test_blocks_a_process_that_activates_before_restart_authorization);
     RUN_TEST(test_blocks_update_autotune_and_error_states);
     RUN_TEST(test_blocks_water_and_grind_modes_and_an_active_grinder);
     return UNITY_END();

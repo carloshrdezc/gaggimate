@@ -51,8 +51,7 @@ void onMenuSteamTempRaise(lv_event_t *e);
 // CAR-358: C-callable getters for immediate Quick-settings label refresh.
 int gmGetWaterTempSetting(void);
 int gmGetSteamTempSetting(void);
-// PRO-539: rechecked immediately before ESP.restart() so confirmation cannot
-// bypass the conservative safety policy if controller state changes.
+// PRO-539: Controller owns synchronized authorization and restart handoff.
 bool gmCanRestartDisplay(void);
 void onRestartDisplayConfirm(lv_event_t *e);
 void onStatusScreenLoad(lv_event_t *e);

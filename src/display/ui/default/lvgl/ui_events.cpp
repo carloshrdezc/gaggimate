@@ -5,7 +5,6 @@
 
 #include "../../../main.h"
 #include "../../../plugins/BLEScalePlugin.h"
-#include "../DisplayRestartPolicy.h"
 #include "ui.h"
 #include <Arduino.h>
 
@@ -87,16 +86,12 @@ int gmGetWaterTempSetting(void) { return controller.getSettings().getTargetWater
 int gmGetSteamTempSetting(void) { return controller.getSettings().getTargetSteamTemp(); }
 
 bool gmCanRestartDisplay(void) {
-    return shouldRestartDisplay(controller.isActiveSafe(), controller.isUpdating(), controller.isAutotuning(),
-                                controller.isErrorState(), controller.getMode(), controller.isGrindActive());
+    return controller.canRestartDisplay();
 }
 
 void onRestartDisplayConfirm(lv_event_t *e) {
     (void)e;
-    // isActiveSafe() fails closed on a mutex timeout, so a process that cannot
-    // be inspected is treated as active and the restart is blocked.
-    if (gmCanRestartDisplay())
-        ESP.restart();
+    controller.restartDisplayIfSafe();
 }
 
 void onBrewScreen(lv_event_t *e) {

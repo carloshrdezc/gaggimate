@@ -30,6 +30,7 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#include <display/ui/default/DisplayRestartPolicy.h>
 #if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
 #endif
@@ -623,6 +624,40 @@ void Controller::startProcess(Process *process) {
 
     pluginManager->trigger(EventIds::CONTROLLER_PROCESS_START);
     updateLastAction();
+}
+
+bool Controller::canRestartDisplay() const {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in canRestartDisplay - denying restart");
+        return false;
+    }
+
+    const bool processActive = currentProcess != nullptr && currentProcess->isActive();
+    const bool grindActive = processActive && currentProcess->getType() == MODE_GRIND;
+    const bool allowed = shouldRestartDisplay(processActive, isUpdating(), isAutotuning(), isErrorState(), mode, grindActive);
+
+    xSemaphoreGive(processMutex);
+    return allowed;
+}
+
+bool Controller::restartDisplayIfSafe() {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in restartDisplayIfSafe - denying restart");
+        return false;
+    }
+
+    const bool processActive = currentProcess != nullptr && currentProcess->isActive();
+    const bool grindActive = processActive && currentProcess->getType() == MODE_GRIND;
+    if (!shouldRestartDisplay(processActive, isUpdating(), isAutotuning(), isErrorState(), mode, grindActive)) {
+        xSemaphoreGive(processMutex);
+        return false;
+    }
+
+    // startProcess() uses this mutex before assigning currentProcess. Retain it
+    // through the non-returning reset handoff so a concurrent activation cannot
+    // begin after authorization and before ESP.restart().
+    ESP.restart();
+    return true;
 }
 
 float Controller::getTargetTemp() const {
