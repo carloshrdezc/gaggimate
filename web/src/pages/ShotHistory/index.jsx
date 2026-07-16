@@ -337,19 +337,22 @@ export function ShotHistory() {
     [apiService, loadHistory],
   );
 
-  const onNotesChanged = useCallback((id, notes, source) => {
-    setHistory(prev =>
-      prev.map(shot =>
-        shot.id === id && shot.source === source
-          ? {
-              ...shot,
-              notes,
-              rating: notes.rating ?? 0,
-            }
-          : shot,
-      ),
-    );
-  }, []);
+  const onNotesChanged = useCallback(
+    (id, notes, source) => {
+      setHistory(prev =>
+        prev.map(shot =>
+          shot.id === id && shot.source === source
+            ? enrichShotWithBean({
+                ...shot,
+                notes,
+                rating: notes.rating ?? 0,
+              })
+            : shot,
+        ),
+      );
+    },
+    [enrichShotWithBean],
+  );
 
   const handleExportAll = useCallback(async () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -514,13 +517,25 @@ export function ShotHistory() {
           const next = prev.map(shot => {
             const hydrated = hydratedByKey.get(getHistoryKey(shot));
             if (!hydrated) return shot;
-            if (hydrated.notes === shot.notes && hydrated.rating === shot.rating) return shot;
-            changed = true;
-            return {
+            const enriched = enrichShotWithBean({
               ...shot,
               notes: hydrated.notes,
               rating: hydrated.rating,
-            };
+            });
+            if (
+              enriched.notes === shot.notes &&
+              enriched.rating === shot.rating &&
+              enriched.beanName === shot.beanName &&
+              enriched.beanId === shot.beanId &&
+              enriched.beanRecorded === shot.beanRecorded &&
+              enriched.grinder === shot.grinder &&
+              enriched.grindSetting === shot.grindSetting &&
+              enriched.grinderRecorded === shot.grinderRecorded
+            ) {
+              return shot;
+            }
+            changed = true;
+            return enriched;
           });
           return changed ? next : prev;
         });
@@ -528,7 +543,7 @@ export function ShotHistory() {
       .catch(error => {
         console.error('Failed to hydrate shot notes:', error);
       });
-  }, [paginatedHistory]);
+  }, [paginatedHistory, enrichShotWithBean]);
 
   // Dropdown options derived from the loaded history + bean library (PRO-31).
   const profileOptions = useMemo(() => availableProfiles(history), [history]);

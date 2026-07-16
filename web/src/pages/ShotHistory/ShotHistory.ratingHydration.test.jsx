@@ -35,16 +35,17 @@ vi.mock('../ShotAnalyzer/services/NotesService.js', () => ({
 }));
 
 vi.mock('../../utils/beanManager.js', () => ({
-  inferBeanForShot: shot => shot.beanName || '',
-  inferBeanIdForShot: shot => shot.beanId || '',
-  isBeanRecordedForShot: shot => Boolean(shot.beanRecorded),
+  inferBeanForShot: shot => shot.beanName || shot.notes?.beanType || '',
+  inferBeanIdForShot: shot => shot.beanId || shot.notes?.beanId || '',
+  isBeanRecordedForShot: shot =>
+    Boolean(shot.beanRecorded || shot.notes?.beanType || shot.notes?.beanId),
   listBeans: vi.fn(async () => []),
 }));
 
 vi.mock('../../utils/grinderManager.js', () => ({
-  inferGrinderForShot: shot => shot.grinder || '',
-  inferGrindSettingForShot: shot => shot.grindSetting || '',
-  isGrinderRecordedForShot: shot => Boolean(shot.grinderRecorded),
+  inferGrinderForShot: shot => shot.notes?.grinderName || shot.grinder || '',
+  inferGrindSettingForShot: shot => shot.grindSetting || shot.notes?.grindSetting || '',
+  isGrinderRecordedForShot: shot => Boolean(shot.grinderRecorded || shot.notes?.grinderName),
 }));
 
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
@@ -147,5 +148,44 @@ describe('ShotHistory visible-page rating hydration', () => {
       expect(screen.getByText('Unrated')).toBeTruthy();
       expect(screen.queryByText('7.1/10')).toBeNull();
     });
+  });
+
+  test('refreshes collapsed footer bean and grinder chips from hydrated notes', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'metadata-browser-row',
+        storageKey: 'browser-key',
+        source: 'browser',
+        profile: 'Browser archive shot',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 0,
+        notes: { rating: 0, notes: 'stale embedded notes' },
+      },
+    ]);
+    const persistedNotes = {
+      id: 'browser-key',
+      rating: 0,
+      beanType: 'Hydrated Bean',
+      grinderName: 'Hydrated Grinder',
+      notes: '',
+    };
+    Object.defineProperty(persistedNotes, '__shotHistoryPersistedNotes', {
+      value: true,
+      enumerable: false,
+    });
+    notesService.loadNotes.mockResolvedValue(persistedNotes);
+
+    renderShotHistory();
+
+    await screen.findByText(/1 \/ 1 shots/);
+    expect(screen.queryByLabelText('Bean: Hydrated Bean')).toBeNull();
+    expect(screen.queryByLabelText('Grinder: Hydrated Grinder')).toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Bean: Hydrated Bean')).toBeTruthy();
+      expect(screen.getByLabelText('Grinder: Hydrated Grinder')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('shot-notes-card')).toBeNull();
   });
 });
