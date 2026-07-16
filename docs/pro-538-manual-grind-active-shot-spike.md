@@ -48,16 +48,34 @@ meet the required "never overwrite" rule.
 
 Add an atomic conditional operation to the device protocol, for example
 `req:history:notes:save` with an explicit `setIfEmpty: ["grindSetting"]`
-contract (or a dedicated conditional set request). The firmware must load the
-current notes and, in the same request handler, retain a non-empty current
-`grindSetting`; only then may it merge the Dashboard value and write the file.
-The response should state whether the field was attached, already present, or
-no active shot matched.
+contract (or a dedicated conditional set request). In one firmware request
+handler, before loading or changing the requested shot's notes, it must
+atomically validate all of these conditions:
+
+1. `ShotHistory.isRecording()` is true;
+2. `ShotHistory.getCurrentShotId()` is non-empty;
+3. that current recording ID equals the request shot ID; and
+4. the active-process predicate holds for the current device process.
+
+If any condition fails, the response is `no-active-shot` and it must not read
+or write historical notes. This includes the stale Dashboard-observed
+`process.a`/`process.id` case: a shot can complete after the Dashboard snapshot
+but before the request reaches firmware, so its previously observed ID must not
+be filled after recording ends.
+
+Only after the handler has atomically validated that active-shot predicate may
+it load the current notes. It must retain a non-empty current
+`notes.grindSetting`; only when that field is empty may it write the supplied
+value. This keeps the existing conservative never-overwrite policy even when an
+explicit Shot Notes save races the conditional attach. The response should state
+whether the field was attached, already present, or `no-active-shot`.
 
 With that contract, the web hook can expose an active-shot manual-grind commit
 callback. It should call the conditional operation only for `process.a` and a
-non-empty positive manual setting. It must leave
-`recordManualGrindSetting()` and `inferGrindSettingForShot()` unchanged.
+non-empty positive manual setting. That browser-side observation is advisory;
+the device's atomic current-recording/id/process validation is authoritative. It
+must leave `recordManualGrindSetting()` and `inferGrindSettingForShot()`
+unchanged.
 
 ## Test plan for the follow-up
 
