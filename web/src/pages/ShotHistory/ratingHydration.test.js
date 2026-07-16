@@ -84,6 +84,30 @@ describe('hydrateShotRatingsFromNotes', () => {
     expect(hydrated.notes).toBe(persistedNotes);
   });
 
+  test('hydrates duplicate imported browser ids by their notes persistence key', async () => {
+    const notesService = {
+      loadNotes: vi.fn(async id => ({
+        id,
+        rating: id === 'browser-key-a' ? 4.1 : 8.2,
+        beanType: id === 'browser-key-a' ? 'Bean A' : 'Bean B',
+        notes: '',
+      })),
+    };
+
+    const hydrated = await hydrateShotRatingsFromNotes(
+      [
+        { id: 'shared-import-id', source: 'browser', storageKey: 'browser-key-a', rating: 0 },
+        { id: 'shared-import-id', source: 'browser', storageKey: 'browser-key-b', rating: 0 },
+      ],
+      notesService,
+    );
+
+    expect(notesService.loadNotes).toHaveBeenCalledWith('browser-key-a', 'browser');
+    expect(notesService.loadNotes).toHaveBeenCalledWith('browser-key-b', 'browser');
+    expect(hydrated.map(shot => shot.rating)).toEqual([4.1, 8.2]);
+    expect(hydrated.map(shot => shot.notes.beanType)).toEqual(['Bean A', 'Bean B']);
+  });
+
   test('keeps embedded browser notes when the notes store has no saved values', async () => {
     const embeddedNotes = { rating: 7.1, notes: 'archive notes only' };
     const notesService = {

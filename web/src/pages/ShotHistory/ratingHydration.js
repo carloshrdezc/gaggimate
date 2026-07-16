@@ -102,7 +102,10 @@ export async function hydrateShotRatingsFromNotes(
   const pending = visibleShots.filter(shot => {
     if (!shot) return false;
     if (!shouldLoadPersistedNotes(shot)) {
-      hydrated.set(`${shot.source || 'gaggimate'}:${shot.id}`, applyNotesRating(shot, shot.notes));
+      hydrated.set(
+        `${shot.source || 'gaggimate'}:${getShotNotesKey(shot)}`,
+        applyNotesRating(shot, shot.notes),
+      );
       return false;
     }
     return true;
@@ -117,10 +120,12 @@ export async function hydrateShotRatingsFromNotes(
         const source = shot.source || 'gaggimate';
         const key = getShotNotesKey(shot);
         const notes = chooseLoadedNotes(shot, await service.loadNotes(key, source), service);
-        hydrated.set(`${source}:${shot.id}`, applyNotesRating(shot, notes));
+        hydrated.set(`${source}:${key}`, applyNotesRating(shot, notes));
       }
     }),
   );
 
-  return visibleShots.map(shot => hydrated.get(`${shot.source || 'gaggimate'}:${shot.id}`) || shot);
+  return visibleShots.map(
+    shot => hydrated.get(`${shot.source || 'gaggimate'}:${getShotNotesKey(shot)}`) || shot,
+  );
 }

@@ -62,12 +62,78 @@ import {
   filtersFromQuery,
   mergeFiltersIntoSearch,
 } from './shotFilters.js';
-import { hydrateShotRatingsFromNotes } from './ratingHydration.js';
+import { hydrateShotRatingsFromNotes, getShotNotesKey } from './ratingHydration.js';
 
 const connected = computed(() => machine.value.connected);
 
 function getHistoryKey(shot) {
-  return `${shot.source || 'gaggimate'}:${shot.id}`;
+  const source = shot.source || 'gaggimate';
+  return `${source}:${source === 'browser' ? getShotNotesKey(shot) : shot.id}`;
+}
+
+const PERSISTED_CLEAR_FIELDS = [
+  'beanId',
+  'beanType',
+  'grinderName',
+  'grinder',
+  'grindSetting',
+];
+const PERSISTED_NOTES_FOUND = '__shotHistoryNotesStoreFound';
+const NOTES_SERVICE_PERSISTED = '__shotHistoryPersistedNotes';
+
+function notesAreStoreBacked(notes) {
+  return Boolean(notes?.[PERSISTED_NOTES_FOUND] || notes?.[NOTES_SERVICE_PERSISTED]);
+}
+
+function markNotesStoreBacked(notes) {
+  if (!notes || typeof notes !== 'object') return notes;
+
+  try {
+    Object.defineProperty(notes, PERSISTED_NOTES_FOUND, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen notes objects remain usable; they just cannot carry the marker.
+  }
+
+  return notes;
+}
+
+function notesExplicitlyClearAny(notes, fields) {
+  return Boolean(
+    notesAreStoreBacked(notes) &&
+      fields.some(
+        field => Object.prototype.hasOwnProperty.call(notes, field) && notes[field] === '',
+      ),
+  );
+}
+
+function notesExplicitlyClearMetadata(notes) {
+  return notesExplicitlyClearAny(notes, PERSISTED_CLEAR_FIELDS);
+}
+
+function notesClearBean(notes) {
+  const hasBeanValue = Boolean(notes?.beanId || notes?.beanType);
+  return !hasBeanValue && notesExplicitlyClearAny(notes, ['beanId', 'beanType']);
+}
+
+function notesFieldIsBlank(notes, field) {
+  return Boolean(
+    notesAreStoreBacked(notes) &&
+      Object.prototype.hasOwnProperty.call(notes, field) &&
+      notes[field] === '',
+  );
+}
+
+function notesClearGrinder(notes) {
+  const hasGrinderValue = Boolean(notes?.grinderName || notes?.grinder);
+  return !hasGrinderValue && notesExplicitlyClearAny(notes, ['grinderName', 'grinder']);
+}
+
+function notesClearGrindSetting(notes) {
+  return notesFieldIsBlank(notes, 'grindSetting');
 }
 
 function normalizeBrowserShot(shot) {
@@ -75,6 +141,29 @@ function normalizeBrowserShot(shot) {
     ...shot,
     source: 'browser',
     loaded: Array.isArray(shot.samples) && shot.samples.length > 0,
+  };
+}
+
+function shotWithFreshNotes(shot, notes, rating, { storeBacked = true } = {}) {
+  const rawShot = { ...shot };
+  const freshNotes = storeBacked ? markNotesStoreBacked(notes) : notes;
+  if (storeBacked) {
+    delete rawShot.beanName;
+    delete rawShot.beanId;
+    delete rawShot.beanRecorded;
+    delete rawShot.beanArchived;
+    delete rawShot.grinder;
+    delete rawShot.grindSetting;
+    delete rawShot.grinderRecorded;
+  }
+  if (notesExplicitlyClearMetadata(freshNotes)) {
+    delete rawShot.beanType;
+    delete rawShot.grinderName;
+  }
+  return {
+    ...rawShot,
+    notes: freshNotes,
+    rating,
   };
 }
 
@@ -144,20 +233,26 @@ export function ShotHistory() {
   }, [apiService, connected.value]);
 
   const enrichShotWithBean = useCallback(
-    shot => ({
-      ...shot,
-      beanName: inferBeanForShot(shot),
-      beanId: inferBeanIdForShot(shot),
-      beanRecorded: isBeanRecordedForShot(shot),
-      // PRO-434 (ref PRO-430 / PR #429): reserved for symmetry with `beanRecorded`.
-      // No current consumer — unlike beans, grinders have no archived lifecycle,
-      // so there is no `grinderArchived` feature to gate. Seeds a future one.
-      grinderRecorded: isGrinderRecordedForShot(shot),
-      // PRO-425: pre-fill defaults for Shot Notes' grinder / grindSetting from
-      // the dashboard grinder-selection log. Editable — not authoritative.
-      grinder: inferGrinderForShot(shot),
-      grindSetting: inferGrindSettingForShot(shot),
-    }),
+    shot => {
+      const beanCleared = notesClearBean(shot.notes);
+      const grinderCleared = notesClearGrinder(shot.notes);
+      const grindSettingCleared = notesClearGrindSetting(shot.notes);
+
+      return {
+        ...shot,
+        beanName: beanCleared ? '' : inferBeanForShot(shot),
+        beanId: beanCleared ? '' : inferBeanIdForShot(shot),
+        beanRecorded: beanCleared ? false : isBeanRecordedForShot(shot),
+        // PRO-434 (ref PRO-430 / PR #429): reserved for symmetry with `beanRecorded`.
+        // No current consumer — unlike beans, grinders have no archived lifecycle,
+        // so there is no `grinderArchived` feature to gate. Seeds a future one.
+        grinderRecorded: grinderCleared ? false : isGrinderRecordedForShot(shot),
+        // PRO-425: pre-fill defaults for Shot Notes' grinder / grindSetting from
+        // the dashboard grinder-selection log. Editable — not authoritative.
+        grinder: grinderCleared ? '' : inferGrinderForShot(shot),
+        grindSetting: grindSettingCleared ? '' : inferGrindSettingForShot(shot),
+      };
+    },
     [],
   );
 
@@ -337,19 +432,19 @@ export function ShotHistory() {
     [apiService, loadHistory],
   );
 
-  const onNotesChanged = useCallback((id, notes, source) => {
-    setHistory(prev =>
-      prev.map(shot =>
-        shot.id === id && shot.source === source
-          ? {
-              ...shot,
-              notes,
-              rating: notes.rating ?? 0,
-            }
-          : shot,
-      ),
-    );
-  }, []);
+  const onNotesChanged = useCallback(
+    (changedShot, notes) => {
+      const changedKey = getHistoryKey(changedShot);
+      setHistory(prev =>
+        prev.map(shot =>
+          getHistoryKey(shot) === changedKey
+            ? enrichShotWithBean(shotWithFreshNotes(shot, notes, notes.rating ?? 0))
+            : shot,
+        ),
+      );
+    },
+    [enrichShotWithBean],
+  );
 
   const handleExportAll = useCallback(async () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -514,13 +609,25 @@ export function ShotHistory() {
           const next = prev.map(shot => {
             const hydrated = hydratedByKey.get(getHistoryKey(shot));
             if (!hydrated) return shot;
-            if (hydrated.notes === shot.notes && hydrated.rating === shot.rating) return shot;
+            const enriched = enrichShotWithBean(
+              shotWithFreshNotes(shot, hydrated.notes, hydrated.rating, {
+                storeBacked: notesAreStoreBacked(hydrated.notes),
+              }),
+            );
+            if (
+              enriched.notes === shot.notes &&
+              enriched.rating === shot.rating &&
+              enriched.beanName === shot.beanName &&
+              enriched.beanId === shot.beanId &&
+              enriched.beanRecorded === shot.beanRecorded &&
+              enriched.grinder === shot.grinder &&
+              enriched.grindSetting === shot.grindSetting &&
+              enriched.grinderRecorded === shot.grinderRecorded
+            ) {
+              return shot;
+            }
             changed = true;
-            return {
-              ...shot,
-              notes: hydrated.notes,
-              rating: hydrated.rating,
-            };
+            return enriched;
           });
           return changed ? next : prev;
         });
@@ -528,7 +635,7 @@ export function ShotHistory() {
       .catch(error => {
         console.error('Failed to hydrate shot notes:', error);
       });
-  }, [paginatedHistory]);
+  }, [paginatedHistory, enrichShotWithBean]);
 
   // Dropdown options derived from the loaded history + bean library (PRO-31).
   const profileOptions = useMemo(() => availableProfiles(history), [history]);
