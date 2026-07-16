@@ -7,6 +7,7 @@ import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { useProcessActions } from '../../hooks/useProcessActions.js';
 import { useProfileData } from '../../hooks/useProfileData.js';
 import { useAutoSteam } from '../../hooks/useAutoSteam.js';
+import { useActiveShotManualGrindRecorder } from '../../hooks/useActiveShotManualGrindRecorder.js';
 import { useShotDoseRecorder } from '../../hooks/useShotDoseRecorder.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
 import { listBeans, recordBeanSelection, parseQuantity } from '../../utils/beanManager.js';
@@ -1418,6 +1419,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const [manualGrind, setManualGrindState] = useState(() => {
     try { return parseQuantity(localStorage.getItem(MANUAL_GRIND_SETTING_STORAGE_KEY)) ?? DEFAULT_MANUAL_GRIND; } catch { return DEFAULT_MANUAL_GRIND; }
   });
+  const recordActiveShotManualGrind = useActiveShotManualGrindRecorder(api);
   const setManualGrind = useCallback(val => {
     // Permissive range: grinder dials vary enormously (0–10 with decimals on a
     // Niche, 0–40+ clicks on a DF64, arbitrary worm-drive numbers), so clamp
@@ -1435,8 +1437,9 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
         profileLabel: st.selectedProfile,
         grindSetting: String(v),
       });
+      recordActiveShotManualGrind(String(v));
     }
-  }, []);
+  }, [recordActiveShotManualGrind]);
 
   // Auto-attach dose and bean to shot notes as soon as the shot becomes active
   useShotDoseRecorder(api, dose);

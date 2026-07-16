@@ -104,6 +104,24 @@ class NotesService {
     return defaults;
   }
 
+  async saveNotesIfMissing(shotId, source, notes, shouldSave = () => true) {
+    if (source !== 'gaggimate') {
+      if (shouldSave()) await this.saveNotes(shotId, source, notes);
+      return;
+    }
+    if (!this.apiService) throw new Error('ApiService not available');
+
+    if (!shouldSave()) return;
+
+    // The device evaluates the missing-field condition and saves in one request,
+    // so concurrent Dashboard / Shot History clients cannot clobber each other.
+    await this.apiService.request({
+      tp: 'req:history:notes:fill-missing',
+      id: shotId,
+      notes: { ...notes, id: String(shotId) },
+    });
+  }
+
   async saveNotes(shotId, source, notes) {
     // Ensure the notes object always has the shot ID
     const notesWithId = { ...notes, id: String(shotId) };

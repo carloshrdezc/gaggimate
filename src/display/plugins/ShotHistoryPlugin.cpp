@@ -1037,6 +1037,33 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
         JsonDocument notes;
         loadNotes(id, notes);
         response["notes"] = notes;
+    } else if (type == "req:history:notes:fill-missing") {
+        auto id = request["id"].as<String>();
+        // `currentId` and the recording flag change together under stateMutex.
+        // Hold that lock through the conditional write so a stale Dashboard
+        // request can neither attach to the next shot nor race end/start.
+        if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            response["error"] = "Active shot unavailable";
+        } else if (!recording.load(std::memory_order_relaxed) || currentId != id) {
+            response["saved"] = false;
+            xSemaphoreGive(stateMutex);
+        } else {
+            JsonDocument existingNotes;
+            loadNotes(id, existingNotes);
+            const String existingGrindSetting = existingNotes["grindSetting"] | "";
+            const String requestedGrindSetting = request["notes"]["grindSetting"] | "";
+            if (existingGrindSetting.length() > 0 || requestedGrindSetting.length() == 0) {
+                response["saved"] = false;
+            } else {
+                existingNotes["grindSetting"] = requestedGrindSetting;
+                if (!saveNotes(id, existingNotes)) {
+                    response["error"] = "Save failed";
+                } else {
+                    response["saved"] = true;
+                }
+            }
+            xSemaphoreGive(stateMutex);
+        }
     } else if (type == "req:history:notes:save") {
         auto id = request["id"].as<String>();
         JsonDocument notes; // explicit document: variant->const JsonDocument& is ambiguous on clang
