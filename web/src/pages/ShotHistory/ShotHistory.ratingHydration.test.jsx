@@ -99,4 +99,53 @@ describe('ShotHistory visible-page rating hydration', () => {
       expect(screen.getByText('8.4/10')).toBeTruthy();
     });
   });
+
+  test('honors persisted cleared browser notes over stale embedded notes for list state', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'cleared-browser-row',
+        storageKey: 'browser-key',
+        source: 'browser',
+        profile: 'Browser archive shot',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 7.1,
+        notes: { rating: 7.1, notes: 'stale embedded notes' },
+      },
+    ]);
+    const persistedNotes = {
+      id: 'browser-key',
+      rating: 0,
+      beanId: '',
+      beanType: '',
+      doseIn: '',
+      doseOut: '',
+      ratio: '',
+      grinder: '',
+      grindSetting: '',
+      balanceTaste: 'balanced',
+      notes: '',
+    };
+    Object.defineProperty(persistedNotes, '__shotHistoryPersistedNotes', {
+      value: true,
+      enumerable: false,
+    });
+    notesService.loadNotes.mockResolvedValue(persistedNotes);
+
+    renderShotHistory();
+
+    await screen.findByText(/1 \/ 1 shots/);
+    await waitFor(() => {
+      expect(notesService.loadNotes).toHaveBeenCalledWith('browser-key', 'browser');
+    });
+
+    fireEvent.change(screen.getByDisplayValue('All Shots'), {
+      target: { value: 'rated' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Unrated')).toBeTruthy();
+      expect(screen.queryByText('7.1/10')).toBeNull();
+    });
+  });
 });

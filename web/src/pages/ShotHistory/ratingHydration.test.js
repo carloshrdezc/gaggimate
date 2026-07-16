@@ -1,5 +1,13 @@
 import { describe, test, expect, vi } from 'vitest';
 
+vi.mock('../ShotAnalyzer/services/IndexedDBService.js', () => ({
+  indexedDBService: {
+    getNotes: vi.fn(),
+  },
+}));
+
+import { indexedDBService } from '../ShotAnalyzer/services/IndexedDBService.js';
+import { notesService as realNotesService } from '../ShotAnalyzer/services/NotesService.js';
 import { hydrateShotRatingsFromNotes } from './ratingHydration.js';
 
 describe('hydrateShotRatingsFromNotes', () => {
@@ -98,6 +106,45 @@ describe('hydrateShotRatingsFromNotes', () => {
     expect(notesService.loadNotes).toHaveBeenCalledWith('indexed-db-key', 'browser');
     expect(hydrated.rating).toBe(7.1);
     expect(hydrated.notes).toBe(embeddedNotes);
+  });
+
+  test('uses persisted browser notes even when they look like cleared defaults', async () => {
+    indexedDBService.getNotes.mockResolvedValueOnce({
+      id: 'indexed-db-key',
+      rating: 0,
+      beanId: '',
+      beanType: '',
+      doseIn: '',
+      doseOut: '',
+      ratio: '',
+      grinder: '',
+      grindSetting: '',
+      balanceTaste: 'balanced',
+      notes: '',
+    });
+
+    const [hydrated] = await hydrateShotRatingsFromNotes(
+      [
+        {
+          id: 'archive-row',
+          source: 'browser',
+          storageKey: 'indexed-db-key',
+          rating: 7.1,
+          notes: { rating: 7.1, notes: 'stale embedded archive value' },
+        },
+      ],
+      realNotesService,
+    );
+
+    expect(indexedDBService.getNotes).toHaveBeenCalledWith('indexed-db-key');
+    expect(hydrated.rating).toBe(0);
+    expect(hydrated.notes).toMatchObject({
+      id: 'indexed-db-key',
+      rating: 0,
+      notes: '',
+      balanceTaste: 'balanced',
+    });
+    expect(Object.keys(hydrated.notes)).not.toContain('__shotHistoryPersistedNotes');
   });
 
   test('preserves existing ratings when the notes store has no saved values', async () => {
