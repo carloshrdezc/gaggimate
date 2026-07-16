@@ -85,6 +85,15 @@ void onMenuSteamTempRaise(lv_event_t *e) {
 int gmGetWaterTempSetting(void) { return controller.getSettings().getTargetWaterTemp(); }
 int gmGetSteamTempSetting(void) { return controller.getSettings().getTargetSteamTemp(); }
 
+bool gmCanRestartDisplay(void) {
+    return controller.canRestartDisplay();
+}
+
+void onRestartDisplayConfirm(lv_event_t *e) {
+    (void)e;
+    controller.restartDisplayIfSafe();
+}
+
 void onBrewScreen(lv_event_t *e) {
     controller.getUI()->changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
     controller.deactivate();

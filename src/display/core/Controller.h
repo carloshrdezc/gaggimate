@@ -93,6 +93,8 @@ class Controller {
     virtual float getCurrentTemp() const { return currentTemp; }
     bool isActive() const;
     bool isActiveSafe() const;
+    bool canRestartDisplay() const;
+    bool restartDisplayIfSafe();
     bool isGrindActive() const;
     bool isGrindAvailable() const;
     bool isManualAvailable() const;
