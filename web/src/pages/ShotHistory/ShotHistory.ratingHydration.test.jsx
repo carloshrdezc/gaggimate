@@ -40,23 +40,36 @@ vi.mock('../ShotAnalyzer/services/NotesService.js', () => ({
 }));
 
 vi.mock('../../utils/beanManager.js', () => ({
-  inferBeanForShot: shot => shot.beanName || shot.notes?.beanType || '',
-  inferBeanIdForShot: shot => shot.beanId || shot.notes?.beanId || '',
-  isBeanRecordedForShot: shot =>
+  inferBeanForShot: vi.fn(shot => shot.beanName || shot.notes?.beanType || ''),
+  inferBeanIdForShot: vi.fn(shot => shot.beanId || shot.notes?.beanId || ''),
+  isBeanRecordedForShot: vi.fn(shot =>
     Boolean(shot.beanRecorded || shot.notes?.beanType || shot.notes?.beanId),
+  ),
   listBeans: vi.fn(async () => []),
 }));
 
 vi.mock('../../utils/grinderManager.js', () => ({
-  inferGrinderForShot: shot => shot.notes?.grinderName || shot.grinder || '',
-  inferGrindSettingForShot: shot => shot.grindSetting || shot.notes?.grindSetting || '',
-  isGrinderRecordedForShot: shot => Boolean(shot.grinderRecorded || shot.notes?.grinderName),
+  inferGrinderForShot: vi.fn(shot => shot.notes?.grinderName || shot.grinder || ''),
+  inferGrindSettingForShot: vi.fn(shot => shot.grindSetting || shot.notes?.grindSetting || ''),
+  isGrinderRecordedForShot: vi.fn(shot =>
+    Boolean(shot.grinderRecorded || shot.notes?.grinderName),
+  ),
 }));
 
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { indexedDBService } from '../ShotAnalyzer/services/IndexedDBService.js';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { ShotHistory } from './index.jsx';
+import {
+  inferBeanForShot,
+  inferBeanIdForShot,
+  isBeanRecordedForShot,
+} from '../../utils/beanManager.js';
+import {
+  inferGrinderForShot,
+  inferGrindSettingForShot,
+  isGrinderRecordedForShot,
+} from '../../utils/grinderManager.js';
 
 function renderShotHistory(apiService = {}) {
   return render(h(ApiServiceContext.Provider, { value: apiService }, h(ShotHistory, {})));
@@ -234,5 +247,165 @@ describe('ShotHistory visible-page rating hydration', () => {
       expect(screen.getByLabelText('Bean: New Bean')).toBeTruthy();
     });
     expect(screen.queryByLabelText('Bean: Old Bean')).toBeNull();
+  });
+
+  test('hydrates duplicate browser ids independently by storage key', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'shared-import-id',
+        storageKey: 'browser-key-a',
+        source: 'browser',
+        profile: 'Browser archive shot A',
+        timestamp: 2000,
+        duration: 25000,
+        rating: 0,
+      },
+      {
+        id: 'shared-import-id',
+        storageKey: 'browser-key-b',
+        source: 'browser',
+        profile: 'Browser archive shot B',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 0,
+      },
+    ]);
+    notesService.loadNotes.mockImplementation(async key => ({
+      id: key,
+      rating: 0,
+      beanType: key === 'browser-key-a' ? 'Bean A' : 'Bean B',
+      grinderName: key === 'browser-key-a' ? 'Grinder A' : 'Grinder B',
+      notes: '',
+    }));
+
+    renderShotHistory();
+
+    await screen.findByText(/2 \/ 2 shots/);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Bean: Bean A')).toBeTruthy();
+      expect(screen.getByLabelText('Grinder: Grinder A')).toBeTruthy();
+      expect(screen.getByLabelText('Bean: Bean B')).toBeTruthy();
+      expect(screen.getByLabelText('Grinder: Grinder B')).toBeTruthy();
+    });
+  });
+
+  test('updates only the edited duplicate browser-id row after notes save', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'shared-import-id',
+        storageKey: 'browser-key-a',
+        source: 'browser',
+        profile: 'Browser archive shot A',
+        timestamp: 2000,
+        duration: 25000,
+        rating: 0,
+        loaded: true,
+        samples: [{ t: 0 }],
+        notes: { rating: 0, beanType: 'Bean A', grinderName: 'Grinder A', notes: '' },
+      },
+      {
+        id: 'shared-import-id',
+        storageKey: 'browser-key-b',
+        source: 'browser',
+        profile: 'Browser archive shot B',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 0,
+        loaded: true,
+        samples: [{ t: 0 }],
+        notes: { rating: 0, beanType: 'Bean B', grinderName: 'Grinder B', notes: '' },
+      },
+    ]);
+    notesService.loadNotes.mockImplementation(async key => ({
+      id: key,
+      rating: 0,
+      beanType: key === 'browser-key-a' ? 'Bean A' : 'Bean B',
+      grinderName: key === 'browser-key-a' ? 'Grinder A' : 'Grinder B',
+      notes: '',
+    }));
+
+    renderShotHistory();
+
+    await screen.findByText(/2 \/ 2 shots/);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Bean: Bean A')).toBeTruthy();
+      expect(screen.getByLabelText('Bean: Bean B')).toBeTruthy();
+    });
+
+    const expandButtons = screen.getAllByLabelText('Expand shot details');
+    fireEvent.click(expandButtons[0]);
+    await screen.findByTestId('shot-notes-card');
+    shotNotesCardUpdate({
+      id: 'browser-key-a',
+      rating: 0,
+      beanType: 'Edited Bean A',
+      grinderName: 'Edited Grinder A',
+      notes: '',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Bean: Edited Bean A')).toBeTruthy();
+      expect(screen.getByLabelText('Grinder: Edited Grinder A')).toBeTruthy();
+    });
+    expect(screen.getByLabelText('Bean: Bean B')).toBeTruthy();
+    expect(screen.getByLabelText('Grinder: Grinder B')).toBeTruthy();
+    expect(screen.queryByLabelText('Bean: Edited Bean B')).toBeNull();
+  });
+
+  test('does not infer browser-local metadata fallbacks for explicitly blank persisted notes', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'cleared-browser-row',
+        storageKey: 'browser-key',
+        source: 'browser',
+        profile: 'Browser archive shot',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 0,
+        beanName: 'Fallback Bean',
+        beanId: 'fallback-bean-id',
+        grinder: 'Fallback Grinder',
+        grindSetting: '18',
+      },
+    ]);
+    const persistedNotes = {
+      id: 'browser-key',
+      rating: 0,
+      beanId: '',
+      beanType: '',
+      grinderName: '',
+      grinder: '',
+      grindSetting: '',
+      notes: '',
+    };
+    Object.defineProperty(persistedNotes, '__shotHistoryPersistedNotes', {
+      value: true,
+      enumerable: false,
+    });
+    notesService.loadNotes.mockResolvedValue(persistedNotes);
+
+    renderShotHistory();
+
+    await screen.findByText(/1 \/ 1 shots/);
+    expect(screen.getByLabelText('Bean: Fallback Bean')).toBeTruthy();
+    expect(screen.getByLabelText('Grinder: Fallback Grinder')).toBeTruthy();
+    inferBeanForShot.mockClear();
+    inferBeanIdForShot.mockClear();
+    isBeanRecordedForShot.mockClear();
+    inferGrinderForShot.mockClear();
+    inferGrindSettingForShot.mockClear();
+    isGrinderRecordedForShot.mockClear();
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Bean: Fallback Bean')).toBeNull();
+      expect(screen.queryByLabelText('Grinder: Fallback Grinder')).toBeNull();
+    });
+    expect(inferBeanForShot).not.toHaveBeenCalled();
+    expect(inferBeanIdForShot).not.toHaveBeenCalled();
+    expect(isBeanRecordedForShot).not.toHaveBeenCalled();
+    expect(inferGrinderForShot).not.toHaveBeenCalled();
+    expect(inferGrindSettingForShot).not.toHaveBeenCalled();
+    expect(isGrinderRecordedForShot).not.toHaveBeenCalled();
   });
 });

@@ -62,12 +62,54 @@ import {
   filtersFromQuery,
   mergeFiltersIntoSearch,
 } from './shotFilters.js';
-import { hydrateShotRatingsFromNotes } from './ratingHydration.js';
+import { hydrateShotRatingsFromNotes, getShotNotesKey } from './ratingHydration.js';
 
 const connected = computed(() => machine.value.connected);
 
 function getHistoryKey(shot) {
-  return `${shot.source || 'gaggimate'}:${shot.id}`;
+  const source = shot.source || 'gaggimate';
+  return `${source}:${source === 'browser' ? getShotNotesKey(shot) : shot.id}`;
+}
+
+const PERSISTED_CLEAR_FIELDS = [
+  'beanId',
+  'beanType',
+  'grinderName',
+  'grinder',
+  'grindSetting',
+];
+
+function notesExplicitlyClearAny(notes, fields) {
+  return Boolean(
+    notes &&
+      fields.some(
+        field => Object.prototype.hasOwnProperty.call(notes, field) && notes[field] === '',
+      ),
+  );
+}
+
+function notesExplicitlyClearMetadata(notes) {
+  return notesExplicitlyClearAny(notes, PERSISTED_CLEAR_FIELDS);
+}
+
+function notesClearBean(notes) {
+  const hasBeanValue = Boolean(notes?.beanId || notes?.beanType);
+  return !hasBeanValue && notesExplicitlyClearAny(notes, ['beanId', 'beanType']);
+}
+
+function notesFieldIsBlank(notes, field) {
+  return Boolean(
+    notes && Object.prototype.hasOwnProperty.call(notes, field) && notes[field] === '',
+  );
+}
+
+function notesClearGrinder(notes) {
+  const hasGrinderValue = Boolean(notes?.grinderName || notes?.grinder);
+  return !hasGrinderValue && notesExplicitlyClearAny(notes, ['grinderName', 'grinder']);
+}
+
+function notesClearGrindSetting(notes) {
+  return notesFieldIsBlank(notes, 'grindSetting');
 }
 
 function normalizeBrowserShot(shot) {
@@ -87,6 +129,10 @@ function shotWithFreshNotes(shot, notes, rating) {
   delete rawShot.grinder;
   delete rawShot.grindSetting;
   delete rawShot.grinderRecorded;
+  if (notesExplicitlyClearMetadata(notes)) {
+    delete rawShot.beanType;
+    delete rawShot.grinderName;
+  }
   return {
     ...rawShot,
     notes,
@@ -160,20 +206,26 @@ export function ShotHistory() {
   }, [apiService, connected.value]);
 
   const enrichShotWithBean = useCallback(
-    shot => ({
-      ...shot,
-      beanName: inferBeanForShot(shot),
-      beanId: inferBeanIdForShot(shot),
-      beanRecorded: isBeanRecordedForShot(shot),
-      // PRO-434 (ref PRO-430 / PR #429): reserved for symmetry with `beanRecorded`.
-      // No current consumer — unlike beans, grinders have no archived lifecycle,
-      // so there is no `grinderArchived` feature to gate. Seeds a future one.
-      grinderRecorded: isGrinderRecordedForShot(shot),
-      // PRO-425: pre-fill defaults for Shot Notes' grinder / grindSetting from
-      // the dashboard grinder-selection log. Editable — not authoritative.
-      grinder: inferGrinderForShot(shot),
-      grindSetting: inferGrindSettingForShot(shot),
-    }),
+    shot => {
+      const beanCleared = notesClearBean(shot.notes);
+      const grinderCleared = notesClearGrinder(shot.notes);
+      const grindSettingCleared = notesClearGrindSetting(shot.notes);
+
+      return {
+        ...shot,
+        beanName: beanCleared ? '' : inferBeanForShot(shot),
+        beanId: beanCleared ? '' : inferBeanIdForShot(shot),
+        beanRecorded: beanCleared ? false : isBeanRecordedForShot(shot),
+        // PRO-434 (ref PRO-430 / PR #429): reserved for symmetry with `beanRecorded`.
+        // No current consumer — unlike beans, grinders have no archived lifecycle,
+        // so there is no `grinderArchived` feature to gate. Seeds a future one.
+        grinderRecorded: grinderCleared ? false : isGrinderRecordedForShot(shot),
+        // PRO-425: pre-fill defaults for Shot Notes' grinder / grindSetting from
+        // the dashboard grinder-selection log. Editable — not authoritative.
+        grinder: grinderCleared ? '' : inferGrinderForShot(shot),
+        grindSetting: grindSettingCleared ? '' : inferGrindSettingForShot(shot),
+      };
+    },
     [],
   );
 
@@ -354,10 +406,11 @@ export function ShotHistory() {
   );
 
   const onNotesChanged = useCallback(
-    (id, notes, source) => {
+    (changedShot, notes) => {
+      const changedKey = getHistoryKey(changedShot);
       setHistory(prev =>
         prev.map(shot =>
-          shot.id === id && shot.source === source
+          getHistoryKey(shot) === changedKey
             ? enrichShotWithBean(shotWithFreshNotes(shot, notes, notes.rating ?? 0))
             : shot,
         ),

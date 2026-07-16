@@ -124,9 +124,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     notes => {
       setShotNotes(notes);
       // Notify parent that notes changed (so it can reload the index)
-      if (onNotesChanged) onNotesChanged(shot.id, notes, shot.source);
+      if (onNotesChanged) onNotesChanged(shot, notes);
     },
-    [onNotesChanged, shot.id, shot.source],
+    [onNotesChanged, shot],
   );
   const beanDisplay = shot.beanName
     ? `${shot.beanName}${shot.beanArchived ? ' (archived)' : ''}`
