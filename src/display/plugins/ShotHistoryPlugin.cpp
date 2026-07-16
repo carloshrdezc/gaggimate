@@ -313,6 +313,43 @@ bool ShotHistoryPlugin::openLogFileIfNeeded() {
     return true;
 }
 
+void ShotHistoryPlugin::adoptPendingActiveShotFill() {
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (pendingActiveShotFill.isEmpty()) {
+        xSemaphoreGive(notesMutex);
+        return;
+    }
+
+    const uint32_t requestedId = pendingActiveShotFillIdentity.id;
+    const String requestedShotId = padId(requestedId);
+    const shot_notes::ActiveShotIdentity current{shotGeneration.load(std::memory_order_acquire),
+                                                 activeShotId.load(std::memory_order_acquire)};
+    if (shot_notes::admitActiveFill(pendingActiveShotFillIdentity, current, requestedId,
+                                    fs->exists("/h/" + requestedShotId + ".slog")) != shot_notes::ActiveFillAdmission::Persist) {
+        pendingActiveShotFill = "";
+        pendingActiveShotFillIdentity = {0, 0};
+        xSemaphoreGive(notesMutex);
+        return;
+    }
+
+    JsonDocument notes;
+    loadNotes(requestedShotId, notes);
+    const shot_notes::ActiveShotIdentity beforeSave{shotGeneration.load(std::memory_order_acquire),
+                                                    activeShotId.load(std::memory_order_acquire)};
+    if (shot_notes::isActiveFillFor(pendingActiveShotFillIdentity, beforeSave, requestedId) &&
+        !shot_notes::hasValue(notes["grindSetting"])) {
+        notes["grindSetting"] = pendingActiveShotFill;
+        if (!saveNotes(requestedShotId, notes)) {
+            ESP_LOGW("ShotHistoryPlugin", "Failed to adopt pending active-shot grind setting");
+        }
+    }
+    pendingActiveShotFill = "";
+    pendingActiveShotFillIdentity = {0, 0};
+    xSemaphoreGive(notesMutex);
+}
+
 void ShotHistoryPlugin::initializeHeader() {
     memset(&header, 0, sizeof(header));
     header.magic = SHOT_LOG_MAGIC;
@@ -654,6 +691,7 @@ void ShotHistoryPlugin::record() {
         }
         return;
     }
+    adoptPendingActiveShotFill();
 
     // Update bluetooth flow calculation from the snapshot.
     updateBluetoothFlow(snapBluetoothWeight);
@@ -1122,9 +1160,24 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
             // behind completion or another notes write.
             const shot_notes::ActiveShotIdentity current{shotGeneration.load(std::memory_order_acquire),
                                                          activeShotId.load(std::memory_order_acquire)};
-            if (!shot_notes::isActiveFillFor(admitted, current, requestedId) ||
-                !shot_notes::mayAccessExistingHistoryNotes(fs->exists("/h/" + id + ".slog"))) {
+            const auto admission = shot_notes::admitActiveFill(admitted, current, requestedId, fs->exists("/h/" + id + ".slog"));
+            if (admission == shot_notes::ActiveFillAdmission::Reject) {
                 response["saved"] = false;
+            } else if (admission == shot_notes::ActiveFillAdmission::Queue) {
+                // A predecessor can have ended before its first record() pass. Drop
+                // it before admitting a valid successor rather than blocking it.
+                if (!pendingActiveShotFill.isEmpty() &&
+                    !shot_notes::isActiveFillFor(pendingActiveShotFillIdentity, current, requestedId)) {
+                    pendingActiveShotFill = "";
+                    pendingActiveShotFillIdentity = {0, 0};
+                }
+                if (pendingActiveShotFill.isEmpty()) {
+                    pendingActiveShotFill = requestedGrindSetting;
+                    pendingActiveShotFillIdentity = admitted;
+                    response["saved"] = true;
+                } else {
+                    response["saved"] = false;
+                }
             } else {
                 JsonDocument existingNotes;
                 loadNotes(id, existingNotes);
@@ -1133,15 +1186,15 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
                 } else {
                     const shot_notes::ActiveShotIdentity beforeSave{shotGeneration.load(std::memory_order_acquire),
                                                                     activeShotId.load(std::memory_order_acquire)};
-                    if (!shot_notes::isActiveFillFor(admitted, beforeSave, requestedId)) {
-                        response["saved"] = false;
-                    } else {
+                    if (shot_notes::isActiveFillFor(admitted, beforeSave, requestedId)) {
                         existingNotes["grindSetting"] = requestedGrindSetting;
                         if (!saveNotes(id, existingNotes)) {
                             response["error"] = "Save failed";
                         } else {
                             response["saved"] = true;
                         }
+                    } else {
+                        response["saved"] = false;
                     }
                 }
             }

@@ -18,4 +18,17 @@ inline bool isActiveFillFor(const ActiveShotIdentity &captured, const ActiveShot
            current.id == requestedId;
 }
 
+enum class ActiveFillAdmission : uint8_t { Reject, Queue, Persist };
+
+// startRecording() publishes the active identity before record() creates the
+// .slog. A valid fill in that short interval is queued, then record() adopts it
+// only if this same identity is still active after the log exists.
+inline ActiveFillAdmission admitActiveFill(const ActiveShotIdentity &admitted, const ActiveShotIdentity &current,
+                                           uint32_t requestedId, bool historyExists) {
+    if (!isActiveFillFor(admitted, current, requestedId)) {
+        return ActiveFillAdmission::Reject;
+    }
+    return historyExists ? ActiveFillAdmission::Persist : ActiveFillAdmission::Queue;
+}
+
 } // namespace shot_notes

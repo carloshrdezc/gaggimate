@@ -1,6 +1,7 @@
 #ifndef SHOTHISTORYPLUGIN_H
 #define SHOTHISTORYPLUGIN_H
 
+#include "ActiveShotFillPolicy.h"
 #include "PostStopGracePolicy.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -84,6 +85,7 @@ class ShotHistoryPlugin : public Plugin {
 
     // Phase 1 refactoring: extracted helper methods from record()
     bool openLogFileIfNeeded();
+    void adoptPendingActiveShotFill();
     void initializeHeader();
     // PRO-277: createSample / updateBluetoothFlow take the telemetry snapshot
     // captured under stateMutex in record(), so the file-building work runs
@@ -134,6 +136,10 @@ class ShotHistoryPlugin : public Plugin {
     std::atomic<bool> extendedRecording{false};
     std::atomic<uint32_t> activeShotId{0};
     std::atomic<uint32_t> shotGeneration{0};
+    // Protected by notesMutex: retain a valid fill admitted before record()
+    // creates its .slog, then adopt it only for the same active identity.
+    String pendingActiveShotFill;
+    shot_notes::ActiveShotIdentity pendingActiveShotFillIdentity{0, 0};
     bool indexEntryCreated = false;     // Track if early index entry was created
     bool shotStartedVolumetric = false; // Track initial volumetric mode
     unsigned long shotStart = 0;

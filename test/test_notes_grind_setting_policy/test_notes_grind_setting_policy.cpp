@@ -41,6 +41,23 @@ void test_fill_recheck_rejects_a_shot_ended_while_it_waited_for_notes_io(void) {
     TEST_ASSERT_FALSE(shot_notes::isActiveFillFor(admitted, ended, 1234));
 }
 
+void test_active_fill_before_first_log_is_admitted_for_later_persistence(void) {
+    // startRecording() publishes the active identity before record() creates .slog.
+    const shot_notes::ActiveShotIdentity active{42, 1234};
+    const shot_notes::ActiveShotIdentity ended{43, 0};
+    const shot_notes::ActiveShotIdentity nextShot{44, 1235};
+
+    TEST_ASSERT_EQUAL(shot_notes::ActiveFillAdmission::Queue,
+                      shot_notes::admitActiveFill(active, active, 1234, false));
+    TEST_ASSERT_EQUAL(shot_notes::ActiveFillAdmission::Persist,
+                      shot_notes::admitActiveFill(active, active, 1234, true));
+    // A queued predecessor is never admitted after end or for a successor.
+    TEST_ASSERT_EQUAL(shot_notes::ActiveFillAdmission::Reject,
+                      shot_notes::admitActiveFill(active, ended, 1234, false));
+    TEST_ASSERT_EQUAL(shot_notes::ActiveFillAdmission::Reject,
+                      shot_notes::admitActiveFill(active, nextShot, 1234, false));
+}
+
 void test_notes_operations_reject_writes_after_serialized_history_delete(void) {
     // Model the notesMutex order: delete wins the resource, then a delayed fill
     // or normal save must not recreate a sidecar without its .slog shot record.
@@ -68,6 +85,7 @@ int main(int, char **) {
     RUN_TEST(test_stale_regular_save_preserves_dashboard_fill_written_between_read_and_save);
     RUN_TEST(test_explicit_shot_history_grind_setting_remains_authoritative);
     RUN_TEST(test_fill_recheck_rejects_a_shot_ended_while_it_waited_for_notes_io);
+    RUN_TEST(test_active_fill_before_first_log_is_admitted_for_later_persistence);
     RUN_TEST(test_notes_operations_reject_writes_after_serialized_history_delete);
     RUN_TEST(test_notes_get_observes_a_complete_serialized_write);
     return UNITY_END();
