@@ -345,6 +345,7 @@ export function getCurrentGrinderSelection() {
 // shot's Shot Notes grindSetting is pre-filled — see inferGrindSettingForShot.
 
 const MANUAL_GRIND_SETTING_EVENTS_KEY = 'gaggimate-manual-grind-setting-events';
+export const MANUAL_GRIND_SETTING_STORAGE_KEY = 'gaggimate-manual-grind-setting';
 
 function createManualGrindId() {
   return `manual-grind-${Math.random().toString(36).slice(2, 10)}`;
@@ -397,6 +398,16 @@ function resolveManualGrindSettingForShot(shot) {
       .filter(event => Number(event.selectedAtMs || 0) <= shotTimestampMs)
       .sort((a, b) => Number(b.selectedAtMs || 0) - Number(a.selectedAtMs || 0))[0] || null
   );
+}
+
+function readCurrentDashboardManualGrindSetting() {
+  try {
+    const value = String(localStorage.getItem(MANUAL_GRIND_SETTING_STORAGE_KEY) ?? '').trim();
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? value : '';
+  } catch {
+    return '';
+  }
 }
 
 // Resolve the most recent grinder-selection event that (a) matches the shot's
@@ -474,17 +485,20 @@ export function isGrindTargetRecordedForShot(shot) {
 
 // PRE-FILL default for a shot's `grindSetting` notes field.
 //
-// Precedence (PRO-431 / PRO-441): a saved note always wins; then an explicit
-// value on the shot; then the MANUAL grinder-dial number the user typed on the
-// dashboard (recordManualGrindSetting) — this deliberately outranks the machine
-// grind-TARGET label so a real dial setting is preferred over the auto-grind
-// target; then the DEVICE-recorded machine target (`shot.notes.grindTarget`,
-// PRO-441 — device-authoritative, reads the same in every browser); finally the
-// per-browser localStorage grinder-selection log.
+// Precedence (PRO-431 / PRO-441 / PRO-533): a saved note always wins; then an
+// explicit value on the shot; then the MANUAL grinder-dial number the user
+// typed on the dashboard (first the timestamped per-profile event, then the
+// current Dashboard field value if it is a positive number) — this deliberately
+// outranks the machine grind-TARGET label so a real dial setting is preferred
+// over the auto-grind target; then the DEVICE-recorded machine target
+// (`shot.notes.grindTarget`, PRO-441 — device-authoritative, reads the same in
+// every browser); finally the per-browser localStorage grinder-selection log.
 export function inferGrindSettingForShot(shot) {
   if (shot?.notes?.grindSetting) return shot.notes.grindSetting;
   if (shot?.grindSetting) return shot.grindSetting;
   const manual = resolveManualGrindSettingForShot(shot)?.grindSetting;
   if (manual) return manual;
+  const currentManual = readCurrentDashboardManualGrindSetting();
+  if (currentManual) return currentManual;
   return shot?.notes?.grindTarget || resolveGrinderSelectionForShot(shot)?.grindSetting || '';
 }
