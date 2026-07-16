@@ -53,6 +53,7 @@ import {
   filtersFromQuery,
   mergeFiltersIntoSearch,
 } from './shotFilters.js';
+import { hydrateShotRatingsFromNotes } from './ratingHydration.js';
 
 const connected = computed(() => machine.value.connected);
 
@@ -84,6 +85,7 @@ export function ShotHistory() {
   const itemsPerPage = 10;
 
   const [allBeans, setAllBeans] = useState([]);
+  const hydrationRunRef = useRef(0);
 
   // Advanced filters (PRO-31). Initialized from the URL query params so applied
   // filters persist across navigation (read on mount, written on change).
@@ -335,7 +337,7 @@ export function ShotHistory() {
           ? {
               ...shot,
               notes,
-              rating: notes.rating || 0,
+              rating: notes.rating ?? 0,
             }
           : shot,
       ),
@@ -489,6 +491,21 @@ export function ShotHistory() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (paginatedHistory.every(shot => shot.notes)) return;
+
+    const runId = ++hydrationRunRef.current;
+    hydrateShotRatingsFromNotes(paginatedHistory, notesService)
+      .then(hydratedShots => {
+        if (hydrationRunRef.current !== runId) return;
+        const hydratedByKey = new Map(hydratedShots.map(shot => [getHistoryKey(shot), shot]));
+        setHistory(prev => prev.map(shot => hydratedByKey.get(getHistoryKey(shot)) || shot));
+      })
+      .catch(error => {
+        console.error('Failed to hydrate shot notes:', error);
+      });
+  }, [paginatedHistory]);
 
   // Dropdown options derived from the loaded history + bean library (PRO-31).
   const profileOptions = useMemo(() => availableProfiles(history), [history]);
