@@ -30,9 +30,10 @@ vi.mock('../../services/VisualizerService.js', () => ({
 }));
 
 import HistoryCard from './HistoryCard.jsx';
+import { addToComparison, clearComparison } from '../../state/comparisonShots.js';
 
-function renderHistoryCard(shotOverrides = {}) {
-  const shot = {
+function makeShot(shotOverrides = {}) {
+  return {
     id: 'shot-1',
     timestamp: 1710000000,
     duration: 25300,
@@ -45,12 +46,17 @@ function renderHistoryCard(shotOverrides = {}) {
     grinder: 'Niche Zero',
     ...shotOverrides,
   };
+}
+
+function renderHistoryCard(shotOverrides = {}) {
+  const shot = makeShot(shotOverrides);
 
   return render(h(HistoryCard, { shot, onDelete: vi.fn(), onLoad: vi.fn() }));
 }
 
 afterEach(() => {
   cleanup();
+  clearComparison();
 });
 
 describe('HistoryCard footer metadata', () => {
@@ -72,5 +78,32 @@ describe('HistoryCard footer metadata', () => {
     expect(screen.queryByLabelText(/Profile:/)).toBeNull();
     expect(screen.queryByLabelText(/Grinder:/)).toBeNull();
     expect(screen.queryByText('Unknown Profile', { selector: '[aria-label]' })).toBeNull();
+  });
+
+  test('keeps compare button conditional classes separated from the base class', () => {
+    const shot = makeShot();
+    addToComparison(shot);
+
+    renderHistoryCard(shot);
+
+    const compareButton = screen.getByLabelText('Remove from comparison');
+    expect(compareButton.classList.contains('nd-action-btn')).toBe(true);
+    expect(compareButton.classList.contains('nd-action-btn--active')).toBe(true);
+    expect(compareButton.className).not.toContain('nd-action-btnnd-action-btn--active');
+  });
+
+  test('keeps disabled compare button utility classes separated from the base class', () => {
+    addToComparison(makeShot({ id: 'comparison-1' }));
+    addToComparison(makeShot({ id: 'comparison-2' }));
+    addToComparison(makeShot({ id: 'comparison-3' }));
+    addToComparison(makeShot({ id: 'comparison-4' }));
+
+    renderHistoryCard({ id: 'shot-5' });
+
+    const compareButton = screen.getByLabelText('Add to comparison');
+    expect(compareButton.classList.contains('nd-action-btn')).toBe(true);
+    expect(compareButton.classList.contains('cursor-not-allowed')).toBe(true);
+    expect(compareButton.classList.contains('opacity-40')).toBe(true);
+    expect(compareButton.className).not.toContain('nd-action-btncursor-not-allowed');
   });
 });

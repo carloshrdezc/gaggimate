@@ -275,7 +275,13 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   <button
                     onClick={handleCompare}
                     disabled={comparisonFull.value}
-                    className={`nd-action-btn${inComparison.value ? 'nd-action-btn--active' : ''}${comparisonFull.value ? 'cursor-not-allowed opacity-40' : ''}`}
+                    className={[
+                      'nd-action-btn',
+                      inComparison.value ? 'nd-action-btn--active' : '',
+                      comparisonFull.value ? 'cursor-not-allowed opacity-40' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
                     style={{ width: '32px', height: '32px' }}
                     aria-label={inComparison.value ? 'Remove from comparison' : 'Add to comparison'}
                     title={inComparison.value ? 'Remove from comparison' : 'Add to comparison'}
