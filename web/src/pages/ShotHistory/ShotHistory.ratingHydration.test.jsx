@@ -14,8 +14,13 @@ vi.mock('./HistoryChart.jsx', () => ({
   HistoryChart: () => h('div', { 'data-testid': 'history-chart' }),
 }));
 
+let shotNotesCardUpdate;
+
 vi.mock('./ShotNotesCard.jsx', () => ({
-  default: () => h('div', { 'data-testid': 'shot-notes-card' }),
+  default: ({ onNotesUpdate }) => {
+    shotNotesCardUpdate = onNotesUpdate;
+    return h('div', { 'data-testid': 'shot-notes-card' });
+  },
 }));
 
 vi.mock('../ShotAnalyzer/services/IndexedDBService.js', () => ({
@@ -59,6 +64,7 @@ function renderShotHistory(apiService = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  shotNotesCardUpdate = undefined;
   machine.value = { ...machine.value, connected: false };
   window.history.replaceState(null, '', '/history');
 });
@@ -160,13 +166,17 @@ describe('ShotHistory visible-page rating hydration', () => {
         timestamp: 1000,
         duration: 25000,
         rating: 0,
-        notes: { rating: 0, notes: 'stale embedded notes' },
+        notes: { rating: 0, beanType: 'Old Bean', notes: 'stale embedded notes' },
+        beanName: 'Old Bean',
+        beanId: 'old-bean-id',
+        beanRecorded: true,
       },
     ]);
     const persistedNotes = {
       id: 'browser-key',
       rating: 0,
-      beanType: 'Hydrated Bean',
+      beanId: 'new-bean-id',
+      beanType: 'New Bean',
       grinderName: 'Hydrated Grinder',
       notes: '',
     };
@@ -179,13 +189,50 @@ describe('ShotHistory visible-page rating hydration', () => {
     renderShotHistory();
 
     await screen.findByText(/1 \/ 1 shots/);
-    expect(screen.queryByLabelText('Bean: Hydrated Bean')).toBeNull();
+    expect(screen.getByLabelText('Bean: Old Bean')).toBeTruthy();
+    expect(screen.queryByLabelText('Bean: New Bean')).toBeNull();
     expect(screen.queryByLabelText('Grinder: Hydrated Grinder')).toBeNull();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Bean: Hydrated Bean')).toBeTruthy();
+      expect(screen.getByLabelText('Bean: New Bean')).toBeTruthy();
       expect(screen.getByLabelText('Grinder: Hydrated Grinder')).toBeTruthy();
     });
+    expect(screen.queryByLabelText('Bean: Old Bean')).toBeNull();
     expect(screen.queryByTestId('shot-notes-card')).toBeNull();
+  });
+
+  test('refreshes footer bean from saved notes over stale pre-derived metadata', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'save-browser-row',
+        storageKey: 'browser-key',
+        source: 'browser',
+        profile: 'Browser archive shot',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 0,
+        loaded: true,
+        samples: [{ t: 0 }],
+        notes: { rating: 0, beanType: 'Old Bean', notes: 'stale embedded notes' },
+        beanName: 'Old Bean',
+        beanId: 'old-bean-id',
+        beanRecorded: true,
+      },
+    ]);
+    notesService.loadNotes.mockResolvedValue({ rating: 0, beanType: 'Old Bean', notes: '' });
+
+    renderShotHistory();
+
+    await screen.findByText(/1 \/ 1 shots/);
+    expect(screen.getByLabelText('Bean: Old Bean')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Expand shot details'));
+    await screen.findByTestId('shot-notes-card');
+    shotNotesCardUpdate({ rating: 0, beanId: 'new-bean-id', beanType: 'New Bean', notes: '' });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Bean: New Bean')).toBeTruthy();
+    });
+    expect(screen.queryByLabelText('Bean: Old Bean')).toBeNull();
   });
 });

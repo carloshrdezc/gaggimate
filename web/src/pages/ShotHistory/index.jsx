@@ -78,6 +78,22 @@ function normalizeBrowserShot(shot) {
   };
 }
 
+function shotWithFreshNotes(shot, notes, rating) {
+  const rawShot = { ...shot };
+  delete rawShot.beanName;
+  delete rawShot.beanId;
+  delete rawShot.beanRecorded;
+  delete rawShot.beanArchived;
+  delete rawShot.grinder;
+  delete rawShot.grindSetting;
+  delete rawShot.grinderRecorded;
+  return {
+    ...rawShot,
+    notes,
+    rating,
+  };
+}
+
 export function ShotHistory() {
   const apiService = useContext(ApiServiceContext);
   const importInputRef = useRef(null);
@@ -342,11 +358,7 @@ export function ShotHistory() {
       setHistory(prev =>
         prev.map(shot =>
           shot.id === id && shot.source === source
-            ? enrichShotWithBean({
-                ...shot,
-                notes,
-                rating: notes.rating ?? 0,
-              })
+            ? enrichShotWithBean(shotWithFreshNotes(shot, notes, notes.rating ?? 0))
             : shot,
         ),
       );
@@ -517,11 +529,9 @@ export function ShotHistory() {
           const next = prev.map(shot => {
             const hydrated = hydratedByKey.get(getHistoryKey(shot));
             if (!hydrated) return shot;
-            const enriched = enrichShotWithBean({
-              ...shot,
-              notes: hydrated.notes,
-              rating: hydrated.rating,
-            });
+            const enriched = enrichShotWithBean(
+              shotWithFreshNotes(shot, hydrated.notes, hydrated.rating),
+            );
             if (
               enriched.notes === shot.notes &&
               enriched.rating === shot.rating &&
