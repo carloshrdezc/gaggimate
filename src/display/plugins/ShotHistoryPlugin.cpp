@@ -444,7 +444,7 @@ void ShotHistoryPlugin::patchHeaderWithFinalData(float finalBluetoothWeight) {
 bool ShotHistoryPlugin::isShotTooShort() const { return header.durationMs <= MIN_VALID_SHOT_DURATION_MS; }
 
 void ShotHistoryPlugin::handleFailedShot(const String &id, bool hadIndexEntry) {
-    fs->remove("/h/" + id + ".slog");
+    removeHistoryFiles(id);
 
     if (hadIndexEntry) {
         markIndexDeleted(id.toInt());
@@ -534,6 +534,8 @@ void ShotHistoryPlugin::handleCompletedShot(const String &id, const String &bean
     }
 
     xSemaphoreGive(notesMutex);
+    // cleanupHistory() serializes each sidecar removal with notesMutex, so it
+    // must run only after the completion read/merge/write transaction releases it.
     cleanupHistory();
     appendCompletedShotToIndex(id, completedHeader, hasNotes);
 }
@@ -983,15 +985,20 @@ void ShotHistoryPlugin::cleanupHistory() {
         String fname = slogFiles[i];
         int start = fname.lastIndexOf('/') + 1;
         int end = fname.lastIndexOf('.');
+        uint32_t shotId = 0;
         if (end > start) {
-            uint32_t shotId = fname.substring(start, end).toInt();
-            markIndexDeleted(shotId);
+            shotId = fname.substring(start, end).toInt();
         }
 
-        // Remove .slog and associated .json notes file
-        fs->remove(fname);
-        String notesPath = fname.substring(0, fname.lastIndexOf('.')) + ".json";
-        fs->remove(notesPath);
+        // Serialize both files with every notes reader/writer. The .slog check
+        // and sidecar write are one notes resource transaction, so an admitted
+        // writer cannot recreate an orphan after retention deletes this shot.
+        // Do this before index work: notes saves update index metadata only after
+        // releasing notesMutex, preserving the notes-then-index lock order.
+        removeHistoryFiles(fname.substring(0, fname.lastIndexOf('.')));
+        if (shotId != 0) {
+            markIndexDeleted(shotId);
+        }
         removed++;
     }
 
@@ -1082,18 +1089,23 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
     } else if (type == "req:history:delete") {
         auto id = request["id"].as<String>();
         String paddedId = padId(id);
-        fs->remove("/h/" + paddedId + ".slog");
-        fs->remove("/h/" + paddedId + ".json");
+        removeHistoryFiles(paddedId);
 
-        // Mark as deleted in index
+        // Notes saves update index metadata only after releasing notesMutex, so
+        // deleting the files first preserves that resource lock order.
         markIndexDeleted(id.toInt());
 
         response["msg"] = "Ok";
     } else if (type == "req:history:notes:get") {
         auto id = request["id"].as<String>();
-        JsonDocument notes;
-        loadNotes(id, notes);
-        response["notes"] = notes;
+        if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+            response["error"] = "Notes unavailable";
+        } else {
+            JsonDocument notes;
+            loadNotes(id, notes);
+            response["notes"] = notes;
+            xSemaphoreGive(notesMutex);
+        }
     } else if (type == "req:history:notes:fill-missing") {
         auto id = request["id"].as<String>();
         const uint32_t requestedId = id.toInt();
@@ -1110,7 +1122,8 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
             // behind completion or another notes write.
             const shot_notes::ActiveShotIdentity current{shotGeneration.load(std::memory_order_acquire),
                                                          activeShotId.load(std::memory_order_acquire)};
-            if (!shot_notes::isActiveFillFor(admitted, current, requestedId)) {
+            if (!shot_notes::isActiveFillFor(admitted, current, requestedId) ||
+                !shot_notes::mayAccessExistingHistoryNotes(fs->exists("/h/" + id + ".slog"))) {
                 response["saved"] = false;
             } else {
                 JsonDocument existingNotes;
@@ -1143,11 +1156,14 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
         JsonDocument notes; // explicit document: variant->const JsonDocument& is ambiguous on clang
         notes.set(request["notes"]);
         JsonDocument previousNotes;
-        loadNotes(id, previousNotes);
+        const bool historyExists = shot_notes::mayAccessExistingHistoryNotes(fs->exists("/h/" + id + ".slog"));
+        if (historyExists) {
+            loadNotes(id, previousNotes);
+        }
         // A normal editor save can be based on a stale GET. Preserve a Dashboard
         // fill that landed after that read unless this payload explicitly edits it.
         shot_notes::preservePersistedGrindSetting(notes, previousNotes);
-        const bool notesSaved = saveNotes(id, notes);
+        const bool notesSaved = historyExists && saveNotes(id, notes);
         bool beanUsageSaved = false;
         if (!notesSaved) {
             response["error"] = "Save failed";
@@ -1200,6 +1216,16 @@ bool ShotHistoryPlugin::saveNotes(const String &id, const JsonDocument &notes) {
     }
     file.close();
     return true;
+}
+
+void ShotHistoryPlugin::removeHistoryFiles(const String &id) {
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire notes mutex for history removal");
+        return;
+    }
+    fs->remove("/h/" + id + ".slog");
+    fs->remove("/h/" + id + ".json");
+    xSemaphoreGive(notesMutex);
 }
 
 void ShotHistoryPlugin::loadNotes(const String &id, JsonDocument &notes) {

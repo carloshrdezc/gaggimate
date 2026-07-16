@@ -82,6 +82,7 @@ channels:
           - $ref: '#/components/messages/HistoryGetResponse'
           - $ref: '#/components/messages/HistoryDeleteResponse'
           - $ref: '#/components/messages/HistoryNotesGetResponse'
+          - $ref: '#/components/messages/HistoryNotesFillMissingResponse'
           - $ref: '#/components/messages/HistoryNotesSaveResponse'
           - $ref: '#/components/messages/HistoryRebuildResponse'
           - $ref: '#/components/messages/FlushStartResponse'
@@ -129,6 +130,7 @@ channels:
           - $ref: '#/components/messages/HistoryGetRequest'
           - $ref: '#/components/messages/HistoryDeleteRequest'
           - $ref: '#/components/messages/HistoryNotesGetRequest'
+          - $ref: '#/components/messages/HistoryNotesFillMissingRequest'
           - $ref: '#/components/messages/HistoryNotesSaveRequest'
           - $ref: '#/components/messages/HistoryRebuildRequest'
 components:
@@ -707,6 +709,7 @@ components:
       x-since-version: 'unknown'
       payload:
         type: object
+        description: Notes are read under the device notes resource lock, so this response is a complete committed notes document rather than a partial concurrent save.
         properties:
           tp:
             type: string
@@ -717,6 +720,29 @@ components:
             type: object
             description: Free-form shot notes object.
             additionalProperties: true
+          error:
+            type: string
+            description: '`Notes unavailable` when the device cannot acquire the notes resource.'
+        required: [tp]
+    HistoryNotesFillMissingResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Result of an active-shot, fill-only `grindSetting` write. The device saves only when `id` is the currently recording shot and its persisted notes do not already have a non-blank `grindSetting`. Stale, ended, next-shot, blank, missing-history, and already-filled requests are successful no-ops (`saved: false`).
+        properties:
+          tp:
+            type: string
+            enum: ['res:history:notes:fill-missing']
+          rid:
+            type: string
+          saved:
+            type: boolean
+            description: '`true` only when the missing setting was committed; `false` for the documented no-op cases.'
+          error:
+            type: string
+            enum: ['Notes unavailable', 'Save failed']
+            description: Present when the notes resource cannot be acquired or the write fails.
         required: [tp]
     HistoryNotesSaveResponse:
       x-since-version: 'unknown'
@@ -1272,6 +1298,29 @@ components:
           id:
             type: string
         required: [tp, id]
+    HistoryNotesFillMissingRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: Atomically fill a missing active-shot `grindSetting`. This does not overwrite a non-blank persisted setting.
+        properties:
+          tp:
+            type: string
+            enum: ['req:history:notes:fill-missing']
+          rid:
+            type: string
+          id:
+            type: string
+            description: Current recording shot ID.
+          notes:
+            type: object
+            properties:
+              grindSetting:
+                type: string
+                description: Non-blank Dashboard manual grind value to fill only when absent.
+            required: [grindSetting]
+            additionalProperties: true
+        required: [tp, id, notes]
     HistoryNotesSaveRequest:
       x-since-version: 'unknown'
       payload:

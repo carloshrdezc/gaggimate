@@ -76,6 +76,7 @@ class ShotHistoryPlugin : public Plugin {
     bool createEarlyIndexEntry();
     bool saveNotes(const String &id, const JsonDocument &notes);
     void loadNotes(const String &id, JsonDocument &notes);
+    void removeHistoryFiles(const String &id);
     bool applyBeanUsageDelta(JsonVariantConst previousNotes, JsonVariantConst nextNotes);
     void startRecording();
 
