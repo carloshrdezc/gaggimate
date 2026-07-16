@@ -18,6 +18,7 @@ lv_obj_t *ui_MenuScreen = NULL;
 lv_obj_t *ui_MenuScreen_contentPanel = NULL;
 lv_obj_t *ui_MenuScreen_backButton = NULL;
 lv_obj_t *ui_MenuScreen_doneButton = NULL; // CAR-358: obvious full-width exit
+lv_obj_t *ui_MenuScreen_restartButton = NULL;
 lv_obj_t *ui_MenuScreen_brightnessSwitch = NULL;
 lv_obj_t *ui_MenuScreen_brewTempValue = NULL;
 lv_obj_t *ui_MenuScreen_brewTempMinus = NULL;
@@ -37,11 +38,11 @@ lv_obj_t *ui_MenuScreen_scaleSwitch = NULL;
 // the screen background to palette.surfaceBase, so on light themes the
 // originally-near-white text/icons go invisible against a near-white bg.
 //
-// CAR-358: bumped from 3 to 5 rows (added WATER/STEAM TEMP). Stepper +/- glyph
+// CAR-358: expanded from 3 to 5 rows (added WATER/STEAM TEMP). Stepper +/- glyph
 // labels are tracked per-row in qs_stepper_minus_labels / qs_stepper_plus_labels
 // (was a single brew-only pair) so every new stepper glyph is recolored too —
 // otherwise they go invisible on UI_THEME_LIGHT (the palette pitfall).
-#define QS_MAX_ROWS 5
+#define QS_MAX_ROWS 6
 #define QS_MAX_STEPPERS 3
 static lv_obj_t *qs_kicker = NULL;
 static lv_obj_t *qs_row_icons[QS_MAX_ROWS] = {NULL};
@@ -55,6 +56,8 @@ static lv_obj_t *qs_stepper_plus_labels[QS_MAX_STEPPERS] = {NULL};
 static lv_obj_t *qs_stepper_plus_btns[QS_MAX_STEPPERS] = {NULL};
 static lv_color_t qs_stepper_plus_accents[QS_MAX_STEPPERS];
 static lv_obj_t *qs_done_label = NULL; // CAR-358: DONE button text
+static lv_obj_t *qs_restart_label = NULL;
+static lv_obj_t *qs_restart_dialog = NULL;
 static int qs_row_count = 0;
 static int qs_stepper_count = 0;
 
@@ -116,6 +119,75 @@ static void ui_event_MenuScreen_brightness(lv_event_t *e) { (void)e; }
 
 // CAR-279 TODO: wire to BLEScales/scale-enabled state.
 static void ui_event_MenuScreen_scale(lv_event_t *e) { (void)e; }
+
+static void ui_event_MenuScreen_restart_close(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (qs_restart_dialog != NULL && lv_obj_is_valid(qs_restart_dialog)) lv_obj_del(qs_restart_dialog);
+    qs_restart_dialog = NULL;
+}
+
+static void ui_event_MenuScreen_restart_confirm(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    onRestartDisplayConfirm(e);
+}
+
+static void ui_event_MenuScreen_restart(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (qs_restart_dialog != NULL && lv_obj_is_valid(qs_restart_dialog)) return;
+
+    qs_restart_dialog = lv_obj_create(ui_MenuScreen);
+    lv_obj_set_size(qs_restart_dialog, 272, 174);
+    lv_obj_center(qs_restart_dialog);
+    lv_obj_set_style_bg_color(qs_restart_dialog, GM_SURFACE, 0);
+    lv_obj_set_style_bg_opa(qs_restart_dialog, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(qs_restart_dialog, 1, 0);
+    lv_obj_set_style_border_color(qs_restart_dialog, GM_CONTENT, 0);
+    lv_obj_set_style_border_opa(qs_restart_dialog, LV_OPA_40, 0);
+    lv_obj_set_style_radius(qs_restart_dialog, 16, 0);
+    lv_obj_clear_flag(qs_restart_dialog, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(qs_restart_dialog);
+    lv_label_set_text(title, "RESTART DISPLAY?");
+    lv_obj_set_style_text_font(title, &grotesk_16, 0);
+    lv_obj_set_style_text_color(title, GM_CONTENT, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
+
+    const bool allowed = gmCanRestartDisplay();
+    lv_obj_t *message = lv_label_create(qs_restart_dialog);
+    lv_label_set_text(message, allowed ? "The display will restart now." : "Restart unavailable while machine is busy.");
+    lv_obj_set_width(message, 236);
+    lv_label_set_long_mode(message, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(message, &grotesk_16, 0);
+    lv_obj_set_style_text_color(message, allowed ? GM_MUTED : GM_RED, 0);
+    lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(message, LV_ALIGN_TOP_MID, 0, 48);
+
+    lv_obj_t *cancel = lv_btn_create(qs_restart_dialog);
+    lv_obj_set_size(cancel, 108, 40);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 12, -12);
+    lv_obj_set_style_bg_color(cancel, GM_BG, 0);
+    lv_obj_set_style_bg_opa(cancel, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(cancel, ui_event_MenuScreen_restart_close, LV_EVENT_ALL, NULL);
+    lv_obj_t *cancel_label = lv_label_create(cancel);
+    lv_label_set_text(cancel_label, "CANCEL");
+    lv_obj_set_style_text_font(cancel_label, &grotesk_16, 0);
+    lv_obj_set_style_text_color(cancel_label, GM_CONTENT, 0);
+    lv_obj_center(cancel_label);
+
+    if (allowed) {
+        lv_obj_t *confirm = lv_btn_create(qs_restart_dialog);
+        lv_obj_set_size(confirm, 108, 40);
+        lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+        lv_obj_set_style_bg_color(confirm, GM_RED, 0);
+        lv_obj_set_style_bg_opa(confirm, LV_OPA_COVER, 0);
+        lv_obj_add_event_cb(confirm, ui_event_MenuScreen_restart_confirm, LV_EVENT_ALL, NULL);
+        lv_obj_t *confirm_label = lv_label_create(confirm);
+        lv_label_set_text(confirm_label, "RESTART");
+        lv_obj_set_style_text_font(confirm_label, &grotesk_16, 0);
+        lv_obj_set_style_text_color(confirm_label, GM_CONTENT, 0);
+        lv_obj_center(confirm_label);
+    }
+}
 
 // Helper: build a settings row (icon + label, no control yet). Captures the
 // icon and label refs into the qs_row_icons / qs_row_labels arrays so the
@@ -232,8 +304,8 @@ void ui_MenuScreen_screen_init(void) {
 
     // Settings list panel — VERTICALLY SCROLLABLE (CAR-358). 300px wide keeps
     // full-width rows inside the round bezel; 236px tall leaves room above for
-    // the kicker and below for the DONE button. The 5 rows (≈52px each + 8px
-    // gaps ≈ 296px) overflow the panel, so vertical scrolling is enabled with a
+    // the kicker and below for the DONE button. The 6 rows overflow the panel,
+    // so vertical scrolling is enabled with a
     // snap so rows don't get stranded half-off. Width/centering keeps content
     // off the curved edges.
     ui_MenuScreen_contentPanel = lv_obj_create(ui_MenuScreen);
@@ -246,7 +318,7 @@ void ui_MenuScreen_screen_init(void) {
     lv_obj_set_style_pad_row(ui_MenuScreen_contentPanel, 8, 0);
     lv_obj_set_style_pad_top(ui_MenuScreen_contentPanel, 4, 0);
     lv_obj_set_style_pad_bottom(ui_MenuScreen_contentPanel, 4, 0);
-    // Enable vertical scrolling so all 5 rows are reachable on the round screen.
+    // Enable vertical scrolling so all rows are reachable on the round screen.
     lv_obj_add_flag(ui_MenuScreen_contentPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(ui_MenuScreen_contentPanel, LV_DIR_VER);
     lv_obj_set_scroll_snap_y(ui_MenuScreen_contentPanel, LV_SCROLL_SNAP_CENTER);
@@ -285,6 +357,23 @@ void ui_MenuScreen_screen_init(void) {
         lv_obj_add_event_cb(ui_MenuScreen_scaleSwitch, ui_event_MenuScreen_scale, LV_EVENT_VALUE_CHANGED, NULL);
     }
 
+    // Row 6: explicit confirmation is required; the dialog omits confirmation
+    // when the conservative controller policy says restart is unsafe.
+    {
+        lv_obj_t *row = qs_row(ui_MenuScreen_contentPanel, &gm_ic_power, "RESTART");
+        ui_MenuScreen_restartButton = lv_btn_create(row);
+        lv_obj_set_size(ui_MenuScreen_restartButton, 112, 36);
+        lv_obj_set_style_bg_color(ui_MenuScreen_restartButton, GM_RED, 0);
+        lv_obj_set_style_bg_opa(ui_MenuScreen_restartButton, LV_OPA_COVER, 0);
+        lv_obj_set_ext_click_area(ui_MenuScreen_restartButton, 12);
+        lv_obj_add_event_cb(ui_MenuScreen_restartButton, ui_event_MenuScreen_restart, LV_EVENT_ALL, NULL);
+        qs_restart_label = lv_label_create(ui_MenuScreen_restartButton);
+        lv_label_set_text(qs_restart_label, "RESTART");
+        lv_obj_set_style_text_font(qs_restart_label, &grotesk_16, 0);
+        lv_obj_set_style_text_color(qs_restart_label, GM_CONTENT, 0);
+        lv_obj_center(qs_restart_label);
+    }
+
     // CAR-358: obvious full-width "DONE" exit pill at the bottom -> mode hub.
     // The small top-left back arrow is hard to find/hit on the round display;
     // this is the discoverable exit. Pinned below the scroll panel so it never
@@ -320,6 +409,7 @@ void ui_MenuScreen_screen_destroy(void) {
     ui_MenuScreen_contentPanel = NULL;
     ui_MenuScreen_backButton = NULL;
     ui_MenuScreen_doneButton = NULL;
+    ui_MenuScreen_restartButton = NULL;
     ui_MenuScreen_brightnessSwitch = NULL;
     ui_MenuScreen_brewTempValue = NULL;
     ui_MenuScreen_brewTempMinus = NULL;
@@ -334,6 +424,8 @@ void ui_MenuScreen_screen_destroy(void) {
 
     qs_kicker = NULL;
     qs_done_label = NULL;
+    qs_restart_label = NULL;
+    qs_restart_dialog = NULL;
     for (int i = 0; i < QS_MAX_ROWS; i++) {
         qs_row_icons[i] = NULL;
         qs_row_labels[i] = NULL;
@@ -418,5 +510,11 @@ void ui_MenuScreen_apply_palette(lv_color_t text, lv_color_t muted, lv_color_t b
     }
     if (qs_done_label != NULL && lv_obj_is_valid(qs_done_label)) {
         lv_obj_set_style_text_color(qs_done_label, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (ui_MenuScreen_restartButton != NULL && lv_obj_is_valid(ui_MenuScreen_restartButton)) {
+        lv_obj_set_style_bg_color(ui_MenuScreen_restartButton, GM_RED, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (qs_restart_label != NULL && lv_obj_is_valid(qs_restart_label)) {
+        lv_obj_set_style_text_color(qs_restart_label, text, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
 }

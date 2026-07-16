@@ -21,6 +21,7 @@ extern lv_obj_t *ui_MenuScreen;
 extern lv_obj_t *ui_MenuScreen_contentPanel;
 extern lv_obj_t *ui_MenuScreen_backButton;
 extern lv_obj_t *ui_MenuScreen_doneButton; // CAR-358: full-width exit
+extern lv_obj_t *ui_MenuScreen_restartButton;
 extern lv_obj_t *ui_MenuScreen_brightnessSwitch;
 extern lv_obj_t *ui_MenuScreen_brewTempValue;
 extern lv_obj_t *ui_MenuScreen_brewTempMinus;
