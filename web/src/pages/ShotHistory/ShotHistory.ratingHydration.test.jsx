@@ -353,6 +353,45 @@ describe('ShotHistory visible-page rating hydration', () => {
     expect(screen.queryByLabelText('Bean: Edited Bean B')).toBeNull();
   });
 
+  test('preserves archived footer metadata when blank embedded notes are not store-backed', async () => {
+    indexedDBService.getAllShots.mockResolvedValue([
+      {
+        id: 'archived-browser-row',
+        storageKey: 'browser-key',
+        source: 'browser',
+        profile: 'Browser archive shot',
+        timestamp: 1000,
+        duration: 25000,
+        rating: 0,
+        beanName: 'Archived Bean',
+        grinder: 'Archived Grinder',
+        grindSetting: '18',
+        notes: {
+          id: 'browser-key',
+          rating: 0,
+          beanId: '',
+          beanType: '',
+          grinderName: '',
+          grinder: '',
+          grindSetting: '',
+          notes: '',
+        },
+      },
+    ]);
+    notesService.loadNotes.mockResolvedValue({ id: 'browser-key', rating: 0, notes: '' });
+
+    renderShotHistory();
+
+    await screen.findByText(/1 \/ 1 shots/);
+    expect(screen.getByLabelText('Bean: Archived Bean')).toBeTruthy();
+    expect(screen.getByLabelText('Grinder: Archived Grinder')).toBeTruthy();
+    await waitFor(() => {
+      expect(notesService.loadNotes).toHaveBeenCalledWith('browser-key', 'browser');
+    });
+    expect(screen.getByLabelText('Bean: Archived Bean')).toBeTruthy();
+    expect(screen.getByLabelText('Grinder: Archived Grinder')).toBeTruthy();
+  });
+
   test('does not infer browser-local metadata fallbacks for explicitly blank persisted notes', async () => {
     indexedDBService.getAllShots.mockResolvedValue([
       {

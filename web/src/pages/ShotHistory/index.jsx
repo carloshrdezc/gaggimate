@@ -78,10 +78,32 @@ const PERSISTED_CLEAR_FIELDS = [
   'grinder',
   'grindSetting',
 ];
+const PERSISTED_NOTES_FOUND = '__shotHistoryNotesStoreFound';
+const NOTES_SERVICE_PERSISTED = '__shotHistoryPersistedNotes';
+
+function notesAreStoreBacked(notes) {
+  return Boolean(notes?.[PERSISTED_NOTES_FOUND] || notes?.[NOTES_SERVICE_PERSISTED]);
+}
+
+function markNotesStoreBacked(notes) {
+  if (!notes || typeof notes !== 'object') return notes;
+
+  try {
+    Object.defineProperty(notes, PERSISTED_NOTES_FOUND, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen notes objects remain usable; they just cannot carry the marker.
+  }
+
+  return notes;
+}
 
 function notesExplicitlyClearAny(notes, fields) {
   return Boolean(
-    notes &&
+    notesAreStoreBacked(notes) &&
       fields.some(
         field => Object.prototype.hasOwnProperty.call(notes, field) && notes[field] === '',
       ),
@@ -99,7 +121,9 @@ function notesClearBean(notes) {
 
 function notesFieldIsBlank(notes, field) {
   return Boolean(
-    notes && Object.prototype.hasOwnProperty.call(notes, field) && notes[field] === '',
+    notesAreStoreBacked(notes) &&
+      Object.prototype.hasOwnProperty.call(notes, field) &&
+      notes[field] === '',
   );
 }
 
@@ -120,22 +144,25 @@ function normalizeBrowserShot(shot) {
   };
 }
 
-function shotWithFreshNotes(shot, notes, rating) {
+function shotWithFreshNotes(shot, notes, rating, { storeBacked = true } = {}) {
   const rawShot = { ...shot };
-  delete rawShot.beanName;
-  delete rawShot.beanId;
-  delete rawShot.beanRecorded;
-  delete rawShot.beanArchived;
-  delete rawShot.grinder;
-  delete rawShot.grindSetting;
-  delete rawShot.grinderRecorded;
-  if (notesExplicitlyClearMetadata(notes)) {
+  const freshNotes = storeBacked ? markNotesStoreBacked(notes) : notes;
+  if (storeBacked) {
+    delete rawShot.beanName;
+    delete rawShot.beanId;
+    delete rawShot.beanRecorded;
+    delete rawShot.beanArchived;
+    delete rawShot.grinder;
+    delete rawShot.grindSetting;
+    delete rawShot.grinderRecorded;
+  }
+  if (notesExplicitlyClearMetadata(freshNotes)) {
     delete rawShot.beanType;
     delete rawShot.grinderName;
   }
   return {
     ...rawShot,
-    notes,
+    notes: freshNotes,
     rating,
   };
 }
@@ -583,7 +610,9 @@ export function ShotHistory() {
             const hydrated = hydratedByKey.get(getHistoryKey(shot));
             if (!hydrated) return shot;
             const enriched = enrichShotWithBean(
-              shotWithFreshNotes(shot, hydrated.notes, hydrated.rating),
+              shotWithFreshNotes(shot, hydrated.notes, hydrated.rating, {
+                storeBacked: notesAreStoreBacked(hydrated.notes),
+              }),
             );
             if (
               enriched.notes === shot.notes &&
