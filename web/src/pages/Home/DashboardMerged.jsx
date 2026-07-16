@@ -10,7 +10,12 @@ import { useAutoSteam } from '../../hooks/useAutoSteam.js';
 import { useShotDoseRecorder } from '../../hooks/useShotDoseRecorder.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
 import { listBeans, recordBeanSelection, parseQuantity } from '../../utils/beanManager.js';
-import { listGrinders, recordGrinderSelection, recordManualGrindSetting } from '../../utils/grinderManager.js';
+import {
+  listGrinders,
+  recordGrinderSelection,
+  recordManualGrindSetting,
+  MANUAL_GRIND_SETTING_STORAGE_KEY,
+} from '../../utils/grinderManager.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
@@ -50,7 +55,6 @@ const DEFAULT_YIELD = 36.0;
 // Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history of
 // the physical grinder dial number; NEVER sent to the device (unlike DOSE_KEY,
 // which also fires req:dose:set). Default 0 = "not set yet".
-const MANUAL_GRIND_KEY = 'gaggimate-manual-grind-setting';
 const DEFAULT_MANUAL_GRIND = 0;
 
 const PRESSURE_MAX = 12;
@@ -1412,7 +1416,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // active profile pre-fills its Shot Notes grindSetting with it (taking
   // precedence over the machine grind-TARGET label — see grinderManager.js).
   const [manualGrind, setManualGrindState] = useState(() => {
-    try { return parseQuantity(localStorage.getItem(MANUAL_GRIND_KEY)) ?? DEFAULT_MANUAL_GRIND; } catch { return DEFAULT_MANUAL_GRIND; }
+    try { return parseQuantity(localStorage.getItem(MANUAL_GRIND_SETTING_STORAGE_KEY)) ?? DEFAULT_MANUAL_GRIND; } catch { return DEFAULT_MANUAL_GRIND; }
   });
   const setManualGrind = useCallback(val => {
     // Permissive range: grinder dials vary enormously (0–10 with decimals on a
@@ -1421,7 +1425,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     // scale. step=0.1 supports decimal dials.
     const v = Math.max(0, Math.min(100, val));
     setManualGrindState(v);
-    try { localStorage.setItem(MANUAL_GRIND_KEY, String(v)); } catch {}
+    try { localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, String(v)); } catch {}
     // Record for Shot Notes pre-fill (per-profile, per-browser). Skip 0 — that
     // is the "not set" sentinel and should not shadow the machine target label.
     if (v > 0) {

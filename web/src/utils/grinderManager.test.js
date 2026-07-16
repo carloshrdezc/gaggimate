@@ -10,6 +10,7 @@ import {
   isGrinderRecordedForShot,
   isGrindTargetRecordedForShot,
   resolveGrinderPrefill,
+  MANUAL_GRIND_SETTING_STORAGE_KEY,
 } from './grinderManager.js';
 
 const GRINDERS_STORAGE_KEY = 'gaggimate-grinders';
@@ -426,8 +427,19 @@ describe('grinderManager', () => {
       expect(inferGrindSettingForShot(shot)).toBe('28s');
     });
 
+    it('uses the current Dashboard manual setting over the device grindTarget when no fresh event exists', () => {
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '3.2');
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindTarget: '25s' },
+      };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
     it('never clobbers a saved note or an explicit shot value', () => {
       recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '4.1');
       const shotWithNote = {
         profile: 'Espresso',
         timestamp: Math.floor(Date.now() / 1000) + 5,
@@ -441,6 +453,16 @@ describe('grinderManager', () => {
         grindSetting: 'Explicit Setting',
       };
       expect(inferGrindSettingForShot(shotWithExplicit)).toBe('Explicit Setting');
+    });
+
+    it.each(['0', '', 'not-a-number', '-1'])('falls back to the machine target when Dashboard manual setting is %s', value => {
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, value);
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindTarget: '25s' },
+      };
+      expect(inferGrindSettingForShot(shot)).toBe('25s');
     });
 
     it('does not infer a manual value recorded AFTER the shot was pulled', () => {
