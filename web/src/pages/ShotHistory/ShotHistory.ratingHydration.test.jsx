@@ -67,44 +67,36 @@ afterEach(() => {
 });
 
 describe('ShotHistory visible-page rating hydration', () => {
-  test('syncs top-level ratings from existing notes before rated filter uses the visible page', async () => {
+  test('prefers newer persisted browser notes over stale embedded notes for list state', async () => {
     indexedDBService.getAllShots.mockResolvedValue([
       {
-        id: 'low-top-level',
-        storageKey: 'low-key',
+        id: 'stale-browser-row',
+        storageKey: 'browser-key',
         source: 'browser',
-        profile: 'Stale top-level',
+        profile: 'Browser archive shot',
         timestamp: 1000,
         duration: 25000,
-        rating: 2,
-        notes: { rating: 8.7, notes: 'imported decimal rating' },
-      },
-      {
-        id: 'missing-top-level',
-        storageKey: 'missing-key',
-        source: 'browser',
-        profile: 'Missing top-level',
-        timestamp: 900,
-        duration: 26000,
-        notes: { rating: 9.4, notes: 'browser archive notes' },
+        rating: 4.2,
+        notes: { rating: 4.2, notes: 'stale embedded notes' },
       },
     ]);
+    notesService.loadNotes.mockResolvedValue({ rating: 8.4, notes: 'newer persisted notes' });
 
     renderShotHistory();
 
-    await screen.findByText(/2 \/ 2 shots/);
-    expect(notesService.loadNotes).not.toHaveBeenCalled();
+    await screen.findByText(/1 \/ 1 shots/);
+    await waitFor(() => {
+      expect(notesService.loadNotes).toHaveBeenCalledWith('browser-key', 'browser');
+    });
 
     fireEvent.change(screen.getByDisplayValue('All Shots'), {
       target: { value: 'rated' },
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/2 \/ 2 shots/)).toBeTruthy();
-      expect(screen.getByText('Stale top-level')).toBeTruthy();
-      expect(screen.getByText('Missing top-level')).toBeTruthy();
-      expect(screen.getByText('8.7/10')).toBeTruthy();
-      expect(screen.getByText('9.4/10')).toBeTruthy();
+      expect(screen.getByText(/1 \/ 1 shots/)).toBeTruthy();
+      expect(screen.getByText('Browser archive shot')).toBeTruthy();
+      expect(screen.getByText('8.4/10')).toBeTruthy();
     });
   });
 });

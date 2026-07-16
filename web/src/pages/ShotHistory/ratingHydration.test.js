@@ -52,17 +52,51 @@ describe('hydrateShotRatingsFromNotes', () => {
     expect(hydrated.at(-1).rating).toBe(10.5);
   });
 
-  test('uses browser shot storage keys when hydrating imported shots', async () => {
+  test('uses persisted browser notes over stale embedded imported-shot notes', async () => {
+    const persistedNotes = { rating: 8.4, notes: 'edited notes-store value' };
     const notesService = {
-      loadNotes: vi.fn(async () => ({ rating: 6.8 })),
+      loadNotes: vi.fn(async () => persistedNotes),
     };
 
     const [hydrated] = await hydrateShotRatingsFromNotes(
-      [{ id: 'archive-row', source: 'browser', storageKey: 'indexed-db-key', rating: 6 }],
+      [
+        {
+          id: 'archive-row',
+          source: 'browser',
+          storageKey: 'indexed-db-key',
+          rating: 4.2,
+          notes: { rating: 4.2, notes: 'stale embedded archive value' },
+        },
+      ],
       notesService,
     );
 
     expect(notesService.loadNotes).toHaveBeenCalledWith('indexed-db-key', 'browser');
-    expect(hydrated.rating).toBe(6.8);
+    expect(hydrated.rating).toBe(8.4);
+    expect(hydrated.notes).toBe(persistedNotes);
+  });
+
+  test('keeps embedded browser notes when the notes store has no saved values', async () => {
+    const embeddedNotes = { rating: 7.1, notes: 'archive notes only' };
+    const notesService = {
+      loadNotes: vi.fn(async id => ({ id, rating: 0, notes: '' })),
+    };
+
+    const [hydrated] = await hydrateShotRatingsFromNotes(
+      [
+        {
+          id: 'archive-row',
+          source: 'browser',
+          storageKey: 'indexed-db-key',
+          rating: 7.1,
+          notes: embeddedNotes,
+        },
+      ],
+      notesService,
+    );
+
+    expect(notesService.loadNotes).toHaveBeenCalledWith('indexed-db-key', 'browser');
+    expect(hydrated.rating).toBe(7.1);
+    expect(hydrated.notes).toBe(embeddedNotes);
   });
 });
