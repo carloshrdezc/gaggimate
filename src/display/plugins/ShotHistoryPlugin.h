@@ -91,12 +91,14 @@ class ShotHistoryPlugin : public Plugin {
     void updateBluetoothFlow(float bluetoothWeight);
     bool writeSampleToBuffer(const ShotLogSample &sample);
     void checkEarlyIndexCreation();
-    void closeLogFile(float finalBluetoothWeight);
+    bool closeLogFile(float finalBluetoothWeight);
     void patchHeaderWithFinalData(float finalBluetoothWeight);
     bool isShotTooShort() const;
-    void handleFailedShot();
-    void handleCompletedShot();
-    void appendCompletedShotToIndex(bool hasNotes = false);
+    void handleFailedShot(const String &id, bool hadIndexEntry);
+    void handleCompletedShot(const String &id, const String &beanName, const String &beanId, const String &grinderName,
+                             bool startedVolumetric, double grindTargetVolume, int grindTargetDuration,
+                             const ShotLogHeader &completedHeader);
+    void appendCompletedShotToIndex(const String &id, const ShotLogHeader &completedHeader, bool hasNotes = false);
 
     // PRO-422: resolve the selected bean NAME (all Settings stores) to its stable
     // BeanManager id at capture time. Returns "" when no bean is selected, the
@@ -129,6 +131,8 @@ class ShotHistoryPlugin : public Plugin {
     // (relaxed ordering — a single independent bool, no dependent data published alongside it).
     std::atomic<bool> recording{false};
     std::atomic<bool> extendedRecording{false};
+    std::atomic<uint32_t> activeShotId{0};
+    std::atomic<uint32_t> shotGeneration{0};
     bool indexEntryCreated = false;     // Track if early index entry was created
     bool shotStartedVolumetric = false; // Track initial volumetric mode
     unsigned long shotStart = 0;
@@ -166,7 +170,8 @@ class ShotHistoryPlugin : public Plugin {
     bool rebuildInProgress = false;
 
     xTaskHandle taskHandle;
-    SemaphoreHandle_t stateMutex = nullptr; // Protects shared state accessed by record()
+    SemaphoreHandle_t stateMutex = nullptr;     // Protects shared state accessed by record()
+    SemaphoreHandle_t recordingMutex = nullptr; // Prevents a start while an ended file is closing.
     // Serializes notes filesystem read/merge/write operations without blocking
     // telemetry callbacks on stateMutex.
     SemaphoreHandle_t notesMutex = nullptr;

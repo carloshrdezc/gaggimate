@@ -1,3 +1,4 @@
+#include "../../src/display/plugins/ActiveShotFillPolicy.h"
 #include "../../src/display/plugins/ShotNotesPersistencePolicy.h"
 #include <unity.h>
 
@@ -32,9 +33,18 @@ void test_explicit_shot_history_grind_setting_remains_authoritative(void) {
     TEST_ASSERT_EQUAL_STRING("4.0", explicitShotHistoryPayload["grindSetting"].as<const char *>());
 }
 
+void test_fill_recheck_rejects_a_shot_ended_while_it_waited_for_notes_io(void) {
+    const shot_notes::ActiveShotIdentity admitted{42, 1234};
+    const shot_notes::ActiveShotIdentity ended{43, 1234};
+
+    TEST_ASSERT_TRUE(shot_notes::isActiveFillFor(admitted, admitted, 1234));
+    TEST_ASSERT_FALSE(shot_notes::isActiveFillFor(admitted, ended, 1234));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_stale_regular_save_preserves_dashboard_fill_written_between_read_and_save);
     RUN_TEST(test_explicit_shot_history_grind_setting_remains_authoritative);
+    RUN_TEST(test_fill_recheck_rejects_a_shot_ended_while_it_waited_for_notes_io);
     return UNITY_END();
 }
