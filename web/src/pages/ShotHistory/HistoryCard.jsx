@@ -1,5 +1,5 @@
 import Card from '../../components/Card.jsx';
-import { useCallback, useState, useContext } from 'preact/hooks';
+import { useCallback, useEffect, useState, useContext } from 'preact/hooks';
 import { useComputed } from '@preact/signals';
 import { HistoryChart } from './HistoryChart.jsx';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
@@ -105,6 +105,10 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
       setIsExporting(false);
     }
   }, [onLoad, shot, shotNotes]);
+
+  useEffect(() => {
+    setShotNotes(shot.notes || null);
+  }, [shot.notes]);
 
   const handleNotesLoaded = useCallback(notes => {
     setShotNotes(notes);

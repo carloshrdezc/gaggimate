@@ -42,8 +42,17 @@ import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
 import { faXmark } from '@fortawesome/free-solid-svg-icons/faXmark';
-import { inferBeanForShot, inferBeanIdForShot, isBeanRecordedForShot, listBeans } from '../../utils/beanManager.js';
-import { inferGrinderForShot, inferGrindSettingForShot, isGrinderRecordedForShot } from '../../utils/grinderManager.js';
+import {
+  inferBeanForShot,
+  inferBeanIdForShot,
+  isBeanRecordedForShot,
+  listBeans,
+} from '../../utils/beanManager.js';
+import {
+  inferGrinderForShot,
+  inferGrindSettingForShot,
+  isGrinderRecordedForShot,
+} from '../../utils/grinderManager.js';
 import {
   defaultFilters,
   hasActiveFilters,
@@ -53,6 +62,7 @@ import {
   filtersFromQuery,
   mergeFiltersIntoSearch,
 } from './shotFilters.js';
+import { hydrateShotRatingsFromNotes } from './ratingHydration.js';
 
 const connected = computed(() => machine.value.connected);
 
@@ -84,6 +94,7 @@ export function ShotHistory() {
   const itemsPerPage = 10;
 
   const [allBeans, setAllBeans] = useState([]);
+  const hydrationRunRef = useRef(0);
 
   // Advanced filters (PRO-31). Initialized from the URL query params so applied
   // filters persist across navigation (read on mount, written on change).
@@ -119,7 +130,9 @@ export function ShotHistory() {
     let cancelled = false;
     const load = () => {
       listBeans(apiService)
-        .then(beans => { if (!cancelled) setAllBeans(beans); })
+        .then(beans => {
+          if (!cancelled) setAllBeans(beans);
+        })
         .catch(() => {});
     };
     load();
@@ -224,64 +237,59 @@ export function ShotHistory() {
     return () => loadHistoryAbortRef.current?.abort();
   }, [loadHistory, connected.value]);
 
-  const loadShotDetails = useCallback(async shot => {
-    if (!shot) return null;
-    if (shot.loaded) return shot;
+  const loadShotDetails = useCallback(
+    async shot => {
+      if (!shot) return null;
+      if (shot.loaded) return shot;
 
-    try {
-      if (shot.source === 'browser') {
-        const storageKey = shot.storageKey || shot.name || shot.id;
-        const storedShot = await indexedDBService.getShot(storageKey);
-        if (!storedShot) return null;
+      try {
+        if (shot.source === 'browser') {
+          const storageKey = shot.storageKey || shot.name || shot.id;
+          const storedShot = await indexedDBService.getShot(storageKey);
+          if (!storedShot) return null;
+
+          const loadedShot = enrichShotWithBean({
+            ...shot,
+            ...storedShot,
+            source: 'browser',
+            loaded: true,
+          });
+
+          setHistory(prev =>
+            prev.map(item => (getHistoryKey(item) === getHistoryKey(shot) ? loadedShot : item)),
+          );
+          return loadedShot;
+        }
+
+        const paddedId = String(shot.id).padStart(6, '0');
+        const resp = await fetch(`/api/history/${paddedId}.slog`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        const parsed = parseBinaryShot(buf, shot.id);
+        parsed.incomplete = (shot?.incomplete ?? false) || parsed.incomplete;
+        if (shot?.notes) parsed.notes = shot.notes;
 
         const loadedShot = enrichShotWithBean({
           ...shot,
-          ...storedShot,
-          source: 'browser',
+          ...parsed,
+          volume: shot.volume ?? parsed.volume,
+          rating: shot.rating ?? parsed.rating,
+          incomplete: shot.incomplete ?? parsed.incomplete,
+          source: 'gaggimate',
           loaded: true,
         });
 
         setHistory(prev =>
-          prev.map(item =>
-            getHistoryKey(item) === getHistoryKey(shot)
-              ? loadedShot
-              : item,
-          ),
+          prev.map(item => (getHistoryKey(item) === getHistoryKey(shot) ? loadedShot : item)),
         );
         return loadedShot;
+      } catch (e) {
+        console.error('Failed loading shot', e);
+        throw e;
       }
-
-      const paddedId = String(shot.id).padStart(6, '0');
-      const resp = await fetch(`/api/history/${paddedId}.slog`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const buf = await resp.arrayBuffer();
-      const parsed = parseBinaryShot(buf, shot.id);
-      parsed.incomplete = (shot?.incomplete ?? false) || parsed.incomplete;
-      if (shot?.notes) parsed.notes = shot.notes;
-
-      const loadedShot = enrichShotWithBean({
-        ...shot,
-        ...parsed,
-        volume: shot.volume ?? parsed.volume,
-        rating: shot.rating ?? parsed.rating,
-        incomplete: shot.incomplete ?? parsed.incomplete,
-        source: 'gaggimate',
-        loaded: true,
-      });
-
-      setHistory(prev =>
-        prev.map(item =>
-          getHistoryKey(item) === getHistoryKey(shot)
-            ? loadedShot
-            : item,
-        ),
-      );
-      return loadedShot;
-    } catch (e) {
-      console.error('Failed loading shot', e);
-      throw e;
-    }
-  }, [enrichShotWithBean]);
+    },
+    [enrichShotWithBean],
+  );
 
   const buildExportShot = useCallback(async shot => {
     if (shot.source === 'browser') {
@@ -292,7 +300,8 @@ export function ShotHistory() {
         ...(storedShot || shot),
         id: String(shot.id),
         source: 'browser',
-        loaded: Array.isArray((storedShot || shot)?.samples) && (storedShot || shot).samples.length > 0,
+        loaded:
+          Array.isArray((storedShot || shot)?.samples) && (storedShot || shot).samples.length > 0,
         notes,
       };
     }
@@ -335,7 +344,7 @@ export function ShotHistory() {
           ? {
               ...shot,
               notes,
-              rating: notes.rating || 0,
+              rating: notes.rating ?? 0,
             }
           : shot,
       ),
@@ -373,7 +382,9 @@ export function ShotHistory() {
         const payload = JSON.parse(await file.text());
         const imported = await importShotHistoryArchive(payload);
         await loadHistory();
-        alert(`Imported ${imported.length} shot${imported.length === 1 ? '' : 's'} into Shot History.`);
+        alert(
+          `Imported ${imported.length} shot${imported.length === 1 ? '' : 's'} into Shot History.`,
+        );
       } catch (error) {
         console.error('Failed to import shot history archive:', error);
         alert(`Import failed: ${error.message}`);
@@ -395,7 +406,9 @@ export function ShotHistory() {
           shot.profile?.toLowerCase().includes(search) ||
           shot.beanName?.toLowerCase().includes(search) ||
           String(shot.id).includes(search) ||
-          String(shot.source || '').toLowerCase().includes(search),
+          String(shot.source || '')
+            .toLowerCase()
+            .includes(search),
       );
     }
 
@@ -490,6 +503,33 @@ export function ShotHistory() {
     }
   }, [currentPage, totalPages]);
 
+  useEffect(() => {
+    const runId = ++hydrationRunRef.current;
+    hydrateShotRatingsFromNotes(paginatedHistory, notesService)
+      .then(hydratedShots => {
+        if (hydrationRunRef.current !== runId) return;
+        const hydratedByKey = new Map(hydratedShots.map(shot => [getHistoryKey(shot), shot]));
+        setHistory(prev => {
+          let changed = false;
+          const next = prev.map(shot => {
+            const hydrated = hydratedByKey.get(getHistoryKey(shot));
+            if (!hydrated) return shot;
+            if (hydrated.notes === shot.notes && hydrated.rating === shot.rating) return shot;
+            changed = true;
+            return {
+              ...shot,
+              notes: hydrated.notes,
+              rating: hydrated.rating,
+            };
+          });
+          return changed ? next : prev;
+        });
+      })
+      .catch(error => {
+        console.error('Failed to hydrate shot notes:', error);
+      });
+  }, [paginatedHistory]);
+
   // Dropdown options derived from the loaded history + bean library (PRO-31).
   const profileOptions = useMemo(() => availableProfiles(history), [history]);
   const beanOptions = useMemo(() => availableBeans(history, allBeans), [history, allBeans]);
@@ -508,10 +548,10 @@ export function ShotHistory() {
       {/* Header */}
       <div className='flex items-center justify-between gap-4'>
         <div>
-          <h1 className='font-nd-mono text-[20px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+          <h1 className='font-nd-mono text-[20px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
             Shot History
           </h1>
-          <p className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)] mt-2'>
+          <p className='font-nd-mono mt-2 text-[13px] text-[var(--text-disabled,#666)]'>
             {totalFilteredItems} / {history.length} shots
             {totalPages > 1 && ` • Page ${currentPage} of ${totalPages}`}
           </p>
@@ -519,7 +559,9 @@ export function ShotHistory() {
         <div className='flex items-center gap-2'>
           <button
             onClick={() => setFiltersOpen(open => !open)}
-            className={`nd-action-btn${filtersActive ? ' nd-action-btn--primary' : ''}`}
+            className={['nd-action-btn', filtersActive ? 'nd-action-btn--primary' : '']
+              .filter(Boolean)
+              .join(' ')}
             title='Filters'
             aria-label='Toggle filters'
             aria-expanded={filtersOpen}
@@ -633,7 +675,7 @@ export function ShotHistory() {
           {filtersOpen && (
             <div className='flex flex-col gap-4 rounded-md border border-[var(--home-border,rgba(255,255,255,0.08))] p-4'>
               <div className='flex items-center justify-between gap-3'>
-                <span className='font-nd-mono text-[12px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+                <span className='font-nd-mono text-[12px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
                   Filters — {totalFilteredItems} / {history.length}
                 </span>
                 <button
@@ -651,7 +693,7 @@ export function ShotHistory() {
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
                 {/* Date range */}
                 <label className='flex flex-col gap-1'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     From date
                   </span>
                   <input
@@ -663,7 +705,7 @@ export function ShotHistory() {
                   />
                 </label>
                 <label className='flex flex-col gap-1'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     To date
                   </span>
                   <input
@@ -677,7 +719,7 @@ export function ShotHistory() {
 
                 {/* Profile */}
                 <label className='flex flex-col gap-1'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     Profile
                   </span>
                   <select
@@ -696,7 +738,7 @@ export function ShotHistory() {
 
                 {/* Bean */}
                 <label className='flex flex-col gap-1'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     Bean
                   </span>
                   <select
@@ -715,7 +757,7 @@ export function ShotHistory() {
 
                 {/* Duration range (seconds) */}
                 <label className='flex flex-col gap-1'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     Min duration (s)
                   </span>
                   <input
@@ -729,7 +771,7 @@ export function ShotHistory() {
                   />
                 </label>
                 <label className='flex flex-col gap-1'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     Max duration (s)
                   </span>
                   <input
@@ -745,7 +787,7 @@ export function ShotHistory() {
 
                 {/* Free text (notes) */}
                 <label className='flex flex-col gap-1 sm:col-span-2'>
-                  <span className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-disabled,#666)]'>
+                  <span className='font-nd-mono text-[11px] tracking-[0.08em] text-[var(--text-disabled,#666)] uppercase'>
                     Notes contain
                   </span>
                   <input
@@ -775,7 +817,9 @@ export function ShotHistory() {
           {totalFilteredItems === 0 && !loading && (
             <div className='py-20 text-center'>
               <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>
-                {history.length === 0 ? 'No shots available' : 'No shots match your search and filter criteria'}
+                {history.length === 0
+                  ? 'No shots available'
+                  : 'No shots match your search and filter criteria'}
               </span>
             </div>
           )}
