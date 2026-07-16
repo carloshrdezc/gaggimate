@@ -99,4 +99,24 @@ describe('hydrateShotRatingsFromNotes', () => {
     expect(hydrated.rating).toBe(7.1);
     expect(hydrated.notes).toBe(embeddedNotes);
   });
+
+  test('preserves existing ratings when the notes store has no saved values', async () => {
+    const notesService = {
+      loadNotes: vi.fn(async id => ({ id, rating: 0, notes: '' })),
+    };
+
+    const hydrated = await hydrateShotRatingsFromNotes(
+      [
+        { id: 101, source: 'gaggimate', rating: 8 },
+        { id: 'archive-row', source: 'browser', storageKey: 'indexed-db-key', rating: 6.5 },
+      ],
+      notesService,
+    );
+
+    expect(notesService.loadNotes).toHaveBeenCalledWith('101', 'gaggimate');
+    expect(notesService.loadNotes).toHaveBeenCalledWith('indexed-db-key', 'browser');
+    expect(hydrated.map(shot => shot.rating)).toEqual([8, 6.5]);
+    expect(hydrated[0].notes).toBeUndefined();
+    expect(hydrated[1].notes).toBeUndefined();
+  });
 });

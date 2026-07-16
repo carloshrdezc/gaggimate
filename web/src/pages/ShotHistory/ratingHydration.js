@@ -72,11 +72,15 @@ function hasPersistedNotes(notes, service) {
 
 function chooseLoadedNotes(shot, notes, service) {
   const persisted = hasPersistedNotes(notes, service);
-  if (shot?.source === 'browser' && shot.notes && !persisted) {
+  if (persisted) {
+    return markNotesStoreChecked(notes, true);
+  }
+
+  if (shot?.source === 'browser' && shot.notes) {
     return markNotesStoreChecked(shot.notes, false);
   }
 
-  return markNotesStoreChecked(notes, persisted);
+  return null;
 }
 
 function shouldLoadPersistedNotes(shot) {
