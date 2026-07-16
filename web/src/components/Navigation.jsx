@@ -1,4 +1,4 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faHome } from '@fortawesome/free-solid-svg-icons/faHome';
@@ -37,6 +37,7 @@ const NAVIGATION_SECTIONS = [
 ];
 
 const _NAV_BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function MenuItem({ icon, isNew = false, label, link, onNavigate }) {
   const { path } = useLocation();
@@ -58,7 +59,7 @@ function MenuItem({ icon, isNew = false, label, link, onNavigate }) {
       <FontAwesomeIcon icon={icon} />
       <span className='flex items-center gap-2 overflow-hidden whitespace-nowrap'>
         <span className='truncate'>{label}</span>
-        {isNew && <span className='text-success text-[0.65rem] font-bold shrink-0'>NEW</span>}
+        {isNew && <span className='text-success shrink-0 text-[0.65rem] font-bold'>NEW</span>}
       </span>
     </a>
   );
@@ -66,6 +67,19 @@ function MenuItem({ icon, isNew = false, label, link, onNavigate }) {
 
 export function Navigation({ open = false, onClose } = {}) {
   const { path } = useLocation();
+  const closeButtonRef = useRef(null);
+  const drawerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousActiveElement = document.activeElement;
+    closeButtonRef.current?.focus();
+
+    return () => {
+      previousActiveElement?.focus?.();
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -73,6 +87,43 @@ export function Navigation({ open = false, onClose } = {}) {
     const handleKeyDown = event => {
       if (event.key === 'Escape') {
         onClose?.();
+        return;
+      }
+
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const drawerEl = drawerRef.current;
+      if (!drawerEl) {
+        return;
+      }
+
+      const focusableElements = Array.from(drawerEl.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
+        el => !el.closest('[aria-hidden="true"]'),
+      );
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (!firstElement || !lastElement) {
+        return;
+      }
+
+      if (!drawerEl.contains(document.activeElement)) {
+        event.preventDefault();
+        firstElement.focus();
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+        return;
+      }
+
+      if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
       }
     };
 
@@ -92,38 +143,43 @@ export function Navigation({ open = false, onClose } = {}) {
         onClick={onClose}
       />
       <aside
+        ref={drawerRef}
         id='app-navigation-drawer'
         className={`nav-drawer ${open ? 'is-open' : ''}`}
-        aria-hidden={!open}
+        role={open ? 'dialog' : undefined}
+        aria-modal={open ? 'true' : undefined}
+        aria-label='Navigation menu'
+        aria-hidden={open ? undefined : true}
       >
-        <div className='flex h-full max-h-screen flex-col overflow-hidden rounded-r-[1.75rem] border-r border-base-300/65 bg-base-100/96 p-4 shadow-[0_26px_60px_-24px_rgba(0,0,0,0.92)] backdrop-blur-xl sm:w-[19rem]'>
+        <div className='border-base-300/65 bg-base-100/96 flex h-full max-h-screen flex-col overflow-hidden rounded-r-[1.75rem] border-r p-4 shadow-[0_26px_60px_-24px_rgba(0,0,0,0.92)] backdrop-blur-xl sm:w-[19rem]'>
           <div className='mb-4 flex items-center justify-between gap-3 px-2 pt-1'>
             <div>
-              <div className='font-logo text-lg tracking-[0.18em] text-base-content'>GAGGIMATE</div>
-              <div className='text-[0.65rem] uppercase tracking-[0.24em] text-base-content/46'>
+              <div className='font-logo text-base-content text-lg tracking-[0.18em]'>GAGGIMATE</div>
+              <div className='text-base-content/46 text-[0.65rem] tracking-[0.24em] uppercase'>
                 Navigation
               </div>
             </div>
             <button
+              ref={closeButtonRef}
               type='button'
               aria-label='Close navigation menu'
-              className='btn btn-sm btn-circle border-none bg-transparent text-base-content hover:bg-base-content/10 hover:text-base-content focus-visible:bg-base-content/10 focus-visible:outline-none'
+              className='btn btn-sm btn-circle text-base-content hover:bg-base-content/10 hover:text-base-content focus-visible:bg-base-content/10 border-none bg-transparent focus-visible:outline-none'
               onClick={onClose}
             >
               <span className='text-lg leading-none'>×</span>
             </button>
           </div>
           <div className='custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1'>
-          {NAVIGATION_SECTIONS.map(section => (
-            <div key={section.id}>
-              {section.showDivider && <div className='h-3' />}
-              <div className='space-y-2'>
-                {section.items.map(item => (
-                  <MenuItem key={item.link} {...item} onNavigate={onClose} />
-                ))}
+            {NAVIGATION_SECTIONS.map(section => (
+              <div key={section.id}>
+                {section.showDivider && <div className='h-3' />}
+                <div className='space-y-2'>
+                  {section.items.map(item => (
+                    <MenuItem key={item.link} {...item} onNavigate={onClose} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
           </div>
         </div>
       </aside>
