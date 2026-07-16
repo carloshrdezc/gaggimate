@@ -587,14 +587,9 @@ void ShotHistoryPlugin::record() {
     // then correctly observes isFileOpen == false. The close runs once at end-of-
     // shot when no live samples for that shot remain, so holding the lock here does
     // not reintroduce the steady-state sample-drop the lock-free path fixed.
-    // Acquire notesMutex before stateMutex so active-shot fills and recording
-    // identity transitions share one lock order. On the active sample path the
-    // notes lock is released with stateMutex before any filesystem I/O.
-    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        return;
-    }
+    // stateMutex protects only the bounded shared-state snapshot. Notes writes use
+    // notesMutex independently, so active recording never waits for filesystem I/O.
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        xSemaphoreGive(notesMutex);
         return;
     }
 
@@ -615,12 +610,10 @@ void ShotHistoryPlugin::record() {
             closeLogFile(snapBluetoothWeight);
         }
         xSemaphoreGive(stateMutex);
-        xSemaphoreGive(notesMutex);
         return;
     }
 
     xSemaphoreGive(stateMutex);
-    xSemaphoreGive(notesMutex);
 
     // ---- Everything below runs WITHOUT stateMutex (active-shot path) ----
 

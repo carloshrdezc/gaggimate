@@ -168,8 +168,7 @@ class ShotHistoryPlugin : public Plugin {
     xTaskHandle taskHandle;
     SemaphoreHandle_t stateMutex = nullptr; // Protects shared state accessed by record()
     // Serializes notes filesystem read/merge/write operations without blocking
-    // telemetry callbacks on stateMutex. start/end take this before stateMutex so
-    // an active-shot fill cannot cross a shot identity transition.
+    // telemetry callbacks on stateMutex.
     SemaphoreHandle_t notesMutex = nullptr;
     // PRO-277: serializes every operation on /h/index.bin across the loopTask,
     // the WebUI request task, and the async-rebuild task (see *Locked helpers above).
