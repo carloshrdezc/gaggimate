@@ -10,6 +10,7 @@ import {
   isGrinderRecordedForShot,
   isGrindTargetRecordedForShot,
   resolveGrinderPrefill,
+  MANUAL_GRIND_SETTING_STORAGE_KEY,
 } from './grinderManager.js';
 
 const GRINDERS_STORAGE_KEY = 'gaggimate-grinders';
@@ -355,6 +356,29 @@ describe('grinderManager', () => {
       expect(inferGrindSettingForShot(shot)).toBe('2.5');
     });
 
+    // PRO-503: EditableNumBlock's onClick fires onTap (which re-commits the
+    // current value) BEFORE entering edit mode, so tapping the GRIND field
+    // and tapping away WITHOUT typing/pressing Enter still records a fresh
+    // event. This pins the function-level contract this depends on: calling
+    // recordManualGrindSetting again with the SAME grindSetting must produce
+    // a new, later event rather than being a no-op or being deduped away —
+    // the fix relies on this to make a re-commit of an unchanged value count.
+    it('records a fresh event when the same grindSetting is re-committed (tap-away without Enter)', async () => {
+      const first = recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      // Ensure a distinguishable timestamp between the two events.
+      await new Promise(resolve => setTimeout(resolve, 2));
+      const second = recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      expect(second.id).not.toBe(first.id);
+      expect(second.selectedAtMs).toBeGreaterThanOrEqual(first.selectedAtMs);
+
+      // A shot pulled after the re-commit still resolves the (unchanged) value.
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
     it('no-ops for a blank / whitespace value', () => {
       expect(
         recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '   ' }),
@@ -403,8 +427,34 @@ describe('grinderManager', () => {
       expect(inferGrindSettingForShot(shot)).toBe('28s');
     });
 
+    it('uses the current Dashboard manual setting over the device grindTarget when no fresh event exists', () => {
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '3.2');
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindTarget: '25s' },
+      };
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
+    it('uses the current Dashboard manual setting over the grinder-selection fallback', () => {
+      recordGrinderSelection({
+        profileLabel: 'Espresso',
+        grinder: 'Niche Zero',
+        grindSetting: '28s',
+      });
+
+      const shot = { profile: 'Espresso', timestamp: Math.floor(Date.now() / 1000) + 5 };
+      expect(shot.notes?.grindTarget).toBeUndefined();
+      expect(inferGrindSettingForShot(shot)).toBe('28s');
+
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '3.2');
+      expect(inferGrindSettingForShot(shot)).toBe('3.2');
+    });
+
     it('never clobbers a saved note or an explicit shot value', () => {
       recordManualGrindSetting({ profileLabel: 'Espresso', grindSetting: '3.2' });
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, '4.1');
       const shotWithNote = {
         profile: 'Espresso',
         timestamp: Math.floor(Date.now() / 1000) + 5,
@@ -418,6 +468,16 @@ describe('grinderManager', () => {
         grindSetting: 'Explicit Setting',
       };
       expect(inferGrindSettingForShot(shotWithExplicit)).toBe('Explicit Setting');
+    });
+
+    it.each(['0', '', 'not-a-number', '-1'])('falls back to the machine target when Dashboard manual setting is %s', value => {
+      localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, value);
+      const shot = {
+        profile: 'Espresso',
+        timestamp: Math.floor(Date.now() / 1000) + 5,
+        notes: { grindTarget: '25s' },
+      };
+      expect(inferGrindSettingForShot(shot)).toBe('25s');
     });
 
     it('does not infer a manual value recorded AFTER the shot was pulled', () => {
@@ -538,6 +598,24 @@ describe('grinderManager', () => {
 
     it('returns an empty string when no source has a grinder', () => {
       expect(resolveGrinderPrefill({ grinder: '' }, {}, {})).toBe('');
+    });
+
+    it('returns empty string when all args are undefined (null-safety)', () => {
+      expect(resolveGrinderPrefill(undefined, undefined, undefined)).toBe('');
+    });
+
+    it('uses savedNotes.grinderName when shot has no grinder and loadedNotes has no truthy grinder', () => {
+      const loadedNotes = { grinder: '' };
+      const savedNotes = { grinderName: 'Device Df64' };
+      const shot = {};
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('Device Df64');
+    });
+
+    it('treats a whitespace-only loadedNotes.grinder as empty so device grinderName wins', () => {
+      const loadedNotes = { grinder: '   ' };
+      const savedNotes = { grinderName: 'Device Df64' };
+      const shot = { grinder: 'LStore Guess' };
+      expect(resolveGrinderPrefill(loadedNotes, savedNotes, shot)).toBe('Device Df64');
     });
   });
 

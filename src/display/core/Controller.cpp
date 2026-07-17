@@ -13,11 +13,12 @@
 // BLE and has no coexistence path).
 #include <esp_wifi.h>
 #endif
-#include <SD_MMC.h>
 #include <LittleFS.h>
+#include <SD_MMC.h>
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/EventIds.h>
 #include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/SteamButtonPolicy.h>
 #include <display/core/constants.h>
@@ -29,6 +30,7 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#include <display/ui/default/DisplayRestartPolicy.h>
 #if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
 #endif
@@ -78,9 +80,12 @@ void Controller::setup() {
     // every value silently falls back to its default (WiFi never connects).
     // setup() runs after nvs init, so the read here succeeds.
     settings.load();
+    // TODO(PRO-494): no re-init path exists yet. If one ever needs to reload
+    // settings post-boot, call settings.unload() before this settings.load()
+    // to tear down the existing loop task and vectorMutex first.
 
     mode = settings.getStartupMode();
-    
+
     // Initialize process mutex for thread-safe access
     processMutex = xSemaphoreCreateMutex();
     if (processMutex == nullptr) {
@@ -158,14 +163,14 @@ void Controller::setup() {
 #endif
     pluginManager->setup(this);
 
-    pluginManager->on("profiles:profile:save", [this](Event const &event) {
+    pluginManager->on(EventIds::PROFILES_PROFILE_SAVE, [this](Event const &event) {
         String id = event.getString("id");
         if (id == profileManager->getSelectedProfile().id) {
             this->handleProfileUpdate();
         }
     });
 
-    pluginManager->on("profiles:profile:select", [this](Event const &event) { this->handleProfileUpdate(); });
+    pluginManager->on(EventIds::PROFILES_PROFILE_SELECT, [this](Event const &event) { this->handleProfileUpdate(); });
 
 #ifndef GAGGIMATE_HEADLESS
     ui->init();
@@ -187,12 +192,12 @@ void Controller::connect() {
         return;
     lastPing = millis();
     connectStartTime = millis();
-    pluginManager->trigger("controller:startup");
+    pluginManager->trigger(EventIds::CONTROLLER_STARTUP);
 
     setupWifi();
     setupBluetooth();
-    pluginManager->on("ota:update:start", [this](Event const &) { this->updating = true; });
-    pluginManager->on("ota:update:end", [this](Event const &) { this->updating = false; });
+    pluginManager->on(EventIds::OTA_UPDATE_START, [this](Event const &) { this->updating = true; });
+    pluginManager->on(EventIds::OTA_UPDATE_END, [this](Event const &) { this->updating = false; });
 
     updateLastAction();
     initialized = true;
@@ -259,7 +264,7 @@ void Controller::setupBluetooth() {
     clientController.initClient();
     clientController.registerDisconnectCallback([this]() {
         if (initialized) {
-            pluginManager->trigger("controller:bluetooth:disconnect");
+            pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT);
             waitingForController = true;
             // Restart the grace clock so the next scan/reconnect attempt gets a
             // full CONTROLLER_WAITING_TIMEOUT_MS window (PRO-3).
@@ -273,10 +278,10 @@ void Controller::setupBluetooth() {
             this->pressure = pressure;
             this->currentPuckFlow = puckFlow;
             this->currentPumpFlow = pumpFlow;
-            pluginManager->trigger("boiler:pressure:change", "value", pressure);
-            pluginManager->trigger("pump:puck-flow:change", "value", puckFlow);
-            pluginManager->trigger("pump:flow:change", "value", pumpFlow);
-            pluginManager->trigger("pump:puck-resistance:change", "value", puckResistance);
+            pluginManager->trigger(EventIds::BOILER_PRESSURE_CHANGE, "value", pressure);
+            pluginManager->trigger(EventIds::PUMP_PUCK_FLOW_CHANGE, "value", puckFlow);
+            pluginManager->trigger(EventIds::PUMP_FLOW_CHANGE, "value", pumpFlow);
+            pluginManager->trigger(EventIds::PUMP_PUCK_RESISTANCE_CHANGE, "value", puckResistance);
         });
     clientController.registerBrewBtnCallback([this](const int brewButtonStatus) { handleBrewButton(brewButtonStatus); });
     clientController.registerSteamBtnCallback([this](const int steamButtonStatus) { handleSteamButton(steamButtonStatus); });
@@ -285,7 +290,7 @@ void Controller::setupBluetooth() {
             this->error = error;
             deactivate();
             setMode(MODE_STANDBY);
-            pluginManager->trigger(F("controller:error"));
+            pluginManager->trigger(EventIds::CONTROLLER_ERROR);
             ESP_LOGE(LOG_TAG, "Received error %d", error);
         }
     });
@@ -295,7 +300,7 @@ void Controller::setupBluetooth() {
         // Store in simplified format with combined Kf
         snprintf(pid, sizeof(pid), "%.3f,%.3f,%.3f,%.3f", Kp, Ki, Kd, Kf);
         settings.setPid(String(pid));
-        pluginManager->trigger("controller:autotune:result");
+        pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_RESULT);
         autotuning = false;
     });
     clientController.registerVolumetricMeasurementCallback(
@@ -303,9 +308,9 @@ void Controller::setupBluetooth() {
     clientController.registerTofMeasurementCallback([this](const int value) {
         tofDistance = value;
         ESP_LOGV(LOG_TAG, "Received new TOF distance: %d", value);
-        pluginManager->trigger("controller:tof:change", "value", value);
+        pluginManager->trigger(EventIds::CONTROLLER_TOF_CHANGE, "value", value);
     });
-    pluginManager->trigger("controller:bluetooth:init");
+    pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_INIT);
 }
 
 void Controller::setupInfos() {
@@ -374,13 +379,14 @@ void Controller::setupWifi() {
         if (WiFi.status() == WL_CONNECTED) {
             ESP_LOGI(LOG_TAG, "Connected to %s with IP address %s", settings.getWifiSsid().c_str(),
                      WiFi.localIP().toString().c_str());
-            WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger("controller:wifi:connect", "AP", 0); },
-                         WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+            WiFi.onEvent(
+                [this](WiFiEvent_t, WiFiEventInfo_t) { pluginManager->trigger(EventIds::CONTROLLER_WIFI_CONNECT, "AP", 0); },
+                WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
             WiFi.onEvent(
                 [this](WiFiEvent_t, WiFiEventInfo_t info) {
                     ESP_LOGI(LOG_TAG, "Lost WiFi connection. Reason: %s",
                              WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(info.wifi_sta_disconnected.reason)));
-                    pluginManager->trigger("controller:wifi:disconnect");
+                    pluginManager->trigger(EventIds::CONTROLLER_WIFI_DISCONNECT);
                 },
                 WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
             configTzTime(resolve_timezone(settings.getTimezone()), NTP_SERVER);
@@ -404,10 +410,7 @@ void Controller::setupWifi() {
         ESP_LOGI(LOG_TAG, "Started WiFi AP %s", WIFI_AP_SSID);
     }
 
-    pluginManager->on("ota:update:start", [this](Event const &) { this->updating = true; });
-    pluginManager->on("ota:update:end", [this](Event const &) { this->updating = false; });
-
-    pluginManager->trigger("controller:wifi:connect", "AP", isApConnection ? 1 : 0);
+    pluginManager->trigger(EventIds::CONTROLLER_WIFI_CONNECT, "AP", isApConnection ? 1 : 0);
 }
 
 void Controller::loop() {
@@ -424,7 +427,7 @@ void Controller::loop() {
     if (!waitingForController && initialized && !clientController.isConnected() &&
         (long)(now - connectStartTime) > CONTROLLER_WAITING_TIMEOUT_MS) {
         waitingForController = true;
-        pluginManager->trigger("controller:bluetooth:waiting");
+        pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_WAITING);
     }
 
     if (clientController.isReadyForConnection() && clientController.connectToServer()) {
@@ -442,9 +445,9 @@ void Controller::loop() {
             if (settings.getStartupMode() == MODE_STANDBY)
                 activateStandby();
 
-            pluginManager->trigger("controller:ready");
+            pluginManager->trigger(EventIds::CONTROLLER_READY);
         }
-        pluginManager->trigger("controller:bluetooth:connect");
+        pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_CONNECT);
     }
 
     if (isErrorState()) {
@@ -477,7 +480,7 @@ void Controller::loop() {
                 currentProcess->progress();
                 bool stillActive = currentProcess->isActive();
                 xSemaphoreGive(processMutex);
-                
+
                 if (!stillActive) {
                     deactivate();
                 }
@@ -576,7 +579,7 @@ void Controller::autotune(int testTime, int samples) {
     }
     autotuning = true;
     clientController.sendAutotune(testTime, samples);
-    pluginManager->trigger("controller:autotune:start");
+    pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_START);
 }
 
 void Controller::startProcess(Process *process) {
@@ -584,7 +587,7 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
-    
+
     // Acquire mutex first to prevent TOCTOU race condition
     // Use portMAX_DELAY (blocking) with ESP_LOGE: failure here is critical and should never happen
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
@@ -592,7 +595,7 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
-    
+
     // Check if process is already active while holding the mutex
     if (currentProcess != nullptr && currentProcess->isActive()) {
         xSemaphoreGive(processMutex);
@@ -605,22 +608,56 @@ void Controller::startProcess(Process *process) {
         xSemaphoreGive(processMutex);
         delete process;
         if (endedProcessType == MODE_BREW) {
-            pluginManager->trigger("controller:brew:end");
+            pluginManager->trigger(EventIds::CONTROLLER_BREW_END);
         } else if (endedProcessType == MODE_GRIND) {
-            pluginManager->trigger("controller:grind:end");
+            pluginManager->trigger(EventIds::CONTROLLER_GRIND_END);
         }
-        pluginManager->trigger("controller:process:end", "processType", endedProcessType);
+        pluginManager->trigger(EventIds::CONTROLLER_PROCESS_END, "processType", endedProcessType);
         updateLastAction();
         return;
     }
-    
+
     processCompleted = false;
     this->currentProcess = process;
-    
+
     xSemaphoreGive(processMutex);
-    
-    pluginManager->trigger("controller:process:start");
+
+    pluginManager->trigger(EventIds::CONTROLLER_PROCESS_START);
     updateLastAction();
+}
+
+bool Controller::canRestartDisplay() const {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in canRestartDisplay - denying restart");
+        return false;
+    }
+
+    const bool processActive = currentProcess != nullptr && currentProcess->isActive();
+    const bool grindActive = processActive && currentProcess->getType() == MODE_GRIND;
+    const bool allowed = shouldRestartDisplay(processActive, isUpdating(), isAutotuning(), isErrorState(), mode, grindActive);
+
+    xSemaphoreGive(processMutex);
+    return allowed;
+}
+
+bool Controller::restartDisplayIfSafe() {
+    if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(LOG_TAG, "Mutex timeout in restartDisplayIfSafe - denying restart");
+        return false;
+    }
+
+    const bool processActive = currentProcess != nullptr && currentProcess->isActive();
+    const bool grindActive = processActive && currentProcess->getType() == MODE_GRIND;
+    if (!shouldRestartDisplay(processActive, isUpdating(), isAutotuning(), isErrorState(), mode, grindActive)) {
+        xSemaphoreGive(processMutex);
+        return false;
+    }
+
+    // startProcess() uses this mutex before assigning currentProcess. Retain it
+    // through the non-returning reset handoff so a concurrent activation cannot
+    // begin after authorization and before ESP.restart().
+    ESP.restart();
+    return true;
 }
 
 float Controller::getTargetTemp() const {
@@ -641,10 +678,10 @@ float Controller::getTargetTemp() const {
             return 0;
         }
     }
-    
+
     Process *proc = currentProcess;
     float result = 0;
-    
+
     switch (mode) {
     case MODE_STANDBY:
         result = profileManager->getSelectedProfile().temperature;
@@ -670,7 +707,7 @@ float Controller::getTargetTemp() const {
         result = 0;
         break;
     }
-    
+
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -797,7 +834,7 @@ bool Controller::hasTargetFlow() const {
 }
 
 void Controller::setTargetTemp(float temperature) {
-    pluginManager->trigger("boiler:targetTemperature:change", "value", temperature);
+    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", temperature);
     switch (mode) {
     case MODE_BREW:
         profileManager->getSelectedProfile().temperature = temperature;
@@ -810,6 +847,8 @@ void Controller::setTargetTemp(float temperature) {
         break;
     case MODE_MANUAL:
         settings.setManualTemperature(static_cast<int>(temperature));
+        settings.save(); // PRO-23: setter no longer self-saves; persist here (setTargetTemp has a standalone call site outside
+                         // updateManualTargets)
         break;
     default:;
     }
@@ -831,13 +870,13 @@ void Controller::setPumpModelCoeffs(void) {
 int Controller::getTargetGrindDuration() const { return settings.getTargetGrindDuration(); }
 
 void Controller::setTargetGrindDuration(int duration) {
-    Event event = pluginManager->trigger("controller:grindDuration:change", "value", duration);
+    Event event = pluginManager->trigger(EventIds::CONTROLLER_GRIND_DURATION_CHANGE, "value", duration);
     settings.setTargetGrindDuration(event.getInt("value"));
     updateLastAction();
 }
 
 void Controller::setTargetGrindVolume(double volume) {
-    Event event = pluginManager->trigger("controller:grindVolume:change", "value", static_cast<float>(volume));
+    Event event = pluginManager->trigger(EventIds::CONTROLLER_GRIND_VOLUME_CHANGE, "value", static_cast<float>(volume));
     settings.setTargetGrindVolume(event.getFloat("value"));
     updateLastAction();
 }
@@ -848,6 +887,9 @@ void Controller::updateManualTargets(int targetType, float pressure, float flow,
     settings.setManualFlow(flow);
     settings.setManualTemperature(temperature);
     setTargetTemp(settings.getManualTemperature());
+    // PRO-23: the four setters above no longer save() individually (see Settings.cpp);
+    // save once here for the whole batch instead of once per setter.
+    settings.save();
 
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW(LOG_TAG, "Mutex timeout in updateManualTargets");
@@ -966,10 +1008,10 @@ void Controller::updateControl() {
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         return; // Skip this update if we can't get the mutex quickly
     }
-    
+
     Process *proc = currentProcess;
     bool active = proc != nullptr && proc->isActive();
-    
+
     // Copy values we need while holding the mutex to minimize lock time
     bool isAltRelayActive = false;
     int procType = -1;
@@ -983,13 +1025,13 @@ void Controller::updateControl() {
     float manualPumpPressure = 0.0f;
     float manualPumpFlow = 0.0f;
     float targetTemp = 0.0f;
-    
+
     if (active) {
         procType = proc->getType();
         pumpValue = proc->getPumpValue();
         relayActive = proc->isRelayActive();
         isAltRelayActive = proc->isAltRelayActive();
-        
+
         if (procType == MODE_BREW) {
             auto *brewProcess = static_cast<BrewProcess *>(proc);
             isAdvancedPump = brewProcess->isAdvancedPump();
@@ -1007,7 +1049,7 @@ void Controller::updateControl() {
             targetTemp = manualProcess->getTemperature();
         }
     }
-    
+
     // Get target temp while still holding mutex to avoid race condition
     // Inline the logic from getTargetTemp() to avoid deadlock
     if (targetTemp == 0.0f) {
@@ -1029,7 +1071,7 @@ void Controller::updateControl() {
             break;
         }
     }
-    
+
     // Release mutex now that we've copied all needed values
     xSemaphoreGive(processMutex);
 
@@ -1054,9 +1096,8 @@ void Controller::updateControl() {
         }
         if (procType == MODE_BREW) {
             if (isAdvancedPump) {
-                clientController.sendAdvancedOutputControl(relayActive, targetTemp,
-                                                           brewPumpTargetIsPressure,
-                                                           brewPumpPressure, brewPumpFlow);
+                clientController.sendAdvancedOutputControl(relayActive, targetTemp, brewPumpTargetIsPressure, brewPumpPressure,
+                                                           brewPumpFlow);
                 targetPressure = brewPumpPressure;
                 targetFlow = brewPumpFlow;
                 return;
@@ -1110,7 +1151,7 @@ void Controller::activate() {
             currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
 #endif
             if (mode == MODE_BREW) {
-                pluginManager->trigger("controller:brew:prestart");
+                pluginManager->trigger(EventIds::CONTROLLER_BREW_PRESTART);
             }
         }
         // Yield to FreeRTOS (including WiFi/BLE tasks) while waiting for the scale
@@ -1140,16 +1181,16 @@ void Controller::activate() {
         break;
     default:;
     }
-    
+
     // Check if we started a brew process (with mutex protection)
     bool isBrewProcess = false;
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         isBrewProcess = currentProcess != nullptr && currentProcess->getType() == MODE_BREW;
         xSemaphoreGive(processMutex);
     }
-    
+
     if (isBrewProcess) {
-        pluginManager->trigger("controller:brew:start");
+        pluginManager->trigger(EventIds::CONTROLLER_BREW_START);
     }
 }
 
@@ -1159,7 +1200,7 @@ void Controller::deactivate() {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in deactivate");
         return;
     }
-    
+
     if (currentProcess == nullptr) {
         xSemaphoreGive(processMutex);
         return;
@@ -1168,28 +1209,28 @@ void Controller::deactivate() {
     lastProcess = currentProcess;
     currentProcess = nullptr;
     const int endedProcessType = lastProcess->getType();
-    
+
     xSemaphoreGive(processMutex);
     if (endedProcessType == MODE_BREW) {
-        pluginManager->trigger("controller:brew:end");
+        pluginManager->trigger(EventIds::CONTROLLER_BREW_END);
     } else if (endedProcessType == MODE_GRIND) {
-        pluginManager->trigger("controller:grind:end");
+        pluginManager->trigger(EventIds::CONTROLLER_GRIND_END);
     }
-    pluginManager->trigger("controller:process:end", "processType", endedProcessType);
+    pluginManager->trigger(EventIds::CONTROLLER_PROCESS_END, "processType", endedProcessType);
     updateLastAction();
 }
 
 void Controller::clear() {
     processCompleted = true;
-    
+
     // Protect lastProcess access with mutex to prevent race with getProcessSnapshot() and onVolumetricMeasurement()
     if (xSemaphoreTake(processMutex, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(LOG_TAG, "Failed to acquire mutex in clear");
         return;
     }
-    
+
     if (lastProcess != nullptr && lastProcess->getType() == MODE_BREW) {
-        pluginManager->trigger("controller:brew:clear");
+        pluginManager->trigger(EventIds::CONTROLLER_BREW_CLEAR);
     }
     delete lastProcess;
     lastProcess = nullptr;
@@ -1209,7 +1250,7 @@ void Controller::clear() {
 void Controller::activateGrind() {
     if (!isGrindAvailable())
         return;
-    pluginManager->trigger("controller:grind:start");
+    pluginManager->trigger(EventIds::CONTROLLER_GRIND_START);
     if (isGrindActive())
         return;
     clear();
@@ -1257,10 +1298,10 @@ bool Controller::isActive() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isActive - returning false (UI-safe: assume inactive)");
         return false;
     }
-    
+
     Process *proc = currentProcess;
     bool result = proc != nullptr && proc->isActive();
-    
+
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1273,10 +1314,10 @@ bool Controller::isActiveSafe() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isActiveSafe - returning true (conservative: assume active)");
         return true;
     }
-    
+
     Process *proc = currentProcess;
     bool result = proc != nullptr && proc->isActive();
-    
+
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1293,10 +1334,10 @@ bool Controller::isGrindActive() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isGrindActive - returning false (process may be active)");
         return false;
     }
-    
+
     Process *proc = currentProcess;
     bool result = proc != nullptr && proc->isActive() && proc->getType() == MODE_GRIND;
-    
+
     xSemaphoreGive(processMutex);
     return result;
 }
@@ -1306,12 +1347,12 @@ int Controller::getProcessType() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in getProcessType - returning -1");
         return -1;
     }
-    
+
     int type = -1;
     if (currentProcess != nullptr) {
         type = currentProcess->getType();
     }
-    
+
     xSemaphoreGive(processMutex);
     return type;
 }
@@ -1321,13 +1362,13 @@ uint8_t Controller::getBrewProcessPhaseIndex() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in getBrewProcessPhaseIndex - returning 0");
         return 0;
     }
-    
+
     uint8_t phaseIndex = 0;
     if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
         auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
         phaseIndex = static_cast<uint8_t>(brewProcess->phaseIndex);
     }
-    
+
     xSemaphoreGive(processMutex);
     return phaseIndex;
 }
@@ -1337,14 +1378,14 @@ bool Controller::isBrewProcessVolumetric() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isBrewProcessVolumetric - returning false");
         return false;
     }
-    
+
     bool isVolumetric = false;
     if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
         auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
-        isVolumetric = brewProcess->target == ProcessTarget::VOLUMETRIC &&
-                      brewProcess->currentPhase.hasVolumetricTarget() && isVolumetricAvailable();
+        isVolumetric = brewProcess->target == ProcessTarget::VOLUMETRIC && brewProcess->currentPhase.hasVolumetricTarget() &&
+                       isVolumetricAvailable();
     }
-    
+
     xSemaphoreGive(processMutex);
     return isVolumetric;
 }
@@ -1354,31 +1395,31 @@ bool Controller::isBrewProcessUtility() const {
         ESP_LOGW(LOG_TAG, "Mutex timeout in isBrewProcessUtility - returning false");
         return false;
     }
-    
+
     bool isUtility = false;
     if (currentProcess != nullptr && currentProcess->getType() == MODE_BREW) {
         auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
         isUtility = brewProcess->isUtility();
     }
-    
+
     xSemaphoreGive(processMutex);
     return isUtility;
 }
 
 ProcessSnapshot Controller::getProcessSnapshot() const {
     ProcessSnapshot snapshot;
-    
+
     // Use consistent timeout strategy to prevent deadlocks
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(UI_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW(LOG_TAG, "Mutex timeout in getProcessSnapshot - returning empty snapshot");
         return snapshot;
     }
-    
+
     Process *proc = currentProcess;
     if (proc == nullptr) {
         proc = lastProcess;
     }
-    
+
     if (proc != nullptr) {
         snapshot.exists = true;
         snapshot.isActive = proc->isActive();
@@ -1397,7 +1438,7 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.started = 0;
             snapshot.finished = 0;
         }
-        
+
         if (proc->getType() == MODE_BREW) {
             auto *brew = static_cast<BrewProcess *>(proc);
             snapshot.isBrew = true;
@@ -1440,7 +1481,7 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
             snapshot.manualTemperature = manual->temperature;
         }
     }
-    
+
     xSemaphoreGive(processMutex);
     return snapshot;
 }
@@ -1452,7 +1493,7 @@ void Controller::setMode(int newMode) {
         return;
     if (newMode == MODE_MANUAL && !isManualAvailable())
         return;
-    Event modeEvent = pluginManager->trigger("controller:mode:change", "value", newMode);
+    Event modeEvent = pluginManager->trigger(EventIds::CONTROLLER_MODE_CHANGE, "value", newMode);
     mode = modeEvent.getInt("value");
     steamReady = false;
 
@@ -1465,7 +1506,7 @@ void Controller::setMode(int newMode) {
 
 void Controller::onTempRead(float temperature) {
     float temp = temperature - static_cast<float>(settings.getTemperatureOffset());
-    Event event = pluginManager->trigger("boiler:currentTemperature:change", "value", temp);
+    Event event = pluginManager->trigger(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, "value", temp);
     currentTemp = event.getFloat("value");
 }
 
@@ -1489,8 +1530,8 @@ void Controller::onProfileSaveAsNew() {
 
 void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source) {
     pluginManager->trigger(source == VolumetricMeasurementSource::FLOW_ESTIMATION
-                               ? F("controller:volumetric-measurement:estimation:change")
-                               : F("controller:volumetric-measurement:bluetooth:change"),
+                               ? EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_ESTIMATION_CHANGE
+                               : EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE,
                            "value", static_cast<float>(measurement));
     if (source == VolumetricMeasurementSource::BLUETOOTH) {
         lastBluetoothMeasurement.store(millis(), std::memory_order_release);
@@ -1514,7 +1555,7 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         currentVolumetricSource.store(VolumetricMeasurementSource::FLOW_ESTIMATION, std::memory_order_release);
         latched = VolumetricMeasurementSource::FLOW_ESTIMATION;
         ESP_LOGW(LOG_TAG, "BLE scale unhealthy mid-shot; falling back volumetric source to flow-estimation");
-        pluginManager->trigger(F("controller:volumetric-measurement:source:change"), "value",
+        pluginManager->trigger(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_SOURCE_CHANGE, "value",
                                static_cast<int>(VolumetricMeasurementSource::FLOW_ESTIMATION));
     }
 
@@ -1522,7 +1563,7 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
         ESP_LOGD(LOG_TAG, "Ignoring volumetric measurement, source does not match");
         return;
     }
-    
+
     // PRO-367: never lose the stop-critical measurement to a timed-out take.
     // Latch the freshest value first (outside the lock). The scale weight is
     // monotonic cumulative, so the newest value subsumes any earlier one.
@@ -1560,7 +1601,7 @@ void Controller::onFlush() {
     Profile flushProfile = FLUSH_PROFILE;
     flushProfile.phases[0].duration = settings.getFlushDuration() / 1000.0f;
     startProcess(new BrewProcess(flushProfile, ProcessTarget::TIME, settings.getBrewDelay()));
-    pluginManager->trigger("controller:brew:start");
+    pluginManager->trigger(EventIds::CONTROLLER_BREW_START);
 }
 
 void Controller::onVolumetricDelete() {
@@ -1633,9 +1674,11 @@ void Controller::handleSteamButton(int steamButtonStatus) {
 }
 
 void Controller::handleProfileUpdate() {
-    pluginManager->trigger("boiler:targetTemperature:change", "value", profileManager->getSelectedProfile().temperature);
-    pluginManager->trigger("controller:targetDuration:change", "value", profileManager->getSelectedProfile().getTotalDuration());
-    pluginManager->trigger("controller:targetVolume:change", "value", profileManager->getSelectedProfile().getTotalVolume());
+    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", profileManager->getSelectedProfile().temperature);
+    pluginManager->trigger(EventIds::CONTROLLER_TARGET_DURATION_CHANGE, "value",
+                           profileManager->getSelectedProfile().getTotalDuration());
+    pluginManager->trigger(EventIds::CONTROLLER_TARGET_VOLUME_CHANGE, "value",
+                           profileManager->getSelectedProfile().getTotalVolume());
 }
 
 void Controller::loopTask(void *arg) {

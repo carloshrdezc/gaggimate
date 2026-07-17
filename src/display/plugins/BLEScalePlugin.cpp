@@ -2,12 +2,14 @@
 
 #if GAGGIMATE_ENABLE_BLE_SCALE
 
+#include "BLEScaleConnectPolicy.h"
 #include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
 #include "ShotHistoryPlugin.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <scales/acaia.h>
 #include <scales/bookoo.h>
 #include <scales/decent.h>
@@ -82,14 +84,14 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
         return;
     }
 
-    manager->on("controller:bluetooth:connect", [this](Event const &) {
+    manager->on(EventIds::CONTROLLER_BLUETOOTH_CONNECT, [this](Event const &) {
         if (this->controller != nullptr && shouldScanForBleScaleMode(this->controller->getMode())) {
             ESP_LOGI("BLEScalePlugin", "Resuming scanning");
             scan();
             active = true;
         }
     });
-    manager->on("controller:bluetooth:disconnect", [this](Event const &) {
+    manager->on(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT, [this](Event const &) {
         ESP_LOGW("BLEScalePlugin", "Controller disconnected, stopping BLE scan");
         // Clear any in-flight steam grace so a BLE disconnect during the window
         // doesn't leave the pending flag dangling until the deadline.
@@ -103,9 +105,9 @@ void BLEScalePlugin::setup(Controller *controller, PluginManager *manager) {
             scanner->stopAsyncScan();
         }
     });
-    manager->on("controller:brew:prestart", [this](Event const &) { onProcessStart(); });
-    manager->on("controller:grind:start", [this](Event const &) { onProcessStart(); });
-    manager->on("controller:mode:change", [this](Event const &event) {
+    manager->on(EventIds::CONTROLLER_BREW_PRESTART, [this](Event const &) { onProcessStart(); });
+    manager->on(EventIds::CONTROLLER_GRIND_START, [this](Event const &) { onProcessStart(); });
+    manager->on(EventIds::CONTROLLER_MODE_CHANGE, [this](Event const &event) {
         const int newMode = event.getInt("value");
         const int oldMode = previousMode;
         previousMode = newMode;
@@ -193,22 +195,41 @@ void BLEScalePlugin::update() {
         return;
     }
 
-    // Don't update volumetric override if scale access might fail
     bool hasConnectedScale = false;
-    if (scale != nullptr) {
-        // Check if scale pointer is valid before accessing
-        hasConnectedScale = scale->isConnected();
-    }
-
-    if (controller->isVolumetricAvailable())
-        controller->setVolumetricOverride(hasConnectedScale);
 
     if (!active)
         return;
 
     if (scale != nullptr) {
         // Call scale update with error checking
-        scale->update();
+        // PRO-459: hold scaleMutex_ for the FULL scale->update() call. A
+        // scale driver's handshake (e.g. myscale::performConnectionHandshake)
+        // can run for hundreds of ms inside update(); without this lock a
+        // concurrent disconnect() from another task/context can free `scale`
+        // mid-call (use-after-free, confirmed via coredump). Re-check
+        // scale != nullptr after acquiring the lock — disconnect() may have
+        // cleared it while this task waited.
+        //
+        // PRO-511: hasConnectedScale is read here too, inside the same lock,
+        // instead of via an unguarded scale->isConnected() before the lock
+        // (the old code read it up front, before the !active check). That
+        // pre-lock read raced disconnect() (which also takes scaleMutex_
+        // before nulling scale), so a disconnect landing between the read
+        // and this block could leave hasConnectedScale stale for a tick —
+        // same TOCTOU class as PRO-459/PRO-510, just on the isConnected()
+        // read rather than update(). hasConnectedScale is a local bool copy,
+        // so using it after the lock releases below is safe.
+        {
+            std::lock_guard<std::mutex> lg(scaleMutex_);
+            if (scale != nullptr) {
+                hasConnectedScale = scale->isConnected();
+                scale->update();
+            }
+        }
+
+        if (controller->isVolumetricAvailable())
+            controller->setVolumetricOverride(hasConnectedScale);
+
         // PRO-5: route the counter through nextReconnectionTries() (tested in
         // test_ble_scale_scan_policy) so it measures CONSECUTIVE failed reconnect
         // ticks. A healthy tick resets it to 0; without that reset the counter was
@@ -237,24 +258,34 @@ void BLEScalePlugin::update() {
     }
 }
 
-void BLEScalePlugin::connect(const std::string &uuid) {
-    if (uuid.empty()) {
+bool BLEScalePlugin::connect(const std::string &uuid) {
+    if (!isValidBleScaleConnectUuid(uuid)) {
         ESP_LOGE("BLEScalePlugin", "Cannot connect with empty UUID");
-        return;
+        return false;
     }
     if (controller == nullptr) {
         ESP_LOGE("BLEScalePlugin", "Controller is null, cannot save scale setting");
-        return;
+        return false;
     }
 
     doConnect = true;
     this->uuid = uuid;
     controller->getSettings().setSavedScale(uuid.data());
+    return true;
 }
 
 void BLEScalePlugin::scan() const {
-    if (scale != nullptr && scale->isConnected()) {
-        return;
+    // PRO-512: scan() is called from both the controller loop task
+    // (CONTROLLER_BLUETOOTH_CONNECT/CONTROLLER_MODE_CHANGE handlers) and the
+    // async_tcp task (WebUIPlugin::handleBLEScaleScan), same cross-task shape
+    // as PRO-510/PRO-459/PRO-509. disconnect() can null `scale` between the
+    // nullptr check and the isConnected() call on another task, so read both
+    // under scaleMutex_ to eliminate the TOCTOU/UAF window.
+    {
+        std::lock_guard<std::mutex> lg(scaleMutex_);
+        if (scale != nullptr && scale->isConnected()) {
+            return;
+        }
     }
     if (scanner == nullptr) {
         ESP_LOGE("BLEScalePlugin", "Scanner not initialized, cannot start scan");
@@ -264,12 +295,31 @@ void BLEScalePlugin::scan() const {
 }
 
 void BLEScalePlugin::disconnect() {
+    // PRO-504: claim exclusive ownership of the teardown before touching
+    // `scale`. compare_exchange_strong atomically flips tearingDown from
+    // false->true for exactly one caller; every other concurrent/re-entrant
+    // caller sees it already true and bails without touching `scale`. See the
+    // `tearingDown` comment in the header for why this must be a real
+    // cross-task claim, not a plain bool.
+    bool expected = false;
+    if (!tearingDown.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
     if (scale != nullptr) {
         // PRO-351: order matters for the cross-task lifetime handshake.
         // 1. active=false was already set by the teardown caller, so any callback
         //    that started before the flag flipped is the only one that can still
         //    be touching `scale`. Wait (bounded) for it to drain.
         waitForCallbacksToDrain();
+
+        // PRO-459: scaleMutex_ guards against a concurrent update() call
+        // (different task) that may still be executing scale->update()'s
+        // driver handshake. Acquiring the lock here blocks until that call
+        // returns, so `scale` is never freed while update() is inside it.
+        // waitForCallbacksToDrain() stays OUTSIDE this lock — it must not
+        // block the weight-callback path, which does not take scaleMutex_.
+        std::lock_guard<std::mutex> lg(scaleMutex_);
 
         // 2. Now that no weight callback is in flight, it is safe to disconnect
         //    and free the scale.
@@ -289,6 +339,11 @@ void BLEScalePlugin::disconnect() {
         doConnect = false;
         reconnectionTries = 0;
     }
+
+    // release suffices here: the next caller's CAS at entry (default seq_cst,
+    // an acquire on success) synchronizes-with this release-store on the same
+    // variable, so the next caller is guaranteed to observe everything written above.
+    tearingDown.store(false, std::memory_order_release);
 }
 
 void BLEScalePlugin::waitForCallbacksToDrain() {
@@ -319,12 +374,19 @@ void BLEScalePlugin::tearDownScale() {
 }
 
 void BLEScalePlugin::onProcessStart() const {
+    // PRO-509: hold scaleMutex_ for the full tare sequence. A concurrent
+    // disconnect() from another task/context can free `scale` while tare()
+    // is executing (use-after-free). Re-check scale != nullptr after
+    // acquiring the lock — disconnect() may have cleared it while we waited.
+    // Note: the lock is held for the entire tare sequence (~50–150ms including
+    // the inter-tare delay(50) and BLE call latency). This is intentional:
+    // the UAF-prevention guarantee requires holding the lock until both tares
+    // complete. Callers contending on scaleMutex_ (disconnect(), update())
+    // will block for up to this duration on brew/grind start.
+    std::lock_guard<std::mutex> lg(scaleMutex_);
     if (scale != nullptr && scale->isConnected()) {
-        // Double tare with validation
         scale->tare();
         delay(50);
-
-        // Check if scale is still connected before second tare
         if (scale != nullptr && scale->isConnected()) {
             scale->tare();
         }
@@ -332,6 +394,40 @@ void BLEScalePlugin::onProcessStart() const {
 }
 
 void BLEScalePlugin::tare() const { onProcessStart(); }
+
+// PRO-510: WebUIPlugin.cpp calls these four status readers from the
+// async_tcp task while the loop task may concurrently run disconnect()
+// (freeing `scale`) — take scaleMutex_ for the duration of the `scale`
+// access, mirroring update() (PRO-459) and onProcessStart() (PRO-509), and
+// return a copy taken while the lock is held.
+bool BLEScalePlugin::isConnected() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    return scale != nullptr && scale->isConnected();
+}
+
+std::string BLEScalePlugin::getName() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    if (scale != nullptr && scale->isConnected()) {
+        return scale->getDeviceName();
+    }
+    return "";
+}
+
+std::string BLEScalePlugin::getUUID() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    if (scale != nullptr && scale->isConnected()) {
+        return scale->getDeviceAddress();
+    }
+    return "";
+}
+
+int BLEScalePlugin::getRSSI() {
+    std::lock_guard<std::mutex> lg(scaleMutex_);
+    if (scale != nullptr && scale->isConnected()) {
+        return scale->getRSSI();
+    }
+    return 0;
+}
 
 void BLEScalePlugin::establishConnection() {
     if (uuid.empty()) {

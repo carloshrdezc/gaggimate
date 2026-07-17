@@ -67,7 +67,7 @@ void test_accepts_valid_pro_profile_with_advanced_pump(void) {
     TEST_ASSERT_TRUE(
         parseProfileJson(R"({"label":"Pro","type":"pro","temperature":94,"phases":[{"name":"Ramp","phase":"preinfusion",)"
                          R"("valve":1,"duration":10,"temperature":92,"pump":{"target":"pressure","pressure":3,"flow":0},)"
-                         R"("transition":{"type":"linear","duration":2,"adaptive":1},)"
+                         R"("transition":{"type":"linear","duration":2,"adaptive":true},)"
                          R"("targets":[{"type":"pressure","operator":"gte","value":4}]}]})",
                          profile));
     TEST_ASSERT_EQUAL_STRING("pro", profile.type.c_str());

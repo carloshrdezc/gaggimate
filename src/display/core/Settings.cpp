@@ -195,7 +195,57 @@ void Settings::load() {
 
     preferences.end();
 
-    xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
+    // PRO-486: create vectorMutex here, eagerly, before the loop task (and
+    // therefore any other task) can reach a vector accessor. Closes the
+    // theoretical lazy-init double-create race in ensureVectorMutex() —
+    // load() runs single-threaded, so there is no concurrent caller to race.
+    // PRO-488: guard against double-init if load() is ever called twice
+    // (e.g. in a future test harness). No-op when mutex already created.
+    if (vectorMutex == nullptr) {
+        vectorMutex = xSemaphoreCreateMutex();
+    }
+
+    // PRO-492: guard against double-init if load() is ever called twice,
+    // mirroring the vectorMutex guard above (PRO-488). Without this, a
+    // second call would spawn a duplicate Settings::loop task and
+    // overwrite taskHandle, leaking the original task.
+    if (taskHandle == nullptr) {
+        xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
+    }
+}
+
+// PRO-494: teardown counterpart to load(), so the PRO-492 double-init guard
+// stays logically complete -- if a future re-init path ever clears taskHandle
+// externally, it must go through here first, or the FreeRTOS task started by
+// load() would leak as a zombie. Only tears down resources load() explicitly
+// creates: the loop task and vectorMutex (created eagerly at PRO-486/PRO-488).
+// selectedNameMutex is intentionally left alone -- it is lazily created by
+// ensureSelectedNameMutex() on first use, not by load(), so it is out of
+// scope for this teardown.
+void Settings::unload() {
+    // Keep this in sync with Settings::load() — it must tear down every
+    // resource load() creates (loop task via vTaskDelete, vectorMutex via
+    // vSemaphoreDelete, etc.). selectedNameMutex is intentionally excluded:
+    // it is lazily created by ensureSelectedNameMutex(), not by load().
+    // Flush any pending dirty write BEFORE killing the deferred-flush task,
+    // otherwise a settings change made shortly before unload() would be
+    // silently discarded when the loop task is deleted.
+    // Note: the loop task may fire a concurrent doSave() in the brief window
+    // between this check and vTaskDelete below. The ESP32 NVS Preferences
+    // library serializes begin() internally, so the worst case is a redundant
+    // write — not data corruption. This is a pre-existing design constraint,
+    // not a regression of this teardown; see PRO-499 for context.
+    if (dirty) {
+        doSave();
+    }
+    if (taskHandle != nullptr) {
+        vTaskDelete(taskHandle);
+        taskHandle = nullptr;
+    }
+    if (vectorMutex != nullptr) {
+        vSemaphoreDelete(vectorMutex);
+        vectorMutex = nullptr;
+    }
 }
 
 void Settings::batchUpdate(const SettingsCallback &callback) {
@@ -266,27 +316,27 @@ void Settings::setStandbyTimeout(int standby_timeout) {
 }
 
 void Settings::setPid(const String &pid) {
-    this->pid = pid;
+    assignUnderSelectedNameLock(this->pid, String(pid));
     save();
 }
 
 void Settings::setPumpModelCoeffs(const String &pumpModelCoeffs) {
-    this->pumpModelCoeffs = pumpModelCoeffs;
+    assignUnderSelectedNameLock(this->pumpModelCoeffs, String(pumpModelCoeffs));
     save();
 }
 
 void Settings::setWifiSsid(const String &wifiSsid) {
-    this->wifiSsid = wifiSsid;
+    assignUnderSelectedNameLock(this->wifiSsid, String(wifiSsid));
     save();
 }
 
 void Settings::setWifiPassword(const String &wifiPassword) {
-    this->wifiPassword = wifiPassword;
+    assignUnderSelectedNameLock(this->wifiPassword, String(wifiPassword));
     save();
 }
 
 void Settings::setMdnsName(const String &mdnsName) {
-    this->mdnsName = mdnsName;
+    assignUnderSelectedNameLock(this->mdnsName, String(mdnsName));
     save();
 }
 
@@ -316,17 +366,17 @@ void Settings::setDoseGrams(double dose_grams) {
 }
 
 void Settings::setOTAChannel(const String &otaChannel) {
-    this->otaChannel = otaChannel;
+    assignUnderSelectedNameLock(this->otaChannel, String(otaChannel));
     save();
 }
 
 void Settings::setInstalledChannel(const String &installedChannel) {
-    this->installedChannel = installedChannel;
+    assignUnderSelectedNameLock(this->installedChannel, String(installedChannel));
     save();
 }
 
 void Settings::setSavedScale(const String &savedScale) {
-    this->savedScale = savedScale;
+    assignUnderSelectedNameLock(this->savedScale, String(savedScale));
     save();
 }
 
@@ -356,7 +406,7 @@ void Settings::setDiagnosticLogEnabled(bool diagnostic_log_enabled) {
 }
 
 void Settings::setSmartGrindIp(String smart_grind_ip) {
-    this->smartGrindIp = std::move(smart_grind_ip);
+    assignUnderSelectedNameLock(this->smartGrindIp, std::move(smart_grind_ip));
     save();
 }
 
@@ -371,7 +421,7 @@ void Settings::setHomeAssistant(const bool homeAssistant) {
 }
 
 void Settings::setHomeAssistantIP(const String &homeAssistantIP) {
-    this->homeAssistantIP = homeAssistantIP;
+    assignUnderSelectedNameLock(this->homeAssistantIP, String(homeAssistantIP));
     save();
 }
 
@@ -383,18 +433,18 @@ void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
     // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
     // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
     if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
-        this->homeAssistantTopic = homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH);
+        assignUnderSelectedNameLock(this->homeAssistantTopic, homeAssistantTopic.substring(0, MAX_HOME_ASSISTANT_TOPIC_LENGTH));
     } else {
-        this->homeAssistantTopic = homeAssistantTopic;
+        assignUnderSelectedNameLock(this->homeAssistantTopic, String(homeAssistantTopic));
     }
     save();
 }
 void Settings::setHomeAssistantUser(const String &homeAssistantUser) {
-    this->homeAssistantUser = homeAssistantUser;
+    assignUnderSelectedNameLock(this->homeAssistantUser, String(homeAssistantUser));
     save();
 }
 void Settings::setHomeAssistantPassword(const String &homeAssistantPassword) {
-    this->homeAssistantPassword = homeAssistantPassword;
+    assignUnderSelectedNameLock(this->homeAssistantPassword, String(homeAssistantPassword));
     save();
 }
 
@@ -404,7 +454,7 @@ void Settings::setMomentaryButtons(bool momentary_buttons) {
 }
 
 void Settings::setTimezone(String timezone) {
-    this->timezone = std::move(timezone);
+    assignUnderSelectedNameLock(this->timezone, std::move(timezone));
     save();
 }
 
@@ -414,7 +464,7 @@ void Settings::setClockFormat(bool clock_24h_format) {
 }
 
 void Settings::setSelectedProfile(String selected_profile) {
-    this->selectedProfile = std::move(selected_profile);
+    assignUnderSelectedNameLock(this->selectedProfile, std::move(selected_profile));
     save();
 }
 
@@ -459,9 +509,92 @@ void Settings::assignUnderSelectedNameLock(String &member, String &&value) noexc
     }
 }
 
+SemaphoreHandle_t Settings::ensureVectorMutex() const {
+    // PRO-486: vectorMutex is created eagerly in Settings::load(), before the
+    // loop task (the first possible concurrent caller) starts. No lazy-init
+    // here anymore -- this removes the theoretical double-create race from
+    // PRO-481 where two concurrent first-callers could both observe nullptr
+    // and each call xSemaphoreCreateMutex(), leaking one handle. A null
+    // handle (creation failed in load(), e.g. out of memory) still degrades
+    // accessors to lock-free, same as before.
+    return vectorMutex;
+}
+
+std::vector<String> Settings::copyUnderVectorLock(const std::vector<String> &member) const noexcept {
+    // PRO-481: copy the vector into a local under the lock, then return the
+    // local so the copy cannot race a concurrent setter's mutation/reallocation.
+    // A null handle degrades to a lock-free copy. Mirrors
+    // copyUnderSelectedNameLock's single-copy-site structure.
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
+    }
+    std::vector<String> copy = member;
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+    return copy;
+}
+
+void Settings::assignUnderVectorLock(std::vector<String> &member, std::vector<String> &&value) noexcept {
+    // PRO-481: assign under the shared lock so a concurrent copy-read (or
+    // doSave()'s implode()) never observes the vector mid-mutation. Mirrors
+    // assignUnderSelectedNameLock's single-assign-site structure.
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
+    }
+    member = std::move(value);
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+}
+
+// PRO-478: out-of-line getters for the String members guarded by
+// selectedNameMutex — mirrors getSelectedBean()/getSelectedGrinder() (PRO-427).
+String Settings::getPid() const { return copyUnderSelectedNameLock(pid); }
+
+String Settings::getPumpModelCoeffs() const { return copyUnderSelectedNameLock(pumpModelCoeffs); }
+
+String Settings::getWifiSsid() const { return copyUnderSelectedNameLock(wifiSsid); }
+
+String Settings::getWifiPassword() const { return copyUnderSelectedNameLock(wifiPassword); }
+
+String Settings::getMdnsName() const { return copyUnderSelectedNameLock(mdnsName); }
+
+String Settings::getOTAChannel() const { return copyUnderSelectedNameLock(otaChannel); }
+
+String Settings::getInstalledChannel() const { return copyUnderSelectedNameLock(installedChannel); }
+
+String Settings::getSavedScale() const { return copyUnderSelectedNameLock(savedScale); }
+
+String Settings::getSmartGrindIp() const { return copyUnderSelectedNameLock(smartGrindIp); }
+
+String Settings::getHomeAssistantIP() const { return copyUnderSelectedNameLock(homeAssistantIP); }
+
+String Settings::getHomeAssistantUser() const { return copyUnderSelectedNameLock(homeAssistantUser); }
+
+String Settings::getHomeAssistantPassword() const { return copyUnderSelectedNameLock(homeAssistantPassword); }
+
+String Settings::getHomeAssistantTopic() const { return copyUnderSelectedNameLock(homeAssistantTopic); }
+
+String Settings::getTimezone() const { return copyUnderSelectedNameLock(timezone); }
+
+String Settings::getSelectedProfile() const { return copyUnderSelectedNameLock(selectedProfile); }
+
+String Settings::getCloudRelayUrl() const { return copyUnderSelectedNameLock(cloudRelayUrl); }
+
+String Settings::getCloudRelayToken() const { return copyUnderSelectedNameLock(cloudRelayToken); }
+
 String Settings::getSelectedBean() const { return copyUnderSelectedNameLock(selectedBean); }
 
 String Settings::getSelectedGrinder() const { return copyUnderSelectedNameLock(selectedGrinder); }
+
+// PRO-481: out-of-line vector getters guarded by vectorMutex — mirrors the
+// String getters guarded by selectedNameMutex above.
+std::vector<String> Settings::getFavoritedProfiles() const { return copyUnderVectorLock(favoritedProfiles); }
+
+std::vector<String> Settings::getProfileOrder() const { return copyUnderVectorLock(profileOrder); }
 
 void Settings::setSelectedBean(String selected_bean) {
     // save() is intentionally left OUTSIDE the lock scope: it only sets dirty=true
@@ -477,7 +610,7 @@ void Settings::setSelectedGrinder(String selected_grinder) {
 }
 
 void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
-    favoritedProfiles = cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles");
+    assignUnderVectorLock(favoritedProfiles, cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles"));
     save();
 }
 
@@ -485,24 +618,69 @@ void Settings::addFavoritedProfile(String profile) {
     if (!isSafeId(profile)) {
         return;
     }
-    if (std::find(favoritedProfiles.begin(), favoritedProfiles.end(), profile) != favoritedProfiles.end()) {
-        return;
+    // PRO-481: guard the whole find+emplace under vectorMutex so a concurrent
+    // doSave() implode() (or another setter) never observes the vector
+    // mid-mutation. save() is only called when a profile was actually added,
+    // matching the pre-guard behavior, and is left outside the lock scope for
+    // the same reason assignUnderSelectedNameLock's callers leave it out.
+    bool added = false;
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
     }
-    favoritedProfiles.emplace_back(profile);
-    save();
+    if (std::find(favoritedProfiles.begin(), favoritedProfiles.end(), profile) == favoritedProfiles.end()) {
+        favoritedProfiles.emplace_back(profile);
+        added = true;
+    }
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+    if (added) {
+        save();
+    }
 }
 
 void Settings::removeFavoritedProfile(String profile) {
-    favoritedProfiles.erase(std::remove(favoritedProfiles.begin(), favoritedProfiles.end(), profile), favoritedProfiles.end());
-    favoritedProfiles.shrink_to_fit();
-    save();
+    // PRO-481: guard the erase+shrink_to_fit under vectorMutex; both mutate
+    // the vector's storage and must not race a concurrent implode() read.
+    // PRO-487: save() is only called when a profile was actually erased,
+    // mirroring the bool-added guard in addFavoritedProfile.
+    bool erased = false;
+    SemaphoreHandle_t mutex = ensureVectorMutex();
+    if (mutex != nullptr) {
+        xSemaphoreTake(mutex, portMAX_DELAY);
+    }
+    auto newEnd = std::remove(favoritedProfiles.begin(), favoritedProfiles.end(), profile);
+    if (newEnd != favoritedProfiles.end()) {
+        favoritedProfiles.erase(newEnd, favoritedProfiles.end());
+        favoritedProfiles.shrink_to_fit();
+        erased = true;
+    }
+    if (mutex != nullptr) {
+        xSemaphoreGive(mutex);
+    }
+    if (erased) {
+        save();
+    }
 }
 
 void Settings::setProfileOrder(std::vector<String> profile_order) {
-    profileOrder = cleanProfileIds(std::move(profile_order), "profileOrder");
+    assignUnderVectorLock(profileOrder, cleanProfileIds(std::move(profile_order), "profileOrder"));
     save();
 }
 
+// PRO-481: migrateProfileIds() (including the direct `selectedProfile = ...`
+// assignments below and the favoritedProfiles/profileOrder assignments further
+// down) runs exactly once, synchronously, from ProfileManager::setup() during
+// Controller::setup() -- BEFORE pluginManager->registerPlugin(new
+// WebUIPlugin()) and BEFORE xTaskCreatePinnedToCore() spin up the loop task.
+// No AsyncTCP/WebSocket-handler task or deferred-flush task exists yet at
+// this point, so there is no concurrent accessor to race against and neither
+// selectedNameMutex nor vectorMutex is needed here. Do not remove this
+// assertion when touching this function -- if migrateProfileIds() is ever
+// called after setup() (e.g. from a runtime "re-scan profiles" feature), the
+// assignments below must be routed through assignUnderSelectedNameLock /
+// assignUnderVectorLock instead.
 void Settings::migrateProfileIds(const std::vector<std::pair<String, String>> &migrations) {
     preferences.begin(PREFERENCES_KEY, true);
 
@@ -591,12 +769,12 @@ void Settings::setFlushDuration(int flush_duration) {
 }
 
 void Settings::setCloudRelayUrl(const String &url) {
-    cloudRelayUrl = url;
+    assignUnderSelectedNameLock(cloudRelayUrl, String(url));
     save();
 }
 
 void Settings::setCloudRelayToken(const String &token) {
-    cloudRelayToken = token;
+    assignUnderSelectedNameLock(cloudRelayToken, String(token));
     save();
 }
 
@@ -605,24 +783,22 @@ void Settings::setCloudRelayEnabled(bool enabled) {
     save();
 }
 
+// PRO-23: setManualTargetType/setManualPressure/setManualFlow/setManualTemperature
+// no longer call save() individually; updateManualTargets() calls save() once
+// after all four. NOTE: setManualTemperature has one additional call site
+// (Controller::setTargetTemp MODE_MANUAL) which calls save() explicitly.
 void Settings::setManualTargetType(int target_type) {
     manualTargetType = target_type == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE;
-    save();
 }
 
 void Settings::setManualPressure(float pressure) {
     manualPressure = std::clamp(pressure, MIN_MANUAL_PRESSURE, MAX_MANUAL_PRESSURE);
-    save();
 }
 
-void Settings::setManualFlow(float flow) {
-    manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW);
-    save();
-}
+void Settings::setManualFlow(float flow) { manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW); }
 
 void Settings::setManualTemperature(int temperature) {
     manualTemperature = std::clamp(temperature, MIN_MANUAL_TEMPERATURE, MAX_MANUAL_TEMPERATURE);
-    save();
 }
 
 void Settings::setSunriseR(int sunrise_r) {
@@ -680,6 +856,64 @@ void Settings::doSave() {
         return;
     }
     dirty = false;
+
+    // PRO-478: doSave() runs on the deferred flush task, while every String member
+    // below is written from the AsyncTCP/WebSocket-handler task via the setters
+    // (which already assign under selectedNameMutex per PRO-427/PRO-437 for
+    // selectedBean/selectedGrinder — this extends the same guard to the rest).
+    // Snapshot ALL String members under a single lock acquisition up front, then
+    // use the snapshots (not the live members) for every putString() below. This
+    // keeps the critical section short (no lock held across the flash-write
+    // preferences block) while eliminating the torn-String-read hazard on every
+    // member, not just selectedBean/selectedGrinder.
+    SemaphoreHandle_t stringLock = ensureSelectedNameMutex();
+    if (stringLock != nullptr) {
+        xSemaphoreTake(stringLock, portMAX_DELAY);
+    }
+    String pidSnap = pid;
+    String pumpModelCoeffsSnap = pumpModelCoeffs;
+    String wifiSsidSnap = wifiSsid;
+    String wifiPasswordSnap = wifiPassword;
+    String mdnsNameSnap = mdnsName;
+    String otaChannelSnap = otaChannel;
+    String installedChannelSnap = installedChannel;
+    String savedScaleSnap = savedScale;
+    String smartGrindIpSnap = smartGrindIp;
+    String homeAssistantIPSnap = homeAssistantIP;
+    String homeAssistantTopicSnap = homeAssistantTopic;
+    String homeAssistantUserSnap = homeAssistantUser;
+    String homeAssistantPasswordSnap = homeAssistantPassword;
+    String timezoneSnap = timezone;
+    String selectedProfileSnap = selectedProfile;
+    String beanSnap = selectedBean;
+    String grinderSnap = selectedGrinder;
+    // PRO-481: cloudRelayUrl/cloudRelayToken are also guarded by
+    // selectedNameMutex (see getCloudRelayUrl/getCloudRelayToken +
+    // setCloudRelayUrl/setCloudRelayToken). Snapshot them inside the
+    // same stringLock block so doSave() never observes them torn.
+    String cloudRelayUrlSnap = cloudRelayUrl;
+    String cloudRelayTokenSnap = cloudRelayToken;
+    if (stringLock != nullptr) {
+        xSemaphoreGive(stringLock);
+    }
+
+    // PRO-481: favoritedProfiles/profileOrder are guarded by the separate
+    // vectorMutex (not selectedNameMutex — see the vectorMutex declaration in
+    // Settings.h for why the two mutexes must stay independent). Take it only
+    // around the implode() calls so the vector iterator stays consistent
+    // against a concurrent setFavoritedProfiles()/addFavoritedProfile()/
+    // removeFavoritedProfile()/setProfileOrder() call from the WS-handler
+    // task, then release before the flash-write preferences block below.
+    SemaphoreHandle_t vecLock = ensureVectorMutex();
+    if (vecLock != nullptr) {
+        xSemaphoreTake(vecLock, portMAX_DELAY);
+    }
+    String favoritedProfilesSnap = implode(favoritedProfiles, ",");
+    String profileOrderSnap = implode(profileOrder, ",");
+    if (vecLock != nullptr) {
+        xSemaphoreGive(vecLock);
+    }
+
     ESP_LOGI("Settings", "Saving settings");
     preferences.begin(PREFERENCES_KEY, false);
     preferences.putInt("sm", startupMode);
@@ -692,42 +926,42 @@ void Settings::doSave() {
     preferences.putBool("del_ad", delayAdjust);
     preferences.putInt("to", temperatureOffset);
     preferences.putFloat("ps", pressureScaling);
-    preferences.putString("pid", pid);
-    preferences.putString("pmc", pumpModelCoeffs);
-    preferences.putString("ws", wifiSsid);
-    preferences.putString("wp", wifiPassword);
-    preferences.putString("mn", mdnsName);
+    preferences.putString("pid", pidSnap);
+    preferences.putString("pmc", pumpModelCoeffsSnap);
+    preferences.putString("ws", wifiSsidSnap);
+    preferences.putString("wp", wifiPasswordSnap);
+    preferences.putString("mn", mdnsNameSnap);
     preferences.putBool("hk", homekit);
     preferences.putBool("vt", volumetricTarget);
     preferences.putBool("ayo", allowYieldOverride);
     preferences.putBool("autosteam", autoSteamEnabled);
     preferences.putDouble("dosegrams", doseGrams);
-    preferences.putString("oc", otaChannel);
-    preferences.putString("ic", installedChannel);
-    preferences.putString("ssc", savedScale);
+    preferences.putString("oc", otaChannelSnap);
+    preferences.putString("ic", installedChannelSnap);
+    preferences.putString("ssc", savedScaleSnap);
     preferences.putBool("bf_a", boilerFillActive);
     preferences.putInt("bf_su", startupFillTime);
     preferences.putInt("bf_st", steamFillTime);
     preferences.putBool("sg_a", smartGrindActive);
     preferences.putBool("diag_log", diagnosticLogEnabled);
-    preferences.putString("sg_i", smartGrindIp);
+    preferences.putString("sg_i", smartGrindIpSnap);
     preferences.putBool("sg_t", smartGrindToggle);
     preferences.putInt("sg_m", smartGrindMode);
     preferences.putBool("ha_a", homeAssistant);
-    preferences.putString("ha_i", homeAssistantIP);
+    preferences.putString("ha_i", homeAssistantIPSnap);
     preferences.putInt("ha_p", homeAssistantPort);
-    preferences.putString("ha_t", homeAssistantTopic);
-    preferences.putString("ha_u", homeAssistantUser);
-    preferences.putString("ha_pw", homeAssistantPassword);
-    preferences.putString("tz", timezone);
+    preferences.putString("ha_t", homeAssistantTopicSnap);
+    preferences.putString("ha_u", homeAssistantUserSnap);
+    preferences.putString("ha_pw", homeAssistantPasswordSnap);
+    preferences.putString("tz", timezoneSnap);
     preferences.putBool("clk_24h", clock24hFormat);
-    preferences.putString("sp", selectedProfile);
-    preferences.putString("sb", selectedBean);
-    preferences.putString("sg", selectedGrinder);
+    preferences.putString("sp", selectedProfileSnap);
+    preferences.putString("sb", beanSnap);
+    preferences.putString("sg", grinderSnap);
     preferences.putInt("sbt", standbyTimeout);
     preferences.putBool("mb", momentaryButtons);
-    preferences.putString("fp", implode(favoritedProfiles, ","));
-    preferences.putString("po", implode(profileOrder, ","));
+    preferences.putString("fp", favoritedProfilesSnap);
+    preferences.putString("po", profileOrderSnap);
     preferences.putFloat("spp", steamPumpPercentage);
     preferences.putFloat("spc", steamPumpCutoff);
     preferences.putInt("hi", historyIndex);
@@ -769,8 +1003,8 @@ void Settings::doSave() {
     preferences.putInt("sr_fd", fullTankDistance);
     preferences.putInt("alt_relay", altRelayFunction);
     preferences.putBool("alt_set", altRelayConfigured);
-    preferences.putString("cr_url", cloudRelayUrl);
-    preferences.putString("cr_token", cloudRelayToken);
+    preferences.putString("cr_url", cloudRelayUrlSnap);
+    preferences.putString("cr_token", cloudRelayTokenSnap);
     preferences.putBool("cr_enabled", cloudRelayEnabled);
 
     preferences.end();

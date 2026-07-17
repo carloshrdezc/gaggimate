@@ -5,10 +5,12 @@
  */
 
 import { useState, useEffect, useContext, useRef } from 'preact/hooks';
+import { useSignalEffect } from '@preact/signals';
 import { useRoute } from 'preact-iso';
 import { LibraryPanel } from './components/LibraryPanel';
 import { AnalysisTable } from './components/AnalysisTable';
 import { ShotChart } from './components/ShotChart';
+import { ComparisonChart } from './components/ComparisonChart';
 import { calculateShotMetrics, detectAutoDelay } from './services/AnalyzerService';
 import { libraryService } from './services/LibraryService';
 import { notesService } from './services/NotesService';
@@ -20,6 +22,7 @@ import {
   loadFromStorage,
 } from './utils/analyzerUtils';
 import { buildStatisticsProfileHref } from '../Statistics/utils/statisticsRoute';
+import { comparisonShots, clearComparison } from '../../state/comparisonShots';
 
 import { EmptyState } from './components/EmptyState.jsx';
 
@@ -129,6 +132,14 @@ export function ShotAnalyzer() {
 
   const [analysisResults, setAnalysisResults] = useState(null);
   const [pendingMobileAnalysisScroll, setPendingMobileAnalysisScroll] = useState(false);
+  const [comparisonData, setComparisonData] = useState({});
+  const comparisonDataRef = useRef(comparisonData);
+  useEffect(() => {
+    comparisonDataRef.current = comparisonData;
+  }, [comparisonData]);
+  // Tracks IDs whose loads are already in-flight so rapid signal re-fires don't
+  // launch duplicate fetches before comparisonDataRef.current syncs on the next render.
+  const loadingIdsRef = useRef(new Set());
   const analysisSectionRef = useRef(null);
   const profileMatchIdRef = useRef(0);
   const analysisIdRef = useRef(0);
@@ -158,6 +169,53 @@ export function ShotAnalyzer() {
       if (profileSearchTimerRef.current) clearTimeout(profileSearchTimerRef.current);
     };
   }, []);
+
+  // Load sample data for comparison shots that haven't been loaded yet;
+  // evict entries for shots that have been removed from the comparison set.
+  useSignalEffect(() => {
+    const shots = comparisonShots.value;
+    const currentIds = new Set(shots.map(s => s.id));
+    // Evict removed shots so stale cache entries don't persist or get re-served
+    setComparisonData(prev => {
+      const next = {};
+      for (const id of currentIds) if (prev[id]) next[id] = prev[id];
+      return next;
+    });
+    // Also evict stale in-flight markers for removed shots
+    for (const id of loadingIdsRef.current) {
+      if (!currentIds.has(id)) loadingIdsRef.current.delete(id);
+    }
+    // Load data for any newly-added shots.
+    // NOTE: While useSignalEffect does support returning a cleanup function
+    // (the underlying signal effect() contract forwards it), we intentionally
+    // omit an AbortController here: rapid signal re-fires may queue redundant
+    // fetches, but two dedup guards make them harmless —
+    //   • loadingIdsRef (in-flight guard): prevents firing more than one fetch
+    //     per shot ID at a time; cleared on removal or completion/error
+    //   • comparisonDataRef (already-loaded guard): short-circuits before even
+    //     touching loadingIds when data is already present
+    // Together with the idempotent setComparisonData setter, a stale response
+    // just overwrites the same key with equivalent data (or resolves into a
+    // no-op on an unmounted component). A proper cancel would require an
+    // AbortController per shot plus tracked in-flight request IDs — a
+    // significant refactor that isn't warranted for this low-frequency,
+    // self-correcting code path.
+    Promise.allSettled(shots.map(async shot => {
+      if (comparisonDataRef.current[shot.id]) return;
+      if (loadingIdsRef.current.has(shot.id)) return; // already in-flight
+      loadingIdsRef.current.add(shot.id);
+      try {
+        const loaded = await libraryService.loadShot(shot.id, shot.source || 'gaggimate');
+        if (loaded?.samples) {
+          setComparisonData(prev => ({ ...prev, [shot.id]: loaded }));
+        }
+      } catch (e) {
+        console.warn('Failed to load comparison shot', shot.id, e);
+      } finally {
+        loadingIdsRef.current.delete(shot.id);
+      }
+    }));
+  });
 
   // --- DEEP LINK HANDLER ---
   useEffect(() => {
@@ -407,6 +465,26 @@ export function ShotAnalyzer() {
             isSearchingProfile={isSearchingProfile}
           />
         </div>
+
+        {/* Comparison overlay — rendered outside the currentShot guard so that a user
+            who navigates to /analyzer from the Compare button always sees the chart even
+            when no primary shot is loaded yet. */}
+        {comparisonShots.value.length >= 2 && (
+          <div className='nd-card p-5 mt-4'>
+            <div className='flex items-center justify-between mb-3'>
+              <h3 className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)] m-0'>
+                Comparison ({comparisonShots.value.length} shots)
+              </h3>
+              <button
+                className='nd-action-btn nd-action-btn--text font-nd-mono text-[12px] px-3'
+                onClick={clearComparison}
+              >
+                Clear
+              </button>
+            </div>
+            <ComparisonChart shots={comparisonShots.value} comparisonData={comparisonData} />
+          </div>
+        )}
 
         {currentShot ? (
           <div ref={analysisSectionRef} className='mt-8'>

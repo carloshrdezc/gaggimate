@@ -1,5 +1,6 @@
 import Card from '../../components/Card.jsx';
-import { useCallback, useState, useContext } from 'preact/hooks';
+import { useCallback, useEffect, useState, useContext } from 'preact/hooks';
+import { useComputed } from '@preact/signals';
 import { HistoryChart } from './HistoryChart.jsx';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -13,6 +14,16 @@ import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
 import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus';
 import { faMagnifyingGlassChart } from '@fortawesome/free-solid-svg-icons/faMagnifyingGlassChart';
 import { faCodeBranch } from '@fortawesome/free-solid-svg-icons/faCodeBranch';
+import { faChartLine } from '@fortawesome/free-solid-svg-icons/faChartLine';
+import { faCoffee } from '@fortawesome/free-solid-svg-icons/faCoffee';
+import { faGears } from '@fortawesome/free-solid-svg-icons/faGears';
+import { faTag } from '@fortawesome/free-solid-svg-icons/faTag';
+import {
+  addToComparison,
+  removeFromComparison,
+  comparisonShots,
+  isInComparison,
+} from '../../state/comparisonShots';
 import ShotNotesCard from './ShotNotesCard.jsx';
 import { useConfirmAction } from '../../hooks/useConfirmAction.js';
 
@@ -31,13 +42,31 @@ function round2(v) {
 export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) {
   const apiService = useContext(ApiServiceContext);
   const location = useLocation();
-  const isManualShot = !shot.profileId || shot.profileId.trim() === '' || shot.profileId === 'manual';
+  const isManualShot =
+    !shot.profileId || shot.profileId.trim() === '' || shot.profileId === 'manual';
   const [shotNotes, setShotNotes] = useState(shot.notes || null);
   const [expanded, setExpanded] = useState(false);
   const { armed: confirmDelete, armOrRun: confirmOrDelete } = useConfirmAction(4000);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Reactive comparison state — read signal value to subscribe to updates
+  const inComparison = useComputed(() => isInComparison(shot.id));
+  const comparisonFull = useComputed(
+    () => comparisonShots.value.length >= 4 && !inComparison.value,
+  );
+
+  const handleCompare = useCallback(() => {
+    if (inComparison.value) {
+      removeFromComparison(shot.id);
+    } else {
+      addToComparison(shot);
+      if (location.path !== '/analyzer') {
+        location.route('/analyzer');
+      }
+    }
+  }, [inComparison, shot, location]);
 
   const date = new Date(shot.timestamp * 1000);
   const effectiveRating = shotNotes?.rating ?? shot.rating ?? 0;
@@ -83,6 +112,10 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     }
   }, [onLoad, shot, shotNotes]);
 
+  useEffect(() => {
+    setShotNotes(shot.notes || null);
+  }, [shot.notes]);
+
   const handleNotesLoaded = useCallback(notes => {
     setShotNotes(notes);
   }, []);
@@ -91,9 +124,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
     notes => {
       setShotNotes(notes);
       // Notify parent that notes changed (so it can reload the index)
-      if (onNotesChanged) onNotesChanged(shot.id, notes, shot.source);
+      if (onNotesChanged) onNotesChanged(shot, notes);
     },
-    [onNotesChanged, shot.id, shot.source],
+    [onNotesChanged, shot],
   );
   const beanDisplay = shot.beanName
     ? `${shot.beanName}${shot.beanArchived ? ' (archived)' : ''}`
@@ -176,10 +209,10 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
             {/* Header Row */}
             <div className='flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between'>
               <div className='min-w-0 flex-grow'>
-                <h3 className='font-nd-mono text-[14px] text-[var(--text-primary,#e8e8e8)] truncate'>
+                <h3 className='font-nd-mono truncate text-[14px] text-[var(--text-primary,#e8e8e8)]'>
                   {profileTitle}
                 </h3>
-                <p className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)] mt-1'>
+                <p className='font-nd-mono mt-1 text-[12px] text-[var(--text-secondary,#999)]'>
                   #{shot.id} \u2022 {formattedDate}
                 </p>
                 {expanded &&
@@ -187,15 +220,16 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   shot.samples &&
                   shot.samples.length > 0 &&
                   shot.samples[0].systemInfo && (
-                    <p className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mt-1 italic'>
-                      Brewed by {shot.samples[0].systemInfo.shotStartedVolumetric ? 'Weight' : 'Time'}
+                    <p className='font-nd-mono mt-1 text-[11px] text-[var(--text-disabled,#666)] italic'>
+                      Brewed by{' '}
+                      {shot.samples[0].systemInfo.shotStartedVolumetric ? 'Weight' : 'Time'}
                     </p>
                   )}
               </div>
 
               <div className='flex shrink-0 flex-wrap items-center gap-2 xl:justify-end'>
                 <span
-                  className={`font-nd-mono text-[10px] uppercase tracking-[0.08em] px-2 py-1 ${
+                  className={`font-nd-mono px-2 py-1 text-[10px] tracking-[0.08em] uppercase ${
                     shot.source === 'browser'
                       ? 'bg-[rgba(139,92,246,0.15)] text-[#8b5cf6]'
                       : 'bg-[rgba(59,130,246,0.15)] text-[#3b82f6]'
@@ -204,7 +238,7 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   {shot.source === 'browser' ? 'Imported' : 'Device'}
                 </span>
                 {shot.incomplete && (
-                  <span className='font-nd-mono text-[10px] uppercase tracking-[0.08em] px-2 py-1 bg-[rgba(234,179,8,0.15)] text-[var(--color-warning,#d4a843)]'>
+                  <span className='font-nd-mono bg-[rgba(234,179,8,0.15)] px-2 py-1 text-[10px] tracking-[0.08em] text-[var(--color-warning,#d4a843)] uppercase'>
                     Incomplete
                   </span>
                 )}
@@ -232,11 +266,27 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   <button
                     onClick={() => setShowUploadModal(true)}
                     disabled={!canUpload}
-                    className={`nd-action-btn ${canUpload ? '' : 'opacity-40 cursor-not-allowed'}`}
+                    className={`nd-action-btn ${canUpload ? '' : 'cursor-not-allowed opacity-40'}`}
                     style={{ width: '32px', height: '32px' }}
                     aria-label='Upload to visualizer.coffee'
                   >
                     <FontAwesomeIcon icon={faUpload} className='text-[12px]' />
+                  </button>
+                  <button
+                    onClick={handleCompare}
+                    disabled={comparisonFull.value}
+                    className={[
+                      'nd-action-btn',
+                      inComparison.value ? 'nd-action-btn--active' : '',
+                      comparisonFull.value ? 'cursor-not-allowed opacity-40' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    style={{ width: '32px', height: '32px' }}
+                    aria-label={inComparison.value ? 'Remove from comparison' : 'Add to comparison'}
+                    title={inComparison.value ? 'Remove from comparison' : 'Add to comparison'}
+                  >
+                    <FontAwesomeIcon icon={faChartLine} className='text-[12px]' />
                   </button>
                   {isManualShot && shot.source !== 'browser' && (
                     <button
@@ -269,7 +319,10 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
             {/* Stats Row */}
             <div className='mt-3 flex flex-wrap items-center gap-x-4 gap-y-2'>
               <div className='flex items-center gap-1'>
-                <FontAwesomeIcon icon={faClock} className='text-[var(--text-disabled,#666)] text-[10px]' />
+                <FontAwesomeIcon
+                  icon={faClock}
+                  className='text-[10px] text-[var(--text-disabled,#666)]'
+                />
                 <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
                   {(shot.duration / 1000).toFixed(1)}s
                 </span>
@@ -277,7 +330,10 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
 
               {shot.volume && shot.volume > 0 && (
                 <div className='flex items-center gap-1'>
-                  <FontAwesomeIcon icon={faWeightScale} className='text-[var(--text-disabled,#666)] text-[10px]' />
+                  <FontAwesomeIcon
+                    icon={faWeightScale}
+                    className='text-[10px] text-[var(--text-disabled,#666)]'
+                  />
                   <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
                     {round2(shot.volume)}g
                   </span>
@@ -286,15 +342,71 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
 
               {effectiveRating && effectiveRating > 0 ? (
                 <div className='flex items-center gap-1'>
-                  <FontAwesomeIcon icon={faStar} className='text-[var(--color-warning,#d4a843)] text-[10px]' />
+                  <FontAwesomeIcon
+                    icon={faStar}
+                    className='text-[10px] text-[var(--color-warning,#d4a843)]'
+                  />
                   <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
                     {formatTenPointRating(effectiveRating)}
                   </span>
                 </div>
               ) : (
                 <div className='flex items-center gap-1'>
-                  <FontAwesomeIcon icon={faStar} className='text-[var(--text-disabled,#666)] text-[10px]' />
-                  <span className='font-nd-mono text-[12px] text-[var(--text-disabled,#666)]'>Unrated</span>
+                  <FontAwesomeIcon
+                    icon={faStar}
+                    className='text-[10px] text-[var(--text-disabled,#666)]'
+                  />
+                  <span className='font-nd-mono text-[12px] text-[var(--text-disabled,#666)]'>
+                    Unrated
+                  </span>
+                </div>
+              )}
+
+              {shot.beanName && (
+                <div
+                  className='flex min-w-0 items-center gap-1'
+                  aria-label={`Bean: ${shot.beanName}`}
+                  title={`Bean: ${shot.beanName}`}
+                >
+                  <FontAwesomeIcon
+                    icon={faCoffee}
+                    className='text-[10px] text-[var(--text-disabled,#666)]'
+                  />
+                  <span className='font-nd-mono min-w-0 truncate text-[12px] text-[var(--text-secondary,#999)]'>
+                    Bean: {shot.beanName}
+                  </span>
+                </div>
+              )}
+
+              {shot.profile && (
+                <div
+                  className='flex min-w-0 items-center gap-1'
+                  aria-label={`Profile: ${shot.profile}`}
+                  title={`Profile: ${shot.profile}`}
+                >
+                  <FontAwesomeIcon
+                    icon={faTag}
+                    className='text-[10px] text-[var(--text-disabled,#666)]'
+                  />
+                  <span className='font-nd-mono min-w-0 truncate text-[12px] text-[var(--text-secondary,#999)]'>
+                    Profile: {shot.profile}
+                  </span>
+                </div>
+              )}
+
+              {shot.grinder && (
+                <div
+                  className='flex min-w-0 items-center gap-1'
+                  aria-label={`Grinder: ${shot.grinder}`}
+                  title={`Grinder: ${shot.grinder}`}
+                >
+                  <FontAwesomeIcon
+                    icon={faGears}
+                    className='text-[10px] text-[var(--text-disabled,#666)]'
+                  />
+                  <span className='font-nd-mono min-w-0 truncate text-[12px] text-[var(--text-secondary,#999)]'>
+                    Grinder: {shot.grinder}
+                  </span>
                 </div>
               )}
             </div>
@@ -303,7 +415,9 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
               <div className='mt-4 border-t border-[var(--home-border,#222)] pt-4'>
                 {!shot.loaded && (
                   <div className='flex items-center justify-center py-8'>
-                    <span className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>Loading shot data...</span>
+                    <span className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
+                      Loading shot data...
+                    </span>
                   </div>
                 )}
                 {shot.loaded && hasSamples && <HistoryChart shot={shot} />}
@@ -315,7 +429,7 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
                   />
                 )}
                 {shot.loaded && !hasSamples && (
-                  <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)] mt-4'>
+                  <div className='font-nd-mono mt-4 text-[13px] text-[var(--text-disabled,#666)]'>
                     This backup contains shot details and notes, but not the full sample trace.
                   </div>
                 )}

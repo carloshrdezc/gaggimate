@@ -2,6 +2,7 @@
 #include "../config/features.h"
 #include "../core/Controller.h"
 #include "../core/Event.h"
+#include "../core/EventIds.h"
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_log.h>
@@ -11,7 +12,7 @@ static constexpr char LOG_TAG[] = "mDNSPlugin";
 
 void mDNSPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
-    pluginManager->on("controller:wifi:connect", [this](Event const &event) { start(event); });
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event const &event) { start(event); });
 }
 void mDNSPlugin::start(Event const &event) const {
     const int apMode = event.getInt("AP");

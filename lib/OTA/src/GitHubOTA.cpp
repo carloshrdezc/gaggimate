@@ -10,7 +10,8 @@
 GitHubOTA::GitHubOTA(const String &display_version, const String &controller_version, const String &release_url,
                      const phase_callback_t &phase_callback, const progress_callback_t &progress_callback,
                      const String &firmware_name, const String &filesystem_name, const String &controller_firmware_name) {
-    ESP_LOGV("GitHubOTA", "GitHubOTA(display_version: %s, firmware_name: %s, filesystem_name: %s, controller_firmware_name: %s)\n",
+    ESP_LOGV("GitHubOTA",
+             "GitHubOTA(display_version: %s, firmware_name: %s, filesystem_name: %s, controller_firmware_name: %s)\n",
              display_version.c_str(), firmware_name.c_str(), filesystem_name.c_str(), controller_firmware_name.c_str());
 
     _version = from_string(display_version.c_str());
@@ -72,6 +73,7 @@ void GitHubOTA::checkForUpdates() {
             return;
         }
         _latest_version_string = semver_str;
+        semver_free(&_latest_version);
         _latest_version = from_string(semver_str.c_str());
     } else {
         _latest_url = _release_url + "/";
@@ -88,6 +90,7 @@ void GitHubOTA::checkForUpdates() {
             version = version.substring(1);
         }
         _latest_version_string = version;
+        semver_free(&_latest_version);
         _latest_version = from_string(version.c_str());
     }
 }
@@ -173,5 +176,6 @@ HTTPUpdateResult GitHubOTA::update_firmware(const String &url) {
 }
 
 void GitHubOTA::setControllerVersion(const String &controller_version) {
+    semver_free(&_controller_version);
     _controller_version = from_string(controller_version.c_str());
 }

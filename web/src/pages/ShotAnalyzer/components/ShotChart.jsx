@@ -10,6 +10,7 @@ import { createPortal } from 'preact/compat';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import Chart from 'chart.js/auto';
 import annotationPlugin from 'chartjs-plugin-annotation';
+import Dialog from '../../../components/Dialog';
 import { ShotChartControls, getNextChartHeight } from './shotChart/ShotChartControls';
 import {
   areTooltipLayoutsEqual,
@@ -446,22 +447,24 @@ export function ShotChart({ shotData, results }) {
   if (isFullDisplay && typeof document !== 'undefined') {
     // The portal detaches the chart from analyzer layout containers so parent
     // overflow, transforms, and stacking contexts cannot turn full display into
-    // a constrained in-page viewer.
+    // a constrained in-page viewer. Dialog supplies role=dialog, the focus trap,
+    // Esc-to-close, and body scroll lock (PRO-17); the explicit close affordance
+    // remains the "Close full display" button rendered by ShotChartControls.
     return createPortal(
-      <div className='shot-chart-full-display select-none'>
-        <button
-          type='button'
-          className='shot-chart-full-display__backdrop'
-          onClick={() => {
-            if (!isControlsLocked) toggleFullDisplay();
-          }}
-          aria-label='Close full display'
-        />
-        <div className='shot-chart-full-display__panel'>
-          {controls}
-          {charts}
-        </div>
-      </div>,
+      <Dialog
+        open
+        onClose={() => {
+          if (!isControlsLocked) toggleFullDisplay();
+        }}
+        title='Full display shot chart'
+        closeOnBackdropClick={!isControlsLocked}
+        containerClassName='shot-chart-full-display select-none'
+        backdropClassName='shot-chart-full-display__backdrop'
+        panelClassName='shot-chart-full-display__panel'
+      >
+        {controls}
+        {charts}
+      </Dialog>,
       document.body,
     );
   }

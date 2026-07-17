@@ -63,6 +63,21 @@ describe('Navigation', () => {
     expect(screen.getByRole('link', { name: /Profiles/i })).toBeTruthy();
   });
 
+  test('renders the open drawer as a modal dialog', () => {
+    renderNavigation({ open: true });
+
+    const drawer = screen.getByRole('dialog', { name: /Navigation menu/i });
+    expect(drawer.getAttribute('aria-modal')).toBe('true');
+    expect(drawer.getAttribute('aria-hidden')).toBeNull();
+  });
+
+  test('hides the closed drawer from assistive technology', () => {
+    renderNavigation({ open: false });
+
+    const drawer = document.querySelector('#app-navigation-drawer');
+    expect(drawer?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   test('marks the active route link with aria-current', () => {
     history.replaceState(null, '', '/settings');
     renderNavigation({ open: true });

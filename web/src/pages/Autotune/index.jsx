@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useContext } from 'preact/hooks';
+import { useState, useEffect, useCallback, useContext, useRef } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { OverviewChart } from '../../components/OverviewChart.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
@@ -9,12 +10,17 @@ import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
 import { faPlay } from '@fortawesome/free-solid-svg-icons/faPlay';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons/faArrowLeft';
 
+const AUTOTUNE_TIMEOUT_MS = 60000;
+
 export function Autotune() {
   const apiService = useContext(ApiServiceContext);
+  const location = useLocation();
   const [active, setActive] = useState(false);
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
   const [time, setTime] = useState(60);
   const [samples, setSamples] = useState(4);
+  const timeoutRef = useRef(null);
 
   const onStart = useCallback(() => {
     apiService.send({
@@ -23,17 +29,47 @@ export function Autotune() {
       samples,
     });
     setActive(true);
+    setError(null);
+    timeoutRef.current = setTimeout(() => {
+      setActive(false);
+      setError('Autotune timed out. Please try again.');
+    }, AUTOTUNE_TIMEOUT_MS);
   }, [time, samples, apiService]);
 
   useEffect(() => {
     const listenerId = apiService.on('evt:autotune-result', msg => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      const pid = msg?.pid;
+      if (!pid) {
+        setActive(false);
+        setError('Received invalid PID data from device.');
+        return;
+      }
+      const [kp, ki, kd, kf] = pid.split(',').map(Number);
+      if ([kp, ki, kd, kf].some(isNaN)) {
+        setActive(false);
+        setError('Received invalid PID data from device.');
+        return;
+      }
       setActive(false);
-      setResult(msg.pid);
+      setResult({ kp, ki, kd, kf });
     });
     return () => {
       apiService.off('evt:autotune-result', listenerId);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
   }, [apiService]);
+
+  const onReset = useCallback(() => {
+    setResult(null);
+    setError(null);
+  }, []);
 
   return (
     <div className='flex flex-col gap-6'>
@@ -60,15 +96,27 @@ export function Autotune() {
               </div>
               <div className='border-l-2 border-[var(--color-warning,#d4a843)] pl-4'>
                 <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>
-                  Please wait while the system optimizes your PID settings. This may take up to 30 seconds.
+                  Please wait while the system optimizes your PID settings. This may take up to 60 seconds.
                 </span>
               </div>
             </div>
           </div>
         )}
 
+        {error && !active && !result && (
+          <div className='flex flex-col gap-4'>
+            <div className='flex items-center gap-3 border-l-2 border-[var(--color-error,#c05858)] pl-4'>
+              <FontAwesomeIcon icon={faTriangleExclamation} className='text-[var(--color-error,#c05858)] text-xl' />
+              <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>{error}</span>
+            </div>
+            <button className='nd-action-btn' onClick={() => setError(null)}>
+              <FontAwesomeIcon icon={faArrowLeft} /> Back
+            </button>
+          </div>
+        )}
+
         {result && (
-          <div className='flex flex-col gap-5 text-center'>
+          <div className='flex flex-col gap-5'>
             <div className='flex items-center justify-center gap-3 border-l-2 border-[var(--color-success,#7cb876)] pl-4'>
               <FontAwesomeIcon icon={faCheck} className='text-[var(--color-success,#7cb876)] text-xl' />
               <div className='text-left'>
@@ -80,15 +128,20 @@ export function Autotune() {
                 </div>
               </div>
             </div>
-            <div className='rounded-[8px] border border-[var(--home-border,#222)] bg-[var(--home-surface,#111)] p-4'>
-              <pre className='font-nd-mono text-[12px] text-[var(--text-primary,#e8e8e8)]'>
-                <code>{result}</code>
-              </pre>
+            <div className='grid grid-cols-2 gap-3 rounded-[8px] border border-[var(--home-border,#222)] bg-[var(--home-surface,#111)] p-4'>
+              {[['Kp', result.kp], ['Ki', result.ki], ['Kd', result.kd], ['Kf', result.kf]].map(([label, val]) => (
+                <div key={label} className='flex flex-col gap-1'>
+                  <span className='font-nd-mono text-[12px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+                    {label}
+                  </span>
+                  <span className='font-nd-mono text-[16px] text-[var(--text-primary,#e8e8e8)]'>{val.toFixed(3)}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {!active && !result && (
+        {!active && !result && !error && (
           <div className='flex flex-col gap-5'>
             <div className='flex items-start gap-3 border-l-2 border-[var(--color-warning,#d4a843)] pl-4'>
               <FontAwesomeIcon icon={faTriangleExclamation} className='mt-0.5 text-[var(--color-warning,#d4a843)] text-xl' />
@@ -148,7 +201,7 @@ export function Autotune() {
 
       {/* Action buttons */}
       <div className='flex gap-3'>
-        {!active && !result && (
+        {!active && !result && !error && (
           <button
             className='nd-action-btn nd-action-btn--primary'
             onClick={onStart}
@@ -159,9 +212,14 @@ export function Autotune() {
         )}
 
         {result && (
-          <button className='nd-action-btn' onClick={() => setResult(null)}>
-            <FontAwesomeIcon icon={faArrowLeft} />
-          </button>
+          <>
+            <button className='nd-action-btn nd-action-btn--primary' onClick={() => location.route('/settings')}>
+              Apply & Go to Settings
+            </button>
+            <button className='nd-action-btn' onClick={onReset}>
+              <FontAwesomeIcon icon={faArrowLeft} />
+            </button>
+          </>
         )}
       </div>
     </div>
