@@ -22,7 +22,8 @@ void test_websocket_requires_an_authenticated_session_for_commands(void) {
     TEST_ASSERT_TRUE(localAuthWebSocketMessageAllowed(/*isRelay=*/true, /*sessionAuthenticated=*/false, "req:ota-start"));
     TEST_ASSERT_TRUE(localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/true, "req:ota-start"));
     TEST_ASSERT_TRUE(localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/false, "req:auth"));
-    TEST_ASSERT_FALSE(localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/false, "req:process:activate"));
+    TEST_ASSERT_FALSE(
+        localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/false, "req:process:activate"));
     TEST_ASSERT_FALSE(localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/false, "req:profiles:list"));
 }
 
