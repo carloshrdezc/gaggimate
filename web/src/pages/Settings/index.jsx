@@ -7,6 +7,7 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { timezones } from '../../config/zones.js';
 import { machine, ApiServiceContext } from '../../services/ApiService.js';
+import { authenticatedFetch, localAuthDownloadUrl } from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
@@ -15,12 +16,6 @@ import { PluginCard } from './PluginCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
 import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
 import { normalizeSettings } from './settingsNormalize.js';
-
-const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
-const localAuthHeaders = () => {
-  const token = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
@@ -36,7 +31,7 @@ export function Settings() {
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
   const { isLoading, data: fetchedSettings } = useQuery(`settings/${gen}`, async () => {
-    const response = await fetch(`/api/settings`, { headers: localAuthHeaders() });
+    const response = await authenticatedFetch(`/api/settings`);
     const data = await response.json();
     return data;
   });
@@ -188,9 +183,8 @@ export function Settings() {
         if (restart) {
           formDataToSubmit.append('restart', '1');
         }
-        const response = await fetch(form.action, {
+        const response = await authenticatedFetch(form.action, {
           method: 'post',
-          headers: localAuthHeaders(),
           body: formDataToSubmit,
         });
 
@@ -711,14 +705,14 @@ export function Settings() {
                   Download SD log:
                 </span>
                 <a
-                  href='/api/diag/log.txt'
+                  href={localAuthDownloadUrl('/api/diag/log.txt')}
                   download='diag-log.txt'
                   className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
                 >
                   log.txt
                 </a>
                 <a
-                  href='/api/diag/log.1'
+                  href={localAuthDownloadUrl('/api/diag/log.1')}
                   download='diag-log.1.txt'
                   className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
                 >

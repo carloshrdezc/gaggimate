@@ -4,6 +4,7 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { MigrationWarningBanner } from '../../components/MigrationWarningBanner.jsx';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
+import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
@@ -450,11 +451,11 @@ export function OTA() {
 
   const downloadSupportData = useCallback(async () => {
     try {
-      const settingsResponse = await fetch(`/api/settings`);
+      const settingsResponse = await authenticatedFetch(`/api/settings`);
       const data = await settingsResponse.json();
       delete data.wifiPassword;
       delete data.haPassword;
-      const coredumpBlob = await fetch(`/api/core-dump`).then(r => r.blob());
+      const coredumpBlob = await authenticatedFetch(`/api/core-dump`).then(r => r.blob());
       let coredump = await imageUrlToBase64(coredumpBlob);
       coredump = coredump.substring(coredump.indexOf('base64,') + 7);
       const supportFile = {

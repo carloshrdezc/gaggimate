@@ -7,6 +7,8 @@
 #include "FS.h"
 #include "Print.h"
 #include "WString.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -82,7 +84,10 @@ class AsyncWebServerRequest {
     }
     String arg(const String &name) const { return arg(name.c_str()); }
     String header(const char *name) const {
-        auto it = _headers.find(name);
+        std::string normalizedName(name);
+        std::transform(normalizedName.begin(), normalizedName.end(), normalizedName.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        auto it = _headers.find(normalizedName);
         return it == _headers.end() ? String() : String(it->second.c_str());
     }
 

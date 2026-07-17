@@ -4,6 +4,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { computed } from '@preact/signals';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
+import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { useProcessActions } from '../../hooks/useProcessActions.js';
 import { useProfileData } from '../../hooks/useProfileData.js';
 import { useAutoSteam } from '../../hooks/useAutoSteam.js';
@@ -1187,7 +1188,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const [scaleName, setScaleName] = useState(null);
   useEffect(() => {
     if (!s.bluetoothConnected) { setScaleName(null); return; }
-    fetch('/api/scales/info')
+    authenticatedFetch('/api/scales/info')
       .then(r => r.json())
       .then(d => setScaleName(d?.name || null))
       .catch(() => setScaleName(null));

@@ -4,6 +4,7 @@ import Card from '../../components/Card.jsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faScaleBalanced } from '@fortawesome/free-solid-svg-icons/faScaleBalanced';
 import { machine } from '../../services/ApiService.js';
+import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { Spinner } from '../../components/Spinner.jsx';
 import { faSignal } from '@fortawesome/free-solid-svg-icons/faSignal';
 import { faNetworkWired } from '@fortawesome/free-solid-svg-icons/faNetworkWired';
@@ -46,8 +47,8 @@ export function Scales() {
     data,
   } = useQuery(`scales-${refreshKey}`, async () => {
     const [scalesRes, infoRes] = await Promise.all([
-      fetch('/api/scales/list'),
-      fetch('/api/scales/info'),
+      authenticatedFetch('/api/scales/list'),
+      authenticatedFetch('/api/scales/info'),
     ]);
     const [scales, info] = await Promise.all([scalesRes.json(), infoRes.json()]);
     return { scales, info };
@@ -61,7 +62,7 @@ export function Scales() {
   const onScan = useCallback(async () => {
     setIsScanning(true);
     try {
-      await fetch('/api/scales/scan', {
+      await authenticatedFetch('/api/scales/scan', {
         method: 'post',
       });
       setManualRefreshKey(Date.now());
@@ -77,7 +78,7 @@ export function Scales() {
       try {
         const formData = new FormData();
         formData.append('uuid', uuid);
-        await fetch('/api/scales/connect', {
+        await authenticatedFetch('/api/scales/connect', {
           method: 'post',
           body: formData,
         });

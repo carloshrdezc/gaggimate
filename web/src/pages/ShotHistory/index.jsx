@@ -1,3 +1,4 @@
+import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import {
   Chart,
   LineController,
@@ -142,7 +143,7 @@ export function ShotHistory() {
       let deviceShots = [];
 
       if (connected.value) {
-        const response = await fetch('/api/history/index.bin', { signal: controller.signal });
+        const response = await authenticatedFetch('/api/history/index.bin', { signal: controller.signal });
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();
           const indexData = parseBinaryIndex(arrayBuffer);
@@ -195,7 +196,7 @@ export function ShotHistory() {
       }
 
       const paddedId = String(shot.id).padStart(6, '0');
-      const resp = await fetch(`/api/history/${paddedId}.slog`);
+      const resp = await authenticatedFetch(`/api/history/${paddedId}.slog`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const buf = await resp.arrayBuffer();
       const parsed = parseBinaryShot(buf, shot.id);

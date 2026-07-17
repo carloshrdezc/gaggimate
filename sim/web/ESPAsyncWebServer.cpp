@@ -638,6 +638,7 @@ bool AsyncWebServer::handleHttp(Conn &c) {
 
     AsyncWebServerRequest req(c.fd, this);
     req._url = String(path.c_str());
+    req._headers = headers;
     req._body = body;
     req._method = method == "POST" ? HTTP_POST : method == "PUT" ? HTTP_PUT : method == "DELETE" ? HTTP_DELETE : HTTP_GET;
     auto parseArgs = [&](const std::string &s) {

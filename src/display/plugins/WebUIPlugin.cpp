@@ -779,6 +779,7 @@ void WebUIPlugin::setupServer() {
                              server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
+                authenticatedWebSocketClients.erase(client->id());
             } else if (type == WS_EVT_DATA) {
                 handleWebSocketData(server, client, type, arg, data, len);
             }
@@ -1084,7 +1085,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         sendResponse(clientId, response);
         return;
     }
-    const bool sessionAuthenticated = clientId != RELAY_CLIENT_ID && authenticatedWebSocketClients[clientId];
+    const bool sessionAuthenticated =
+        clientId != RELAY_CLIENT_ID && localAuthWebSocketSessionAuthenticated(authenticatedWebSocketClients, clientId);
     if (!localAuthWebSocketMessageAllowed(clientId == RELAY_CLIENT_ID, sessionAuthenticated, msgType.c_str())) {
         ESP_LOGW("WebUIPlugin", "Rejected unauthenticated WebSocket request: %s", msgType.c_str());
         return;

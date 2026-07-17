@@ -27,6 +27,17 @@ void test_websocket_requires_an_authenticated_session_for_commands(void) {
     TEST_ASSERT_FALSE(localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/false, "req:profiles:list"));
 }
 
+void test_websocket_disconnect_does_not_preserve_authentication_for_a_reused_client_id(void) {
+    std::unordered_map<uint32_t, bool> authenticatedClients{{42, true}};
+    TEST_ASSERT_TRUE(localAuthWebSocketSessionAuthenticated(authenticatedClients, 42));
+
+    authenticatedClients.erase(42);
+    TEST_ASSERT_FALSE(localAuthWebSocketSessionAuthenticated(authenticatedClients, 42));
+
+    authenticatedClients.emplace(42, false);
+    TEST_ASSERT_FALSE(localAuthWebSocketSessionAuthenticated(authenticatedClients, 42));
+}
+
 void test_normal_operation_never_emits_wildcard_cors(void) {
     TEST_ASSERT_FALSE(localAuthShouldEmitCors(/*apMode=*/false, /*developmentBuild=*/false));
     TEST_ASSERT_FALSE(localAuthShouldEmitCors(/*apMode=*/true, /*developmentBuild=*/false));
@@ -38,6 +49,7 @@ static int runLocalAuthPolicyTests() {
     RUN_TEST(test_bearer_token_must_match_exactly);
     RUN_TEST(test_only_ap_setup_can_bypass_http_authentication);
     RUN_TEST(test_websocket_requires_an_authenticated_session_for_commands);
+    RUN_TEST(test_websocket_disconnect_does_not_preserve_authentication_for_a_reused_client_id);
     RUN_TEST(test_normal_operation_never_emits_wildcard_cors);
     return UNITY_END();
 }
