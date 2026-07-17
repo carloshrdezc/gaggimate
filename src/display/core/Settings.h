@@ -6,8 +6,8 @@
 #include <Preferences.h>
 #include <display/core/constants.h>
 #include <display/core/utils.h>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #define PREFERENCES_KEY "controller"
 
@@ -133,7 +133,9 @@ class Settings {
     String getCloudRelayToken() const { return cloudRelayToken; }
     bool isCloudRelayEnabled() const { return cloudRelayEnabled; }
     String getLocalAdminToken() const { return localAdminToken; }
+    bool isLocalAuthProvisioned() const { return localAuthProvisioned; }
     void setLocalAdminToken(const String &token);
+    void setLocalAuthProvisioned(bool provisioned);
     int getManualTargetType() const { return manualTargetType; }
     float getManualPressure() const { return manualPressure; }
     float getManualFlow() const { return manualFlow; }
@@ -291,6 +293,7 @@ class Settings {
     String cloudRelayToken = "";
     bool cloudRelayEnabled = false;
     String localAdminToken = "";
+    bool localAuthProvisioned = false;
 
     void doSave();
     xTaskHandle taskHandle = nullptr;

@@ -22,3 +22,18 @@ export function localAuthDownloadUrl(url) {
   const separator = url.includes('?') ? '&' : '?';
   return `${url}${separator}localAuthToken=${encodeURIComponent(token)}`;
 }
+
+export function localAuthHandoffUrl(hostname, token = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY)) {
+  if (!hostname || !token) return null;
+  return `http://${hostname}.local/#localAuthToken=${encodeURIComponent(token)}`;
+}
+
+export function importLocalAuthHandoff(apiService, location = window.location) {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const token = params.get('localAuthToken');
+  if (!token) return false;
+
+  bootstrapLocalAuth(token, apiService);
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+  return true;
+}

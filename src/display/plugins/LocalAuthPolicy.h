@@ -15,8 +15,10 @@ inline bool localAuthBearerMatches(const std::string &authorization, const std::
 // endpoint may use it without a token; all normal LAN operation is authenticated.
 inline bool localAuthMayBypassHttpInSetup(bool apMode, bool bootstrapRoute) { return apMode && bootstrapRoute; }
 
-// Cloud-relay requests are authenticated by the relay token before they enter this
-// plugin. Local browser sessions must explicitly authenticate before any req:* work.
+// Existing STA installations predate local credentials. Keep the recovery AP
+// available until an owner completes the AP setup flow and persists the marker.
+inline bool localAuthRequiresRecoveryAp(bool hasWifiCredentials, bool provisioned) { return hasWifiCredentials && !provisioned; }
+
 inline bool localAuthWebSocketMessageAllowed(bool isRelay, bool sessionAuthenticated, const std::string &messageType) {
     return isRelay || sessionAuthenticated || messageType == "req:auth";
 }

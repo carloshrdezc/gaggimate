@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdint>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <string>
@@ -174,8 +175,14 @@ class AsyncWebSocket {
 class AsyncStaticWebHandler {
   public:
     AsyncStaticWebHandler &setCacheControl(const char *) { return *this; }
+    AsyncStaticWebHandler &setFilter(std::function<bool(AsyncWebServerRequest *)> filter) {
+        _filter = std::move(filter);
+        return *this;
+    }
     AsyncStaticWebHandler &setDefaultFile(const char *) { return *this; }
     AsyncStaticWebHandler &setTryGzipFirst(bool) { return *this; }
+
+    std::function<bool(AsyncWebServerRequest *)> _filter;
 };
 
 class AsyncWebServer {
@@ -206,13 +213,14 @@ class AsyncWebServer {
         std::string uri;
         FS *fs;
         std::string path;
+        AsyncStaticWebHandler *handler;
     };
 
     uint16_t _port;
     int _listenFd = -1;
     std::vector<Route> _routes;
     std::vector<StaticRoute> _static;
-    std::vector<AsyncStaticWebHandler> _staticHandlers;
+    std::list<AsyncStaticWebHandler> _staticHandlers;
     ArRequestHandlerFunction _notFound;
     AsyncWebSocket *_ws = nullptr;
 

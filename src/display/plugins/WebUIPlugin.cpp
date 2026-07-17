@@ -18,10 +18,10 @@
 #include <cmath>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ChangeModeDeferPolicy.h>
+#include <display/plugins/LocalAuthPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
-#include <display/plugins/LocalAuthPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
 #include <string>
 #include <unordered_map>
@@ -49,8 +49,13 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) { host = hostPort; port = 443; }
-        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
+        if (colonIdx < 0) {
+            host = hostPort;
+            port = 443;
+        } else {
+            host = hostPort.substring(0, colonIdx);
+            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
+        }
         return true;
     }
     if (url.startsWith("ws://")) {
@@ -60,8 +65,13 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
         String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
         basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
         int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) { host = hostPort; port = 80; }
-        else { host = hostPort.substring(0, colonIdx); port = (uint16_t)hostPort.substring(colonIdx + 1).toInt(); }
+        if (colonIdx < 0) {
+            host = hostPort;
+            port = 80;
+        } else {
+            host = hostPort.substring(0, colonIdx);
+            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
+        }
         return true;
     }
     return false;
@@ -87,10 +97,13 @@ void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
     request->send(response);
 }
 
-bool WebUIPlugin::isSetupBootstrapRequest(AsyncWebServerRequest *request) const { return request->url() == "/api/settings"; }
+bool WebUIPlugin::isSetupBootstrapRequest(AsyncWebServerRequest *request) const {
+    return request->method() == HTTP_GET && request->url() == "/api/settings";
+}
 
 bool WebUIPlugin::isHttpAuthenticated(AsyncWebServerRequest *request) const {
-    if (localAuthMayBypassHttpInSetup(apMode, isSetupBootstrapRequest(request))) return true;
+    if (localAuthMayBypassHttpInSetup(apMode, isSetupBootstrapRequest(request)))
+        return true;
     const String token = request->hasArg("localAuthToken") ? request->arg("localAuthToken") : String("");
     const String authorization = token.isEmpty() ? request->header("Authorization") : String("Bearer ") + token;
     return localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
@@ -103,7 +116,8 @@ void WebUIPlugin::sendUnauthorized(AsyncWebServerRequest *request) const {
 bool WebUIPlugin::authenticateWebSocket(uint32_t clientId, JsonDocument &request) {
     const String token = request["token"].is<String>() ? request["token"].as<String>() : String("");
     const String authorization = String("Bearer ") + token;
-    const bool authenticated = localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
+    const bool authenticated =
+        localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
     authenticatedWebSocketClients[clientId] = authenticated;
     return authenticated;
 }
@@ -127,8 +141,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         ESP_LOGW("WebUIPlugin", "Generated device-local admin token; retrieve it only through AP setup");
     }
     this->ota = new GitHubOTA(
-        BUILD_GIT_VERSION, controller->getSystemInfo().version,
-        resolveReleaseUrl(controller->getSettings().getOTAChannel()),
+        BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
             pluginManager->trigger("ota:update:phase", "phase", phase);
             updateOTAProgress(phase, 0);
@@ -342,20 +355,16 @@ void WebUIPlugin::loop() {
             // stored does not. Treat them as equal so legacy tags still flash.
             // Cover both directions in case a future resolver path keeps the
             // `v` and the channel string drops it.
-            const bool match = resolved == pinned ||
-                               (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
+            const bool match = resolved == pinned || (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
                                (resolved.startsWith("v") && resolved.substring(1) == pinned);
             if (!match) {
-                ESP_LOGE("WebUIPlugin",
-                         "Refusing forced OTA: pinned tag %s but resolved %s",
-                         pinned.c_str(), resolved.c_str());
+                ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s", pinned.c_str(), resolved.c_str());
                 tagResolved = false;
             }
         }
         bool updateSucceeded = false;
         if (tagResolved) {
-            updateSucceeded =
-                ota->update(updateComponent != "display", updateComponent != "controller", force);
+            updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
         }
         pluginManager->trigger("ota:update:end");
         updating = false;
@@ -481,7 +490,7 @@ void WebUIPlugin::loop() {
         // BLE scale compiled out (CAR-382): always report disconnected / zero
         // weight. Volumetric still works via flow estimation; that value flows
         // through the process snapshot, not these BLE-specific status fields.
-        doc["cw"] = 0; // current bluetooth weight
+        doc["cw"] = 0;     // current bluetooth weight
         doc["bc"] = false; // bluetooth scale connected status
 #endif
 
@@ -503,8 +512,8 @@ void WebUIPlugin::loop() {
                 pObj["s"] = proc.phaseType == static_cast<int>(PhaseType::PHASE_TYPE_BREW) ? "brew" : "infusion";
                 pObj["l"] = proc.isActive ? proc.phaseName.c_str() : "Finished";
                 pObj["e"] = ts - proc.started;
-                const bool isVolumetric = proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget &&
-                                          controller->isVolumetricAvailable();
+                const bool isVolumetric =
+                    proc.target == ProcessTarget::VOLUMETRIC && proc.hasVolumetricTarget && controller->isVolumetricAvailable();
                 pObj["tt"] = isVolumetric ? "volumetric" : "time";
                 if (isVolumetric) {
                     pObj["pt"] = proc.volumetricTargetValue;
@@ -536,7 +545,7 @@ void WebUIPlugin::loop() {
                 pObj["tt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? "flow" : "pressure";
                 pObj["pt"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? proc.manualFlow : proc.manualPressure;
                 pObj["pp"] = proc.manualTargetType == MANUAL_TARGET_FLOW ? controller->getCurrentPumpFlow()
-                                                                          : controller->getCurrentPressure();
+                                                                         : controller->getCurrentPressure();
             }
         }
 
@@ -642,30 +651,42 @@ void WebUIPlugin::setupServer() {
     // {success:false}) with HTTP 200 so the client renders an empty list
     // (CAR-386). The default BLE-on behavior is unchanged.
     server.on("/api/scales/list", [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleBLEScaleList(request);
     });
     server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleBLEScaleConnect(request);
     });
     server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleBLEScaleScan(request);
     });
     server.on("/api/scales/info", [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleBLEScaleInfo(request);
     });
     FS *fs = &LittleFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
     }
-    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store");
+    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store").setFilter(
+        [this](AsyncWebServerRequest *request) {
+            const bool authenticated = isHttpAuthenticated(request);
+            if (!authenticated)
+                sendUnauthorized(request);
+            return authenticated;
+        });
     server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
-        // Serve the binary index file directly
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         if (fs->exists("/h/index.bin")) {
             AsyncWebServerResponse *response = request->beginResponse(*fs, "/h/index.bin", "application/octet-stream");
+            response->addHeader("Cache-Control", "no-store");
             addCorsHeaders(response);
             request->send(response);
         } else {
@@ -673,7 +694,8 @@ void WebUIPlugin::setupServer() {
         }
     });
     server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleCoreDumpDownload(request);
     });
     // Diagnostic SD log download (PRO-274). Explicit handlers (not serveStatic)
@@ -685,11 +707,13 @@ void WebUIPlugin::setupServer() {
     // SD_LOG_PATH_OLD; literals are used here rather than including that plugin's
     // header (it pulls WiFiUdp.h, which the native display-sim build can't resolve).
     server.on("/api/diag/log.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleDiagLogDownload(request, "/diag/log.txt");
     });
     server.on("/api/diag/log.1", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         handleDiagLogDownload(request, "/diag/log.1");
     });
     server.on("/test", [](AsyncWebServerRequest *request) {
@@ -775,8 +799,7 @@ void WebUIPlugin::setupServer() {
             } else if (type == WS_EVT_DISCONNECT) {
                 {
                     SemaphoreGuard lock(wsMutex);
-                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)",
-                             server->getClients().size());
+                    ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
                 authenticatedWebSocketClients.erase(client->id());
@@ -851,7 +874,8 @@ void WebUIPlugin::startRelay() {
     SemaphoreGuard lock(relayLifecycleMutex);
     const String &relayUrl = controller->getSettings().getCloudRelayUrl();
     const String &relayToken = controller->getSettings().getCloudRelayToken();
-    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled()) return;
+    if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled())
+        return;
 
     bool useSSL;
     String host, basePath;
@@ -897,27 +921,26 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/")
-        ? "/connect?token=" + relayToken + "&role=device"
-        : basePath + "/connect?token=" + relayToken + "&role=device";
+    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?token=" + relayToken + "&role=device"
+                                                          : basePath + "/connect?token=" + relayToken + "&role=device";
 
     relayWs.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
         switch (type) {
-            case WStype_CONNECTED:
-                relayConnected = true;
-                ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
-                break;
-            case WStype_DISCONNECTED:
-                relayConnected = false;
-                ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
-                break;
-            case WStype_TEXT: {
-                String msg = String((char *)payload, length);
-                processWebSocketMessage(RELAY_CLIENT_ID, msg);
-                break;
-            }
-            default:
-                break;
+        case WStype_CONNECTED:
+            relayConnected = true;
+            ESP_LOGI("WebUIPlugin", "Connected to cloud relay");
+            break;
+        case WStype_DISCONNECTED:
+            relayConnected = false;
+            ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
+            break;
+        case WStype_TEXT: {
+            String msg = String((char *)payload, length);
+            processWebSocketMessage(RELAY_CLIENT_ID, msg);
+            break;
+        }
+        default:
+            break;
         }
     });
 
@@ -964,7 +987,8 @@ void WebUIPlugin::stopRelay() {
     // ~500 ms spin-wait below; that is acceptable because the wait uses vTaskDelay
     // (yields the CPU) and is strictly bounded.
     SemaphoreGuard lock(relayLifecycleMutex);
-    if (!relayEnabled) return;
+    if (!relayEnabled)
+        return;
     relayEnabled = false;
     relayConnected = false;
     if (relayTaskHandle.load(std::memory_order_acquire) != nullptr) {
@@ -1035,7 +1059,8 @@ void WebUIPlugin::broadcastAll(const String &msg) {
 }
 
 void WebUIPlugin::broadcastRelayMsg(const String &msg) {
-    if (!relayEnabled || relayMutex == nullptr) return;
+    if (!relayEnabled || relayMutex == nullptr)
+        return;
     if (xSemaphoreTake(relayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         if (relayOutBuffer.size() < 64) {
             relayOutBuffer.push_back(msg);
@@ -1069,19 +1094,20 @@ void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
 }
 
 void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) {
-    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s",
-             clientId == RELAY_CLIENT_ID ? "relay" : "local",
+    ESP_LOGV("WebUIPlugin", "Processing message from %s: %.*s", clientId == RELAY_CLIENT_ID ? "relay" : "local",
              (int)msg.length(), msg.c_str());
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, msg.c_str());
-    if (err) return;
+    if (err)
+        return;
 
     String msgType = doc["tp"].as<String>();
     if (clientId != RELAY_CLIENT_ID && msgType == "req:auth") {
         JsonDocument response;
         response["tp"] = "res:auth";
         response["ok"] = authenticateWebSocket(clientId, doc);
-        if (!response["ok"].as<bool>()) response["error"] = "Authentication failed";
+        if (!response["ok"].as<bool>())
+            response["error"] = "Authentication failed";
         sendResponse(clientId, response);
         return;
     }
@@ -1145,11 +1171,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         JsonVariantConst pressureValue = doc["pressure"];
         JsonVariantConst flowValue = doc["flow"];
         JsonVariantConst temperatureValue = doc["temperature"];
-        float pressure = pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>()
-                                                                              : controller->getManualPressure();
+        float pressure =
+            pressureValue.is<float>() || pressureValue.is<int>() ? pressureValue.as<float>() : controller->getManualPressure();
         float flow = flowValue.is<float>() || flowValue.is<int>() ? flowValue.as<float>() : controller->getManualFlow();
         int temperature = temperatureValue.is<int>() || temperatureValue.is<float>() ? temperatureValue.as<int>()
-                                                                                    : controller->getManualTemperature();
+                                                                                     : controller->getManualTemperature();
         controller->updateManualTargets(targetType, pressure, flow, temperature);
     } else if (msgType == "req:change-mode") {
         if (doc["mode"].is<uint8_t>()) {
@@ -1246,7 +1272,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:history:rebuild") {
         JsonDocument resp;
         resp["tp"] = "res:history:rebuild";
-        if (doc["rid"].is<const char *>()) resp["rid"] = doc["rid"];
+        if (doc["rid"].is<const char *>())
+            resp["rid"] = doc["rid"];
         resp["msg"] = "Rebuild started";
         sendResponse(clientId, resp);
         ShotHistory.startAsyncRebuild();
@@ -1331,8 +1358,10 @@ static String resolveReleaseUrl(const String &channel) {
 // to "latest" so a malformed websocket payload can never poison the stored
 // setting.
 static String normalizeChannel(const String &channel) {
-    if (channel == "beta") return "beta";
-    if (channel == "nightly") return "nightly";
+    if (channel == "beta")
+        return "beta";
+    if (channel == "nightly")
+        return "nightly";
     if (channel.startsWith("tag:")) {
         const String tag = channel.substring(4);
         for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
@@ -1607,7 +1636,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
         return;
     }
     if (request->method() == HTTP_POST) {
-        controller->getSettings().batchUpdate([request](Settings *settings) {
+        controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
                 settings->setStartupMode(request->arg("startupMode") == "brew" ? MODE_BREW : MODE_STANDBY);
             if (request->hasArg("targetSteamTemp"))
@@ -1695,7 +1724,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
             if (request->hasArg("altRelayFunction"))
                 settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
-            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") && request->arg("autowakeupEnabled").length() > 0);
+            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled") &&
+                                           request->arg("autowakeupEnabled").length() > 0);
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
                 String schedulesStr = request->arg("autowakeupSchedules");
@@ -1746,6 +1776,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setCloudRelayToken(request->arg("cloudRelayToken"));
             if (request->hasArg("cloudRelayEnabled"))
                 settings->setCloudRelayEnabled(request->arg("cloudRelayEnabled") == "1");
+            if (apMode && request->hasArg("completeLocalAuthProvisioning")) {
+                settings->setLocalAuthProvisioned(true);
+            }
             settings->save(true);
         });
         pluginManager->trigger("settings:changed");
@@ -1817,8 +1850,11 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["cloudRelayToken"] = kSecretSentinel;
     // AP fallback is the physical-presence setup channel. It is the only place
     // the bootstrap token is returned; normal LAN responses never disclose it.
-    if (apMode) doc["localAdminToken"] = settings.getLocalAdminToken();
-    else doc["localAdminToken"] = kSecretSentinel;
+    if (apMode)
+        doc["localAdminToken"] = settings.getLocalAdminToken();
+    else
+        doc["localAdminToken"] = kSecretSentinel;
+    doc["localAuthRecovery"] = apMode && !settings.isLocalAuthProvisioned();
     doc["cloudRelayEnabled"] = settings.isCloudRelayEnabled();
 
     // Add schedule format with days

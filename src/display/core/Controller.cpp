@@ -28,6 +28,7 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#include <display/plugins/LocalAuthPolicy.h>
 #if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
 #endif
@@ -331,7 +332,9 @@ void Controller::setupInfos() {
 }
 
 void Controller::setupWifi() {
-    if (settings.getWifiSsid() != "" && settings.getWifiPassword() != "") {
+    const bool recoveryAp = localAuthRequiresRecoveryAp(settings.getWifiSsid() != "" && settings.getWifiPassword() != "",
+                                                        settings.isLocalAuthProvisioned());
+    if (!recoveryAp && settings.getWifiSsid() != "" && settings.getWifiPassword() != "") {
         WiFi.setHostname(settings.getMdnsName().c_str());
         WiFi.mode(WIFI_STA);
         WiFi.setAutoReconnect(true);

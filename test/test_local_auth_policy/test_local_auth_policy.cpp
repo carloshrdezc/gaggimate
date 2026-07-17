@@ -18,6 +18,12 @@ void test_only_ap_setup_can_bypass_http_authentication(void) {
     TEST_ASSERT_FALSE(localAuthMayBypassHttpInSetup(/*apMode=*/true, /*bootstrapRoute=*/false));
 }
 
+void test_saved_wifi_without_completed_provisioning_starts_recovery_ap(void) {
+    TEST_ASSERT_TRUE(localAuthRequiresRecoveryAp(/*hasWifiCredentials=*/true, /*provisioned=*/false));
+    TEST_ASSERT_FALSE(localAuthRequiresRecoveryAp(/*hasWifiCredentials=*/true, /*provisioned=*/true));
+    TEST_ASSERT_FALSE(localAuthRequiresRecoveryAp(/*hasWifiCredentials=*/false, /*provisioned=*/false));
+}
+
 void test_websocket_requires_an_authenticated_session_for_commands(void) {
     TEST_ASSERT_TRUE(localAuthWebSocketMessageAllowed(/*isRelay=*/true, /*sessionAuthenticated=*/false, "req:ota-start"));
     TEST_ASSERT_TRUE(localAuthWebSocketMessageAllowed(/*isRelay=*/false, /*sessionAuthenticated=*/true, "req:ota-start"));
@@ -48,6 +54,7 @@ static int runLocalAuthPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_bearer_token_must_match_exactly);
     RUN_TEST(test_only_ap_setup_can_bypass_http_authentication);
+    RUN_TEST(test_saved_wifi_without_completed_provisioning_starts_recovery_ap);
     RUN_TEST(test_websocket_requires_an_authenticated_session_for_commands);
     RUN_TEST(test_websocket_disconnect_does_not_preserve_authentication_for_a_reused_client_id);
     RUN_TEST(test_normal_operation_never_emits_wildcard_cors);

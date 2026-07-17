@@ -7,7 +7,7 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { timezones } from '../../config/zones.js';
 import { machine, ApiServiceContext } from '../../services/ApiService.js';
-import { authenticatedFetch, localAuthDownloadUrl, bootstrapLocalAuth } from '../../services/localAuthFetch.js';
+import { authenticatedFetch, localAuthDownloadUrl, bootstrapLocalAuth, localAuthHandoffUrl } from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
@@ -27,6 +27,7 @@ export function Settings() {
   const [formData, setFormData] = useState({});
   const [currentTheme, setCurrentTheme] = useState('midnight');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
+  const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
   const [autowakeupSchedules, setAutoWakeupSchedules] = useState([
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
@@ -58,6 +59,20 @@ export function Settings() {
   useEffect(() => {
     setCurrentTheme(getStoredTheme());
   }, []);
+
+  const prepareAuthHandoff = async () => {
+    const url = localAuthHandoffUrl(formData.mdnsName);
+    if (!url) return;
+
+    setAuthHandoffUrl(url);
+    if (navigator.clipboard) navigator.clipboard.writeText(url);
+
+    const response = await authenticatedFetch('/api/settings', {
+      method: 'post',
+      body: new URLSearchParams({ completeLocalAuthProvisioning: '1', restart: '1' }),
+    });
+    if (!response.ok) throw new Error(`Server error: ${response.status}`);
+  };
 
   const onChange = key => {
     return e => {
@@ -633,6 +648,15 @@ export function Settings() {
                   value={formData.mdnsName}
                   onChange={onChange('mdnsName')}
                 />
+              </div>
+              <div className='border-l-2 border-[var(--text-secondary,#999)] pl-4'>
+                <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
+                  Before moving from the setup AP to Wi-Fi, copy this one-time auth handoff link. The device restarts into STA after creating it; its credential stays in the URL fragment and is not sent to the network.
+                </div>
+                <button type='button' className='btn btn-secondary mt-2' onClick={prepareAuthHandoff}>
+                  Copy Wi-Fi auth handoff link
+                </button>
+                {authHandoffUrl && <div className='mt-2 break-all text-xs'>{authHandoffUrl}</div>}
               </div>
               <div className='flex flex-col gap-2'>
                 <label
