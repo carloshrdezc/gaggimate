@@ -641,10 +641,22 @@ void WebUIPlugin::setupServer() {
     // payload (list: [], info: {connected:false,...}, scan/connect:
     // {success:false}) with HTTP 200 so the client renders an empty list
     // (CAR-386). The default BLE-on behavior is unchanged.
-    server.on("/api/scales/list", [this](AsyncWebServerRequest *request) { handleBLEScaleList(request); });
-    server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) { handleBLEScaleConnect(request); });
-    server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
-    server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
+    server.on("/api/scales/list", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleBLEScaleList(request);
+    });
+    server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleBLEScaleConnect(request);
+    });
+    server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleBLEScaleScan(request);
+    });
+    server.on("/api/scales/info", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleBLEScaleInfo(request);
+    });
     FS *fs = &LittleFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
@@ -660,7 +672,10 @@ void WebUIPlugin::setupServer() {
             request->send(404, "text/plain", "Index not found");
         }
     });
-    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) { handleCoreDumpDownload(request); });
+    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleCoreDumpDownload(request);
+    });
     // Diagnostic SD log download (PRO-274). Explicit handlers (not serveStatic)
     // so a missing file returns a clean 404 instead of falling through to the
     // SPA catch-all (onNotFound) below. Registered before onNotFound so these
@@ -669,10 +684,14 @@ void WebUIPlugin::setupServer() {
     // SD card inside the handler. Paths mirror DiagnosticLogPlugin::SD_LOG_PATH /
     // SD_LOG_PATH_OLD; literals are used here rather than including that plugin's
     // header (it pulls WiFiUdp.h, which the native display-sim build can't resolve).
-    server.on("/api/diag/log.txt", HTTP_GET,
-              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.txt"); });
-    server.on("/api/diag/log.1", HTTP_GET,
-              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.1"); });
+    server.on("/api/diag/log.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleDiagLogDownload(request, "/diag/log.txt");
+    });
+    server.on("/api/diag/log.1", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        handleDiagLogDownload(request, "/diag/log.1");
+    });
     server.on("/test", [](AsyncWebServerRequest *request) {
         ESP_LOGI("WebUI", "TEST endpoint hit!");
         request->send(200, "text/plain", "ESP32 server is alive!");

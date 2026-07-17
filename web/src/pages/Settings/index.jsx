@@ -16,6 +16,12 @@ import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
 import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
 import { normalizeSettings } from './settingsNormalize.js';
 
+const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
+const localAuthHeaders = () => {
+  const token = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
 
@@ -30,7 +36,7 @@ export function Settings() {
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
   const { isLoading, data: fetchedSettings } = useQuery(`settings/${gen}`, async () => {
-    const response = await fetch(`/api/settings`);
+    const response = await fetch(`/api/settings`, { headers: localAuthHeaders() });
     const data = await response.json();
     return data;
   });
@@ -182,6 +188,7 @@ export function Settings() {
         }
         const response = await fetch(form.action, {
           method: 'post',
+          headers: localAuthHeaders(),
           body: formDataToSubmit,
         });
 
