@@ -43,7 +43,7 @@ export function buildShotHistoryArchive(shots) {
     shotCount: shots.length,
     shots: shots.map(shot => ({
       ...shot,
-      id: String(shot.id || ''),
+      id: shot.id != null ? String(shot.id) : '',
       source: undefined,
       loaded: true,
       samples: Array.isArray(shot.samples) ? shot.samples.map(normalizeSample) : [],
@@ -72,14 +72,19 @@ export async function importShotHistoryArchive(payload) {
 
   for (const rawShot of rawShots) {
     const hasSamples = Array.isArray(rawShot?.samples) && rawShot.samples.length > 0;
-    const hasCoreHistoryFields = rawShot?.id && rawShot?.timestamp && rawShot?.profile;
+    const hasCoreHistoryFields = rawShot?.id != null && rawShot?.timestamp != null && rawShot?.profile != null;
 
     if (!hasSamples && !hasCoreHistoryFields) {
       continue;
     }
 
     // Generate unique ID: prefer id (original), then timestamp, then Date.now() fallback
-    let shotId = String(rawShot.id || rawShot.timestamp || Date.now());
+    let shotId =
+      rawShot.id != null
+        ? String(rawShot.id)
+        : rawShot.timestamp != null
+          ? String(rawShot.timestamp)
+          : String(Date.now());
     let storageKey = `history-${shotId}.json`;
 
     // Check for collision and generate new ID if needed
@@ -91,7 +96,7 @@ export async function importShotHistoryArchive(payload) {
         shotId = String(timestamp);
         storageKey = `history-${shotId}.json`;
       }
-    } catch (e) {
+    } catch {
       // getShot threw a real DB error (not "not found") — proceed without collision check
       // A true collision will be handled by IndexedDB's natural overwrite behavior
     }

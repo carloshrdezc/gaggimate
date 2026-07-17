@@ -1,5 +1,6 @@
 #include "MQTTPlugin.h"
 #include "../core/Controller.h"
+#include "../core/EventIds.h"
 #include "MqttConnectPolicy.h"
 #include <ArduinoJson.h>
 #include <ctime>
@@ -173,7 +174,7 @@ void MQTTPlugin::publishBrewState(const char *state) {
 }
 
 void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
-    pluginManager->on("controller:wifi:connect", [this, controller](const Event &) {
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this, controller](const Event &) {
         // PRO-348 (Ref PRO-346 F2): controller:wifi:connect fires repeatedly per
         // STA session now (PRO-333). Do NO blocking work here — this runs on the
         // arduino_events WiFi task. If the client is already up, this is a
@@ -188,7 +189,7 @@ void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
         wantConnect = true;
     });
 
-    pluginManager->on("boiler:currentTemperature:change", [this](Event const &event) {
+    pluginManager->on(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, [this](Event const &event) {
         if (!client.connected())
             return;
         char json[50];
@@ -199,7 +200,7 @@ void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
         }
         lastTemperature = temp;
     });
-    pluginManager->on("boiler:targetTemperature:change", [this](Event const &event) {
+    pluginManager->on(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, [this](Event const &event) {
         if (!client.connected())
             return;
         char json[50];
@@ -207,7 +208,7 @@ void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
         snprintf(json, sizeof(json), R"***({"temperature":%02f})***", temp);
         publish("boilers/0/targetTemperature", json);
     });
-    pluginManager->on("controller:mode:change", [this](Event const &event) {
+    pluginManager->on(EventIds::CONTROLLER_MODE_CHANGE, [this](Event const &event) {
         int newMode = event.getInt("value");
         const char *modeStr;
         switch (newMode) {
@@ -234,7 +235,7 @@ void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
         snprintf(json, sizeof(json), R"({"mode":%d,"mode_str":"%s"})", newMode, modeStr);
         publish("controller/mode", json);
     });
-    pluginManager->on("controller:brew:start", [this](Event const &) { publishBrewState("brewing"); });
+    pluginManager->on(EventIds::CONTROLLER_BREW_START, [this](Event const &) { publishBrewState("brewing"); });
 
-    pluginManager->on("controller:brew:end", [this](Event const &) { publishBrewState("not brewing"); });
+    pluginManager->on(EventIds::CONTROLLER_BREW_END, [this](Event const &) { publishBrewState("not brewing"); });
 }

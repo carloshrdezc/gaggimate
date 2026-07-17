@@ -1,6 +1,7 @@
 #ifndef SHOTHISTORYPLUGIN_H
 #define SHOTHISTORYPLUGIN_H
 
+#include "ActiveShotFillPolicy.h"
 #include "PostStopGracePolicy.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -76,6 +77,7 @@ class ShotHistoryPlugin : public Plugin {
     bool createEarlyIndexEntry();
     bool saveNotes(const String &id, const JsonDocument &notes);
     void loadNotes(const String &id, JsonDocument &notes);
+    void removeHistoryFiles(const String &id);
     bool applyBeanUsageDelta(JsonVariantConst previousNotes, JsonVariantConst nextNotes);
     void startRecording();
 
@@ -83,6 +85,7 @@ class ShotHistoryPlugin : public Plugin {
 
     // Phase 1 refactoring: extracted helper methods from record()
     bool openLogFileIfNeeded();
+    void adoptPendingActiveShotFill();
     void initializeHeader();
     // PRO-277: createSample / updateBluetoothFlow take the telemetry snapshot
     // captured under stateMutex in record(), so the file-building work runs
@@ -91,12 +94,19 @@ class ShotHistoryPlugin : public Plugin {
     void updateBluetoothFlow(float bluetoothWeight);
     bool writeSampleToBuffer(const ShotLogSample &sample);
     void checkEarlyIndexCreation();
-    void closeLogFile(float finalBluetoothWeight);
+    bool closeLogFile(float finalBluetoothWeight);
     void patchHeaderWithFinalData(float finalBluetoothWeight);
     bool isShotTooShort() const;
-    void handleFailedShot();
-    void handleCompletedShot();
-    void appendCompletedShotToIndex(bool hasNotes = false);
+    void handleFailedShot(const String &id, bool hadIndexEntry);
+    void handleCompletedShot(const String &id, const String &beanName, const String &beanId, const String &grinderName,
+                             bool startedVolumetric, double grindTargetVolume, int grindTargetDuration,
+                             const ShotLogHeader &completedHeader);
+    void appendCompletedShotToIndex(const String &id, const ShotLogHeader &completedHeader, bool hasNotes = false);
+
+    // PRO-422: resolve the selected bean NAME (all Settings stores) to its stable
+    // BeanManager id at capture time. Returns "" when no bean is selected, the
+    // BeanManager is unavailable, or no stored bean matches the name.
+    String resolveSelectedBeanId(const String &beanName);
 
     unsigned long getTime();
 
@@ -124,6 +134,12 @@ class ShotHistoryPlugin : public Plugin {
     // (relaxed ordering — a single independent bool, no dependent data published alongside it).
     std::atomic<bool> recording{false};
     std::atomic<bool> extendedRecording{false};
+    std::atomic<uint32_t> activeShotId{0};
+    std::atomic<uint32_t> shotGeneration{0};
+    // Protected by notesMutex: retain a valid fill admitted before record()
+    // creates its .slog, then adopt it only for the same active identity.
+    String pendingActiveShotFill;
+    shot_notes::ActiveShotIdentity pendingActiveShotFillIdentity{0, 0};
     bool indexEntryCreated = false;     // Track if early index entry was created
     bool shotStartedVolumetric = false; // Track initial volumetric mode
     unsigned long shotStart = 0;
@@ -144,6 +160,15 @@ class ShotHistoryPlugin : public Plugin {
     float currentPuckResistance = 0.0f;
     String currentProfileName;
     String currentBeanName;
+    String currentBeanId;      // PRO-422: BeanManager id of the selected bean at brew start ("" if none/unknown)
+    String currentGrinderName; // PRO-428: selected grinder name at brew start ("" if none); stamped as notes "grinderName"
+    // PRO-441: snapshot the MACHINE GRIND TARGET (auto-grind grams/seconds) at brew start, mirroring the
+    // grinderName capture. Stamped as notes "grindTarget" (a display label string) so every web client reads
+    // the same device-authoritative target instead of a per-browser localStorage selection log. tgv/tgd are
+    // already Settings/NVS-persisted — no new NVS key, no new WebSocket message. The volumetric-vs-time mode
+    // reuses shotStartedVolumetric (same isVolumetricTarget() snapshot) rather than a second copy.
+    double currentGrindTargetVolume = 0; // grams
+    int currentGrindTargetDuration = 0;  // milliseconds
 
     // Phase transition tracking (v5+)
     uint8_t lastRecordedPhase = 0xFF; // Invalid initial value to detect first phase
@@ -152,7 +177,11 @@ class ShotHistoryPlugin : public Plugin {
     bool rebuildInProgress = false;
 
     xTaskHandle taskHandle;
-    SemaphoreHandle_t stateMutex = nullptr; // Protects shared state accessed by record()
+    SemaphoreHandle_t stateMutex = nullptr;     // Protects shared state accessed by record()
+    SemaphoreHandle_t recordingMutex = nullptr; // Prevents a start while an ended file is closing.
+    // Serializes notes filesystem read/merge/write operations without blocking
+    // telemetry callbacks on stateMutex.
+    SemaphoreHandle_t notesMutex = nullptr;
     // PRO-277: serializes every operation on /h/index.bin across the loopTask,
     // the WebUI request task, and the async-rebuild task (see *Locked helpers above).
     SemaphoreHandle_t indexMutex = nullptr;

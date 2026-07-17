@@ -104,6 +104,7 @@ export function BeanManagerCard({
             </label>
             <input
               type='number'
+              inputMode='decimal'
               min='0'
               step='0.1'
               value={draft.quantity ?? ''}

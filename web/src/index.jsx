@@ -11,6 +11,7 @@ import { LocationProvider, Router, Route, ErrorBoundary } from 'preact-iso';
 import { NotFound } from './pages/_404.jsx';
 import ApiService, { ApiServiceContext } from './services/ApiService.js';
 import { Navigation } from './components/Navigation.jsx';
+import { ConnectionBanner } from './components/ConnectionBanner.jsx';
 import { routes } from './routes.jsx';
 
 const apiService = new ApiService();
@@ -38,6 +39,7 @@ function AppContent() {
           Skip to main content
         </a>
         <Navigation open={navOpen} onClose={() => setNavOpen(false)} />
+        <ConnectionBanner />
         <main id='main-content' className='flex-1'>
           <div className='mx-auto w-full px-4 py-4 lg:px-8 lg:py-6 xl:container'>
             <div className='min-w-0'>

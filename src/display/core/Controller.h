@@ -6,12 +6,14 @@
 #include "PluginManager.h"
 #include "Settings.h"
 #include "VolumetricCoalescer.h"
+#include "VolumetricMeasurementSource.h"
 #include <WiFi.h>
-#include <freertos/semphr.h>
+#include <atomic>
 #include <display/core/BeanManager.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/Process.h>
+#include <freertos/semphr.h>
 
 // Thread-safe snapshot of process state for UI/plugins
 struct ProcessSnapshot {
@@ -21,7 +23,7 @@ struct ProcessSnapshot {
     int type = -1;
     unsigned long started = 0;
     unsigned long finished = 0;
-    
+
     // Brew-specific fields
     bool isBrew = false;
     uint8_t phaseIndex = 0;
@@ -38,7 +40,7 @@ struct ProcessSnapshot {
     float brewVolume = 0.0f;
     bool isAdvancedPump = false;
     float pumpPressure = 0.0f;
-    
+
     // Grind-specific fields
     bool isGrind = false;
     float grindVolume = 0.0f;
@@ -62,8 +64,6 @@ const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https:
 // Mutex timeout for UI/event loop methods to prevent deadlocks
 // Chosen to prevent UI freezes while allowing reasonable wait for mutex
 constexpr TickType_t UI_MUTEX_TIMEOUT_MS = 100;
-
-enum class VolumetricMeasurementSource { INACTIVE, FLOW_ESTIMATION, BLUETOOTH };
 
 class Controller {
   public:
@@ -93,6 +93,8 @@ class Controller {
     virtual float getCurrentTemp() const { return currentTemp; }
     bool isActive() const;
     bool isActiveSafe() const;
+    bool canRestartDisplay() const;
+    bool restartDisplayIfSafe();
     bool isGrindActive() const;
     bool isGrindAvailable() const;
     bool isManualAvailable() const;
@@ -119,25 +121,29 @@ class Controller {
 
     void autotune(int testTime, int samples);
     void startProcess(Process *process);
-    
+
     // DEPRECATED: Direct pointer access is unsafe due to race conditions.
     // Use getProcessSnapshot() or other thread-safe accessor methods instead.
     // This method will be removed in a future version.
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
-    Process *getProcess() const { return currentProcess; }
-    
+    Process *getProcess() const {
+        return currentProcess;
+    }
+
     // DEPRECATED: Direct pointer access is unsafe due to race conditions.
     // Use getProcessSnapshot() or other thread-safe accessor methods instead.
     // This method will be removed in a future version.
     [[deprecated("Use getProcessSnapshot() or thread-safe accessor methods instead")]]
-    Process *getLastProcess() const { return lastProcess; }
-    
+    Process *getLastProcess() const {
+        return lastProcess;
+    }
+
     // Thread-safe methods to get process info without exposing raw pointer
     int getProcessType() const;
     uint8_t getBrewProcessPhaseIndex() const;
     bool isBrewProcessVolumetric() const;
     bool isBrewProcessUtility() const;
-    
+
     // Thread-safe snapshot of current process state
     ProcessSnapshot getProcessSnapshot() const;
     Settings &getSettings() { return settings; }
@@ -173,7 +179,7 @@ class Controller {
     void onProfileSave() const;
     void onProfileSaveAsNew();
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
-    void setVolumetricOverride(bool override) { volumetricOverride = override; }
+    void setVolumetricOverride(bool override) { volumetricOverride.store(override, std::memory_order_release); }
     bool isBluetoothScaleHealthy() const;
     void onFlush();
     int getWaterLevel() const {
@@ -214,6 +220,11 @@ class Controller {
 
     // steam button
     void handleSteamButton(int steamButtonStatus);
+    // PRO-391: previous steam-button level seen by handleSteamButton(). Used to
+    // detect the rising edge of a non-momentary (latching) switch so a sustained
+    // latched-high level does not re-assert MODE_STEAM after an explicit Standby.
+    // 0 = not pressed (initial state).
+    int previousSteamButtonStatus = 0;
     void handleProfileUpdate();
 
     // Private Attributes
@@ -222,7 +233,6 @@ class Controller {
     Driver *driver = nullptr;
 #endif
     NimBLEClientController clientController;
-    hw_timer_t *timer = nullptr;
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
@@ -256,15 +266,18 @@ class Controller {
     bool screenReady = false;
     bool waitingForController = false;
     unsigned long connectStartTime = 0;
-    bool volumetricOverride = false;
+    std::atomic<bool> volumetricOverride{false};
     bool processCompleted = false;
     bool steamReady = false;
     bool sdcard = false;
     int error = 0;
 
     // Bluetooth scale connection monitoring
-    VolumetricMeasurementSource currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
-    unsigned long lastBluetoothMeasurement = 0;
+    // PRO-375: written on the UI/control task, read on the BLE/measurement task
+    // (onVolumetricMeasurement); atomic with acquire/release to synchronize the
+    // cross-task accesses (see BLEScalePlugin.h callbackInFlight precedent).
+    std::atomic<VolumetricMeasurementSource> currentVolumetricSource{VolumetricMeasurementSource::INACTIVE};
+    std::atomic<unsigned long> lastBluetoothMeasurement{0};
 
     // PRO-367: coalesce-latest holder for the stop-critical volumetric update.
     // onVolumetricMeasurement() takes processMutex with a 10 ms fail-fast timeout;

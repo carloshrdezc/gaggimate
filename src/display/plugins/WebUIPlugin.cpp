@@ -1,7 +1,11 @@
 #include "WebUIPlugin.h"
+#include "OtaChannelSwitchPolicy.h"
+#include "OtaIntentState.h"
+#include "OtaUpdateCheckPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <display/core/GrinderManager.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
@@ -12,6 +16,7 @@
 #include <esp_err.h>
 #include <esp_partition.h>
 #include <esp_system.h>
+#include <inttypes.h>
 
 #include <SD_MMC.h>
 #include <algorithm>
@@ -20,6 +25,7 @@
 #include <display/plugins/ChangeModeDeferPolicy.h>
 #include <display/plugins/LocalAuthPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
+#include <display/plugins/StandbyReassertPolicy.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
@@ -143,29 +149,46 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->ota = new GitHubOTA(
         BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
-            pluginManager->trigger("ota:update:phase", "phase", phase);
+            pluginManager->trigger(EventIds::OTA_UPDATE_PHASE, "phase", phase);
             updateOTAProgress(phase, 0);
         },
         [this](uint8_t phase, int progress) {
-            pluginManager->trigger("ota:update:progress", "progress", progress);
+            pluginManager->trigger(EventIds::OTA_UPDATE_PROGRESS, "progress", progress);
             updateOTAProgress(phase, progress);
         },
         "display-firmware.bin", "display-filesystem.bin", "board-firmware.bin");
-    pluginManager->on("controller:wifi:connect", [this](Event const &event) {
-        apMode = event.getInt("AP");
-        start();
+    pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event const &event) {
+        // PRO-417: do NOT call start() inline — this runs on the arduino_events
+        // WiFi-event task. Latch the desired Start intent and let loop() (Arduino
+        // loop task) run the actual start() off this task.
+        // PRO-418: the captive-portal mode (AP vs STA) is folded INTO the intent
+        // (StartAp / StartStation) so a single atomic carries both the "start"
+        // decision and the mode. No separate pendingApMode atomic, hence no
+        // cross-atomic ordering hazard — the deferred start() reads the mode
+        // straight off the drained intent. Last event wins (latchLifecycleIntent
+        // coalesces), and a later connect's mode overwrites an earlier one.
+        pendingLifecycle.store(
+            latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), startIntentForApMode(event.getInt("AP") != 0)),
+            std::memory_order_relaxed);
     });
-    pluginManager->on("controller:wifi:disconnect", [this](Event const &) { stop(); });
-    pluginManager->on("controller:ready", [this](Event const &) {
+    pluginManager->on(EventIds::CONTROLLER_WIFI_DISCONNECT, [this](Event const &) {
+        // PRO-417: do NOT call stop() inline — stop()/stopRelay() blocks the
+        // WiFi-event task (~500 ms spin-wait + ws.closeAll() under wsMutex) once
+        // per ASSOC_LEAVE, stalling core 0 while WPA-supplicant re-associates.
+        // Latch a Stop intent; loop() drains it on the Arduino loop task.
+        pendingLifecycle.store(latchLifecycleIntent(pendingLifecycle.load(std::memory_order_relaxed), WebUiLifecycleIntent::Stop),
+                               std::memory_order_relaxed);
+    });
+    pluginManager->on(EventIds::CONTROLLER_READY, [this](Event const &) {
         ota->setControllerVersion(controller->getSystemInfo().version);
         ota->init(controller->getClientController()->getClient());
     });
-    pluginManager->on("controller:autotune:result", [this](Event const &event) { sendAutotuneResult(); });
+    pluginManager->on(EventIds::CONTROLLER_AUTOTUNE_RESULT, [this](Event const &event) { sendAutotuneResult(); });
 
     // Forward shot history rebuild progress events to WebSocket clients
-    pluginManager->on("evt:history-rebuild-progress", [this](Event const &event) {
+    pluginManager->on(EventIds::EVT_HISTORY_REBUILD_PROGRESS, [this](Event const &event) {
         JsonDocument doc;
-        doc["tp"] = "evt:history-rebuild-progress";
+        doc["tp"] = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         doc["total"] = event.getInt("total");
         doc["current"] = event.getInt("current");
         doc["status"] = event.getString("status");
@@ -173,7 +196,7 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     });
 
     // Subscribe to Bluetooth scale weight updates
-    pluginManager->on("controller:volumetric-measurement:bluetooth:change",
+    pluginManager->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE,
                       [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
 
     // Create the relay lifecycle mutex once here, before any WiFi/server events
@@ -238,6 +261,48 @@ void WebUIPlugin::relayLoopTask(void *arg) {
     }
 }
 
+// PRO-13: one-shot resolve task for the forced-tag/channel-switch OTA path.
+// Runs `ota->checkForUpdates()` (the blocking HTTPS GET) OFF the loop task,
+// then posts the resolved OtaFlashDecision back under otaIntentMutex and
+// self-deletes. `ota` itself is not otherwise touched concurrently while
+// this task runs: the periodic background checkForUpdates() call (line
+// ~485, PRO-411) and the release-URL/status-push drains above it all run on
+// the loop task, and loop() never calls into `ota` again for THIS forced
+// update until it observes ReadyToFlash/Failed and this task has already
+// returned — so there is exactly one task touching `ota` at any given
+// instant, matching the pre-PRO-13 single-task-owns-ota invariant.
+void WebUIPlugin::otaResolveTask(void *arg) {
+    auto *params = static_cast<OtaResolveTaskParams *>(arg);
+    WebUIPlugin *plugin = params->plugin;
+    GitHubOTA *ota = plugin->ota;
+
+    ota->checkForUpdates();
+    const String resolved = ota->getCurrentVersion();
+    // resolveFailed at this layer == the last checkForUpdates() failed to
+    // resolve a head (network error / GitHub redirect quirk / malformed
+    // channel). We consult the AUTHORITATIVE failure flag
+    // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+    // resolve getCurrentVersion() returns the STALE version string from a
+    // prior successful check, so a periodic check that already populated a
+    // version would otherwise mask a failed channel-switch resolve and
+    // force-flash against a stale _latest_url. Keep the || isEmpty() as a
+    // belt-and-suspenders guard (empty is untrustworthy).
+    const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+    const OtaFlashDecision decision = decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled,
+                                                     params->installedEmpty, resolved.c_str(), resolveFailed);
+
+    if (plugin->otaIntentMutex != nullptr && xSemaphoreTake(plugin->otaIntentMutex, portMAX_DELAY) == pdTRUE) {
+        plugin->otaResolveResult.generation = params->generation;
+        plugin->otaResolveResult.decision = decision;
+        plugin->otaResolveResult.resolvedVersion = resolved;
+        plugin->otaResolveResult.resolveFailed = resolveFailed;
+        plugin->otaResolveResultReady = true;
+        xSemaphoreGive(plugin->otaIntentMutex);
+    }
+    delete params;
+    vTaskDelete(nullptr);
+}
+
 namespace {
 // Shared RAII guard for a non-recursive FreeRTOS mutex (PRO-314, unifying the
 // former WsClientsLock from PRO-313 and RelayLifecycleLock from CAR-259). Takes
@@ -278,6 +343,36 @@ struct SemaphoreGuard {
 } // namespace
 
 void WebUIPlugin::loop() {
+    // PRO-417: drain the deferred web-server lifecycle intent latched by the WiFi
+    // (dis)connect event handlers. Runs FIRST, on the Arduino loop task, so the
+    // heavy start()/stop() (stopRelay()'s bounded spin-wait + ws.closeAll() under
+    // wsMutex) executes here instead of inline on the arduino_events WiFi-event
+    // task, where doing it once per ASSOC_LEAVE stalled core 0 while WPA-supplicant
+    // re-associated. Must stay ABOVE the `if (!serverRunning) return;` guard below
+    // so a queued Start (server currently down) is not stranded; a Stop while the
+    // server is down is a no-op inside stop() (its own `!serverRunning` guard).
+    // Read-and-clear atomically so a WiFi event that arrives mid-drain re-latches
+    // for the next tick rather than being lost.
+    {
+        const WebUiLifecycleIntent latched = pendingLifecycle.exchange(WebUiLifecycleIntent::None, std::memory_order_relaxed);
+        const WebUiLifecycleAction action = lifecycleDrainAction(latched);
+        switch (action) {
+        case WebUiLifecycleAction::RunStartStation:
+        case WebUiLifecycleAction::RunStartAp:
+            // PRO-418: the AP mode rides on the drained intent itself (single
+            // atomic), so there is no second pendingApMode load that could be
+            // stale relative to the intent.
+            apMode = drainActionIsAp(action);
+            start();
+            break;
+        case WebUiLifecycleAction::RunStop:
+            stop();
+            break;
+        case WebUiLifecycleAction::None:
+        default:
+            break;
+        }
+    }
     // Latch deferred OTA-start intent posted by handleOTAStart on the WS/relay
     // task (CAR-377). Runs on the loop task, so `updating` and `updateComponent`
     // are written and read only here. If contended, leave pendingOtaStart set so
@@ -289,7 +384,8 @@ void WebUIPlugin::loop() {
     // while in AP mode / before the server is up).
     if (pendingOtaStart) {
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            updateComponent = pendingUpdateComponent;
+            const OtaDeferredDrainResult drained = drainOtaDeferredIntent(pendingOtaStart, pendingUpdateComponent.c_str());
+            updateComponent = drained.payload.c_str();
             pendingUpdateComponent = "";
             pendingOtaStart = false;
             updating = true;
@@ -327,49 +423,213 @@ void WebUIPlugin::loop() {
         }
     }
     if (updating) {
-        pluginManager->trigger("ota:update:start");
-        // Force-flash whenever the user pinned a specific tag (e.g. "tag:2.0.8").
-        // This bypasses the upgrade-only guard so re-flashing the same version
-        // and downgrading both work.
-        const String channel = controller->getSettings().getOTAChannel();
-        const bool force = channel.startsWith("tag:");
-        bool tagResolved = true;
-        if (force) {
-            // Defense-in-depth: a WS client can send `req:ota-settings tag:X`
-            // followed immediately by `req:ota-start` before the throttled
-            // checkForUpdates() in this same loop runs (the if-blocks in
-            // loop() are sequential, and the OTA-start arm executes first).
-            // In that race `_release_url` points at tag/X but `_latest_url`
-            // still holds the previous channel's resolved URL, so a forced
-            // update would flash the wrong asset.
-            //
-            // Resolve `_latest_url` synchronously here, then verify the
-            // freshly-resolved version equals the pinned tag. If it doesn't
-            // (network error, GitHub redirect quirk, malformed channel), we
-            // refuse the update — never flash a tag we can't confirm.
-            const String pinned = channel.substring(4);
-            ota->checkForUpdates();
-            const String resolved = ota->getCurrentVersion();
-            // GitHub release tags occasionally carry a leading `v` prefix
-            // (`v1.8.2`); the resolver strips it, but the channel string we
-            // stored does not. Treat them as equal so legacy tags still flash.
-            // Cover both directions in case a future resolver path keeps the
-            // `v` and the channel string drops it.
-            const bool match = resolved == pinned || (pinned.startsWith("v") && resolved == pinned.substring(1)) ||
-                               (resolved.startsWith("v") && resolved.substring(1) == pinned);
-            if (!match) {
-                ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s", pinned.c_str(), resolved.c_str());
-                tagResolved = false;
+        // PRO-400: force-flash whenever the user pinned a specific tag
+        // (e.g. "tag:2.0.8") OR switched channels (stable <-> beta <-> nightly).
+        // A tag bypasses the upgrade-only guard so re-flashing the same version
+        // and downgrading both work. A channel switch must ALWAYS flash the
+        // resolved head of the newly-selected channel regardless of semver
+        // direction (beta->stable / nightly->stable are lower/equal semver and
+        // would otherwise stall on the upgrade-only guard), while upgrades
+        // WITHIN a channel still run the guard. See OtaChannelSwitchPolicy.h.
+        //
+        // PRO-13: a tag pin OR a channel switch needs a resolve + confirm
+        // before we can trust what would be flashed (this also defeats the
+        // stale-_latest_url race the tag: path documents: a WS client can
+        // send `req:ota-settings <channel>` then `req:ota-start` before the
+        // throttled checkForUpdates() in this same loop runs). That resolve
+        // used to run SYNCHRONOUSLY on this task via ota->checkForUpdates(),
+        // blocking loop() (and the 200ms evt:status broadcast) for however
+        // long the blocking HTTPS GET to github.com takes. It now runs on a
+        // one-shot FreeRTOS task; this block only ever calls ota->update()
+        // once that task reports READY_TO_FLASH (or runs the plain
+        // upgrade-only path immediately when neither a tag nor a channel
+        // switch is in play — that path never touched checkForUpdates() here
+        // to begin with, so it is unaffected by this change).
+        // PRO-448: these live reads re-run on EVERY loop() tick while `updating`
+        // is true, but they only matter in two places: (1) the plain
+        // within-channel-upgrade path just below, which runs this block fresh
+        // each tick since it never enters the resolve state machine; and (2) the
+        // Idle case of the switch below, which latches channel/previousInstalledChannel/
+        // isTag/channelSwitch into the otaResolve* fields once, at spawn time.
+        // Once otaResolveState leaves Idle (Resolving/ReadyToFlash/Failed), the
+        // state machine is driven entirely by those latched otaResolve* fields —
+        // these live locals are computed again on every tick but ignored for the
+        // rest of the resolve lifecycle. Note `settings` itself is NOT idle-only:
+        // it's also referenced in the ReadyToFlash case (~line 516) to persist
+        // installedChannel, so it can't be scoped inside an Idle-only block.
+        Settings &settings = controller->getSettings();
+        const String channel = settings.getOTAChannel();
+        const String previousInstalledChannel = settings.getInstalledChannel();
+        const bool isTag = channel.startsWith("tag:");
+        const bool channelSwitch = !isTag && channel != previousInstalledChannel;
+
+        if (!(isTag || channelSwitch)) {
+            // Plain within-channel upgrade: no resolve needed, run exactly the
+            // pre-existing immediate path (unaffected by PRO-13).
+            pluginManager->trigger(EventIds::OTA_UPDATE_START);
+            const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
+            const bool updateSucceeded =
+                ota->update(componentSelection.updateController, componentSelection.updateDisplay, /*force=*/false);
+            pluginManager->trigger(EventIds::OTA_UPDATE_END);
+            updating = false;
+            if (!updateSucceeded) {
+                updateOTAStatus("Update failed");
             }
-        }
-        bool updateSucceeded = false;
-        if (tagResolved) {
-            updateSucceeded = ota->update(updateComponent != "display", updateComponent != "controller", force);
-        }
-        pluginManager->trigger("ota:update:end");
-        updating = false;
-        if (!updateSucceeded) {
-            updateOTAStatus(tagResolved ? "Update failed" : "Update failed (tag not resolved)");
+        } else {
+            switch (otaResolveState) {
+            case OtaResolveState::Idle: {
+                // First loop() iteration of this forced-tag/channel-switch OTA:
+                // latch the decision inputs at spawn time and kick off the
+                // one-shot resolve task. EventIds::OTA_UPDATE_START fires here (not
+                // only on the eventual flash) so the UI's updateActive/standby
+                // transition (DefaultUI's ota:update:start handler) still
+                // engages immediately, matching pre-PRO-13 behavior.
+                pluginManager->trigger(EventIds::OTA_UPDATE_START);
+                otaResolveChannel = channel;
+                otaResolvePinnedTag = isTag ? channel.substring(4) : String("");
+                otaResolveIsTag = isTag;
+                otaResolveChannelSwitch = channelSwitch;
+                otaResolvePreviousInstalledChannel = previousInstalledChannel;
+                otaResolveResolvedVersion = "";
+                otaResolveResolveFailed = false;
+                otaResolveTimedOutFlag = false;
+                otaResolveStartMs = static_cast<uint32_t>(millis());
+                const uint32_t generation = otaResolveGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
+
+                auto *params = new OtaResolveTaskParams{this,
+                                                        generation,
+                                                        isTag,
+                                                        otaResolvePinnedTag,
+                                                        /*selectedEqInstalled=*/!channelSwitch,
+                                                        /*installedEmpty=*/previousInstalledChannel.isEmpty()};
+                TaskHandle_t createdHandle = nullptr;
+                const BaseType_t created =
+                    xTaskCreatePinnedToCore(otaResolveTask, "OtaResolve", 8192, params, 1, &createdHandle, 1);
+                if (created != pdPASS) {
+                    // OOM spawning the resolve task: fail closed exactly like a
+                    // resolve failure would, rather than getting stuck IDLE
+                    // forever with `updating` latched true.
+                    ESP_LOGE("WebUIPlugin", "Failed to create OTA resolve task (OOM)");
+                    delete params;
+                    otaResolveResolveFailed = true;
+                    otaResolveState = OtaResolveState::Failed;
+                } else {
+                    otaResolveState = OtaResolveState::Resolving;
+                    updateOTAStatus("Verifying release...");
+                }
+                break;
+            }
+            case OtaResolveState::Resolving: {
+                // Drain a posted resolve-task result (if any) under otaIntentMutex,
+                // mirroring the existing release-URL/OTA-start intent handoffs.
+                bool haveResult = false;
+                OtaResolveTaskResult drainedResult;
+                if (otaResolveResultReady && otaIntentMutex != nullptr &&
+                    xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    // Re-check under the lock: the outer check above is a fast-path
+                    // skip (avoid taking the mutex when there's obviously nothing to
+                    // drain), not a guarantee. otaResolveResultReady is volatile, so
+                    // this inner read is the authoritative TOCTOU guard. In practice
+                    // the resolve task is the only writer (sets it once, then
+                    // self-deletes) and loop() is the only clearer, so the flag
+                    // cannot flip between the two checks today — but the guard is
+                    // cheap and keeps the drain correct if that ever changes.
+                    if (otaResolveResultReady) {
+                        drainedResult = otaResolveResult;
+                        otaResolveResultReady = false;
+                        haveResult = true;
+                    }
+                    xSemaphoreGive(otaIntentMutex);
+                }
+                if (haveResult &&
+                    otaResolveResultIsCurrent(drainedResult.generation, otaResolveGeneration.load(std::memory_order_relaxed))) {
+                    otaResolveResolvedVersion = drainedResult.resolvedVersion;
+                    otaResolveResolveFailed = drainedResult.resolveFailed;
+                    otaResolveState = otaResolveStateForDecision(drainedResult.decision);
+                    if (otaResolveState == OtaResolveState::Failed) {
+                        if (otaResolveIsTag) {
+                            ESP_LOGE("WebUIPlugin", "Refusing forced OTA: pinned tag %s but resolved %s",
+                                     otaResolvePinnedTag.c_str(), otaResolveResolvedVersion.c_str());
+                        } else {
+                            ESP_LOGE("WebUIPlugin", "Refusing channel-switch OTA to %s: resolve failed",
+                                     otaResolveChannel.c_str());
+                        }
+                    }
+                } else if (otaResolveTimedOut(otaResolveStartMs, static_cast<uint32_t>(millis()), kOtaResolveTimeoutMs)) {
+                    // Soft 10s timeout: abandon the in-flight resolve. Bump the
+                    // generation so the task's eventual (late) result is
+                    // recognized as stale and dropped when/if it arrives.
+                    otaResolveGeneration.fetch_add(1, std::memory_order_relaxed);
+                    otaResolveTimedOutFlag = true;
+                    otaResolveResolveFailed = true;
+                    otaResolveState = OtaResolveState::Failed;
+                    const String &verifyTarget = otaResolveIsTag ? otaResolvePinnedTag : otaResolveChannel;
+                    ESP_LOGE("WebUIPlugin", "OTA resolve timed out after %" PRIu32 "ms verifying %s", kOtaResolveTimeoutMs,
+                             verifyTarget.c_str());
+                }
+                // else: still resolving, no result yet, not timed out — stay in
+                // RESOLVING and re-check next loop() tick. "Verifying release..."
+                // was already pushed once on the Idle->Resolving transition
+                // above, so nothing more to push here (not spammed every tick).
+                break;
+            }
+            case OtaResolveState::ReadyToFlash: {
+                // force=true for a confirmed tag pin OR a confirmed channel
+                // switch — the async resolve path is only ever entered for one
+                // of those two, so force is unconditionally true here.
+                const bool forceChannelSwitch = otaResolveChannelSwitch;
+                const bool force = true;
+                // On a confirmed channel switch, persist installedChannel =
+                // otaChannel BEFORE update() (the success path reboots via
+                // GitHubOTA and never returns). Restored below if update()
+                // returns false (no reboot).
+                if (forceChannelSwitch) {
+                    settings.setInstalledChannel(otaResolveChannel);
+                }
+                const OtaComponentSelection componentSelection = selectOtaComponents(updateComponent.c_str());
+                const bool updateSucceeded =
+                    ota->update(componentSelection.updateController, componentSelection.updateDisplay, force);
+                pluginManager->trigger(EventIds::OTA_UPDATE_END);
+                updating = false;
+                otaResolveState = OtaResolveState::Idle;
+                if (!updateSucceeded) {
+                    // update() returned (no reboot) — restore the previous
+                    // installedChannel so a failed switch doesn't leave the
+                    // persisted installed marker ahead of what is actually
+                    // flashed.
+                    //
+                    // PRO-403: but only when NO component was actually flashed.
+                    // On the default two-component flash the controller can
+                    // flash OK and the display then fail; update() returns
+                    // false while the controller is already running the new
+                    // channel's head. installedChannel is a whole-device
+                    // marker feeding the next channel-switch decision and the
+                    // PRO-401 pending-switch UI hint, so on such a partial
+                    // flash we must KEEP installedChannel = channel (the new
+                    // one) to reflect the controller's actual on-device state.
+                    // Only restore when the controller was not flashed (the
+                    // old channel is still what runs).
+                    if (forceChannelSwitch && !ota->didFlashControllerLastUpdate()) {
+                        settings.setInstalledChannel(otaResolvePreviousInstalledChannel);
+                    }
+                    updateOTAStatus("Update failed");
+                }
+                break;
+            }
+            case OtaResolveState::Failed:
+            default: {
+                pluginManager->trigger(EventIds::OTA_UPDATE_END);
+                updating = false;
+                otaResolveState = OtaResolveState::Idle;
+                if (otaResolveTimedOutFlag) {
+                    const String verifyTarget = otaResolveIsTag ? otaResolvePinnedTag : otaResolveChannel;
+                    updateOTAStatus("Could not verify release " + verifyTarget + " — check network");
+                } else {
+                    updateOTAStatus("Update failed (tag not resolved)");
+                }
+                break;
+            }
+            }
         }
     }
 
@@ -386,7 +646,8 @@ void WebUIPlugin::loop() {
         bool emptyHandoff = false;
         bool have = false;
         if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            url = pendingReleaseUrl;
+            const OtaDeferredDrainResult drained = drainOtaDeferredIntent(pendingReleaseUrlChange, pendingReleaseUrl.c_str());
+            url = drained.payload.c_str();
             emptyHandoff = url.isEmpty();
             pendingReleaseUrl = ""; // release the copy; the flag is the source of truth
             pendingReleaseUrlChange = false;
@@ -414,9 +675,27 @@ void WebUIPlugin::loop() {
         updateOTAStatus("Checking...");
     }
     const unsigned long now = millis();
-    if (lastUpdateCheck == 0 || now - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
+    // PRO-411: back off the periodic OTA update-check after consecutive
+    // failures instead of always retrying every UPDATE_CHECK_INTERVAL. A failing
+    // check opens a fresh TLS connection to github.com concurrently with
+    // async_tcp/wifi/mdns; on a persistent failure that both hammers github.com
+    // and gives the (now-guarded) connect path repeated chances to misbehave.
+    // The effective interval doubles per consecutive failure up to
+    // UPDATE_CHECK_MAX_INTERVAL and resets on the first success. The device stays
+    // online and responsive throughout — checkForUpdates() failures are logged
+    // and swallowed, never fatal.
+    const unsigned long effectiveInterval = otaBackoffInterval(
+        static_cast<uint32_t>(UPDATE_CHECK_INTERVAL), static_cast<uint32_t>(UPDATE_CHECK_MAX_INTERVAL), otaCheckFailureCount);
+    if (lastUpdateCheck == 0 || now - lastUpdateCheck > effectiveInterval) {
         ota->checkForUpdates();
-        pluginManager->trigger("ota:update:status", "value", ota->isUpdateAvailable());
+        if (ota->isUpdateCheckFailed()) {
+            if (otaCheckFailureCount < UINT32_MAX) {
+                otaCheckFailureCount++;
+            }
+        } else {
+            otaCheckFailureCount = 0;
+        }
+        pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
     }
@@ -454,6 +733,7 @@ void WebUIPlugin::loop() {
         doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
         doc["puid"] = controller->getProfileManager()->getSelectedProfile().id;
         doc["bn"] = controller->getSettings().getSelectedBean();
+        doc["gr"] = controller->getSettings().getSelectedGrinder();
         doc["cp"] = controller->getSystemInfo().capabilities.pressure;
         doc["cd"] = controller->getSystemInfo().capabilities.dimming;
         doc["tw"] = profileManager->getSelectedProfile().getTotalVolume(); // total target weight for the process
@@ -831,9 +1111,11 @@ void WebUIPlugin::stop() {
         return;
     server.end();
     {
-        // PRO-313: closeAll() walks the client list and runs on the WiFi-event
-        // task (start()/stop()), a third task distinct from loopTask and
-        // AsyncTCP. Serialize it against their client-list access.
+        // PRO-313: closeAll() walks the client list. Since PRO-417 stop() runs on
+        // the Arduino loop task (drained from a WiFi-event latch), not inline on
+        // the arduino_events WiFi-event task — but the wsMutex is still required to
+        // serialize this walk against the AsyncTCP task's client-list mutation
+        // (connect/disconnect), which is a different task on a different core.
         SemaphoreGuard lock(wsMutex);
         ws.closeAll();
     }
@@ -860,11 +1142,12 @@ void WebUIPlugin::stop() {
 
 void WebUIPlugin::startRelay() {
     // Caller-context: startRelay()/stopRelay() are invoked from two different
-    // FreeRTOS tasks — start()/stop() run inline on the arduino_events WiFi-event
-    // task (controller:wifi:connect/disconnect), while handleSettings() runs on the
-    // AsyncTCP /api/settings task and calls stopRelay()+startRelay() back-to-back.
-    // A WiFi (dis)connect can therefore genuinely interleave with a cloud-relay
-    // settings toggle. They are now serialized by relayLifecycleMutex (taken at the
+    // FreeRTOS tasks — since PRO-417 start()/stop() run on the Arduino loop task
+    // (drained from a WiFi-event latch on controller:wifi:connect/disconnect),
+    // while handleSettings() runs on the AsyncTCP /api/settings task and calls
+    // stopRelay()+startRelay() back-to-back. A WiFi (dis)connect drain can
+    // therefore still genuinely interleave with a cloud-relay settings toggle.
+    // They are serialized by relayLifecycleMutex (taken at the
     // top of both functions, released on every return path) so the atomic-flag
     // handoff with relayLoopTask stays coherent and two starts can never both
     // observe relayTaskHandle==nullptr and orphan a live task (CAR-259). A plain
@@ -999,7 +1282,8 @@ void WebUIPlugin::stopRelay() {
         // allocator. The task nulls relayTaskHandle just before vTaskDelete(NULL).
         relayTaskExitRequested.store(true, std::memory_order_release);
         // Bound the wait so a wedged task can never hang the caller (this runs
-        // on the WiFi-event / AsyncTCP web-server task). Loop cadence is 10 ms;
+        // on the Arduino loop task via the PRO-417 lifecycle drain, or the AsyncTCP
+        // web-server task via handleSettings()). Loop cadence is 10 ms;
         // a single relayWs.loop() with an SSL handshake or large frame in flight
         // can exceed that, so allow generous slack before giving up.
         constexpr TickType_t pollInterval = pdMS_TO_TICKS(10);
@@ -1184,6 +1468,22 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 return;
             if (newMode == MODE_MANUAL && !controller->isManualAvailable())
                 return;
+            // PRO-421: an explicit Standby wins over a stale, near-immediate
+            // re-assert of a non-Standby mode. When Stop-Steam is pressed while
+            // auto-steam is enabled, the web dashboard reflexively re-fires
+            // `req:change-mode` STEAM ~150 ms after the STANDBY (confirmed live);
+            // the firmware is the authoritative layer and must reject that stale
+            // re-assert so a single press lands in Standby and stays. STANDBY
+            // itself is never suppressed. A deliberate re-entry outside the short
+            // guard window still works. Checked BEFORE deactivate() so a
+            // suppressed request tears nothing down. Mirrors PRO-391's principle
+            // (a stale assertion must not override an explicit Standby) for the
+            // WebUIPlugin mode-change path. See StandbyReassertPolicy.h.
+            const unsigned long msSinceStandby =
+                sawExplicitStandby ? (millis() - lastExplicitStandbyMs) : STANDBY_REASSERT_GUARD_MS;
+            if (shouldSuppressStandbyReassert(newMode, msSinceStandby)) {
+                return;
+            }
             // PRO-261: honor the post-shot extended-recording / scale-settle gate
             // that the display's auto-steam path already respects (DefaultUI::loop
             // / pendingAutoSteam, PRO-223 / PRO-248 / PRO-232). This handler runs
@@ -1219,6 +1519,12 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 pendingModeChange = false;
                 controller->clear();
                 controller->setMode(newMode);
+                // PRO-421: record when an explicit STANDBY landed so an immediate
+                // stale non-STANDBY re-assert (see the guard above) is rejected.
+                if (newMode == MODE_STANDBY) {
+                    lastExplicitStandbyMs = millis();
+                    sawExplicitStandby = true;
+                }
             }
         }
     } else if (msgType == "req:change-brew-target") {
@@ -1268,7 +1574,7 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
         controller->getSettings().setSelectedBean(beanName);
-        pluginManager->trigger("beans:selected", "name", beanName);
+        pluginManager->trigger(EventIds::BEANS_SELECTED, "name", beanName);
     } else if (msgType == "req:history:rebuild") {
         JsonDocument resp;
         resp["tp"] = "res:history:rebuild";
@@ -1335,21 +1641,7 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
 // "tag:<semver>" (validated against STABLE_VERSIONS allow-list) -> "tag/<semver>"
 // anything else -> "latest"
 static String resolveReleaseUrl(const String &channel) {
-    if (channel == "beta") {
-        return RELEASE_URL + "tag/beta";
-    }
-    if (channel == "nightly") {
-        return RELEASE_URL + "tag/nightly";
-    }
-    if (channel.startsWith("tag:")) {
-        const String tag = channel.substring(4);
-        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
-            if (tag == STABLE_VERSIONS[i]) {
-                return RELEASE_URL + "tag/" + tag;
-            }
-        }
-    }
-    return RELEASE_URL + "latest";
+    return String(resolveOtaReleaseUrl(channel.c_str(), RELEASE_URL.c_str(), STABLE_VERSIONS, STABLE_VERSIONS_COUNT).c_str());
 }
 
 // Normalize an incoming channel to the value we persist in settings.
@@ -1358,19 +1650,7 @@ static String resolveReleaseUrl(const String &channel) {
 // to "latest" so a malformed websocket payload can never poison the stored
 // setting.
 static String normalizeChannel(const String &channel) {
-    if (channel == "beta")
-        return "beta";
-    if (channel == "nightly")
-        return "nightly";
-    if (channel.startsWith("tag:")) {
-        const String tag = channel.substring(4);
-        for (size_t i = 0; i < STABLE_VERSIONS_COUNT; ++i) {
-            if (tag == STABLE_VERSIONS[i]) {
-                return channel;
-            }
-        }
-    }
-    return "latest";
+    return String(normalizeOtaChannel(channel.c_str(), STABLE_VERSIONS, STABLE_VERSIONS_COUNT).c_str());
 }
 
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
@@ -1393,8 +1673,9 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
             controller->getSettings().setOTAChannel(normalized);
             const String url = resolveReleaseUrl(normalized);
             if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                pendingReleaseUrl = url;
-                pendingReleaseUrlChange = true;
+                const OtaDeferredStringIntent posted = postOtaDeferredIntent(url.c_str());
+                pendingReleaseUrl = posted.payload.c_str();
+                pendingReleaseUrlChange = posted.pending;
                 xSemaphoreGive(otaIntentMutex);
             } else {
                 // Should be effectively impossible — the lock is only ever held
@@ -1403,7 +1684,8 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
                 // loop-task drain re-resolves the URL from the persisted channel
                 // when no explicit URL was handed off (emptyHandoff), so the new
                 // channel still reaches `ota` on the next loop iteration.
-                pendingReleaseUrlChange = true;
+                const OtaDeferredStringIntent posted = postOtaDeferredIntentFlagOnly();
+                pendingReleaseUrlChange = posted.pending;
                 ESP_LOGW("WebUIPlugin", "OTA release-URL handoff contended; channel persisted, loop will re-resolve");
             }
         }
@@ -1425,15 +1707,17 @@ void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
     // concurrent ota-start requests are not a supported workflow.
     const String component = request["cp"].is<String>() ? request["cp"].as<String>() : String("");
     if (otaIntentMutex != nullptr && xSemaphoreTake(otaIntentMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        pendingUpdateComponent = component;
-        pendingOtaStart = true;
+        const OtaDeferredStringIntent posted = postOtaDeferredIntent(component.c_str());
+        pendingUpdateComponent = posted.payload.c_str();
+        pendingOtaStart = posted.pending;
         xSemaphoreGive(otaIntentMutex);
     } else {
         // Effectively impossible (the lock only ever wraps a few trivial
         // assignments), but never drop a start request silently. Raise the flag
         // anyway; loop() finds an empty pendingUpdateComponent and defaults to a
         // full update (both display and controller) — the safe superset.
-        pendingOtaStart = true;
+        const OtaDeferredStringIntent posted = postOtaDeferredIntentFlagOnly();
+        pendingOtaStart = posted.pending;
         ESP_LOGW("WebUIPlugin", "OTA-start handoff contended; defaulting to full update");
     }
 }
@@ -1581,7 +1865,7 @@ void WebUIPlugin::handleBeanRequest(uint32_t clientId, JsonDocument &request) {
         }
         if (auto bean = beanManager->loadBean(id); bean && controller->getSettings().getSelectedBean() == bean->name) {
             controller->getSettings().setSelectedBean("");
-            pluginManager->trigger("beans:selected", "name", "");
+            pluginManager->trigger(EventIds::BEANS_SELECTED, "name", "");
         }
         if (!beanManager->deleteBean(id)) {
             response["error"] = F("Delete failed");
@@ -1620,11 +1904,34 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
         if (!ok) {
             response["error"] = F("Save failed");
         } else {
+            // PRO-424: mirror the bean delete-cleanup. Grinders are a recorded
+            // history with no hard-delete endpoint, so a save/sync is the only
+            // point a previously-selected grinder can disappear (evicted by the
+            // cap, or replaced by a batch sync that omits it). If the currently
+            // selected grinder is no longer present, clear the selection and
+            // emit the event so the web clients converge.
+            const auto grinders = grinderManager->listGrinders();
+            const String selected = controller->getSettings().getSelectedGrinder();
+            if (!selected.isEmpty()) {
+                bool stillPresent = std::find(grinders.begin(), grinders.end(), selected) != grinders.end();
+                if (!stillPresent) {
+                    controller->getSettings().setSelectedGrinder("");
+                    pluginManager->trigger(EventIds::GRINDERS_SELECTED, "name", String(""));
+                }
+            }
             auto arr = response["grinders"].to<JsonArray>();
-            for (const auto &grinder : grinderManager->listGrinders()) {
+            for (const auto &grinder : grinders) {
                 arr.add(grinder);
             }
         }
+    } else if (type == "req:grinders:select") {
+        // PRO-424: firmware-authoritative selected grinder, mirroring
+        // req:beans:select. Persist to NVS and broadcast so every client
+        // (and the status payload's "gr" key) reflects the new selection.
+        String grinderName = request["name"].is<String>() ? request["name"].as<String>() : String("");
+        controller->getSettings().setSelectedGrinder(grinderName);
+        pluginManager->trigger(EventIds::GRINDERS_SELECTED, "name", grinderName);
+        response["name"] = grinderName;
     }
 
     sendResponse(clientId, response);
@@ -1666,7 +1973,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             settings->setSmartGrindActive(request->hasArg("smartGrindActive"));
             // PRO-266: diagnostic UDP log tee, default OFF. Checkbox semantics —
             // present means enabled. PRO-271: takes effect immediately while
-            // online — the "settings:changed" trigger below arms the tee without
+            // online — the EventIds::SETTINGS_CHANGED trigger below arms the tee without
             // a reboot (DiagnosticLogPlugin::tryInstall, also driven from loop()).
             settings->setDiagnosticLogEnabled(request->hasArg("diagnosticLog"));
             if (request->hasArg("smartGrindIp"))
@@ -1781,7 +2088,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
             }
             settings->save(true);
         });
-        pluginManager->trigger("settings:changed");
+        pluginManager->trigger(EventIds::SETTINGS_CHANGED);
         controller->setTargetTemp(controller->getTargetTemp());
         controller->setPumpModelCoeffs();
         if (request->hasArg("cloudRelayUrl") || request->hasArg("cloudRelayToken") || request->hasArg("cloudRelayEnabled")) {
@@ -1914,10 +2221,32 @@ void WebUIPlugin::handleBLEScaleConnect(AsyncWebServerRequest *request) {
         request->send(404);
         return;
     }
-    BLEScales.connect(request->arg("uuid").c_str());
+
+    const String uuid = request->arg("uuid");
     JsonDocument doc;
-    doc["success"] = true;
+    if (uuid.isEmpty()) {
+        doc["success"] = false;
+        doc["error"] = "Missing or empty UUID";
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        response->setCode(400);
+        addCorsHeaders(response);
+        serializeJson(doc, *response);
+        request->send(response);
+        return;
+    }
+
+    const bool accepted = BLEScales.connect(uuid.c_str());
+    doc["success"] = accepted;
+    if (accepted) {
+        doc["accepted"] = true;
+        doc["message"] = "Connection attempt accepted";
+    } else {
+        doc["error"] = "Connection failed";
+    }
     AsyncResponseStream *response = request->beginResponseStream("application/json");
+    if (!accepted) {
+        response->setCode(400);
+    }
     addCorsHeaders(response);
     serializeJson(doc, *response);
     request->send(response);
@@ -1994,6 +2323,10 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["controllerVersion"] = controller->getSystemInfo().version;
     doc["hardware"] = controller->getSystemInfo().hardware;
     doc["channel"] = settings.getOTAChannel();
+    // PRO-400 (Issue B / PRO-401): the channel whose head is installed, so the
+    // web UI can detect a pending channel switch (selected != installed) and
+    // surface the force-flash affordance.
+    doc["installedChannel"] = settings.getInstalledChannel();
     doc["updating"] = updating;
     // Surface the build-time list of selectable stable releases so the web UI
     // can render a "flash a specific tag" dropdown.

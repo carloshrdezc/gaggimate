@@ -195,3 +195,142 @@ export function getPrimaryActionState({ active, finished, mode, isGrindAvailable
     processKind: getProcessKindForMode(mode, isGrindAvailable, isManualAvailable),
   };
 }
+
+// PRO-421: decide whether the auto-steam effect should fire change-mode:STEAM
+// when a process transitions active -> inactive.
+//
+// Auto-steam must fire EXACTLY ONCE per brew/manual shot: after the shot ends we
+// switch to steam. The subtle bug it guards against is a DOUBLE fire — when the
+// auto-steamed steam session is itself stopped (web "Stop Steam" -> STANDBY),
+// the effect must NOT re-fire STEAM, or the machine bounces straight back to
+// Steam out of the Standby the user just asked for. The caller enforces the
+// once-only semantics by clearing lastActiveWasBrew after a fire; this helper is
+// the pure decision so it can be unit-tested.
+//
+//   lastActiveWasBrew - was the just-ended active session a brew/manual shot
+//                       (as opposed to steam/water/grind)?
+//   autoSteamEnabled  - the (device-authoritative) auto-steam setting.
+export function shouldFireAutoSteamOnStop({ lastActiveWasBrew, autoSteamEnabled }) {
+  return Boolean(lastActiveWasBrew) && Boolean(autoSteamEnabled);
+}
+
+// PRO-426: standby profile mini-curve.
+//
+// Builds SVG polyline point strings for a pro profile's pressure + flow target
+// curves so the standby shot card can render a small dark-themed preview WITHOUT
+// pulling in the light-themed Chart.js ExtendedProfileChart. It mirrors the
+// phase-interpolation semantics of ExtendedProfileChart.prepareData (a phase
+// with pump.target === 'pressure'|'flow' ramps linearly from the previous value
+// to its own; otherwise the axis holds a flat value), but samples per-phase
+// endpoints only (enough for a mini preview) and emits ready-to-use viewBox
+// coordinates. Pure + unit-testable; returns null when there is nothing to draw.
+const STANDBY_CURVE_PRESSURE_MAX = 12; // bar (matches dashboard PRESSURE_MAX)
+const STANDBY_CURVE_FLOW_MAX = 6; // g/s (matches dashboard FLOW_MAX)
+const STANDBY_CURVE_TEMP_MAX = 110; // °C (matches dashboard TEMP_GRAPH_MAX)
+const STANDBY_CURVE_TEMP_FALLBACK = 93; // profile-default when nothing usable (matches ExtendedProfileChart)
+
+function phaseAxisValue(phase, axis, prev) {
+  const pump = phase?.pump ?? {};
+  let raw = pump[axis];
+  // -1 means "use current value at phase start" (pro schema sentinel).
+  if (raw === -1 || raw == null) raw = prev;
+  const num = Number(raw);
+  return Number.isFinite(num) ? Math.max(0, num) : 0;
+}
+
+// Temperature is a PHASE-LEVEL field (phase.temperature), NOT phase.pump.*.
+// A missing / non-positive / NaN value carries the PREVIOUS sample forward
+// (mirroring the phaseAxisValue pump-axis -1/null sentinel on this same curve),
+// seeded by the anchor with the profile-level temperature (fallback
+// STANDBY_CURVE_TEMP_FALLBACK = 93 when the profile has none).
+//
+// NOTE: this DIVERGES from ExtendedProfileChart.prepareTemperatureData, which
+// RESETS to the profile temperature on each unset phase. Here the carry-forward
+// is intentional — it produces a target-hold preview (an override on one phase
+// keeps holding until a later phase overrides it again), which is consistent
+// with the pump-axis carry-forward on this mini-curve. See PRO-433.
+function phaseTemperatureValue(phase, prev) {
+  const raw = Number.parseFloat(phase?.temperature);
+  if (Number.isFinite(raw) && raw > 0) return Math.max(0, raw);
+  return prev;
+}
+
+export function buildStandbyProfileCurve(profileData, { width, height, padding = 2 } = {}) {
+  const phases = profileData?.phases;
+  if (!Array.isArray(phases) || phases.length === 0) return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  // Accumulate total duration; bail if the profile has no time span to plot.
+  const durations = phases.map(p => {
+    const d = Number.parseFloat(p?.duration);
+    return Number.isFinite(d) && d > 0 ? d : 0;
+  });
+  const totalDuration = durations.reduce((a, b) => a + b, 0);
+  if (totalDuration <= 0) return null;
+
+  const innerW = Math.max(1, width - padding * 2);
+  const innerH = Math.max(1, height - padding * 2);
+
+  const xAt = t => padding + (t / totalDuration) * innerW;
+  const yAt = (value, max) => {
+    const frac = Math.min(1, Math.max(0, value / max));
+    // SVG y grows downward: full value sits near the top.
+    return padding + (1 - frac) * innerH;
+  };
+
+  // Build endpoint samples. Each phase contributes its start point (carried from
+  // the previous phase's end) and its end point.
+  const pressurePts = [];
+  const flowPts = [];
+  const tempPts = [];
+  let elapsed = 0;
+  let prevPressure = phaseAxisValue(phases[0], 'pressure', 0);
+  let prevFlow = phaseAxisValue(phases[0], 'flow', 0);
+
+  // Temperature is profile-level with a per-phase override (phase.temperature).
+  // Determine whether the profile carries any usable temperature at all; if not,
+  // the temperature line is omitted (empty string) so the curve still renders
+  // pressure + flow without a bogus flat line.
+  const profileTemp = Number.parseFloat(profileData?.temperature);
+  const hasProfileTemp = Number.isFinite(profileTemp) && profileTemp > 0;
+  const hasPhaseTemp = phases.some(p => {
+    const t = Number.parseFloat(p?.temperature);
+    return Number.isFinite(t) && t > 0;
+  });
+  const hasTempData = hasProfileTemp || hasPhaseTemp;
+  // Anchor temperature at the profile default (falling back to 93 like
+  // ExtendedProfileChart) so the first phase can carry it forward.
+  let prevTemp = hasProfileTemp ? profileTemp : STANDBY_CURVE_TEMP_FALLBACK;
+
+  // Anchor at t=0.
+  pressurePts.push([xAt(0), yAt(prevPressure, STANDBY_CURVE_PRESSURE_MAX)]);
+  flowPts.push([xAt(0), yAt(prevFlow, STANDBY_CURVE_FLOW_MAX)]);
+  if (hasTempData) tempPts.push([xAt(0), yAt(prevTemp, STANDBY_CURVE_TEMP_MAX)]);
+
+  phases.forEach((phase, i) => {
+    const dur = durations[i];
+    if (dur <= 0) return;
+    const endPressure = phaseAxisValue(phase, 'pressure', prevPressure);
+    const endFlow = phaseAxisValue(phase, 'flow', prevFlow);
+    const endTemp = phaseTemperatureValue(phase, prevTemp);
+    elapsed += dur;
+    pressurePts.push([xAt(elapsed), yAt(endPressure, STANDBY_CURVE_PRESSURE_MAX)]);
+    flowPts.push([xAt(elapsed), yAt(endFlow, STANDBY_CURVE_FLOW_MAX)]);
+    if (hasTempData) tempPts.push([xAt(elapsed), yAt(endTemp, STANDBY_CURVE_TEMP_MAX)]);
+    prevPressure = endPressure;
+    prevFlow = endFlow;
+    prevTemp = endTemp;
+  });
+
+  const toPointsAttr = pts => pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+
+  return {
+    pressure: toPointsAttr(pressurePts),
+    flow: toPointsAttr(flowPts),
+    temperature: toPointsAttr(tempPts),
+    totalDuration,
+    phaseCount: phases.length,
+  };
+}

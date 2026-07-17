@@ -111,12 +111,15 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 ## Web UI Specifics
 
 **Preact with signals**: Uses `@preact/signals` for state management, NOT React hooks for global state
+- **Signals convention — `computed()` vs `useComputed()`**:
+  - **Module-level `computed(...)`**: for shared derived state used by multiple components (created once at module scope, lives outside component lifecycle). Use this for global/cross-component derived signals.
+  - **`useComputed(...)` inside a component body**: for per-component reactive subscriptions — the correct pattern when a signal needs to be read inside a component *and* the component should re-render on signal change. Example: `web/src/pages/ShotHistory/HistoryCard.jsx` uses `useComputed` for per-shot comparison state.
 - `ApiService` manages WebSocket with exponential backoff (1s to 30s max delay)
 - WebSocket auto-reconnects on close/error with `_scheduleReconnect()`
 
 **Shot Analyzer uses IndexedDB**: `IndexedDBService` stores shot data locally. `AnalyzerService` has predictive window of 4 seconds (`PREDICTIVE_WINDOW_MS`) for phase exit detection.
 
-**Extended profiles use adaptive transitions**: Phase transitions can be `"instant"`, `"linear"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"` with optional `adaptive` flag (0 or 1).
+**Extended profiles use adaptive transitions**: Phase transitions can be `"instant"`, `"linear"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"` with optional `adaptive` flag (`true` or `false`).
 
 **When to make persistence firmware-authoritative (CAR-371 / CAR-372)**: Several
 web stores (`beanManager.js`, `grinderManager.js`) persist to the device over the

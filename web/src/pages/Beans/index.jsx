@@ -1,7 +1,6 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
-import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { faLeaf } from '@fortawesome/free-solid-svg-icons/faLeaf';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
@@ -15,6 +14,7 @@ import {
 } from '../../utils/beanManager.js';
 import { BeanManagerCard } from '../ProfileList/BeanManagerCard.jsx';
 import Card from '../../components/Card.jsx';
+import { ImportButton } from '../../components/ImportButton.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 
 const EMPTY_BEAN_DRAFT = {
@@ -31,7 +31,6 @@ const EMPTY_BEAN_DRAFT = {
 
 export function BeansPage() {
   const apiService = useContext(ApiServiceContext);
-  const importInputRef = useRef(null);
   const [beans, setBeans] = useState([]);
   const [beanDraft, setBeanDraft] = useState(EMPTY_BEAN_DRAFT);
   const [editingBeanId, setEditingBeanId] = useState(null);
@@ -226,24 +225,11 @@ export function BeansPage() {
             onClick={onExport}
             disabled={busy || beans.length === 0}
             title='Export Beans'
+            aria-label='Export Beans'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <button
-            className='nd-action-btn'
-            onClick={() => importInputRef.current?.click()}
-            disabled={busy}
-            title='Import Beans'
-          >
-            <FontAwesomeIcon icon={faFileImport} />
-          </button>
-          <input
-            ref={importInputRef}
-            type='file'
-            accept='.json,application/json'
-            className='hidden'
-            onChange={onImport}
-          />
+          <ImportButton onChange={onImport} title='Import Beans' disabled={busy} />
         </div>
       </div>
 

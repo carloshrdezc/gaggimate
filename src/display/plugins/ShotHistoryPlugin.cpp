@@ -1,12 +1,16 @@
 #include "ShotHistoryPlugin.h"
+#include "ActiveShotFillPolicy.h"
 
+#include "BeanResolutionPolicy.h"
 #include "ExtendedRecordingPolicy.h"
 #include "ShotIndexMetadataPolicy.h"
-#include <SD_MMC.h>
+#include "ShotNotesPersistencePolicy.h"
 #include <LittleFS.h>
+#include <SD_MMC.h>
 #include <algorithm>
 #include <cmath>
 #include <display/core/Controller.h>
+#include <display/core/EventIds.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/utils.h>
@@ -29,6 +33,27 @@ constexpr int16_t FLOW_MAX_VALUE = 2000;  //  20.00 ml/s
 // Minimum duration for a valid shot (7.5 seconds)
 // Shots shorter than this are considered failed/flushes and are excluded
 constexpr unsigned long MIN_VALID_SHOT_DURATION_MS = 7500;
+
+// PRO-441: fill-only-if-absent stamp of a device-recorded value onto shot notes. Returns true
+// when it wrote (so the caller can OR into notesChanged). Deduped from four near-identical
+// inline stamps (beanType/beanId/grinderName/grindTarget) so the JsonVariant isNull/isEmpty +
+// assignment machinery is emitted ONCE, not per call site — this keeps flash usage down on
+// size-constrained firmware builds (PRO-427/441). The parameter is a raw
+// `const char *` (callers pass String::c_str() or a stack buffer) so no String temporary is
+// copy-constructed at any call site; ArduinoJson copies the value into the document pool, so a
+// pointer into caller-owned storage is safe. `noexcept` drops the copy exception unwind tables.
+// A user-entered value is never clobbered.
+bool stampNoteIfAbsent(JsonDocument &notes, const char *key, const char *value) noexcept {
+    // Treat an existing value as "present" only when it is a non-empty string. Read it as a raw
+    // const char* (points into the document pool — no String temporary/dtor/unwind emitted here) so
+    // this helper stays small; it is the flash-budget-sensitive path (PRO-441).
+    const char *existing = notes[key].as<const char *>();
+    if (!value || !*value || (existing && *existing)) {
+        return false;
+    }
+    notes[key] = value;
+    return true;
+}
 
 uint16_t encodeUnsigned(float value, float scale, uint16_t maxValue) {
     if (!std::isfinite(value)) {
@@ -72,15 +97,7 @@ String padId(uint32_t id, int length = 10) {
     return String(buffer);
 }
 
-String padId(const String& id, int length = 10) {
-    return padId((uint32_t)id.toInt(), length);
-}
-
-String normalizeBeanName(String value) {
-    value.trim();
-    value.toLowerCase();
-    return value;
-}
+String padId(const String &id, int length = 10) { return padId((uint32_t)id.toInt(), length); }
 
 float parseDoseValue(JsonVariantConst value) {
     if (value.isNull()) {
@@ -97,28 +114,27 @@ float parseDoseValue(JsonVariantConst value) {
     return std::isfinite(parsed) && parsed > 0.0f ? parsed : 0.0f;
 }
 
+// PRO-423: build the lightweight (id, name) view the pure BeanResolutionPolicy
+// consumes. Shared by both resolution call sites (read-time findBeanIndexForNotes
+// and capture-time resolveSelectedBeanId) so the BeanEntry -> BeanRef marshalling
+// lives in exactly one place.
+std::vector<bean_resolution::BeanRef> refsFromBeans(const std::vector<BeanEntry> &beans) {
+    std::vector<bean_resolution::BeanRef> refs;
+    refs.reserve(beans.size());
+    for (const auto &bean : beans) {
+        refs.push_back({std::string(bean.id.c_str()), std::string(bean.name.c_str())});
+    }
+    return refs;
+}
+
 int findBeanIndexForNotes(JsonVariantConst notes, const std::vector<BeanEntry> &beans) {
-    const String beanId = notes["beanId"].as<String>();
-    if (!beanId.isEmpty()) {
-        for (size_t i = 0; i < beans.size(); ++i) {
-            if (beans[i].id == beanId) {
-                return static_cast<int>(i);
-            }
-        }
-    }
-
-    const String beanType = normalizeBeanName(notes["beanType"].as<String>());
-    if (beanType.isEmpty()) {
-        return -1;
-    }
-
-    for (size_t i = 0; i < beans.size(); ++i) {
-        if (normalizeBeanName(beans[i].name) == beanType) {
-            return static_cast<int>(i);
-        }
-    }
-
-    return -1;
+    // PRO-422: id-first, name-second resolution lives in the pure, host-testable
+    // BeanResolutionPolicy so the device and the native unit tests share one
+    // matching order. Build a lightweight (id, name) view over the beans vector.
+    const std::vector<bean_resolution::BeanRef> refs = refsFromBeans(beans);
+    const std::string beanId = std::string(notes["beanId"].as<String>().c_str());
+    const std::string beanType = std::string(notes["beanType"].as<String>().c_str());
+    return bean_resolution::resolveBeanIndex(beanId, beanType, refs);
 }
 
 float roundBeanQuantity(float value) {
@@ -176,11 +192,26 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         fs = &SD_MMC;
         ESP_LOGI("ShotHistoryPlugin", "Logging shot history to SD card");
     }
-    
+
     // Create mutex for thread-safe access to shared state
     stateMutex = xSemaphoreCreateMutex();
     if (stateMutex == nullptr) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create state mutex");
+        return;
+    }
+
+    recordingMutex = xSemaphoreCreateMutex();
+    if (recordingMutex == nullptr) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to create recording mutex");
+        return;
+    }
+
+    // Notes requests can perform LittleFS/SD I/O. Keep them serialized separately
+    // from the recording state lock so live measurement callbacks never wait for
+    // storage.
+    notesMutex = xSemaphoreCreateMutex();
+    if (notesMutex == nullptr) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to create notes mutex");
         return;
     }
 
@@ -190,30 +221,29 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to create index mutex");
         return;
     }
-    
-    pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
-    pm->on("controller:brew:end", [this](Event const &) { endRecording(); });
-    pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
-    pm->on("controller:process:start", [this](Event const &) {
+
+    pm->on(EventIds::CONTROLLER_BREW_START, [this](Event const &) { startRecording(); });
+    pm->on(EventIds::CONTROLLER_BREW_END, [this](Event const &) { endRecording(); });
+    pm->on(EventIds::CONTROLLER_BREW_CLEAR, [this](Event const &) { endExtendedRecording(); });
+    pm->on(EventIds::CONTROLLER_PROCESS_START, [this](Event const &) {
         if (controller != nullptr && controller->getProcessType() == MODE_MANUAL) {
             startRecording();
         }
     });
-    pm->on("controller:process:end", [this](Event const &event) {
+    pm->on(EventIds::CONTROLLER_PROCESS_END, [this](Event const &event) {
         if (event.getInt("processType") == MODE_MANUAL) {
             endRecording(false);
         }
     });
-    pm->on("controller:volumetric-measurement:estimation:change",
-           [this](Event const &event) {
-               if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-                   currentEstimatedWeight = event.getFloat("value");
-                   xSemaphoreGive(stateMutex);
-               } else {
-                   ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
-               }
-           });
-    pm->on("controller:volumetric-measurement:bluetooth:change", [this](Event const &event) {
+    pm->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_ESTIMATION_CHANGE, [this](Event const &event) {
+        if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+            currentEstimatedWeight = event.getFloat("value");
+            xSemaphoreGive(stateMutex);
+        } else {
+            ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for estimation weight update");
+        }
+    });
+    pm->on(EventIds::CONTROLLER_VOLUMETRIC_MEASUREMENT_BLUETOOTH_CHANGE, [this](Event const &event) {
         // PRO-367: coalesce-latest instead of drop-on-timeout so the recorded
         // yield matches the settled weight. The scale weight is monotonic
         // cumulative, so latch the freshest value and apply it (plus any value a
@@ -229,7 +259,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
             ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for bluetooth weight update");
         }
     });
-    pm->on("boiler:currentTemperature:change", [this](Event const &event) {
+    pm->on(EventIds::BOILER_CURRENT_TEMPERATURE_CHANGE, [this](Event const &event) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentTemperature = event.getFloat("value");
             xSemaphoreGive(stateMutex);
@@ -237,7 +267,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
             ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for temperature update");
         }
     });
-    pm->on("pump:puck-resistance:change", [this](Event const &event) {
+    pm->on(EventIds::PUMP_PUCK_RESISTANCE_CHANGE, [this](Event const &event) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             currentPuckResistance = event.getFloat("value");
             xSemaphoreGive(stateMutex);
@@ -247,7 +277,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
     });
     // Initialize rebuild state
     rebuildInProgress = false;
-    
+
     // Only create task if mutex was successfully created
     if (stateMutex != nullptr) {
         xTaskCreatePinnedToCore(loopTask, "ShotHistoryPlugin::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 0);
@@ -281,6 +311,43 @@ bool ShotHistoryPlugin::openLogFileIfNeeded() {
         return false;
     }
     return true;
+}
+
+void ShotHistoryPlugin::adoptPendingActiveShotFill() {
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (pendingActiveShotFill.isEmpty()) {
+        xSemaphoreGive(notesMutex);
+        return;
+    }
+
+    const uint32_t requestedId = pendingActiveShotFillIdentity.id;
+    const String requestedShotId = padId(requestedId);
+    const shot_notes::ActiveShotIdentity current{shotGeneration.load(std::memory_order_acquire),
+                                                 activeShotId.load(std::memory_order_acquire)};
+    if (shot_notes::admitActiveFill(pendingActiveShotFillIdentity, current, requestedId,
+                                    fs->exists("/h/" + requestedShotId + ".slog")) != shot_notes::ActiveFillAdmission::Persist) {
+        pendingActiveShotFill = "";
+        pendingActiveShotFillIdentity = {0, 0};
+        xSemaphoreGive(notesMutex);
+        return;
+    }
+
+    JsonDocument notes;
+    loadNotes(requestedShotId, notes);
+    const shot_notes::ActiveShotIdentity beforeSave{shotGeneration.load(std::memory_order_acquire),
+                                                    activeShotId.load(std::memory_order_acquire)};
+    if (shot_notes::isActiveFillFor(pendingActiveShotFillIdentity, beforeSave, requestedId) &&
+        !shot_notes::hasValue(notes["grindSetting"])) {
+        notes["grindSetting"] = pendingActiveShotFill;
+        if (!saveNotes(requestedShotId, notes)) {
+            ESP_LOGW("ShotHistoryPlugin", "Failed to adopt pending active-shot grind setting");
+        }
+    }
+    pendingActiveShotFill = "";
+    pendingActiveShotFillIdentity = {0, 0};
+    xSemaphoreGive(notesMutex);
 }
 
 void ShotHistoryPlugin::initializeHeader() {
@@ -317,7 +384,7 @@ void ShotHistoryPlugin::initializeHeader() {
 ShotLogSample ShotHistoryPlugin::createSample(float bluetoothWeight, float estimatedWeight, float temperature,
                                               float puckResistance) {
     ShotLogSample sample{};
-    
+
     if (!controller) {
         ESP_LOGE("ShotHistoryPlugin", "Controller is null in createSample");
         return sample;
@@ -343,12 +410,13 @@ ShotLogSample ShotHistoryPlugin::createSample(float bluetoothWeight, float estim
 }
 
 void ShotHistoryPlugin::updateBluetoothFlow(float bluetoothWeight) {
-    static constexpr float BLUETOOTH_FLOW_SAMPLE_INTERVAL = 0.25f; // 250ms sample interval
+    static constexpr float BLUETOOTH_FLOW_SAMPLE_INTERVAL = 0.25f;  // 250ms sample interval
     static constexpr float BLUETOOTH_FLOW_SMOOTHING_FACTOR = 0.25f; // 25% new, 75% old
-    
+
     float btDiff = bluetoothWeight - lastBluetoothWeight;
     float btFlow = btDiff / BLUETOOTH_FLOW_SAMPLE_INTERVAL;
-    currentBluetoothFlow = currentBluetoothFlow * (1.0f - BLUETOOTH_FLOW_SMOOTHING_FACTOR) + btFlow * BLUETOOTH_FLOW_SMOOTHING_FACTOR;
+    currentBluetoothFlow =
+        currentBluetoothFlow * (1.0f - BLUETOOTH_FLOW_SMOOTHING_FACTOR) + btFlow * BLUETOOTH_FLOW_SMOOTHING_FACTOR;
     lastBluetoothWeight = bluetoothWeight;
 }
 
@@ -378,17 +446,16 @@ void ShotHistoryPlugin::checkEarlyIndexCreation() {
     }
 }
 
-void ShotHistoryPlugin::closeLogFile(float finalBluetoothWeight) {
+bool ShotHistoryPlugin::closeLogFile(float finalBluetoothWeight) {
     if (!isFileOpen) {
-        return;
+        return false;
     }
 
     if (!flushBuffer()) {
         ESP_LOGE("ShotHistoryPlugin", "Failed to flush final buffer, marking shot as failed");
         currentFile.close();
         isFileOpen = false;
-        handleFailedShot();
-        return;
+        return false;
     }
 
     patchHeaderWithFinalData(finalBluetoothWeight);
@@ -396,9 +463,9 @@ void ShotHistoryPlugin::closeLogFile(float finalBluetoothWeight) {
     isFileOpen = false;
 
     if (isShotTooShort()) {
-        handleFailedShot();
+        return false;
     } else {
-        handleCompletedShot();
+        return true;
     }
 }
 
@@ -411,19 +478,19 @@ void ShotHistoryPlugin::patchHeaderWithFinalData(float finalBluetoothWeight) {
     currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
 }
 
-bool ShotHistoryPlugin::isShotTooShort() const {
-    return header.durationMs <= MIN_VALID_SHOT_DURATION_MS;
-}
+bool ShotHistoryPlugin::isShotTooShort() const { return header.durationMs <= MIN_VALID_SHOT_DURATION_MS; }
 
-void ShotHistoryPlugin::handleFailedShot() {
-    fs->remove("/h/" + currentId + ".slog");
+void ShotHistoryPlugin::handleFailedShot(const String &id, bool hadIndexEntry) {
+    removeHistoryFiles(id);
 
-    if (indexEntryCreated) {
-        markIndexDeleted(currentId.toInt());
+    if (hadIndexEntry) {
+        markIndexDeleted(id.toInt());
     }
 }
 
-void ShotHistoryPlugin::handleCompletedShot() {
+void ShotHistoryPlugin::handleCompletedShot(const String &id, const String &beanName, const String &beanId,
+                                            const String &grinderName, bool startedVolumetric, double grindTargetVolume,
+                                            int grindTargetDuration, const ShotLogHeader &completedHeader) {
     if (!controller) {
         ESP_LOGE("ShotHistoryPlugin", "Controller is null in handleCompletedShot");
         return;
@@ -431,54 +498,105 @@ void ShotHistoryPlugin::handleCompletedShot() {
 
     controller->getSettings().setHistoryIndex(controller->getSettings().getHistoryIndex() + 1);
 
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire notes mutex for completed shot");
+        cleanupHistory();
+        appendCompletedShotToIndex(id, completedHeader);
+        return;
+    }
+
     // Auto-save bean name to notes, merging with any dose/notes the WebUI may have already written.
+    // Serialize with WebUI note writes so its load/merge/save cannot clobber them.
     // Track whether a notes file exists so appendCompletedShotToIndex can set SHOT_FLAG_HAS_NOTES
     // without an extra fs->exists() stat call.
     bool hasNotes = false;
-    if (!currentBeanName.isEmpty()) {
+    // PRO-441: a shot with only a machine grind TARGET (no bean/grinder selected) must still write notes.
+    bool hasGrindTarget = (startedVolumetric ? grindTargetVolume > 0 : grindTargetDuration > 0);
+    if (!beanName.isEmpty() || !grinderName.isEmpty() || hasGrindTarget) {
         JsonDocument previousNotes;
         JsonDocument autoNotes;
-        loadNotes(currentId, previousNotes);
-        loadNotes(currentId, autoNotes);
-        if (autoNotes["beanType"].isNull() || autoNotes["beanType"].as<String>().isEmpty()) {
-            autoNotes["beanType"] = currentBeanName;
-            hasNotes = saveNotes(currentId, autoNotes);
+        loadNotes(id, previousNotes);
+        loadNotes(id, autoNotes);
+        // PRO-422/428/441: stamp device-recorded fields fill-only-if-absent (never clobber a
+        // user-entered value). beanType/beanId (PRO-422), grinderName (PRO-428, the contract
+        // PRO-430's isGrinderRecordedForShot keys off; no grinder-id analog — name-only in
+        // Settings), and grindTarget (PRO-441) all route through stampNoteIfAbsent so every web
+        // client reads the same authoritative values.
+        bool notesChanged = false;
+        notesChanged |= stampNoteIfAbsent(autoNotes, "beanType", beanName.c_str());
+        notesChanged |= stampNoteIfAbsent(autoNotes, "beanId", beanId.c_str());
+        notesChanged |= stampNoteIfAbsent(autoNotes, "grinderName", grinderName.c_str());
+        // PRO-441: the machine grind TARGET is DISTINCT from the user-editable "grindSetting" dial
+        // — grindTarget is "what the machine was set to auto-grind" (device-authoritative). The
+        // label matches ProcessControls.jsx formatTarget() EXACTLY: volumetric -> "18.0g"
+        // (formatNumber = toFixed(1)), time -> "25s" (Math.round(ms/1000)). Only built when present.
+        if (hasGrindTarget) {
+            // Format via a single snprintf call site (integer math, no float->String/dtostrf
+            // machinery) to match ProcessControls.jsx formatTarget() EXACTLY: volumetric -> "18.0g"
+            // (toFixed(1)), time -> "25s" (Math.round(ms/1000)). Both cases feed the same call; the
+            // time format "%lds" simply ignores the trailing fractional arg (valid in C). Collapsing
+            // to one snprintf (vs one per branch) trims the last bytes for the 2 MB partition.
+            char gt[16];
+            long whole;
+            long frac = 0;
+            const char *fmt;
+            if (startedVolumetric) {
+                // Tenths of a gram. tgv is entered in 0.1g steps and is positive here (guarded by
+                // hasGrindTarget), so (long)(v*10 + 0.5) is round-half-up == JS toFixed(1) across the
+                // reachable value domain, and avoids pulling lround (this feature is its only user).
+                long tenths = static_cast<long>(grindTargetVolume * 10.0 + 0.5);
+                whole = tenths / 10;
+                frac = tenths % 10;
+                fmt = "%ld.%ldg";
+            } else {
+                // Integer round-half-up: currentGrindTargetDuration is non-negative ms (guarded by
+                // hasGrindTarget), so (ms + 500) / 1000 == JS Math.round(ms/1000) exactly.
+                whole = (grindTargetDuration + 500) / 1000;
+                fmt = "%lds";
+            }
+            snprintf(gt, sizeof(gt), fmt, whole, frac);
+            notesChanged |= stampNoteIfAbsent(autoNotes, "grindTarget", gt);
+        }
+        if (notesChanged) {
+            hasNotes = saveNotes(id, autoNotes);
             if (hasNotes && !applyBeanUsageDelta(previousNotes, autoNotes)) {
                 ESP_LOGW("ShotHistoryPlugin", "Failed to update bean usage for completed shot %s", currentId.c_str());
             }
         } else {
-            hasNotes = true; // WebUI already wrote notes that include beanType
+            hasNotes = true; // WebUI already wrote notes that include beanType/beanId/grinderName
         }
     } else {
-        // No bean selected — WebUI may still have written dose-only notes.
-        hasNotes = fs->exists("/h/" + currentId + ".json");
+        // No bean, grinder, or grind target — WebUI may still have written dose-only notes.
+        hasNotes = fs->exists("/h/" + id + ".json");
     }
 
+    xSemaphoreGive(notesMutex);
+    // cleanupHistory() serializes each sidecar removal with notesMutex, so it
+    // must run only after the completion read/merge/write transaction releases it.
     cleanupHistory();
-    appendCompletedShotToIndex(hasNotes);
+    appendCompletedShotToIndex(id, completedHeader, hasNotes);
 }
 
-void ShotHistoryPlugin::appendCompletedShotToIndex(bool hasNotes) {
+void ShotHistoryPlugin::appendCompletedShotToIndex(const String &id, const ShotLogHeader &completedHeader, bool hasNotes) {
     ShotIndexEntry indexEntry{};
-    indexEntry.id = currentId.toInt();
-    indexEntry.timestamp = header.startEpoch;
-    indexEntry.duration = header.durationMs;
-    indexEntry.volume = header.finalWeight;
+    indexEntry.id = id.toInt();
+    indexEntry.timestamp = completedHeader.startEpoch;
+    indexEntry.duration = completedHeader.durationMs;
+    indexEntry.volume = completedHeader.finalWeight;
     indexEntry.rating = 0;
     indexEntry.flags = SHOT_FLAG_COMPLETED;
     if (hasNotes) {
         indexEntry.flags |= SHOT_FLAG_HAS_NOTES;
     }
-    strncpy(indexEntry.profileId, header.profileId, sizeof(indexEntry.profileId) - 1);
+    strncpy(indexEntry.profileId, completedHeader.profileId, sizeof(indexEntry.profileId) - 1);
     indexEntry.profileId[sizeof(indexEntry.profileId) - 1] = '\0';
-    strncpy(indexEntry.profileName, header.profileName, sizeof(indexEntry.profileName) - 1);
+    strncpy(indexEntry.profileName, completedHeader.profileName, sizeof(indexEntry.profileName) - 1);
     indexEntry.profileName[sizeof(indexEntry.profileName) - 1] = '\0';
 
     if (!appendToIndex(indexEntry)) {
         ESP_LOGE("ShotHistoryPlugin", "CRITICAL: Failed to add completed shot %u to index", indexEntry.id);
     }
 }
-
 
 void ShotHistoryPlugin::record() {
     // PRO-277: stateMutex protects the cross-task scalar telemetry
@@ -503,19 +621,10 @@ void ShotHistoryPlugin::record() {
     // the active-shot file work lock-free — the callbacks now only ever contend
     // with a memcpy-speed critical section and stop timing out.
     //
-    // The close path (shouldRecord == false) is the one exception: it MUST run with
-    // stateMutex still held. closeLogFile() reads currentId / currentBeanName /
-    // header, and startRecording() (controller task, core 1) concurrently rewrites
-    // currentId (Arduino String realloc), currentBeanName, sampleCount, ioBufferPos
-    // and sets recording = true WITHOUT touching isFileOpen. If the close ran
-    // lock-free, a brew:start landing in the close window would (a) tear/UAF the
-    // String reads inside closeLogFile() and (b) see isFileOpen == true, skip
-    // openLogFileIfNeeded(), and write the new shot's samples into the OLD file
-    // being closed. Holding the lock across the close restores the base-code mutual
-    // exclusion: startRecording() blocks on stateMutex until the close finishes and
-    // then correctly observes isFileOpen == false. The close runs once at end-of-
-    // shot when no live samples for that shot remain, so holding the lock here does
-    // not reintroduce the steady-state sample-drop the lock-free path fixed.
+    // The close path needs mutual exclusion with a concurrent startRecording()
+    // because both touch currentFile. recordingMutex provides that exclusion while
+    // stateMutex is released before the close and completion filesystem work, so
+    // telemetry callbacks never wait for Dashboard notes I/O.
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         return;
     }
@@ -528,13 +637,35 @@ void ShotHistoryPlugin::record() {
     const float snapTemperature = currentTemperature;
     const float snapPuckResistance = currentPuckResistance;
 
-    // Handle file closing when recording stops — KEEP THE LOCK HELD across the
-    // close so it is mutually exclusive with a concurrent startRecording() (see
-    // the ownership note above). closeLogFile() may perform SD I/O; that is
-    // acceptable here because no live shot is being sampled during the close.
+    // Take a complete end-of-shot snapshot before closing the file. The state
+    // lock protects only the handoff to the completion path; no notes I/O runs
+    // under it, so a Dashboard fill cannot block recording completion.
     if (!shouldRecord) {
+        const String completedId = currentId;
+        const String completedBeanName = currentBeanName;
+        const String completedBeanId = currentBeanId;
+        const String completedGrinderName = currentGrinderName;
+        const bool completedStartedVolumetric = shotStartedVolumetric;
+        const double completedGrindTargetVolume = currentGrindTargetVolume;
+        const int completedGrindTargetDuration = currentGrindTargetDuration;
+        const bool completedHadIndexEntry = indexEntryCreated;
         if (isFileOpen) {
-            closeLogFile(snapBluetoothWeight);
+            if (recordingMutex == nullptr || xSemaphoreTake(recordingMutex, portMAX_DELAY) != pdTRUE) {
+                xSemaphoreGive(stateMutex);
+                return;
+            }
+            xSemaphoreGive(stateMutex);
+            const bool completed = closeLogFile(snapBluetoothWeight);
+            const ShotLogHeader completedHeader = header;
+            xSemaphoreGive(recordingMutex);
+            if (completed) {
+                handleCompletedShot(completedId, completedBeanName, completedBeanId, completedGrinderName,
+                                    completedStartedVolumetric, completedGrindTargetVolume, completedGrindTargetDuration,
+                                    completedHeader);
+            } else {
+                handleFailedShot(completedId, completedHadIndexEntry);
+            }
+            return;
         }
         xSemaphoreGive(stateMutex);
         return;
@@ -554,12 +685,13 @@ void ShotHistoryPlugin::record() {
         // Trigger error event to notify user
         if (pluginManager) {
             Event errorEvent;
-            errorEvent.id = "evt:shot-recording-error";
+            errorEvent.id = EventIds::EVT_SHOT_RECORDING_ERROR;
             errorEvent.setString("error", "Failed to open shot log file");
             pluginManager->trigger(errorEvent);
         }
         return;
     }
+    adoptPendingActiveShotFill();
 
     // Update bluetooth flow calculation from the snapshot.
     updateBluetoothFlow(snapBluetoothWeight);
@@ -632,23 +764,51 @@ void ShotHistoryPlugin::record() {
     }
 }
 
+String ShotHistoryPlugin::resolveSelectedBeanId(const String &beanName) {
+    if (beanName.isEmpty() || !controller) {
+        return "";
+    }
+    BeanManager *manager = controller->getBeanManager();
+    if (!manager) {
+        return "";
+    }
+    // Reuse the shared id-first/name-second resolver so the capture-time lookup
+    // and the read-time findBeanIndexForNotes agree on name normalization.
+    std::vector<BeanEntry> beans = manager->listBeans();
+    const std::vector<bean_resolution::BeanRef> refs = refsFromBeans(beans);
+    const int idx = bean_resolution::resolveBeanIndex("", std::string(beanName.c_str()), refs);
+    return idx >= 0 ? beans[static_cast<size_t>(idx)].id : String("");
+}
+
 void ShotHistoryPlugin::startRecording() {
-    // Acquire mutex to protect shared state
+    // Identity transitions use stateMutex only. Dashboard fills observe the
+    // atomic generation and recheck it after notes I/O, so no lock inversion is
+    // possible with the completion path.
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for startRecording");
         return;
     }
-    
+
+    if (recordingMutex == nullptr || xSemaphoreTake(recordingMutex, portMAX_DELAY) != pdTRUE) {
+        xSemaphoreGive(stateMutex);
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire recording mutex for startRecording");
+        return;
+    }
+
     if (!controller) {
+        xSemaphoreGive(recordingMutex);
         xSemaphoreGive(stateMutex);
         return;
     }
-    
+
     // Use thread-safe method to check process type and utility status
     if (controller->getProcessType() == MODE_BREW && controller->isBrewProcessUtility()) {
+        xSemaphoreGive(recordingMutex);
         xSemaphoreGive(stateMutex);
         return;
     }
+    activeShotId.store(0, std::memory_order_release);
+    shotGeneration.fetch_add(1, std::memory_order_relaxed);
     currentId = padId((uint32_t)getTime());
     shotStart = millis();
     lastWeightChangeTime = 0;
@@ -657,10 +817,22 @@ void ShotHistoryPlugin::startRecording() {
     lastStableWeight = 0.0f;
     currentEstimatedWeight = 0.0f;
     currentBluetoothFlow = 0.0f;
-    currentProfileName = controller->getProcessType() == MODE_MANUAL ? "Manual"
-                                                                     : controller->getProfileManager()->getSelectedProfile().label;
+    currentProfileName =
+        controller->getProcessType() == MODE_MANUAL ? "Manual" : controller->getProfileManager()->getSelectedProfile().label;
     currentBeanName = controller->getSettings().getSelectedBean();
+    // PRO-422: the device stores only the selected bean NAME (req:beans:select
+    // carries no id), so resolve name -> stable BeanManager id here at capture
+    // time. This id is written durably onto the shot notes at shot end so every
+    // web client reads the same authoritative bean instead of guessing per
+    // browser. Empty when no bean is selected or the name no longer matches a
+    // stored bean (older/deleted bean) — the shot then carries name-only, as before.
+    currentBeanId = resolveSelectedBeanId(currentBeanName);
+    // PRO-428: capture the selected grinder NAME at brew start, mirroring the bean
+    // capture above. Settings stores only the name (req:grinders:select carries no
+    // id), so there is no grinder-id analog to beanId; name-only is the payload.
+    currentGrinderName = controller->getSettings().getSelectedGrinder();
     recording = true;
+    activeShotId.store(currentId.toInt(), std::memory_order_release);
     extendedRecording = false;
     indexEntryCreated = false; // Reset flag for new shot
     sampleCount = 0;
@@ -671,7 +843,14 @@ void ShotHistoryPlugin::startRecording() {
 
     // Capture initial volumetric mode state (brew by weight vs brew by time)
     shotStartedVolumetric = controller->getSettings().isVolumetricTarget();
-    
+
+    // PRO-441: snapshot the machine grind TARGET at brew start, mirroring the grinderName capture above.
+    // These are read authoritatively across clients by stamping notes "grindTarget" at shot end. The
+    // volumetric-vs-time mode is shotStartedVolumetric (captured just above from the same call).
+    currentGrindTargetVolume = controller->getSettings().getTargetGrindVolume();
+    currentGrindTargetDuration = controller->getSettings().getTargetGrindDuration();
+
+    xSemaphoreGive(recordingMutex);
     xSemaphoreGive(stateMutex);
 }
 
@@ -682,12 +861,13 @@ unsigned long ShotHistoryPlugin::getTime() {
 }
 
 void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
-    // Acquire mutex to protect shared state
+    // Identity transitions use stateMutex only; Dashboard fills use a generation
+    // token plus post-I/O recheck instead of nesting notesMutex and stateMutex.
     if (stateMutex == nullptr || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endRecording");
         return;
     }
-    
+
     // PRO-232: Open the post-stop settle window whenever a live BLE scale was the
     // active volumetric source at brew-end, gating on isBluetoothScaleHealthy()
     // rather than the instantaneous currentBluetoothWeight sample.
@@ -719,7 +899,9 @@ void ShotHistoryPlugin::endRecording(bool allowExtendedRecording) {
     }
 
     recording = false;
-    
+    activeShotId.store(0, std::memory_order_relaxed);
+    shotGeneration.fetch_add(1, std::memory_order_relaxed);
+
     xSemaphoreGive(stateMutex);
 }
 
@@ -729,11 +911,11 @@ void ShotHistoryPlugin::endExtendedRecording() {
         ESP_LOGW("ShotHistoryPlugin", "Failed to acquire mutex for endExtendedRecording");
         return;
     }
-    
+
     if (extendedRecording) {
         extendedRecording = false;
     }
-    
+
     xSemaphoreGive(stateMutex);
 }
 
@@ -746,7 +928,7 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
 
     // Get current profile to extract phase name
     Profile profile = controller->getProfileManager()->getSelectedProfile();
-    
+
     // Validate phaseNumber bounds before accessing profile data
     if (phaseNumber >= profile.phases.size() || phaseNumber >= 255) {
         // Use fallback for out-of-bounds phase numbers
@@ -756,7 +938,8 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
         transition.reserved = 0;
         snprintf(transition.phaseName, sizeof(transition.phaseName), "Phase %d", phaseNumber + 1);
         header.phaseTransitionCount++;
-        ESP_LOGD("ShotHistoryPlugin", "Recorded phase transition to phase %d (fallback name) at sample %d", phaseNumber, sampleIndex);
+        ESP_LOGD("ShotHistoryPlugin", "Recorded phase transition to phase %d (fallback name) at sample %d", phaseNumber,
+                 sampleIndex);
         return;
     }
 
@@ -765,7 +948,7 @@ void ShotHistoryPlugin::recordPhaseTransition(uint8_t phaseNumber, uint16_t samp
     transition.sampleIndex = sampleIndex;
     transition.phaseNumber = phaseNumber;
     transition.reserved = 0;
-    
+
     strncpy(transition.phaseName, profile.phases[phaseNumber].name.c_str(), sizeof(transition.phaseName) - 1);
     transition.phaseName[sizeof(transition.phaseName) - 1] = '\0';
 
@@ -840,15 +1023,20 @@ void ShotHistoryPlugin::cleanupHistory() {
         String fname = slogFiles[i];
         int start = fname.lastIndexOf('/') + 1;
         int end = fname.lastIndexOf('.');
+        uint32_t shotId = 0;
         if (end > start) {
-            uint32_t shotId = fname.substring(start, end).toInt();
-            markIndexDeleted(shotId);
+            shotId = fname.substring(start, end).toInt();
         }
 
-        // Remove .slog and associated .json notes file
-        fs->remove(fname);
-        String notesPath = fname.substring(0, fname.lastIndexOf('.')) + ".json";
-        fs->remove(notesPath);
+        // Serialize both files with every notes reader/writer. The .slog check
+        // and sidecar write are one notes resource transaction, so an admitted
+        // writer cannot recreate an orphan after retention deletes this shot.
+        // Do this before index work: notes saves update index metadata only after
+        // releasing notesMutex, preserving the notes-then-index lock order.
+        removeHistoryFiles(fname.substring(0, fname.lastIndexOf('.')));
+        if (shotId != 0) {
+            markIndexDeleted(shotId);
+        }
         removed++;
     }
 
@@ -861,7 +1049,7 @@ size_t ShotHistoryPlugin::getFreeSpace() {
     if (!controller) {
         return 0;
     }
-    
+
     if (controller->isSDCard()) {
         uint64_t total = SD_MMC.totalBytes();
         uint64_t used = SD_MMC.usedBytes();
@@ -890,21 +1078,23 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
                     // Read header only
                     ShotLogHeader hdr{};
                     size_t bytesRead = file.read(reinterpret_cast<uint8_t *>(&hdr), sizeof(hdr));
-                    
+
                     // Validate read size
                     if (bytesRead != sizeof(hdr)) {
-                        ESP_LOGW("ShotHistoryPlugin", "Failed to read header from %s: expected %zu bytes, got %zu", fname.c_str(), sizeof(hdr), bytesRead);
+                        ESP_LOGW("ShotHistoryPlugin", "Failed to read header from %s: expected %zu bytes, got %zu", fname.c_str(),
+                                 sizeof(hdr), bytesRead);
                         file = root.openNextFile();
                         continue;
                     }
-                    
+
                     // Validate magic number
                     if (hdr.magic != SHOT_LOG_MAGIC) {
-                        ESP_LOGW("ShotHistoryPlugin", "Invalid magic number in %s: 0x%08X (expected 0x%08X)", fname.c_str(), hdr.magic, SHOT_LOG_MAGIC);
+                        ESP_LOGW("ShotHistoryPlugin", "Invalid magic number in %s: 0x%08X (expected 0x%08X)", fname.c_str(),
+                                 hdr.magic, SHOT_LOG_MAGIC);
                         file = root.openNextFile();
                         continue;
                     }
-                    
+
                     // File is valid, process it
                     float finalWeight = hdr.finalWeight > 0 ? static_cast<float>(hdr.finalWeight) / WEIGHT_SCALE : 0.0f;
 
@@ -937,25 +1127,96 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
     } else if (type == "req:history:delete") {
         auto id = request["id"].as<String>();
         String paddedId = padId(id);
-        fs->remove("/h/" + paddedId + ".slog");
-        fs->remove("/h/" + paddedId + ".json");
+        removeHistoryFiles(paddedId);
 
-        // Mark as deleted in index
+        // Notes saves update index metadata only after releasing notesMutex, so
+        // deleting the files first preserves that resource lock order.
         markIndexDeleted(id.toInt());
 
         response["msg"] = "Ok";
     } else if (type == "req:history:notes:get") {
         auto id = request["id"].as<String>();
-        JsonDocument notes;
-        loadNotes(id, notes);
-        response["notes"] = notes;
+        if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+            response["error"] = "Notes unavailable";
+        } else {
+            JsonDocument notes;
+            loadNotes(id, notes);
+            response["notes"] = notes;
+            xSemaphoreGive(notesMutex);
+        }
+    } else if (type == "req:history:notes:fill-missing") {
+        auto id = request["id"].as<String>();
+        const uint32_t requestedId = id.toInt();
+        const String requestedGrindSetting = request["notes"]["grindSetting"] | "";
+        const shot_notes::ActiveShotIdentity admitted{shotGeneration.load(std::memory_order_acquire),
+                                                      activeShotId.load(std::memory_order_acquire)};
+        if (requestedGrindSetting.length() == 0 || !shot_notes::isActiveFillFor(admitted, admitted, requestedId)) {
+            response["saved"] = false;
+        } else if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+            response["error"] = "Notes unavailable";
+        } else {
+            // Never acquire stateMutex while notesMutex is held. End/start changes
+            // the generation first, and this recheck rejects fills that waited
+            // behind completion or another notes write.
+            const shot_notes::ActiveShotIdentity current{shotGeneration.load(std::memory_order_acquire),
+                                                         activeShotId.load(std::memory_order_acquire)};
+            const auto admission = shot_notes::admitActiveFill(admitted, current, requestedId, fs->exists("/h/" + id + ".slog"));
+            if (admission == shot_notes::ActiveFillAdmission::Reject) {
+                response["saved"] = false;
+            } else if (admission == shot_notes::ActiveFillAdmission::Queue) {
+                // A predecessor can have ended before its first record() pass. Drop
+                // it before admitting a valid successor rather than blocking it.
+                if (!pendingActiveShotFill.isEmpty() &&
+                    !shot_notes::isActiveFillFor(pendingActiveShotFillIdentity, current, requestedId)) {
+                    pendingActiveShotFill = "";
+                    pendingActiveShotFillIdentity = {0, 0};
+                }
+                if (pendingActiveShotFill.isEmpty()) {
+                    pendingActiveShotFill = requestedGrindSetting;
+                    pendingActiveShotFillIdentity = admitted;
+                    response["saved"] = true;
+                } else {
+                    response["saved"] = false;
+                }
+            } else {
+                JsonDocument existingNotes;
+                loadNotes(id, existingNotes);
+                if (shot_notes::hasValue(existingNotes["grindSetting"])) {
+                    response["saved"] = false;
+                } else {
+                    const shot_notes::ActiveShotIdentity beforeSave{shotGeneration.load(std::memory_order_acquire),
+                                                                    activeShotId.load(std::memory_order_acquire)};
+                    if (shot_notes::isActiveFillFor(admitted, beforeSave, requestedId)) {
+                        existingNotes["grindSetting"] = requestedGrindSetting;
+                        if (!saveNotes(id, existingNotes)) {
+                            response["error"] = "Save failed";
+                        } else {
+                            response["saved"] = true;
+                        }
+                    } else {
+                        response["saved"] = false;
+                    }
+                }
+            }
+            xSemaphoreGive(notesMutex);
+        }
     } else if (type == "req:history:notes:save") {
         auto id = request["id"].as<String>();
+        if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+            response["error"] = "Notes unavailable";
+            return;
+        }
         JsonDocument notes; // explicit document: variant->const JsonDocument& is ambiguous on clang
         notes.set(request["notes"]);
         JsonDocument previousNotes;
-        loadNotes(id, previousNotes);
-        const bool notesSaved = saveNotes(id, notes);
+        const bool historyExists = shot_notes::mayAccessExistingHistoryNotes(fs->exists("/h/" + id + ".slog"));
+        if (historyExists) {
+            loadNotes(id, previousNotes);
+        }
+        // A normal editor save can be based on a stale GET. Preserve a Dashboard
+        // fill that landed after that read unless this payload explicitly edits it.
+        shot_notes::preservePersistedGrindSetting(notes, previousNotes);
+        const bool notesSaved = historyExists && saveNotes(id, notes);
         bool beanUsageSaved = false;
         if (!notesSaved) {
             response["error"] = "Save failed";
@@ -985,6 +1246,7 @@ void ShotHistoryPlugin::handleRequest(JsonDocument &request, JsonDocument &respo
 
             response["msg"] = "Ok";
         }
+        xSemaphoreGive(notesMutex);
     } else if (type == "req:history:rebuild") {
         // Rebuild is now handled asynchronously by WebUIPlugin
         // This path shouldn't be reached, but handle it just in case
@@ -999,9 +1261,24 @@ bool ShotHistoryPlugin::saveNotes(const String &id, const JsonDocument &notes) {
     }
     String notesStr;
     serializeJson(notes, notesStr);
-    file.print(notesStr);
+    size_t written = file.print(notesStr);
+    if (written != notesStr.length()) {
+        ESP_LOGE("ShotHistoryPlugin", "Failed to write notes: expected %u, wrote %zu", notesStr.length(), written);
+        file.close();
+        return false;
+    }
     file.close();
     return true;
+}
+
+void ShotHistoryPlugin::removeHistoryFiles(const String &id) {
+    if (notesMutex == nullptr || xSemaphoreTake(notesMutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW("ShotHistoryPlugin", "Failed to acquire notes mutex for history removal");
+        return;
+    }
+    fs->remove("/h/" + id + ".slog");
+    fs->remove("/h/" + id + ".json");
+    xSemaphoreGive(notesMutex);
 }
 
 void ShotHistoryPlugin::loadNotes(const String &id, JsonDocument &notes) {
@@ -1009,7 +1286,10 @@ void ShotHistoryPlugin::loadNotes(const String &id, JsonDocument &notes) {
     if (file) {
         String notesStr = file.readString();
         file.close();
-        deserializeJson(notes, notesStr);
+        DeserializationError err = deserializeJson(notes, notesStr);
+        if (err != DeserializationError::Ok) {
+            ESP_LOGE("ShotHistoryPlugin", "Failed to parse notes JSON for %s: %s", id.c_str(), err.c_str());
+        }
     }
 }
 
@@ -1053,8 +1333,7 @@ bool ShotHistoryPlugin::applyBeanUsageDelta(JsonVariantConst previousNotes, Json
 
     BeanEntry previousOriginal;
     const bool previousChanged = previousBeanIndex >= 0 && previousBeanIndex < static_cast<int>(beans.size()) &&
-                                 std::isfinite(previousDose) && previousDose != 0.0f &&
-                                 beans[previousBeanIndex].quantity >= 0.0f;
+                                 std::isfinite(previousDose) && previousDose != 0.0f && beans[previousBeanIndex].quantity >= 0.0f;
     if (!adjustBean(previousBeanIndex, previousDose, previousChanged ? &previousOriginal : nullptr)) {
         return false;
     }
@@ -1304,7 +1583,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
     // Send scanning event
     if (pluginManager) {
         Event startEvent;
-        startEvent.id = "evt:history-rebuild-progress";
+        startEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         startEvent.setInt("total", 0);
         startEvent.setInt("current", 0);
         startEvent.setString("status", "scanning");
@@ -1320,7 +1599,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
         // Emit error event
         if (pluginManager) {
             Event errorEvent;
-            errorEvent.id = "evt:history-rebuild-progress";
+            errorEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
             errorEvent.setInt("total", 0);
             errorEvent.setInt("current", 0);
             errorEvent.setString("status", "error");
@@ -1335,7 +1614,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
         // Emit completion event even if no directory exists
         if (pluginManager) {
             Event completedEvent;
-            completedEvent.id = "evt:history-rebuild-progress";
+            completedEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
             completedEvent.setInt("total", 0);
             completedEvent.setInt("current", 0);
             completedEvent.setString("status", "completed");
@@ -1364,7 +1643,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
     // Emit start event with total file count
     if (pluginManager) {
         Event startEvent;
-        startEvent.id = "evt:history-rebuild-progress";
+        startEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         startEvent.setInt("total", (int)slogFiles.size());
         startEvent.setInt("current", 0);
         startEvent.setString("status", "started");
@@ -1448,7 +1727,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
         int updateFrequency = slogFiles.size() <= 20 ? 1 : (slogFiles.size() <= 100 ? 3 : 5);
         if (pluginManager && (currentIndex % updateFrequency == 0 || currentIndex == slogFiles.size())) {
             Event progressEvent;
-            progressEvent.id = "evt:history-rebuild-progress";
+            progressEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
             progressEvent.setInt("total", (int)slogFiles.size());
             progressEvent.setInt("current", currentIndex);
             progressEvent.setString("status", "processing");
@@ -1463,7 +1742,7 @@ void ShotHistoryPlugin::rebuildIndexLocked() {
     // Emit completion event
     if (pluginManager) {
         Event completionEvent;
-        completionEvent.id = "evt:history-rebuild-progress";
+        completionEvent.id = EventIds::EVT_HISTORY_REBUILD_PROGRESS;
         completionEvent.setInt("total", (int)slogFiles.size());
         completionEvent.setInt("current", (int)slogFiles.size());
         completionEvent.setString("status", "completed");

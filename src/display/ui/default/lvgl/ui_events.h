@@ -51,6 +51,9 @@ void onMenuSteamTempRaise(lv_event_t *e);
 // CAR-358: C-callable getters for immediate Quick-settings label refresh.
 int gmGetWaterTempSetting(void);
 int gmGetSteamTempSetting(void);
+// PRO-539: Controller owns synchronized authorization and restart handoff.
+bool gmCanRestartDisplay(void);
+void onRestartDisplayConfirm(lv_event_t *e);
 void onStatusScreenLoad(lv_event_t *e);
 void onBrewCancel(lv_event_t *e);
 void onGrindScreenLoad(lv_event_t *e);

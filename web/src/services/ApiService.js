@@ -25,6 +25,27 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 // Matches the firmware default (Settings.h: doseGrams = 18.0).
 const DEFAULT_DOSE_GRAMS = 18;
 
+// If a socket errors before it ever opened, some browsers do NOT emit a
+// subsequent `close` event — so relying on `_onClose` to arm the reconnect can
+// stall forever. `_onError` arms this short fallback; if `_onClose` hasn't run
+// within the window it schedules the reconnect directly. Because
+// `_scheduleReconnect` is idempotent (PRO-18), whichever path fires first wins
+// and the other is a no-op, so we never double-count.
+const ERROR_RECONNECT_FALLBACK_MS = 1000;
+
+/**
+ * Internal connection state machine (PRO-18). This is bookkeeping used to keep
+ * reconnect scheduling idempotent; it is SEPARATE from the `connectionState`
+ * signal that feeds the PRO-7 banner (that signal keeps its
+ * 'connected'/'reconnecting' contract unchanged).
+ */
+export const ConnState = Object.freeze({
+  DISCONNECTED: 'DISCONNECTED',
+  CONNECTING: 'CONNECTING',
+  OPEN: 'OPEN',
+  RECONNECTING: 'RECONNECTING',
+});
+
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;
 
@@ -39,6 +60,14 @@ export default class ApiService {
   baseReconnectDelay = 1000; // Start with 1 second delay
   reconnectTimeout = null;
   isConnecting = false;
+  /**
+   * Fallback timer armed by `_onError` when the socket errored before opening,
+   * so a missing `close` event can't stall reconnection (PRO-18). Cancelled in
+   * `_onClose` when a real close arrives first.
+   */
+  _errorReconnectFallback = null;
+  /** Internal connection state machine (PRO-18). See {@link ConnState}. */
+  _connState = ConnState.DISCONNECTED;
 
   constructor() {
     // Bind methods once to avoid creating new function references on each reconnect
@@ -79,6 +108,7 @@ export default class ApiService {
   async connect() {
     if (this.isConnecting) return;
     this.isConnecting = true;
+    this._connState = ConnState.CONNECTING;
 
     try {
       if (this.socket) {
@@ -116,6 +146,13 @@ export default class ApiService {
     this.authenticateLocal(localAdminToken);
     this.reconnectAttempts = 0;
     this.isConnecting = false;
+    this._connState = ConnState.OPEN;
+    // A successful open supersedes any pending reconnect/fallback timers.
+    this._clearReconnectTimers();
+    // Transport is up: clear the banner (PRO-7). The countdown target is no
+    // longer meaningful once we're connected.
+    connectionState.value = 'connected';
+    nextReconnectAt.value = null;
     machine.value = {
       ...machine.value,
       connected: true,
@@ -125,6 +162,9 @@ export default class ApiService {
   _onClose() {
     console.log('WebSocket connection closed');
     this.isConnecting = false; // Reset flag to allow reconnection
+    // A real close arrived, so the error-path fallback is no longer needed —
+    // cancel it so we don't double-schedule (PRO-18).
+    this._cancelErrorReconnectFallback();
     machine.value = {
       ...machine.value,
       connected: false,
@@ -141,9 +181,40 @@ export default class ApiService {
     this._rejectPendingRequests(
       new WebSocketDisconnectedError('WebSocket errored before response was received'),
     );
+    // Closing the errored socket normally triggers a `close` event, which
+    // schedules the reconnect via _onClose. But if the socket errored before it
+    // ever opened, some browsers never emit `close` — which would stall
+    // reconnection forever. Arm a short fallback that schedules directly if
+    // _onClose hasn't run in time. _scheduleReconnect is idempotent (PRO-18), so
+    // whichever fires first wins and the other is a no-op. (PRO-18)
+    const neverOpened = !this.socket || this.socket.readyState !== WebSocket.OPEN;
     if (this.socket) {
       this.socket.close();
     }
+    if (neverOpened) {
+      this._cancelErrorReconnectFallback();
+      this._errorReconnectFallback = setTimeout(() => {
+        this._errorReconnectFallback = null;
+        this._scheduleReconnect();
+      }, ERROR_RECONNECT_FALLBACK_MS);
+    }
+  }
+
+  /** Cancel the error-path reconnect fallback timer if armed (PRO-18). */
+  _cancelErrorReconnectFallback() {
+    if (this._errorReconnectFallback) {
+      clearTimeout(this._errorReconnectFallback);
+      this._errorReconnectFallback = null;
+    }
+  }
+
+  /** Clear both the scheduled reconnect and the error fallback timers (PRO-18). */
+  _clearReconnectTimers() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this._cancelErrorReconnectFallback();
   }
 
   /**
@@ -161,9 +232,24 @@ export default class ApiService {
   }
 
   _scheduleReconnect() {
+    // Idempotent: one failure schedules exactly one reconnect. If a timer is
+    // already armed and we're already in RECONNECTING, do nothing — don't bump
+    // attempts, don't re-arm, don't advance the backoff (PRO-18). A single
+    // failure fans out to both _onError->close and _onClose (and the connect()
+    // catch path); without this guard those competing calls double-count
+    // reconnectAttempts and race two timers. reconnectNow() clears the timer
+    // first, so it can still force an immediate reconnect through this guard.
+    if (this.reconnectTimeout && this._connState === ConnState.RECONNECTING) {
+      return;
+    }
+
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
     }
+    // A scheduled reconnect supersedes the error-path fallback.
+    this._cancelErrorReconnectFallback();
+
+    this._connState = ConnState.RECONNECTING;
 
     // Calculate delay with exponential backoff
     const delay = Math.min(
@@ -171,12 +257,43 @@ export default class ApiService {
       this.maxReconnectDelay,
     );
 
+    // Surface reconnect state so the connection-lost banner can show a live
+    // countdown until the next attempt (PRO-7). Backoff continues indefinitely
+    // up to maxReconnectDelay, so the state stays 'reconnecting' — we never
+    // give up on our own.
+    connectionState.value = 'reconnecting';
+    nextReconnectAt.value = Date.now() + delay;
+
     console.log(`Scheduling reconnect attempt ${this.reconnectAttempts + 1} in ${delay}ms`);
 
     this.reconnectTimeout = setTimeout(() => {
+      // Clear the handle before reconnecting so a subsequent failure can arm a
+      // fresh reconnect through the idempotency guard (PRO-18).
+      this.reconnectTimeout = null;
       this.reconnectAttempts++;
       this.connect();
     }, delay);
+  }
+
+  /**
+   * Force an immediate reconnect, bypassing the backoff delay (PRO-7).
+   *
+   * Wired to the "Reconnect now" button on the connection-lost banner. Clears
+   * any pending scheduled reconnect, resets the exponential backoff so the
+   * NEXT failure starts from `baseReconnectDelay` again, and retries right
+   * away.
+   */
+  reconnectNow() {
+    // Clear any pending scheduled reconnect AND the error-path fallback so a
+    // forced reconnect isn't blocked by the idempotency guard (PRO-18).
+    this._clearReconnectTimers();
+    this.reconnectAttempts = 0;
+    nextReconnectAt.value = null;
+    // Clear the in-flight guard so a forced reconnect isn't swallowed if a
+    // prior connect() attempt is still marked pending (e.g. a socket that
+    // opened but never fired open/close).
+    this.isConnecting = false;
+    this.connect();
   }
 
   _onMessage(event) {
@@ -329,6 +446,7 @@ export default class ApiService {
       selectedProfile: message.p,
       selectedProfileId: message.puid,
       selectedBean: message.bn || '',
+      selectedGrinder: message.gr || '',
       brewTarget: !!message.bt,
       brewTargetDuration: message.btd || 0,
       brewTargetVolume: message.btv || 0,
@@ -379,6 +497,26 @@ export default class ApiService {
 
 export const ApiServiceContext = createContext(null);
 
+/**
+ * Connection-lost banner state (PRO-7).
+ *
+ * - `'connected'`    — transport is up; banner hidden.
+ * - `'reconnecting'` — socket dropped and a reconnect is scheduled/in-flight.
+ *
+ * `'failed'` is reserved for a future attempt cap; today the backoff continues
+ * up to `maxReconnectDelay` and never gives up, so the state stays
+ * `'reconnecting'` while offline. Starts optimistic so a stable connection
+ * never flashes the banner during the initial handshake.
+ */
+export const connectionState = signal('connected');
+
+/**
+ * Epoch-ms timestamp of the next scheduled reconnect attempt, or `null` when
+ * connected / retrying immediately. The banner derives its live countdown from
+ * this (PRO-7).
+ */
+export const nextReconnectAt = signal(null);
+
 export const machine = signal({
   connected: false,
   status: {
@@ -388,6 +526,7 @@ export const machine = signal({
     selectedProfile: '',
     selectedProfileId: null,
     selectedBean: '',
+    selectedGrinder: '',
     brewTargetDuration: 0,
     brewTargetVolume: 0,
     allowYieldOverride: false,

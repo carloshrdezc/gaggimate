@@ -11,6 +11,8 @@
 
 #include "../core/constants.h"
 #include "GitHubOTA.h"
+#include "OtaAsyncResolvePolicy.h"
+#include "WebUiLifecycleDeferPolicy.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -20,6 +22,13 @@
 constexpr uint32_t RELAY_CLIENT_ID = 0xFFFFFFFE;
 
 constexpr size_t UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
+// PRO-411: cap for the exponential failure backoff of the periodic OTA
+// update-check. On consecutive check failures the effective interval doubles
+// from UPDATE_CHECK_INTERVAL up to this ceiling (6 h), then holds; a successful
+// check resets it back to UPDATE_CHECK_INTERVAL. This stops a persistently
+// failing check (github.com unreachable / TLS failing / transient WiFi loss)
+// from opening a fresh TLS connection every 5 min and hammering github.com.
+constexpr size_t UPDATE_CHECK_MAX_INTERVAL = 6 * 60 * 60 * 1000;
 constexpr size_t CLEANUP_PERIOD = 5 * 1000;
 constexpr size_t STATUS_PERIOD = 500;
 constexpr size_t DNS_PERIOD = 10;
@@ -124,7 +133,7 @@ class WebUIPlugin : public Plugin {
     // volatile handoffs (a missed-by-one-tick drain is harmless — loop() runs
     // every ~2 ms and re-checks every iteration).
     SemaphoreHandle_t otaIntentMutex = nullptr;
-    String pendingReleaseUrl = "";        // guarded by otaIntentMutex
+    String pendingReleaseUrl = ""; // guarded by otaIntentMutex
     volatile bool pendingReleaseUrlChange = false;
     volatile bool pendingOtaStatusPush = false;
     // Deferred OTA-start intent (CAR-377). handleOTAStart runs on the AsyncTCP /
@@ -135,6 +144,92 @@ class WebUIPlugin : public Plugin {
     // onto the loop task before the update runs, exactly like the release-URL handoff.
     String pendingUpdateComponent = ""; // guarded by otaIntentMutex
     volatile bool pendingOtaStart = false;
+
+    // PRO-13: async resolve of the forced-tag / channel-switch OTA path.
+    //
+    // Previously, when `updating` became true with a pinned tag or a channel
+    // switch selected, loop() called `ota->checkForUpdates()` SYNCHRONOUSLY
+    // right there before the flash, blocking the Arduino main loop task (and
+    // therefore the 200ms evt:status broadcast) for however long the blocking
+    // HTTPS GET to github.com/api.github.com takes (1-5s+ on a slow/congested
+    // link). This hoists that resolve into a one-shot FreeRTOS task, mirroring
+    // the resolve-intent latch/drain idiom already used for pendingOtaStart /
+    // pendingReleaseUrl above (CAR-178/CAR-377) rather than inventing a new
+    // pattern.
+    //
+    // otaResolveState is loop-task-owned (only loop() reads/writes it); the
+    // resolve task NEVER touches it directly. Instead the resolve task posts
+    // its outcome into otaResolveResult under otaIntentMutex (reused rather
+    // than adding a dedicated mutex, per point 7 of the PRO-13 brief — the
+    // resolve task's critical section is exactly as trivial as the existing
+    // release-URL/OTA-start handoffs it mirrors) and raises
+    // otaResolveResultReady; loop() drains both under the same mutex on its
+    // next iteration.
+    OtaResolveState otaResolveState = OtaResolveState::Idle;
+    // millis() timestamp of when the current resolve started RESOLVING;
+    // compared against kOtaResolveTimeoutMs each loop() tick via
+    // otaResolveTimedOut() (OtaAsyncResolvePolicy.h) for the soft 10s bound.
+    uint32_t otaResolveStartMs = 0;
+    static constexpr uint32_t kOtaResolveTimeoutMs = 10000;
+    // Generation counter: bumped by loop() whenever it spawns a fresh resolve
+    // task AND whenever it abandons one (timeout). The resolve task captures
+    // the generation it was spawned with and stamps it onto its posted
+    // result; loop() drops any result whose generation no longer matches
+    // (otaResolveResultIsCurrent()), so a late/stale task's outcome — one
+    // that arrives after loop() already gave up on it — is safely ignored
+    // rather than acted on. NOTE (design assumption, PRO-13 point 7): the
+    // abandoned task is never force-killed and keeps running `ota->
+    // checkForUpdates()` to completion in the background; its result is
+    // dropped via this generation check, but it could theoretically still be
+    // touching `ota` for a few more seconds after the timeout fires. This
+    // mirrors the brief's own "let it finish, drop its result" design and is
+    // accepted as a rare edge case (see PR body).
+    std::atomic<uint32_t> otaResolveGeneration{0};
+    // Inputs for the in-flight (or just-completed) resolve, latched ONCE when
+    // `updating` transitions Idle -> Resolving/ReadyToFlash (channel/isTag/
+    // channelSwitch/previousInstalledChannel can all change again via a
+    // settings update while the resolve task is running; the flash decision
+    // must be made against what was true AT SPAWN TIME, matching the
+    // original inline code's single-pass read).
+    String otaResolveChannel = "";
+    String otaResolvePinnedTag = "";
+    bool otaResolveIsTag = false;
+    bool otaResolveChannelSwitch = false;
+    String otaResolvePreviousInstalledChannel = "";
+    // Populated from the drained OtaResolveTaskResult (or left at defaults
+    // for the timeout/task-spawn-failure Failed paths, which never got a
+    // resolve result at all).
+    String otaResolveResolvedVersion = "";
+    bool otaResolveResolveFailed = false;
+    // True only when the Failed transition came from the soft 10s timeout
+    // (not from a genuine decideOtaFlash Refuse) — selects the distinct
+    // "Could not verify release ... — check network" UI status/log instead
+    // of the pre-existing refuse messages.
+    bool otaResolveTimedOutFlag = false;
+
+    // Posted by the resolve task under otaIntentMutex; drained by loop().
+    struct OtaResolveTaskResult {
+        uint32_t generation = 0;
+        OtaFlashDecision decision = OtaFlashDecision::Refuse;
+        String resolvedVersion = "";
+        bool resolveFailed = false;
+    };
+    OtaResolveTaskResult otaResolveResult; // guarded by otaIntentMutex
+    volatile bool otaResolveResultReady = false;
+    static void otaResolveTask(void *arg);
+    // Parameter block handed to the one-shot resolve task. The task's ONLY
+    // access to `this` is via `plugin` (for `ota` and the mutex/result
+    // slot); every decision input is captured by value up front so a
+    // concurrent loop()-side settings change can't be observed mid-resolve.
+    struct OtaResolveTaskParams {
+        WebUIPlugin *plugin;
+        uint32_t generation;
+        bool isTag;
+        String pinnedTag;
+        bool selectedEqInstalled;
+        bool installedEmpty;
+    };
+
     AsyncWebServer server;
     // INVARIANT (PRO-313): every access to `ws` that walks or mutates its
     // internal client list MUST hold `wsMutex` for the duration of the call.
@@ -199,12 +294,35 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
+    // PRO-411: consecutive OTA update-check failures, driving the exponential
+    // backoff of the effective check interval (see otaBackoffInterval() /
+    // UPDATE_CHECK_MAX_INTERVAL). Reset to 0 on any successful check. Loop-task
+    // owned (only read/written in loop()), like lastUpdateCheck.
+    uint32_t otaCheckFailureCount = 0;
     unsigned long lastStatus = 0;
     unsigned long lastCleanup = 0;
     unsigned long lastDns = 0;
     bool updating = false; // loop-task-owned; set via pendingOtaStart drain (CAR-377)
     bool apMode = false;
     bool serverRunning = false;
+    // PRO-417: deferred web-server lifecycle intent. The WiFi (dis)connect events
+    // fire on the arduino_events WiFi-event task; running the heavy start()/stop()
+    // (stopRelay()'s ~500 ms spin-wait + ws.closeAll() under wsMutex) inline there,
+    // once per ASSOC_LEAVE, stalls the WiFi event queue / core 0 while the vendored
+    // WPA-supplicant is mid-(re)association — a contributor to the interrupt-WDT
+    // panic under disassociation churn. The event handler now only LATCHES the
+    // desired target here (last event wins, coalesced by latchLifecycleIntent) and
+    // loop() drains it on the Arduino loop task, mirroring the OTA-start / mDNS /
+    // MQTT defer discipline (see WebUiLifecycleDeferPolicy.h). std::atomic because
+    // it is written on the WiFi-event task and read/CAS'd on the loop task, which
+    // run on different cores; relaxed ordering suffices — the flag is the only
+    // shared datum and a missed-by-one-tick drain is harmless (loop() re-checks
+    // every ~2 ms). PRO-418: the connect event's captive-portal mode (AP vs STA)
+    // is folded INTO this intent (StartAp / StartStation) rather than carried in a
+    // separate pendingApMode atomic, so a single atomic conveys both the start
+    // decision and its mode — the loop task can never pair a fresh Start with a
+    // stale AP flag (there is no second atomic to race against).
+    std::atomic<WebUiLifecycleIntent> pendingLifecycle{WebUiLifecycleIntent::None};
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
     std::unordered_map<uint32_t, bool> authenticatedWebSocketClients;
@@ -250,11 +368,22 @@ class WebUIPlugin : public Plugin {
     // the default-target meaning.
     volatile uint8_t pendingModeChangeTarget = 0;
     volatile bool pendingModeChange = false;
+
+    // PRO-421: millis() timestamp of the last explicit STANDBY `req:change-mode`
+    // applied by this plugin. Used by shouldSuppressStandbyReassert() to reject a
+    // stale non-STANDBY re-assert (e.g. the web dashboard's auto-steam effect
+    // reflexively re-firing STEAM right after Stop-Steam) so an explicit Standby
+    // wins. Written and read only on the WS/relay handler task; a plain scalar is
+    // sufficient. Initialized so that before any STANDBY request the guard window
+    // has already elapsed (no spurious suppression at boot).
+    unsigned long lastExplicitStandbyMs = 0;
+    bool sawExplicitStandby = false;
 };
 
 // PRO-286: enforce at compile time the invariant the comment above documents — the
 // pendingModeChangeTarget default-0 initializer only reads as "standby" if MODE_STANDBY == 0.
-static_assert(MODE_STANDBY == 0,
-              "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
+static_assert(
+    MODE_STANDBY == 0,
+    "PRO-286: pendingModeChangeTarget default-0 init assumes MODE_STANDBY==0 (see WebUIPlugin.h comment / constants.h)");
 
 #endif // WEBUIPLUGIN_H

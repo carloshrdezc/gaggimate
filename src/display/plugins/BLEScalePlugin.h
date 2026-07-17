@@ -11,6 +11,7 @@
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
 #include <atomic>
+#include <mutex>
 
 void on_ble_measurement(float value);
 
@@ -43,32 +44,25 @@ class BLEScalePlugin : public Plugin {
     void loop() override;
     ;
 
-    void connect(const std::string &uuid);
+    bool connect(const std::string &uuid);
     void scan() const;
     void disconnect();
     void onMeasurement(float value) const;
-    bool isConnected() { return scale != nullptr && scale->isConnected(); };
-    std::string getName() {
-        if (scale != nullptr && scale->isConnected()) {
-            return scale->getDeviceName();
-        }
-        return "";
-    };
-    std::string getUUID() {
-        if (scale != nullptr && scale->isConnected()) {
-            return scale->getDeviceAddress();
-        }
-        return "";
-    };
-    int getRSSI() {
-        if (scale != nullptr && scale->isConnected()) {
-            return scale->getRSSI();
-        }
-        return 0;
-    };
+    // PRO-510: these four inline readers were the last unguarded access to
+    // `scale` (see PR #506/PRO-459 for update() and PR #508/PRO-509 for
+    // onProcessStart()) — WebUIPlugin.cpp calls them from the async_tcp task
+    // while the loop task may be running disconnect() (freeing `scale`)
+    // concurrently. Moved out-of-line to BLEScalePlugin.cpp so each can take
+    // scaleMutex_ for the duration of the `scale` access, mirroring update().
+    bool isConnected();
+    std::string getName();
+    std::string getUUID();
+    int getRSSI();
 
     std::vector<DiscoveredDevice> getDiscoveredScales() const;
     void tare() const;
+    // Returns the last rate-limited-through measurement, not the absolute latest raw reading
+    // during a fast burst — this "freeze" is intentional; see onMeasurement() in the .cpp (PRO-385).
     float getLastWeight() const { return lastWeight; }
 
   private:
@@ -124,6 +118,50 @@ class BLEScalePlugin : public Plugin {
     RemoteScalesPluginRegistry *pluginRegistry = nullptr;
     RemoteScalesScanner *scanner = nullptr;
     std::unique_ptr<RemoteScales> scale = nullptr;
+
+    // PRO-459: scale->update() (invoked from update() on the controller loop
+    // task) can run for hundreds of milliseconds while a scale driver
+    // performs its connection handshake (e.g. myscale::performConnectionHandshake).
+    // PRO-351/PRO-504's callbackInFlight/tearingDown machinery protects the
+    // async weight-callback path and re-entrant disconnect() calls, but NOT
+    // this call itself: a concurrent disconnect() (CONTROLLER_BLUETOOTH_DISCONNECT
+    // or CONTROLLER_MODE_CHANGE, both reachable from other tasks/contexts) can
+    // reset `scale` to nullptr — freeing the RemoteScales object — while
+    // scale->update() is still executing inside it, producing a use-after-free
+    // (confirmed via coredump: StoreProhibitedCause, this=0x6 in RemoteScales::log
+    // reached through TimemoreScales::tare() during the handshake). PRO-508: a
+    // plain mutex is sufficient — every acquisition here is non-re-entrant.
+    // update()'s lock scope releases before it calls disconnect() on the
+    // max-reconnection-tries path (the lock guard is scoped to the inner
+    // scale->update() call only), and onProcessStart()/tare() acquire the
+    // lock independently rather than while already holding it. A plain
+    // std::mutex gives identical protection with less overhead and turns any
+    // future re-entrant-acquisition bug into a visible deadlock instead of
+    // silently succeeding.
+    mutable std::mutex scaleMutex_;
+
+    // PRO-504: disconnect() is reachable from several independent call sites
+    // that run on DIFFERENT FreeRTOS tasks — the max-reconnection-tries path
+    // in update() (controller loop task), the CONTROLLER_BLUETOOTH_DISCONNECT
+    // handler (dispatched synchronously from the client's onDisconnect(),
+    // which NimBLE invokes on the NimBLE host task), tearDownScale() (loop()/
+    // mode-change handler, controller loop task), and the destructor. It is
+    // NOT reentrancy-safe: it waits (waitForCallbacksToDrain(), up to 100ms)
+    // before touching `scale`, which is a std::unique_ptr<RemoteScales> whose
+    // destructor tears down the underlying NimBLEClient. If two call sites
+    // race onto disconnect() concurrently from different tasks (e.g. a
+    // scale-initiated BLE disconnect fires the NimBLE-host-task path the same
+    // tick update() trips the reconnection-tries teardown on the loop task),
+    // the second caller can observe `scale` as still non-null, start its own
+    // drain wait, and then run scale->disconnect()/scale=nullptr on an object
+    // the first caller is concurrently freeing — a use-after-free on the
+    // underlying NimBLEClient (crash signature: LoadProhibited in
+    // xTimerIsTimerActive, reached via NimBLEClient::disconnect() on an
+    // already-freed client). std::atomic + compare_exchange gives disconnect()
+    // a real cross-task single-owner claim: the first caller in wins and tears
+    // down; any caller that arrives while a teardown is already in flight
+    // returns immediately instead of touching `scale` a second time.
+    std::atomic<bool> tearingDown{false};
 
     // PRO-351: set true while a NimBLE weight-updated callback is executing on
     // the NimBLE host task; teardown waits for this to clear before freeing the

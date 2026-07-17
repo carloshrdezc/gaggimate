@@ -97,9 +97,17 @@ jobs:
       - name: Build display firmware (flags off)
         run: pio run -e display-flags-off
 
-  firmware-headless-4m:
-    name: Firmware build (display-headless-4m)
+  firmware-single-flag-off:
+    name: Firmware build (display, single feature off)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - display-no-homekit
+          - display-no-mqtt
+          - display-no-ble-scale
+          - display-no-webui
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -116,19 +124,59 @@ jobs:
           python-version: '3.11'
       - name: Install PlatformIO Core
         run: pip install platformio==6.1.19
-      # PRO-316: compile the 4MB-flash headless target on every PR. [env:display-headless-4m]
-      # The no_ota single ~2,097,152 B app slot is selected by this repo's own board
-      # definition (boards/esp32-s3-supermini.json -> "partitions": "no_ota.csv"); only the
-      # CSV byte layout ships with the Espressif/Arduino platform. It is not set by this env
-      # or platformio.ini. It links today at ~99.7% flash (~7 KB headroom). Without this leg,
-      # a future change that adds a few KB would silently push it over the partition limit
-      # with nothing in CI to catch it.
-      # PlatformIO's linker exits non-zero on a region overflow, so a plain `pio run` fails
-      # the PR — no silent truncation. Like the sibling display jobs, this relies on
-      # embed_webui_pre.py's empty-bundle stub; the real web UI isn't needed to exercise
-      # the linker/partition check that gates flash overflow.
-      - name: Build display-headless-4m firmware
-        run: pio run -e display-headless-4m
+      # PRO-8: build EACH feature flag disabled on its own. The firmware-flags-off
+      # leg above (and the default `display` build) cannot surface a regression
+      # that only appears when exactly ONE flag is off: with the other three ON,
+      # a symbol/definition the single-off path needs can still be pulled in, so
+      # the all-off and all-on builds both link while the single-off permutation
+      # would fail (undefined-symbol / ODR / dangling-ref stub drift). Precedent:
+      # CAR-383's WEBUI=0 mDNS-advertising-a-dead-:80-service bug was exactly this
+      # single-flag-off class. Each matrix env (see [env:display-no-*] in
+      # platformio.ini) flips one GAGGIMATE_ENABLE_* macro to 0; the linker exits
+      # non-zero on any missing/duplicate symbol, so a broken single-off leg fails
+      # the PR here instead of shipping. Like the sibling display jobs this relies
+      # on embed_webui_pre.py's empty-bundle stub — the real web UI isn't needed
+      # to exercise the compile/link check.
+      - name: Build display firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
+
+  firmware-driver-family:
+    name: Firmware build (display, single driver family)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - display-lilygo
+          - display-amoled
+          - display-waveshare
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-12: build EACH single-driver-family permutation. The default
+      # [env:display] compiles all three families (LilyGo/AMOLED/Waveshare) and
+      # keeps the full autodetect chain; these envs each -DGM_DRIVER_<FAMILY>=1
+      # to prune the other families' #includes + isCompatible() branches and
+      # narrow build_src_filter to drop their driver source. Without this leg,
+      # a broken family guard (a stray reference to an excluded family, or a
+      # build_src_filter that drops shared common/ code) would only surface on a
+      # hand-run board-specific build; here it fails the PR. Relies on
+      # embed_webui_pre.py's empty-bundle stub like the sibling display jobs.
+      - name: Build display firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
 
   native:
     name: Native tests (ASan/UBSan)

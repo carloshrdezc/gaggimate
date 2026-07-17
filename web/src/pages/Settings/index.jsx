@@ -1,5 +1,6 @@
-import { faFileExport, faFileImport, faCheck, faEye, faEyeSlash, faArrowLeft, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faFileExport, faCheck, faEye, faEyeSlash, faArrowLeft, faSave } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { ImportButton } from '../../components/ImportButton.jsx';
 import { computed } from '@preact/signals';
 import { useQuery } from 'preact-fetching';
 import { useCallback, useEffect, useRef, useState, useContext } from 'preact/hooks';
@@ -66,10 +67,18 @@ export function Settings() {
 
     setAuthHandoffUrl(url);
     if (navigator.clipboard) navigator.clipboard.writeText(url);
+    const wifiCredentials = new FormData(formRef.current);
 
+    // The recovery marker must be written with the pending Wi-Fi credentials.
+    // Otherwise Controller::setupWifi() deliberately remains in AP recovery.
     const response = await authenticatedFetch('/api/settings', {
       method: 'post',
-      body: new URLSearchParams({ completeLocalAuthProvisioning: '1', restart: '1' }),
+      body: new URLSearchParams({
+        wifiSsid: wifiCredentials.get('wifiSsid') || '',
+        wifiPassword: wifiCredentials.get('wifiPassword') || '',
+        completeLocalAuthProvisioning: '1',
+        restart: '1',
+      }),
     });
     if (!response.ok) throw new Error(`Server error: ${response.status}`);
   };
@@ -305,23 +314,11 @@ export function Settings() {
             onClick={onExport}
             className='nd-action-btn'
             title='Export Settings'
+            aria-label='Export Settings'
           >
             <FontAwesomeIcon icon={faFileExport} />
           </button>
-          <label
-            htmlFor='settingsImport'
-            className='nd-action-btn cursor-pointer'
-            title='Import Settings'
-          >
-            <FontAwesomeIcon icon={faFileImport} />
-          </label>
-          <input
-            onChange={onUpload}
-            className='hidden'
-            id='settingsImport'
-            type='file'
-            accept='.json,application/json'
-          />
+          <ImportButton onChange={onUpload} title='Import Settings' />
         </div>
       </div>
 
@@ -342,6 +339,7 @@ export function Settings() {
                     id='targetSteamTemp'
                     name='targetSteamTemp'
                     type='number'
+                    inputMode='decimal'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder='135'
                     value={formData.targetSteamTemp}
@@ -362,6 +360,7 @@ export function Settings() {
                     id='targetWaterTemp'
                     name='targetWaterTemp'
                     type='number'
+                    inputMode='decimal'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder='80'
                     value={formData.targetWaterTemp}
@@ -406,6 +405,7 @@ export function Settings() {
                     id='standbyTimeout'
                     name='standbyTimeout'
                     type='number'
+                    inputMode='numeric'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder='0'
                     value={formData.standbyTimeout}
@@ -451,6 +451,7 @@ export function Settings() {
                       id='brewDelay'
                       name='brewDelay'
                       type='number'
+                      inputMode='decimal'
                       step='any'
                       className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                       placeholder='0'
@@ -472,6 +473,7 @@ export function Settings() {
                       id='grindDelay'
                       name='grindDelay'
                       type='number'
+                      inputMode='decimal'
                       step='any'
                       className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                       placeholder='0'
@@ -503,6 +505,7 @@ export function Settings() {
                     id='flushDuration'
                     name='flushDuration'
                     type='number'
+                    inputMode='numeric'
                     min='1'
                     max='60'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
@@ -779,6 +782,7 @@ export function Settings() {
                     id='kf'
                     name='kf'
                     type='number'
+                    inputMode='decimal'
                     step='0.001'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder='0.600'
@@ -823,6 +827,7 @@ export function Settings() {
                     id='temperatureOffset'
                     name='temperatureOffset'
                     type='number'
+                    inputMode='decimal'
                     step='any'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder='0'
@@ -848,6 +853,7 @@ export function Settings() {
                       id='pressureScaling'
                       name='pressureScaling'
                       type='number'
+                      inputMode='decimal'
                       step='any'
                       className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                       placeholder='0.0'
@@ -875,6 +881,7 @@ export function Settings() {
                     id='steamPumpPercentage'
                     name='steamPumpPercentage'
                     type='number'
+                    inputMode='decimal'
                     step='0.1'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder={pressureAvailable.value ? '0.0' : '0.0 %'}
@@ -912,6 +919,7 @@ export function Settings() {
                       id='steamPumpCutoff'
                       name='steamPumpCutoff'
                       type='number'
+                      inputMode='decimal'
                       step='any'
                       className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                       placeholder='0.0'
@@ -960,6 +968,7 @@ export function Settings() {
                   id='mainBrightness'
                   name='mainBrightness'
                   type='number'
+                  inputMode='numeric'
                   className='nd-input nd-input--lg'
                   placeholder='16'
                   min='1'
@@ -998,6 +1007,7 @@ export function Settings() {
                   id='standbyBrightness'
                   name='standbyBrightness'
                   type='number'
+                  inputMode='numeric'
                   className='nd-input nd-input--lg'
                   placeholder='8'
                   min='0'
@@ -1019,6 +1029,7 @@ export function Settings() {
                     id='standbyBrightnessTimeout'
                     name='standbyBrightnessTimeout'
                     type='number'
+                    inputMode='numeric'
                     className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                     placeholder='60'
                     min='1'
@@ -1068,6 +1079,7 @@ export function Settings() {
                       id='sunriseR'
                       name='sunriseR'
                       type='number'
+                      inputMode='numeric'
                       className='nd-input nd-input--lg'
                       placeholder='16'
                       value={formData.sunriseR}
@@ -1085,6 +1097,7 @@ export function Settings() {
                       id='sunriseG'
                       name='sunriseG'
                       type='number'
+                      inputMode='numeric'
                       className='nd-input nd-input--lg'
                       placeholder='16'
                       value={formData.sunriseG}
@@ -1102,6 +1115,7 @@ export function Settings() {
                       id='sunriseB'
                       name='sunriseB'
                       type='number'
+                      inputMode='numeric'
                       className='nd-input nd-input--lg'
                       placeholder='16'
                       value={formData.sunriseB}
@@ -1119,6 +1133,7 @@ export function Settings() {
                       id='sunriseW'
                       name='sunriseW'
                       type='number'
+                      inputMode='numeric'
                       className='nd-input nd-input--lg'
                       placeholder='16'
                       value={formData.sunriseW}
@@ -1137,6 +1152,7 @@ export function Settings() {
                     id='sunriseExtBrightness'
                     name='sunriseExtBrightness'
                     type='number'
+                    inputMode='numeric'
                     className='nd-input nd-input--lg'
                     placeholder='16'
                     value={formData.sunriseExtBrightness}
@@ -1155,6 +1171,7 @@ export function Settings() {
                       id='emptyTankDistance'
                       name='emptyTankDistance'
                       type='number'
+                      inputMode='decimal'
                       className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                       placeholder='16'
                       value={formData.emptyTankDistance}
@@ -1175,6 +1192,7 @@ export function Settings() {
                       id='fullTankDistance'
                       name='fullTankDistance'
                       type='number'
+                      inputMode='decimal'
                       className='nd-input nd-input--lg flex-1 rounded-r-none border-r-0'
                       placeholder='16'
                       value={formData.fullTankDistance}

@@ -8,9 +8,16 @@ import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { useProcessActions } from '../../hooks/useProcessActions.js';
 import { useProfileData } from '../../hooks/useProfileData.js';
 import { useAutoSteam } from '../../hooks/useAutoSteam.js';
+import { useActiveShotManualGrindRecorder } from '../../hooks/useActiveShotManualGrindRecorder.js';
 import { useShotDoseRecorder } from '../../hooks/useShotDoseRecorder.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
 import { listBeans, recordBeanSelection, parseQuantity } from '../../utils/beanManager.js';
+import {
+  listGrinders,
+  recordGrinderSelection,
+  recordManualGrindSetting,
+  MANUAL_GRIND_SETTING_STORAGE_KEY,
+} from '../../utils/grinderManager.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
@@ -25,7 +32,9 @@ import {
   MANUAL_TEMP_MAX,
   MANUAL_TEMP_MIN,
   MODE_MANUAL,
+  MODE_STANDBY,
   MODE_STEAM,
+  buildStandbyProfileCurve,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
@@ -36,6 +45,7 @@ import {
   getProcessKindForMode,
   getPrimaryActionState,
   getTemperatureRingMetrics,
+  shouldFireAutoSteamOnStop,
   shouldKeepManualDraftDirty,
   shouldSendManualUpdate,
 } from './dashboardLogic.js';
@@ -44,11 +54,19 @@ const DOSE_KEY = 'gaggimate-dose-grams';
 const DEFAULT_DOSE = 18.0;
 const DEFAULT_YIELD = 36.0;
 
+// Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history of
+// the physical grinder dial number; NEVER sent to the device (unlike DOSE_KEY,
+// which also fires req:dose:set). Default 0 = "not set yet".
+const DEFAULT_MANUAL_GRIND = 0;
+
 const PRESSURE_MAX = 12;
 const FLOW_MAX = 6;
 const RING_TOTAL_ARC = 300;
 const RING_START_ANGLE = 210;
 const YIELD_SEGMENTS = Array.from({ length: 40 }, (_, i) => i);
+// PRO-426: standby profile mini-curve viewBox (SVG stretches to its container).
+const STANDBY_CURVE_VB_W = 300;
+const STANDBY_CURVE_VB_H = 90;
 const MANUAL_TARGET_OPTIONS = [
   { id: MANUAL_TARGET_PRESSURE, label: 'PRESSURE' },
   { id: MANUAL_TARGET_FLOW, label: 'FLOW' },
@@ -280,6 +298,144 @@ TargetBar.propTypes = {
   frac: PropTypes.number,
   tgtFrac: PropTypes.number,
 };
+
+// PRO-426: Standby shot-card block. Replaces the live target bars + yield bar
+// when the machine is idle (mode 0, non-manual). Surfaces a dark-themed
+// hand-rolled mini-curve of the selected profile — no Chart.js. Grinder + grind
+// setting are NOT duplicated here: the recipe row already renders them as
+// editable dropdowns in all modes (incl. standby). Every field degrades to a
+// themed empty-state string (never NaN / "undefined" / broken UI).
+function StandbyBlock({ profileName, curve }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      {/* Selected-profile mini-curve. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'var(--dm-font-mono)',
+              fontSize: 9,
+              letterSpacing: '0.18em',
+              color: 'var(--dm-fg-dim)',
+            }}
+          >
+            PROFILE
+          </span>
+          {curve && (
+            <span style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-good)' }}>
+                ▬ PRESSURE
+              </span>
+              <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-warn)' }}>
+                ▬ FLOW
+              </span>
+              {curve.temperature && (
+                <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--dm-accent)' }}>
+                  ▬ TEMP
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            border: '1px solid var(--dm-line)',
+            borderRadius: 8,
+            background: 'var(--dm-bg-0)',
+            overflow: 'hidden',
+            height: 92,
+          }}
+        >
+          {curve ? (
+            <svg
+              viewBox={`0 0 ${STANDBY_CURVE_VB_W} ${STANDBY_CURVE_VB_H}`}
+              preserveAspectRatio='none'
+              style={{ width: '100%', height: '100%', display: 'block' }}
+            >
+              {/* Faint horizontal grid lines (quarters) */}
+              {[0.25, 0.5, 0.75].map(f => (
+                <line
+                  key={f}
+                  x1='0'
+                  x2={STANDBY_CURVE_VB_W}
+                  y1={(STANDBY_CURVE_VB_H * f).toFixed(1)}
+                  y2={(STANDBY_CURVE_VB_H * f).toFixed(1)}
+                  stroke='rgba(255,255,255,0.06)'
+                  strokeDasharray='2 4'
+                />
+              ))}
+              {/* Temperature (accent/red) under flow + pressure; pressure stays on top */}
+              {curve.temperature && (
+                <polyline
+                  points={curve.temperature}
+                  fill='none'
+                  stroke='var(--dm-accent)'
+                  strokeWidth='1.5'
+                  strokeLinejoin='round'
+                  strokeLinecap='round'
+                  vectorEffect='non-scaling-stroke'
+                />
+              )}
+              {/* Flow (amber) then pressure (green) on top */}
+              <polyline
+                points={curve.flow}
+                fill='none'
+                stroke='var(--dm-warn)'
+                strokeWidth='1.5'
+                strokeLinejoin='round'
+                strokeLinecap='round'
+                vectorEffect='non-scaling-stroke'
+              />
+              <polyline
+                points={curve.pressure}
+                fill='none'
+                stroke='var(--dm-good)'
+                strokeWidth='2'
+                strokeLinejoin='round'
+                strokeLinecap='round'
+                vectorEffect='non-scaling-stroke'
+              />
+            </svg>
+          ) : (
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'var(--dm-font-mono)',
+                fontSize: 10,
+                letterSpacing: '0.2em',
+                color: 'var(--dm-fg-faint)',
+                border: '1px dashed rgba(232,232,232,0.15)',
+                borderRadius: 8,
+              }}
+            >
+              {profileName ? 'NO CURVE DATA' : 'NO PROFILE SELECTED'}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+StandbyBlock.propTypes = {
+  profileName: PropTypes.string,
+  curve: PropTypes.shape({
+    pressure: PropTypes.string,
+    flow: PropTypes.string,
+    temperature: PropTypes.string,
+  }),
+};
+
 
 function ManualSlider({ label, value, actual, unit, min, max, step, color, onChange, onEditingChange }) {
   const handleInput = useCallback(
@@ -656,7 +812,7 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, disabled = false, lockedHint }) {
+function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
 
@@ -751,7 +907,15 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span
-            onClick={() => { setEditing(true); }}
+            onClick={() => {
+              // PRO-503: fire onTap BEFORE entering edit mode so a tap-away
+              // without typing/Enter still records a fresh "confirmed" event
+              // (mobile onBlur is unreliable). Distinct from onCommit — most
+              // callers don't need this and it must not re-run their commit
+              // side effects (e.g. DOSE's req:dose:set) on every open-tap.
+              onTap?.();
+              setEditing(true);
+            }}
             style={{
               fontFamily: 'var(--dm-font-display)',
               fontSize: 28,
@@ -824,9 +988,21 @@ EditableNumBlock.propTypes = {
   min: PropTypes.number,
   max: PropTypes.number,
   onCommit: PropTypes.func,
+  onTap: PropTypes.func,
   disabled: PropTypes.bool,
   lockedHint: PropTypes.string,
 };
+
+// Format the current grind target for display. Mirrors ProcessControls'
+// formatTarget: grindTarget === 1 means a volumetric (grams) target, otherwise
+// a time (seconds) target. Returns null when no target is set so the caller can
+// render a clean empty state ("No grind target").
+function formatGrindTarget(grindTarget, grindTargetVolume, grindTargetDuration) {
+  if (grindTarget === 1) {
+    return grindTargetVolume > 0 ? `${Number(grindTargetVolume).toFixed(1)}g` : null;
+  }
+  return grindTargetDuration > 0 ? `${Math.round(grindTargetDuration / 1000)}s` : null;
+}
 
 // Inline dropdown for profile / bean selection
 function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loading, error, onClose }) {
@@ -1072,6 +1248,10 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const isManualAvailable = machine.value.capabilities.pressure === true;
   const isSteamMode = mode === MODE_STEAM;
   const isManualMode = mode === MODE_MANUAL;
+  // PRO-426: standby (mode 0, non-manual) swaps the live-shot widgets (target
+  // bars + yield bar) for a standby block (grinder + grind setting + selected
+  // profile mini-curve).
+  const isStandby = mode === MODE_STANDBY;
   const processKind = getProcessKindForMode(mode, isGrindAvailable, isManualAvailable);
   const availableModes = useMemo(
     () => getAvailableModeOptions(isGrindAvailable, isManualAvailable),
@@ -1102,8 +1282,16 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     if (!wasActiveRef.current) return;
     wasActiveRef.current = false;
     setIsFlushing(false);
-    if (lastActiveWasBrewRef.current && autoSteamEnabled) {
+    if (shouldFireAutoSteamOnStop({ lastActiveWasBrew: lastActiveWasBrewRef.current, autoSteamEnabled })) {
       try { api.send({ tp: 'req:change-mode', mode: 2 }); } catch {}
+      // PRO-421: auto-steam fires exactly once per brew shot. Clearing the flag
+      // (and the underlying last-process type) prevents the effect from firing
+      // AGAIN when the auto-steamed session is later stopped: without this, the
+      // steam session re-captures lastActiveWasBrewRef === true (lastProcessType
+      // is still 'brew'), so pressing "Stop Steam" would re-send change-mode:2
+      // right after the STANDBY and bounce the machine back to Steam.
+      lastActiveWasBrewRef.current = false;
+      lastProcessTypeRef.current = null;
     }
   }, [active, autoSteamEnabled, api, setIsFlushing]);
 
@@ -1182,7 +1370,15 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     wasManualModeRef.current = true;
   }, [isManualAvailable, isManualMode, manualDraft, sendManualPayload]);
 
-  const { profileData } = useProfileData(api, s.mode === 1, s.selectedProfileId);
+  // PRO-426: also fetch profile data in standby (mode 0) so the standby shot
+  // card can render the selected-profile mini-curve. The `brew` gate here drives
+  // the profiles-LIST fetch; the selected profile itself is fetched off
+  // selectedProfileId regardless of mode.
+  const { profileData } = useProfileData(
+    api,
+    brew || s.mode === MODE_STANDBY,
+    s.selectedProfileId
+  );
 
   // Connected scale name
   const [scaleName, setScaleName] = useState(null);
@@ -1214,6 +1410,37 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       console.error('Failed to send dose:', error);
     }
   }, [api]);
+
+  // Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history
+  // ONLY — seeded from localStorage like `cachedDose` above, but with NO device
+  // send: this is the physical dial number, not a machine parameter. Committing
+  // a value also records a per-profile manual-grind event so a later shot of the
+  // active profile pre-fills its Shot Notes grindSetting with it (taking
+  // precedence over the machine grind-TARGET label — see grinderManager.js).
+  const [manualGrind, setManualGrindState] = useState(() => {
+    try { return parseQuantity(localStorage.getItem(MANUAL_GRIND_SETTING_STORAGE_KEY)) ?? DEFAULT_MANUAL_GRIND; } catch { return DEFAULT_MANUAL_GRIND; }
+  });
+  const recordActiveShotManualGrind = useActiveShotManualGrindRecorder(api);
+  const setManualGrind = useCallback(val => {
+    // Permissive range: grinder dials vary enormously (0–10 with decimals on a
+    // Niche, 0–40+ clicks on a DF64, arbitrary worm-drive numbers), so clamp
+    // only to a wide, neutral [0, 100] band rather than any grinder-specific
+    // scale. step=0.1 supports decimal dials.
+    const v = Math.max(0, Math.min(100, val));
+    setManualGrindState(v);
+    try { localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, String(v)); } catch {}
+    // Record for Shot Notes pre-fill (per-profile, per-browser). Skip 0 — that
+    // is the "not set" sentinel and should not shadow the machine target label.
+    if (v > 0) {
+      const st = machine.value.status;
+      recordManualGrindSetting({
+        profileId: st.selectedProfileId,
+        profileLabel: st.selectedProfile,
+        grindSetting: String(v),
+      });
+      recordActiveShotManualGrind(String(v));
+    }
+  }, [recordActiveShotManualGrind]);
 
   // Auto-attach dose and bean to shot notes as soon as the shot becomes active
   useShotDoseRecorder(api, dose);
@@ -1258,8 +1485,12 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const [loadingBeans, setLoadingBeans] = useState(false);
   const [profileError, setProfileError] = useState(null);
   const [beanError, setBeanError] = useState(null);
+  const [grinderOptions, setGrinderOptions] = useState([]);
+  const [loadingGrinders, setLoadingGrinders] = useState(false);
+  const [grinderError, setGrinderError] = useState(null);
   const profilesLoadedRef = useRef(false);
   const beansLoadedRef = useRef(false);
+  const grindersLoadedRef = useRef(false);
 
   const loadProfiles = useCallback(async () => {
     if (profilesLoadedRef.current) return;
@@ -1283,6 +1514,19 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     finally { setLoadingBeans(false); }
   }, [api]);
 
+  const loadGrinders = useCallback(async () => {
+    if (grindersLoadedRef.current) return;
+    grindersLoadedRef.current = true;
+    setLoadingGrinders(true); setGrinderError(null);
+    try {
+      const grinders = await listGrinders(api);
+      // listGrinders returns an ordered array of name strings; SelectDropdown
+      // reads `opt.name`/`opt.label` and keys on `opt.id || opt.name`.
+      setGrinderOptions((grinders || []).map(name => ({ name })));
+    } catch { setGrinderError('Failed to load'); grindersLoadedRef.current = false; }
+    finally { setLoadingGrinders(false); }
+  }, [api]);
+
   const openProfileDropdown = useCallback(() => {
     loadProfiles();
     setActiveDropdown(d => d === 'profile' ? null : 'profile');
@@ -1292,6 +1536,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     loadBeans();
     setActiveDropdown(d => d === 'bean' ? null : 'bean');
   }, [loadBeans]);
+
+  const openGrinderDropdown = useCallback(() => {
+    loadGrinders();
+    setActiveDropdown(d => d === 'grinder' ? null : 'grinder');
+  }, [loadGrinders]);
 
   const handleProfileSelect = useCallback(async opt => {
     try {
@@ -1310,6 +1559,24 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       });
       setActiveDropdown(null);
     } catch { console.error('bean select failed'); }
+  }, [api]);
+
+  const handleGrinderSelect = useCallback(opt => {
+    try {
+      // Persist the selection on the device (firmware handler from PRO-424) and
+      // record a per-browser selection event so a subsequent shot's notes
+      // pre-fill the grinder + current grind-setting label. Mirrors
+      // handleBeanSelect / recordBeanSelection.
+      api.send({ tp: 'req:grinders:select', name: opt.name });
+      const st = machine.value.status;
+      recordGrinderSelection({
+        profileId: st.selectedProfileId,
+        profileLabel: st.selectedProfile,
+        grinder: opt.name,
+        grindSetting: formatGrindTarget(st.grindTarget, st.grindTargetVolume, st.grindTargetDuration),
+      });
+      setActiveDropdown(null);
+    } catch { console.error('grinder select failed'); }
   }, [api]);
 
   // Close dropdown when clicking outside
@@ -1364,6 +1631,19 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     }
     return [];
   }, [profileData]);
+
+  // PRO-426: dark-themed selected-profile mini-curve for the standby block.
+  // Built off the same phase schema the ExtendedProfileChart consumes, but as a
+  // hand-rolled SVG (no Chart.js). Fixed viewBox; the SVG stretches to fit.
+  const standbyCurve = useMemo(
+    () =>
+      buildStandbyProfileCurve(profileData, {
+        width: STANDBY_CURVE_VB_W,
+        height: STANDBY_CURVE_VB_H,
+        padding: 3,
+      }),
+    [profileData]
+  );
 
   // Index of current phase in profile list (case-insensitive)
   const currentPhaseIdx = currentPhaseLabel && profilePhases.length > 0
@@ -1879,6 +2159,28 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, color: 'var(--dm-fg-faint)' }}>▾</span>
             </div>
 
+            {/* Grinder + grind-setting row (PRO-425) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+              <button
+                type='button'
+                onClick={openGrinderDropdown}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: 'var(--dm-font-mono)',
+                  fontSize: 10,
+                  color: s.selectedGrinder ? 'var(--dm-fg-dim)' : 'var(--dm-fg-faint)',
+                  borderBottom: `1px dashed ${activeDropdown === 'grinder' ? 'var(--dm-accent)' : 'transparent'}`,
+                }}
+              >
+                {s.selectedGrinder || 'No grinder selected'}
+              </button>
+              <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 8, color: 'var(--dm-fg-faint)' }}>▾</span>
+            </div>
+
             {/* Bean dropdown */}
             {activeDropdown === 'bean' && (
               <SelectDropdown
@@ -1904,13 +2206,26 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onClose={() => setActiveDropdown(null)}
               />
             )}
+
+            {/* Grinder dropdown (PRO-425) */}
+            {activeDropdown === 'grinder' && (
+              <SelectDropdown
+                label='SELECT GRINDER'
+                options={grinderOptions}
+                activeLabel={s.selectedGrinder}
+                onSelect={handleGrinderSelect}
+                loading={loadingGrinders}
+                error={grinderError}
+                onClose={() => setActiveDropdown(null)}
+              />
+            )}
           </div>
 
-          {/* Dose → Yield → Scales */}
+          {/* Grind → Dose → Yield → Scales */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr auto 1fr auto 1fr',
+              gridTemplateColumns: '1fr auto 1fr auto 1fr auto 1fr',
               gap: 10,
               alignItems: 'center',
               padding: '12px 0',
@@ -1918,6 +2233,23 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               borderBottom: '1px solid var(--dm-line)',
             }}
           >
+            {/* Manual grinder-dial setting (PRO-431). Edits exactly like DOSE
+                (tap → type → commit) but is per-browser localStorage only and is
+                never sent to the device. */}
+            <EditableNumBlock
+              label='GRIND'
+              value={manualGrind}
+              unit=''
+              step={0.1}
+              min={0}
+              max={100}
+              onCommit={setManualGrind}
+              // PRO-503: re-commit the current value on tap-to-open so a
+              // tap-away without typing/Enter still records a fresh
+              // recordManualGrindSetting event (mobile onBlur is unreliable).
+              onTap={() => setManualGrind(manualGrind)}
+            />
+            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
             <EditableNumBlock
               label='DOSE'
               value={dose}
@@ -1966,7 +2298,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
             </div>
           </div>
 
-          {/* Target bars */}
+          {/* Target bars (live shot widgets — hidden in standby, PRO-426) */}
+          {!isStandby && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
             <TargetBar
               color='var(--dm-good)'
@@ -1996,8 +2329,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               tgtFrac={temperatureRing.targetFraction}
             />
           </div>
+          )}
 
-          {/* Yield bar + action button */}
+          {/* Bottom row + action button.
+              Standby (PRO-426): grinder + grind setting + selected-profile
+              mini-curve. All other modes: the live yield fill bar. */}
           <div
             style={{
               display: 'grid',
@@ -2007,6 +2343,12 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               marginTop: 'auto',
             }}
           >
+            {isStandby ? (
+              <StandbyBlock
+                profileName={s.selectedProfile}
+                curve={standbyCurve}
+              />
+            ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div
                 style={{
@@ -2058,6 +2400,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 ))}
               </div>
             </div>
+            )}
 
             <button
               type='button'

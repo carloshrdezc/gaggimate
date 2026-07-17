@@ -25,6 +25,24 @@ const DEFAULT_NOTES = {
   notes: '',
 };
 
+const NOTES_SERVICE_PERSISTED = '__shotHistoryPersistedNotes';
+
+function markPersistedNotes(notes) {
+  if (!notes || typeof notes !== 'object') return notes;
+
+  try {
+    Object.defineProperty(notes, NOTES_SERVICE_PERSISTED, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen notes objects remain usable; they just cannot carry the marker.
+  }
+
+  return notes;
+}
+
 class NotesService {
   constructor() {
     this.apiService = null;
@@ -59,7 +77,7 @@ class NotesService {
               parsed = {};
             }
           }
-          return { ...defaults, ...parsed };
+          return markPersistedNotes({ ...defaults, ...parsed });
         }
       } catch (e) {
         console.error('Failed to load notes from API:', e);
@@ -71,7 +89,7 @@ class NotesService {
       try {
         const stored = await indexedDBService.getNotes(String(shotId));
         if (stored) {
-          return { ...defaults, ...stored };
+          return markPersistedNotes({ ...defaults, ...stored });
         }
       } catch (e) {
         console.error('Failed to load notes from IndexedDB:', e);
@@ -84,6 +102,24 @@ class NotesService {
       return { ...defaults, ...this._tempCache.get(String(shotId)) };
     }
     return defaults;
+  }
+
+  async saveNotesIfMissing(shotId, source, notes, shouldSave = () => true) {
+    if (source !== 'gaggimate') {
+      if (shouldSave()) await this.saveNotes(shotId, source, notes);
+      return;
+    }
+    if (!this.apiService) throw new Error('ApiService not available');
+
+    if (!shouldSave()) return;
+
+    // The device evaluates the missing-field condition and saves in one request,
+    // so concurrent Dashboard / Shot History clients cannot clobber each other.
+    await this.apiService.request({
+      tp: 'req:history:notes:fill-missing',
+      id: shotId,
+      notes: { ...notes, id: String(shotId) },
+    });
   }
 
   async saveNotes(shotId, source, notes) {
@@ -102,9 +138,13 @@ class NotesService {
         });
         let raw = res?.notes || {};
         if (typeof raw === 'string') {
-          try { raw = JSON.parse(raw); } catch { raw = {}; }
+          try {
+            raw = JSON.parse(raw);
+          } catch {
+            raw = {};
+          }
         }
-        existing = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+        existing = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
       } catch {
         // No existing notes, fine to continue with empty object
       }

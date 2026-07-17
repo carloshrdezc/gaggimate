@@ -101,6 +101,7 @@ class DefaultUI {
     String selectedProfileId = "";
     Profile selectedProfile{};
     String selectedBean = "";
+    String selectedGrinder = ""; // PRO-428: name of the selected grinder (grinders:selected), "" when none
     int updateAvailable = false;
     int updateActive = false;
     int apActive = false;

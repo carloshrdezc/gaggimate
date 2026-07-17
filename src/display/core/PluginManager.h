@@ -144,6 +144,8 @@ class PluginManager {
         ~ListenersLock() { manager->unlockListeners(); }
         ListenersLock(const ListenersLock &) = delete;
         ListenersLock &operator=(const ListenersLock &) = delete;
+        ListenersLock(ListenersLock &&) = delete;
+        ListenersLock &operator=(ListenersLock &&) = delete;
 
       private:
         PluginManager *manager;
@@ -176,6 +178,8 @@ class PluginManager {
         ~DepthGuard() { manager->exitDispatch(); }
         DepthGuard(const DepthGuard &) = delete;
         DepthGuard &operator=(const DepthGuard &) = delete;
+        DepthGuard(DepthGuard &&) = delete;
+        DepthGuard &operator=(DepthGuard &&) = delete;
         int depth() const { return currentDepth; }
 
       private:
