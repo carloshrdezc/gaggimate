@@ -14,6 +14,17 @@ vi.mock('./HistoryChart.jsx', () => ({
   HistoryChart: () => h('div', { 'data-testid': 'history-chart' }),
 }));
 
+vi.mock('./parseBinaryIndex.js', () => ({
+  parseBinaryIndex: vi.fn(() => ({})),
+  indexToShotList: vi.fn(() => [
+    { id: 42, profile: 'Device shot', timestamp: 1000, duration: 25000 },
+  ]),
+}));
+
+vi.mock('./parseBinaryShot.js', () => ({
+  parseBinaryShot: vi.fn(() => ({ samples: [{ t: 0 }], volume: 36 })),
+}));
+
 let shotNotesCardUpdate;
 
 vi.mock('./ShotNotesCard.jsx', () => ({
@@ -84,9 +95,32 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe('ShotHistory visible-page rating hydration', () => {
+  test('loads a device shot with the stored bearer token when expanding its details', async () => {
+    localStorage.setItem('gaggimate_local_admin_token', 'history-token');
+    machine.value = { ...machine.value, connected: true };
+    indexedDBService.getAllShots.mockResolvedValue([]);
+    notesService.loadNotes.mockResolvedValue({});
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) })
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
+
+    renderShotHistory();
+
+    await screen.findByText('Device shot');
+    fireEvent.click(screen.getByLabelText('Expand shot details'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/history/000042.slog', {
+        headers: { Authorization: 'Bearer history-token' },
+      });
+    });
+  });
+
   test('prefers newer persisted browser notes over stale embedded notes for list state', async () => {
     indexedDBService.getAllShots.mockResolvedValue([
       {

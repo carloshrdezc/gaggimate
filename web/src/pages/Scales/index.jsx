@@ -86,7 +86,7 @@ export function Scales() {
       try {
         const formData = new FormData();
         formData.append('uuid', uuid);
-        const res = await fetch('/api/scales/connect', {
+        const res = await authenticatedFetch('/api/scales/connect', {
           method: 'post',
           body: formData,
         });

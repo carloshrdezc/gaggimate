@@ -358,7 +358,7 @@ export function ShotHistory() {
         }
 
         const paddedId = String(shot.id).padStart(6, '0');
-        const resp = await fetch(`/api/history/${paddedId}.slog`);
+        const resp = await authenticatedFetch(`/api/history/${paddedId}.slog`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const buf = await resp.arrayBuffer();
         const parsed = parseBinaryShot(buf, shot.id);
