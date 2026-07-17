@@ -7,7 +7,7 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { timezones } from '../../config/zones.js';
 import { machine, ApiServiceContext } from '../../services/ApiService.js';
-import { authenticatedFetch, localAuthDownloadUrl } from '../../services/localAuthFetch.js';
+import { authenticatedFetch, localAuthDownloadUrl, bootstrapLocalAuth } from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
@@ -47,9 +47,7 @@ export function Settings() {
       setAutoWakeupSchedules(schedules);
       setFormData(normalized);
       if (fetchedSettings.localAdminToken && fetchedSettings.localAdminToken !== SECRET_SENTINEL) {
-        const previousToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
-        localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, fetchedSettings.localAdminToken);
-        if (previousToken !== fetchedSettings.localAdminToken) apiService.authenticateLocal(fetchedSettings.localAdminToken);
+        bootstrapLocalAuth(fetchedSettings.localAdminToken, apiService);
       }
     } else {
       setFormData({});

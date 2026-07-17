@@ -1,6 +1,7 @@
 import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
+import { LOCAL_AUTH_TOKEN_KEY } from './localAuthFetch.js';
 
 /**
  * Thrown by `ApiService.request()` when the underlying WebSocket closes (or
@@ -23,7 +24,6 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 // Default brew dose (grams) used to seed the pre-connection status object.
 // Matches the firmware default (Settings.h: doseGrams = 18.0).
 const DEFAULT_DOSE_GRAMS = 18;
-const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
 
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;

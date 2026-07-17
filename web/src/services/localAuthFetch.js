@@ -1,4 +1,10 @@
-const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
+export const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
+
+export function bootstrapLocalAuth(token, apiService) {
+  const previousToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+  localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, token);
+  if (previousToken !== token) apiService.authenticateLocal(token);
+}
 
 export function localAuthHeaders(headers = {}) {
   const token = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
