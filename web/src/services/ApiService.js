@@ -23,6 +23,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 // Default brew dose (grams) used to seed the pre-connection status object.
 // Matches the firmware default (Settings.h: doseGrams = 18.0).
 const DEFAULT_DOSE_GRAMS = 18;
+const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
 
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;
@@ -105,6 +106,10 @@ export default class ApiService {
 
   _onOpen() {
     console.log('WebSocket connected successfully');
+    const localAdminToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+    if (localAdminToken) {
+      this.socket.send(JSON.stringify({ tp: 'req:auth', token: localAdminToken }));
+    }
     this.reconnectAttempts = 0;
     this.isConnecting = false;
     machine.value = {

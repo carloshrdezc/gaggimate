@@ -45,6 +45,9 @@ export function Settings() {
       );
       setAutoWakeupSchedules(schedules);
       setFormData(normalized);
+      if (fetchedSettings.localAdminToken && fetchedSettings.localAdminToken !== SECRET_SENTINEL) {
+        localStorage.setItem('gaggimate_local_admin_token', fetchedSettings.localAdminToken);
+      }
     } else {
       setFormData({});
       setAutoWakeupSchedules([{ time: '07:00', days: [true, true, true, true, true, true, true] }]);

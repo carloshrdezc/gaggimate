@@ -181,6 +181,7 @@ void Settings::load() {
     cloudRelayUrl = preferences.getString("cr_url", "");
     cloudRelayToken = preferences.getString("cr_token", "");
     cloudRelayEnabled = preferences.getBool("cr_enabled", false);
+    localAdminToken = preferences.getString("admin_token", "");
 
     preferences.end();
 
@@ -536,6 +537,11 @@ void Settings::setCloudRelayEnabled(bool enabled) {
     save();
 }
 
+void Settings::setLocalAdminToken(const String &token) {
+    localAdminToken = token;
+    save(true);
+}
+
 void Settings::setManualTargetType(int target_type) {
     manualTargetType = target_type == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE;
     save();
@@ -701,6 +707,7 @@ void Settings::doSave() {
     preferences.putString("cr_url", cloudRelayUrl);
     preferences.putString("cr_token", cloudRelayToken);
     preferences.putBool("cr_enabled", cloudRelayEnabled);
+    preferences.putString("admin_token", localAdminToken);
 
     preferences.end();
 }

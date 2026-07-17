@@ -132,6 +132,8 @@ class Settings {
     String getCloudRelayUrl() const { return cloudRelayUrl; }
     String getCloudRelayToken() const { return cloudRelayToken; }
     bool isCloudRelayEnabled() const { return cloudRelayEnabled; }
+    String getLocalAdminToken() const { return localAdminToken; }
+    void setLocalAdminToken(const String &token);
     int getManualTargetType() const { return manualTargetType; }
     float getManualPressure() const { return manualPressure; }
     float getManualFlow() const { return manualFlow; }
@@ -288,6 +290,7 @@ class Settings {
     String cloudRelayUrl = "";
     String cloudRelayToken = "";
     bool cloudRelayEnabled = false;
+    String localAdminToken = "";
 
     void doSave();
     xTaskHandle taskHandle = nullptr;

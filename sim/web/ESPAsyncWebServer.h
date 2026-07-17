@@ -81,6 +81,10 @@ class AsyncWebServerRequest {
         return it == _args.end() ? String() : String(it->second.c_str());
     }
     String arg(const String &name) const { return arg(name.c_str()); }
+    String header(const char *name) const {
+        auto it = _headers.find(name);
+        return it == _headers.end() ? String() : String(it->second.c_str());
+    }
 
     AsyncWebServerResponse *beginResponse(int code, const String &contentType, const uint8_t *content, size_t len);
     AsyncWebServerResponse *beginResponse(const String &contentType, size_t len, AwsResponseFiller callback);
@@ -97,6 +101,7 @@ class AsyncWebServerRequest {
     String _url;
     int _method = HTTP_GET;
     std::map<std::string, std::string> _args;
+    std::map<std::string, std::string> _headers;
     std::string _body;
     int _fd;
     AsyncWebServer *_server;

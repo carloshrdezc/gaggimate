@@ -21,6 +21,7 @@
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
+#include <display/plugins/LocalAuthPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
 #include <string>
 #include <unordered_map>
@@ -67,16 +68,44 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
 }
 
 void WebUIPlugin::addCorsHeaders(AsyncWebServerResponse *response) const {
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    response->addHeader("Access-Control-Max-Age", "86400");
+#if defined(GAGGIMATE_DEVELOPMENT_CORS) && GAGGIMATE_DEVELOPMENT_CORS
+    // Explicit local Vite development exception. Production LAN and AP setup use
+    // same-origin requests and emit no CORS headers.
+    if (localAuthShouldEmitCors(apMode, true)) {
+        response->addHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+        response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+#else
+    (void)response;
+#endif
 }
 
 void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
     AsyncWebServerResponse *response = request->beginResponse(204);
     addCorsHeaders(response);
     request->send(response);
+}
+
+bool WebUIPlugin::isSetupBootstrapRequest(AsyncWebServerRequest *request) const { return request->url() == "/api/settings"; }
+
+bool WebUIPlugin::isHttpAuthenticated(AsyncWebServerRequest *request) const {
+    if (localAuthMayBypassHttpInSetup(apMode, isSetupBootstrapRequest(request))) return true;
+    const String token = request->hasArg("localAuthToken") ? request->arg("localAuthToken") : String("");
+    const String authorization = token.isEmpty() ? request->header("Authorization") : String("Bearer ") + token;
+    return localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
+}
+
+void WebUIPlugin::sendUnauthorized(AsyncWebServerRequest *request) const {
+    request->send(401, "application/json", "{\"error\":\"authentication required\"}");
+}
+
+bool WebUIPlugin::authenticateWebSocket(uint32_t clientId, JsonDocument &request) {
+    const String token = request["token"].is<String>() ? request["token"].as<String>() : String("");
+    const String authorization = String("Bearer ") + token;
+    const bool authenticated = localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
+    authenticatedWebSocketClients[clientId] = authenticated;
+    return authenticated;
 }
 
 // Forward declarations of channel helpers defined below.
@@ -89,6 +118,14 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->grinderManager = _controller->getGrinderManager();
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
+    if (controller->getSettings().getLocalAdminToken().isEmpty()) {
+        char token[33];
+        snprintf(token, sizeof(token), "%08lx%08lx%08lx%08lx", static_cast<unsigned long>(esp_random()),
+                 static_cast<unsigned long>(esp_random()), static_cast<unsigned long>(esp_random()),
+                 static_cast<unsigned long>(esp_random()));
+        controller->getSettings().setLocalAdminToken(token);
+        ESP_LOGW("WebUIPlugin", "Generated device-local admin token; retrieve it only through AP setup");
+    }
     this->ota = new GitHubOTA(
         BUILD_GIT_VERSION, controller->getSystemInfo().version,
         resolveReleaseUrl(controller->getSettings().getOTAChannel()),
@@ -1020,6 +1057,19 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     if (err) return;
 
     String msgType = doc["tp"].as<String>();
+    if (clientId != RELAY_CLIENT_ID && msgType == "req:auth") {
+        JsonDocument response;
+        response["tp"] = "res:auth";
+        response["ok"] = authenticateWebSocket(clientId, doc);
+        if (!response["ok"].as<bool>()) response["error"] = "Authentication failed";
+        sendResponse(clientId, response);
+        return;
+    }
+    const bool sessionAuthenticated = clientId != RELAY_CLIENT_ID && authenticatedWebSocketClients[clientId];
+    if (!localAuthWebSocketMessageAllowed(clientId == RELAY_CLIENT_ID, sessionAuthenticated, msgType.c_str())) {
+        ESP_LOGW("WebUIPlugin", "Rejected unauthenticated WebSocket request: %s", msgType.c_str());
+        return;
+    }
     if (msgType.startsWith("req:profiles:")) {
         handleProfileRequest(clientId, doc);
     } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
@@ -1531,6 +1581,10 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
 }
 
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
+    if (!isHttpAuthenticated(request)) {
+        sendUnauthorized(request);
+        return;
+    }
     if (request->method() == HTTP_POST) {
         controller->getSettings().batchUpdate([request](Settings *settings) {
             if (request->hasArg("startupMode"))
@@ -1740,6 +1794,10 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["flushDuration"] = settings.getFlushDuration() / 1000;
     doc["cloudRelayUrl"] = settings.getCloudRelayUrl();
     doc["cloudRelayToken"] = kSecretSentinel;
+    // AP fallback is the physical-presence setup channel. It is the only place
+    // the bootstrap token is returned; normal LAN responses never disclose it.
+    if (apMode) doc["localAdminToken"] = settings.getLocalAdminToken();
+    else doc["localAdminToken"] = kSecretSentinel;
     doc["cloudRelayEnabled"] = settings.isCloudRelayEnabled();
 
     // Add schedule format with days
