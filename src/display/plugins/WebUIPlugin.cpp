@@ -661,8 +661,16 @@ void WebUIPlugin::setupServer() {
     if (controller->isSDCard()) {
         fs = &SD_MMC;
     }
-    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store");
+    server.on("^\\/api\\/history\\/.*$", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
+        const String id = request->url().substring(String("/api/history/").length());
+        if (!isSafeId(id) || !fs->exists(String("/h/") + id)) return request->send(404);
+        AsyncWebServerResponse *response = request->beginResponse(*fs, String("/h/") + id);
+        response->addHeader("Cache-Control", "no-store");
+        request->send(response);
+    });
     server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request)) return sendUnauthorized(request);
         // Serve the binary index file directly
         if (fs->exists("/h/index.bin")) {
             AsyncWebServerResponse *response = request->beginResponse(*fs, "/h/index.bin", "application/octet-stream");
