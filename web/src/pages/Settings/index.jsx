@@ -52,7 +52,9 @@ export function Settings() {
       setAutoWakeupSchedules(schedules);
       setFormData(normalized);
       if (fetchedSettings.localAdminToken && fetchedSettings.localAdminToken !== SECRET_SENTINEL) {
-        localStorage.setItem('gaggimate_local_admin_token', fetchedSettings.localAdminToken);
+        const previousToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+        localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, fetchedSettings.localAdminToken);
+        if (previousToken !== fetchedSettings.localAdminToken) apiService.authenticateLocal(fetchedSettings.localAdminToken);
       }
     } else {
       setFormData({});

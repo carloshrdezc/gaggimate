@@ -104,12 +104,16 @@ export default class ApiService {
     }
   }
 
+  authenticateLocal(token) {
+    if (token && this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ tp: 'req:auth', token }));
+    }
+  }
+
   _onOpen() {
     console.log('WebSocket connected successfully');
     const localAdminToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
-    if (localAdminToken) {
-      this.socket.send(JSON.stringify({ tp: 'req:auth', token: localAdminToken }));
-    }
+    this.authenticateLocal(localAdminToken);
     this.reconnectAttempts = 0;
     this.isConnecting = false;
     machine.value = {
