@@ -26,7 +26,7 @@ vi.mock('../../services/localAuthFetch.js', () => ({
   authenticatedFetch,
   bootstrapLocalAuth: vi.fn(),
   localAuthDownloadUrl: url => url,
-  localAuthHandoffUrl: () => 'http://gaggimate.local/#localAuthToken=bootstrap-token',
+  localAuthHandoffUrl: hostname => `http://${hostname}.local/#localAuthToken=bootstrap-token`,
 }));
 
 vi.mock('../../components/Card.jsx', () => ({ default: ({ children }) => h('section', {}, children) }));
@@ -50,12 +50,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test('submits pending Wi-Fi credentials with the AP-to-STA completion marker before restarting', async () => {
+test('persists the changed hostname with AP-to-STA credentials and hands off to that hostname', async () => {
   render(
     h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)),
   );
 
-  fireEvent.input(screen.getByLabelText('Wi-Fi Password'), { target: { value: 'new-password' } });
+  const wifiPassword = screen.getByLabelText('Wi-Fi Password');
+  fireEvent.change(wifiPassword, { target: { value: 'new-password' } });
+  await waitFor(() => expect(wifiPassword.value).toBe('new-password'));
+  const hostname = screen.getByLabelText('Hostname');
+  fireEvent.change(hostname, { target: { value: 'new-gaggimate' } });
+  await waitFor(() => expect(hostname.value).toBe('new-gaggimate'));
   fireEvent.click(screen.getByRole('button', { name: 'Copy Wi-Fi auth handoff link' }));
 
   await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
@@ -65,7 +70,12 @@ test('submits pending Wi-Fi credentials with the AP-to-STA completion marker bef
   expect(Object.fromEntries(options.body.entries())).toEqual({
     wifiSsid: 'setup-network',
     wifiPassword: 'new-password',
+    mdnsName: 'new-gaggimate',
     completeLocalAuthProvisioning: '1',
     restart: '1',
   });
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    'http://new-gaggimate.local/#localAuthToken=bootstrap-token',
+  );
+  expect(screen.getByText('http://new-gaggimate.local/#localAuthToken=bootstrap-token')).toBeTruthy();
 });

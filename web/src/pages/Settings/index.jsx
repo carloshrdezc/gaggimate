@@ -76,6 +76,7 @@ export function Settings() {
       body: new URLSearchParams({
         wifiSsid: wifiCredentials.get('wifiSsid') || '',
         wifiPassword: wifiCredentials.get('wifiPassword') || '',
+        mdnsName: formData.mdnsName || '',
         completeLocalAuthProvisioning: '1',
         restart: '1',
       }),
