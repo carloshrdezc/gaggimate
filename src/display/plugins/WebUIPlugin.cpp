@@ -7,6 +7,7 @@
 #include <display/core/Controller.h>
 #include <display/core/EventIds.h>
 #include <display/core/GrinderManager.h>
+#include <display/core/MdnsNamePolicy.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -23,6 +24,7 @@
 #include <cmath>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ChangeModeDeferPolicy.h>
+#include <display/plugins/LocalAuthPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/StandbyReassertPolicy.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
@@ -83,16 +85,49 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
 }
 
 void WebUIPlugin::addCorsHeaders(AsyncWebServerResponse *response) const {
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    response->addHeader("Access-Control-Max-Age", "86400");
+#if defined(GAGGIMATE_DEVELOPMENT_CORS) && GAGGIMATE_DEVELOPMENT_CORS
+    // Explicit local Vite development exception. Production LAN and AP setup use
+    // same-origin requests and emit no CORS headers.
+    if (localAuthShouldEmitCors(apMode, true)) {
+        response->addHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+        response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+#else
+    (void)response;
+#endif
 }
 
 void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
     AsyncWebServerResponse *response = request->beginResponse(204);
     addCorsHeaders(response);
     request->send(response);
+}
+
+bool WebUIPlugin::isSetupBootstrapRequest(AsyncWebServerRequest *request) const {
+    return request->method() == HTTP_GET && request->url() == "/api/settings";
+}
+
+bool WebUIPlugin::isHttpAuthenticated(AsyncWebServerRequest *request) const {
+    if (localAuthMayBypassHttpInSetup(apMode, isSetupBootstrapRequest(request)))
+        return true;
+    const String queryToken = request->hasArg("localAuthToken") ? request->arg("localAuthToken") : String("");
+    return localAuthHttpRequestAuthenticated(request->header("Authorization").c_str(), queryToken.c_str(),
+                                             request->method() == HTTP_GET ? "GET" : "OTHER", request->url().c_str(),
+                                             controller->getSettings().getLocalAdminToken().c_str());
+}
+
+void WebUIPlugin::sendUnauthorized(AsyncWebServerRequest *request) const {
+    request->send(401, "application/json", "{\"error\":\"authentication required\"}");
+}
+
+bool WebUIPlugin::authenticateWebSocket(uint32_t clientId, JsonDocument &request) {
+    const String token = request["token"].is<String>() ? request["token"].as<String>() : String("");
+    const String authorization = String("Bearer ") + token;
+    const bool authenticated =
+        localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
+    authenticatedWebSocketClients[clientId] = authenticated;
+    return authenticated;
 }
 
 // Forward declarations of channel helpers defined below.
@@ -105,6 +140,14 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->grinderManager = _controller->getGrinderManager();
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
+    if (controller->getSettings().getLocalAdminToken().isEmpty()) {
+        char token[33];
+        snprintf(token, sizeof(token), "%08lx%08lx%08lx%08lx", static_cast<unsigned long>(esp_random()),
+                 static_cast<unsigned long>(esp_random()), static_cast<unsigned long>(esp_random()),
+                 static_cast<unsigned long>(esp_random()));
+        controller->getSettings().setLocalAdminToken(token);
+        ESP_LOGW("WebUIPlugin", "Generated device-local admin token; retrieve it only through AP setup");
+    }
     this->ota = new GitHubOTA(
         BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
@@ -870,6 +913,8 @@ void WebUIPlugin::setupServer() {
     server.on("/success.txt", [](AsyncWebServerRequest *request) { request->send(200); }); // firefox captive portal call home
     server.on("/ncsi.txt", [](AsyncWebServerRequest *request) { request->redirect(LOCAL_URL); }); // windows call home
     server.on("/api/settings", [this](AsyncWebServerRequest *request) { handleSettings(request); });
+    server.on("/api/settings/provision", HTTP_POST,
+              [this](AsyncWebServerRequest *request) { handleSettingsProvisioning(request); });
     server.on("/api/status", [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         addCorsHeaders(response);
@@ -889,26 +934,54 @@ void WebUIPlugin::setupServer() {
     // payload (list: [], info: {connected:false,...}, scan/connect:
     // {success:false}) with HTTP 200 so the client renders an empty list
     // (CAR-386). The default BLE-on behavior is unchanged.
-    server.on("/api/scales/list", [this](AsyncWebServerRequest *request) { handleBLEScaleList(request); });
-    server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) { handleBLEScaleConnect(request); });
-    server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
-    server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
+    server.on("/api/scales/list", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleList(request);
+    });
+    server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleConnect(request);
+    });
+    server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleScan(request);
+    });
+    server.on("/api/scales/info", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleInfo(request);
+    });
     FS *fs = &LittleFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
     }
-    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store");
+    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store").setFilter(
+        [this](AsyncWebServerRequest *request) {
+            const bool authenticated = isHttpAuthenticated(request);
+            if (!authenticated)
+                sendUnauthorized(request);
+            return authenticated;
+        });
     server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
-        // Serve the binary index file directly
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         if (fs->exists("/h/index.bin")) {
             AsyncWebServerResponse *response = request->beginResponse(*fs, "/h/index.bin", "application/octet-stream");
+            response->addHeader("Cache-Control", "no-store");
             addCorsHeaders(response);
             request->send(response);
         } else {
             request->send(404, "text/plain", "Index not found");
         }
     });
-    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) { handleCoreDumpDownload(request); });
+    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleCoreDumpDownload(request);
+    });
     // Diagnostic SD log download (PRO-274). Explicit handlers (not serveStatic)
     // so a missing file returns a clean 404 instead of falling through to the
     // SPA catch-all (onNotFound) below. Registered before onNotFound so these
@@ -917,10 +990,16 @@ void WebUIPlugin::setupServer() {
     // SD card inside the handler. Paths mirror DiagnosticLogPlugin::SD_LOG_PATH /
     // SD_LOG_PATH_OLD; literals are used here rather than including that plugin's
     // header (it pulls WiFiUdp.h, which the native display-sim build can't resolve).
-    server.on("/api/diag/log.txt", HTTP_GET,
-              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.txt"); });
-    server.on("/api/diag/log.1", HTTP_GET,
-              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.1"); });
+    server.on("/api/diag/log.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleDiagLogDownload(request, "/diag/log.txt");
+    });
+    server.on("/api/diag/log.1", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleDiagLogDownload(request, "/diag/log.1");
+    });
     server.on("/test", [](AsyncWebServerRequest *request) {
         ESP_LOGI("WebUI", "TEST endpoint hit!");
         request->send(200, "text/plain", "ESP32 server is alive!");
@@ -1007,6 +1086,7 @@ void WebUIPlugin::setupServer() {
                     ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
+                authenticatedWebSocketClients.erase(client->id());
             } else if (type == WS_EVT_DATA) {
                 handleWebSocketData(server, client, type, arg, data, len);
             }
@@ -1310,6 +1390,21 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         return;
 
     String msgType = doc["tp"].as<String>();
+    if (clientId != RELAY_CLIENT_ID && msgType == "req:auth") {
+        JsonDocument response;
+        response["tp"] = "res:auth";
+        response["ok"] = authenticateWebSocket(clientId, doc);
+        if (!response["ok"].as<bool>())
+            response["error"] = "Authentication failed";
+        sendResponse(clientId, response);
+        return;
+    }
+    const bool sessionAuthenticated =
+        clientId != RELAY_CLIENT_ID && localAuthWebSocketSessionAuthenticated(authenticatedWebSocketClients, clientId);
+    if (!localAuthWebSocketMessageAllowed(clientId == RELAY_CLIENT_ID, sessionAuthenticated, msgType.c_str())) {
+        ESP_LOGW("WebUIPlugin", "Rejected unauthenticated WebSocket request: %s", msgType.c_str());
+        return;
+    }
     if (msgType.startsWith("req:profiles:")) {
         handleProfileRequest(clientId, doc);
     } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
@@ -1846,9 +1941,66 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
     sendResponse(clientId, response);
 }
 
+void WebUIPlugin::handleSettingsProvisioning(AsyncWebServerRequest *request) {
+    const bool authenticated = isHttpAuthenticated(request);
+    const bool hasSsid = request->hasArg("wifiSsid");
+    const bool hasPassword = request->hasArg("wifiPassword");
+    const bool hasMdnsName = request->hasArg("mdnsName");
+    const bool complete =
+        request->hasArg("completeLocalAuthProvisioning") && request->arg("completeLocalAuthProvisioning") == "1";
+    const bool restart = request->hasArg("restart") && request->arg("restart") == "1";
+    if (!localAuthMayProvisionInAp(apMode, authenticated, hasSsid, hasPassword, hasMdnsName, complete, restart)) {
+        sendUnauthorized(request);
+        return;
+    }
+
+    const String mdnsName = request->arg("mdnsName");
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        response->setCode(400);
+        addCorsHeaders(response);
+        response->print("{\"error\":\"Invalid mDNS hostname\"}");
+        request->send(response);
+        return;
+    }
+
+    // Deliberately do not call handleSettings(): omitted checkbox fields there
+    // mean false. This narrow endpoint mutates only AP recovery data atomically.
+    controller->getSettings().batchUpdate([request, mdnsName](Settings *settings) {
+        settings->setWifiSsid(request->arg("wifiSsid"));
+        settings->setWifiPassword(request->arg("wifiPassword"));
+        settings->setMdnsName(mdnsName);
+        settings->setLocalAuthProvisioned(true);
+        settings->save(true);
+    });
+
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    response->print("{\"success\":true}");
+    request->send(response);
+
+    if (restart)
+        ESP.restart();
+}
+
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
+    if (!isHttpAuthenticated(request)) {
+        sendUnauthorized(request);
+        return;
+    }
     if (request->method() == HTTP_POST) {
-        controller->getSettings().batchUpdate([request](Settings *settings) {
+        if (request->hasArg("mdnsName")) {
+            const String mdnsName = request->arg("mdnsName");
+            if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+                AsyncResponseStream *response = request->beginResponseStream("application/json");
+                response->setCode(400);
+                addCorsHeaders(response);
+                response->print("{\"error\":\"Invalid mDNS hostname\"}");
+                request->send(response);
+                return;
+            }
+        }
+        controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
                 settings->setStartupMode(request->arg("startupMode") == "brew" ? MODE_BREW : MODE_STANDBY);
             if (request->hasArg("targetSteamTemp"))
@@ -1988,6 +2140,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setCloudRelayToken(request->arg("cloudRelayToken"));
             if (request->hasArg("cloudRelayEnabled"))
                 settings->setCloudRelayEnabled(request->arg("cloudRelayEnabled") == "1");
+            if (apMode && request->hasArg("completeLocalAuthProvisioning")) {
+                settings->setLocalAuthProvisioned(true);
+            }
             settings->save(true);
         });
         pluginManager->trigger(EventIds::SETTINGS_CHANGED);
@@ -2057,6 +2212,13 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["flushDuration"] = settings.getFlushDuration() / 1000;
     doc["cloudRelayUrl"] = settings.getCloudRelayUrl();
     doc["cloudRelayToken"] = kSecretSentinel;
+    // AP fallback is the physical-presence setup channel. It is the only place
+    // the bootstrap token is returned; normal LAN responses never disclose it.
+    if (apMode)
+        doc["localAdminToken"] = settings.getLocalAdminToken();
+    else
+        doc["localAdminToken"] = kSecretSentinel;
+    doc["localAuthRecovery"] = apMode && !settings.isLocalAuthProvisioned();
     doc["cloudRelayEnabled"] = settings.isCloudRelayEnabled();
 
     // Add schedule format with days

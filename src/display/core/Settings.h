@@ -166,6 +166,10 @@ class Settings {
     String getCloudRelayUrl() const;
     String getCloudRelayToken() const;
     bool isCloudRelayEnabled() const { return cloudRelayEnabled; }
+    String getLocalAdminToken() const { return localAdminToken; }
+    bool isLocalAuthProvisioned() const { return localAuthProvisioned; }
+    void setLocalAdminToken(const String &token);
+    void setLocalAuthProvisioned(bool provisioned);
     int getManualTargetType() const { return manualTargetType; }
     float getManualPressure() const { return manualPressure; }
     float getManualFlow() const { return manualFlow; }
@@ -354,6 +358,8 @@ class Settings {
     String cloudRelayUrl = "";
     String cloudRelayToken = "";
     bool cloudRelayEnabled = false;
+    String localAdminToken = "";
+    bool localAuthProvisioned = false;
 
     void doSave();
     // PRO-427: lazily create selectedNameMutex on first use and return it (may be

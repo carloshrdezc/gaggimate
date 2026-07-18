@@ -1,4 +1,5 @@
 #include "Settings.h"
+#include <display/core/MdnsNamePolicy.h>
 
 #include <algorithm>
 #include <utility>
@@ -67,6 +68,11 @@ void Settings::load() {
     wifiSsid = preferences.getString("ws", "");
     wifiPassword = preferences.getString("wp", "");
     mdnsName = preferences.getString("mn", DEFAULT_MDNS_NAME);
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        ESP_LOGW("Settings", "Ignoring invalid persisted mDNS name");
+        mdnsName = DEFAULT_MDNS_NAME;
+        preferences.putString("mn", mdnsName);
+    }
     homekit = preferences.getBool("hk", false);
     volumetricTarget = preferences.getBool("vt", false);
     allowYieldOverride = preferences.getBool("ayo", false);
@@ -192,6 +198,8 @@ void Settings::load() {
     cloudRelayUrl = preferences.getString("cr_url", "");
     cloudRelayToken = preferences.getString("cr_token", "");
     cloudRelayEnabled = preferences.getBool("cr_enabled", false);
+    localAdminToken = preferences.getString("admin_token", "");
+    localAuthProvisioned = preferences.getBool("admin_ready", false);
 
     preferences.end();
 
@@ -336,6 +344,10 @@ void Settings::setWifiPassword(const String &wifiPassword) {
 }
 
 void Settings::setMdnsName(const String &mdnsName) {
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        ESP_LOGW("Settings", "Rejecting invalid mDNS name");
+        return;
+    }
     assignUnderSelectedNameLock(this->mdnsName, String(mdnsName));
     save();
 }
@@ -783,6 +795,16 @@ void Settings::setCloudRelayEnabled(bool enabled) {
     save();
 }
 
+void Settings::setLocalAdminToken(const String &token) {
+    localAdminToken = token;
+    save(true);
+}
+
+void Settings::setLocalAuthProvisioned(bool provisioned) {
+    localAuthProvisioned = provisioned;
+    save(true);
+}
+
 // PRO-23: setManualTargetType/setManualPressure/setManualFlow/setManualTemperature
 // no longer call save() individually; updateManualTargets() calls save() once
 // after all four. NOTE: setManualTemperature has one additional call site
@@ -1006,6 +1028,8 @@ void Settings::doSave() {
     preferences.putString("cr_url", cloudRelayUrlSnap);
     preferences.putString("cr_token", cloudRelayTokenSnap);
     preferences.putBool("cr_enabled", cloudRelayEnabled);
+    preferences.putString("admin_token", localAdminToken);
+    preferences.putBool("admin_ready", localAuthProvisioned);
 
     preferences.end();
 }

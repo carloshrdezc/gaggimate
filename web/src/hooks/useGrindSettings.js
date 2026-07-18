@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals';
 import { useMemo } from 'preact/hooks';
 import { useQuery } from 'preact-fetching';
+import { authenticatedFetch } from '../services/localAuthFetch.js';
 
 const currentSettings = signal(null);
 
@@ -32,7 +33,7 @@ export function useGrindSettings() {
   const { data: settings } = useQuery(
     'settings-cache',
     async () => {
-      const response = await fetch('/api/settings');
+      const response = await authenticatedFetch('/api/settings');
       return response.json();
     },
     { staleTime: 30000, refetchOnWindowFocus: false }

@@ -6,6 +6,7 @@ import './style.css';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import { h, render } from 'preact';
 import { initializeTheme } from './utils/themeManager.js';
+import { importLocalAuthHandoff } from './services/localAuthFetch.js';
 import { LocationProvider, Router, Route, ErrorBoundary } from 'preact-iso';
 import { NotFound } from './pages/_404.jsx';
 import ApiService, { ApiServiceContext } from './services/ApiService.js';
@@ -14,6 +15,7 @@ import { ConnectionBanner } from './components/ConnectionBanner.jsx';
 import { routes } from './routes.jsx';
 
 const apiService = new ApiService();
+importLocalAuthHandoff(apiService);
 
 function AppContent() {
   const [navOpen, setNavOpen] = useState(false);

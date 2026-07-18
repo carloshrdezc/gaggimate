@@ -8,6 +8,7 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { timezones } from '../../config/zones.js';
 import { machine, ApiServiceContext } from '../../services/ApiService.js';
+import { authenticatedFetch, localAuthDownloadUrl, bootstrapLocalAuth, localAuthHandoffUrl, MDNS_NAME_ERROR } from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
@@ -27,11 +28,13 @@ export function Settings() {
   const [formData, setFormData] = useState({});
   const [currentTheme, setCurrentTheme] = useState('midnight');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
+  const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
+  const [authHandoffError, setAuthHandoffError] = useState(null);
   const [autowakeupSchedules, setAutoWakeupSchedules] = useState([
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
   const { isLoading, data: fetchedSettings } = useQuery(`settings/${gen}`, async () => {
-    const response = await fetch(`/api/settings`);
+    const response = await authenticatedFetch(`/api/settings`);
     const data = await response.json();
     return data;
   });
@@ -46,6 +49,9 @@ export function Settings() {
       );
       setAutoWakeupSchedules(schedules);
       setFormData(normalized);
+      if (fetchedSettings.localAdminToken && fetchedSettings.localAdminToken !== SECRET_SENTINEL) {
+        bootstrapLocalAuth(fetchedSettings.localAdminToken, apiService);
+      }
     } else {
       setFormData({});
       setAutoWakeupSchedules([{ time: '07:00', days: [true, true, true, true, true, true, true] }]);
@@ -55,6 +61,46 @@ export function Settings() {
   useEffect(() => {
     setCurrentTheme(getStoredTheme());
   }, []);
+
+  const prepareAuthHandoff = async () => {
+    const url = localAuthHandoffUrl(formData.mdnsName);
+    if (!url) {
+      setAuthHandoffUrl(null);
+      setAuthHandoffError(MDNS_NAME_ERROR);
+      return;
+    }
+
+    setAuthHandoffUrl(null);
+    setAuthHandoffError(null);
+    const wifiCredentials = new FormData(formRef.current);
+
+    try {
+      // The recovery marker must be written with the pending Wi-Fi credentials.
+      // Otherwise Controller::setupWifi() deliberately remains in AP recovery.
+      const response = await authenticatedFetch('/api/settings/provision', {
+        method: 'post',
+        body: new URLSearchParams({
+          wifiSsid: wifiCredentials.get('wifiSsid') || '',
+          wifiPassword: wifiCredentials.get('wifiPassword') || '',
+          mdnsName: formData.mdnsName || '',
+          completeLocalAuthProvisioning: '1',
+          restart: '1',
+        }),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+    } catch (error) {
+      console.error('Failed to provision Wi-Fi auth handoff:', error);
+      setAuthHandoffError('Wi-Fi provisioning failed. Check the connection and try again.');
+      return;
+    }
+
+    setAuthHandoffUrl(url);
+    try {
+      if (navigator.clipboard) await navigator.clipboard.writeText(url);
+    } catch (error) {
+      console.error('Failed to copy Wi-Fi auth handoff:', error);
+    }
+  };
 
   const onChange = key => {
     return e => {
@@ -178,7 +224,7 @@ export function Settings() {
         if (restart) {
           formDataToSubmit.append('restart', '1');
         }
-        const response = await fetch(form.action, {
+        const response = await authenticatedFetch(form.action, {
           method: 'post',
           body: formDataToSubmit,
         });
@@ -623,7 +669,21 @@ export function Settings() {
                   placeholder='Hostname'
                   value={formData.mdnsName}
                   onChange={onChange('mdnsName')}
+                  aria-describedby={authHandoffError ? 'mdnsNameError' : undefined}
                 />
+                {authHandoffError && <div id='mdnsNameError' role='alert' className='text-sm text-red-400'>{authHandoffError}</div>}
+              </div>
+              <div className='border-l-2 border-[var(--text-secondary,#999)] pl-4'>
+                <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
+                  Before moving from the setup AP to Wi-Fi, provision the device and copy this one-time auth handoff link. Its credential stays in the URL fragment and is not sent to the network.
+                </div>
+                <button type='button' className='btn btn-secondary mt-2' onClick={prepareAuthHandoff}>
+                  Provision Wi-Fi and copy auth handoff link
+                </button>
+                {authHandoffUrl && <>
+                  <div className='mt-2 font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>The device restarts into STA after this successful provisioning.</div>
+                  <div className='mt-2 break-all text-xs'>{authHandoffUrl}</div>
+                </>}
               </div>
               <div className='flex flex-col gap-2'>
                 <label
@@ -694,14 +754,14 @@ export function Settings() {
                   Download SD log:
                 </span>
                 <a
-                  href='/api/diag/log.txt'
+                  href={localAuthDownloadUrl('/api/diag/log.txt')}
                   download='diag-log.txt'
                   className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
                 >
                   log.txt
                 </a>
                 <a
-                  href='/api/diag/log.1'
+                  href={localAuthDownloadUrl('/api/diag/log.1')}
                   download='diag-log.1.txt'
                   className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
                 >

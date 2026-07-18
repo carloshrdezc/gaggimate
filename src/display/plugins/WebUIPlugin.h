@@ -17,6 +17,7 @@
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
 #include <vector>
+#include <unordered_map>
 
 constexpr uint32_t RELAY_CLIENT_ID = 0xFFFFFFFE;
 
@@ -60,6 +61,10 @@ class WebUIPlugin : public Plugin {
     void stop();
     void addCorsHeaders(AsyncWebServerResponse *response) const;
     void handleOptions(AsyncWebServerRequest *request) const;
+    bool isHttpAuthenticated(AsyncWebServerRequest *request) const;
+    bool isSetupBootstrapRequest(AsyncWebServerRequest *request) const;
+    void sendUnauthorized(AsyncWebServerRequest *request) const;
+    bool authenticateWebSocket(uint32_t clientId, JsonDocument &request);
 
     // Cloud relay
     void startRelay();
@@ -88,6 +93,7 @@ class WebUIPlugin : public Plugin {
     void serveWebAsset(AsyncWebServerRequest *request);
     void serveWebAsset(AsyncWebServerRequest *request, String path);
     void handleSettings(AsyncWebServerRequest *request);
+    void handleSettingsProvisioning(AsyncWebServerRequest *request);
     void handleBLEScaleList(AsyncWebServerRequest *request);
     void handleBLEScaleScan(AsyncWebServerRequest *request);
     void handleBLEScaleConnect(AsyncWebServerRequest *request);
@@ -320,6 +326,7 @@ class WebUIPlugin : public Plugin {
     std::atomic<WebUiLifecycleIntent> pendingLifecycle{WebUiLifecycleIntent::None};
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
+    std::unordered_map<uint32_t, bool> authenticatedWebSocketClients;
 
     // Deferred mode-change intent (PRO-261). A `req:change-mode` arrives on the
     // AsyncTCP (`handleWebSocketData`) or relay (`relayLoopTask`) task, never the

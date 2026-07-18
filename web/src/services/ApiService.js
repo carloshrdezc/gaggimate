@@ -1,6 +1,7 @@
 import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
+import { LOCAL_AUTH_TOKEN_KEY } from './localAuthFetch.js';
 
 /**
  * Thrown by `ApiService.request()` when the underlying WebSocket closes (or
@@ -133,8 +134,16 @@ export default class ApiService {
     }
   }
 
+  authenticateLocal(token) {
+    if (token && this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ tp: 'req:auth', token }));
+    }
+  }
+
   _onOpen() {
     console.log('WebSocket connected successfully');
+    const localAdminToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+    this.authenticateLocal(localAdminToken);
     this.reconnectAttempts = 0;
     this.isConnecting = false;
     this._connState = ConnState.OPEN;

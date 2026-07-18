@@ -405,8 +405,8 @@ void AsyncWebServerRequest::redirect(const String &url) {
 AsyncWebServer::~AsyncWebServer() { end(); }
 
 AsyncStaticWebHandler &AsyncWebServer::serveStatic(const char *uri, FS &fs, const char *path) {
-    _static.push_back({uri, &fs, path});
     _staticHandlers.emplace_back();
+    _static.push_back({uri, &fs, path, &_staticHandlers.back()});
     return _staticHandlers.back();
 }
 
@@ -638,6 +638,7 @@ bool AsyncWebServer::handleHttp(Conn &c) {
 
     AsyncWebServerRequest req(c.fd, this);
     req._url = String(path.c_str());
+    req._headers = headers;
     req._body = body;
     req._method = method == "POST" ? HTTP_POST : method == "PUT" ? HTTP_PUT : method == "DELETE" ? HTTP_DELETE : HTTP_GET;
     auto parseArgs = [&](const std::string &s) {
@@ -677,6 +678,9 @@ void AsyncWebServer::dispatch(Conn &c, AsyncWebServerRequest &req) {
     }
     for (auto &s : _static) {
         if (path.rfind(s.uri, 0) == 0) { // prefix match
+            if (s.handler && s.handler->_filter && !s.handler->_filter(&req)) {
+                return;
+            }
             std::string rel = path.substr(s.uri.size());
             // Path-traversal guard (PRO-208): refuse any ".." path segment so a
             // request like "/../../etc/hosts" cannot escape the document root.
