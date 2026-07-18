@@ -13,6 +13,15 @@ info:
     correlate the reply. Events (`evt:*`) are unsolicited broadcasts sent to
     every connected client (and the cloud relay, when connected).
 
+    ## Validation contract
+    `tp` must be a string. For documented command fields, clients and firmware
+    require the documented JSON type and finite in-range value before dispatch;
+    malformed, partial numeric strings, non-finite numbers, and out-of-range
+    values are rejected without command side effects. Unknown fields are ignored
+    deliberately for forward-compatible request extensions. `/api/settings` is
+    atomic: invalid supplied values return HTTP 400 JSON `{error, field, detail}`
+    and no supplied setting is persisted.
+
     ## Message surface provenance
     Every message type documented here was audited directly against the
     firmware source as of the `2.0.15` release line
