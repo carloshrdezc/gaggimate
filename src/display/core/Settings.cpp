@@ -146,7 +146,7 @@ void Settings::load() {
     setManualPressure(manualPressure);
     setManualFlow(manualFlow);
     setManualTemperature(manualTemperature);
-    dirty = false;
+    persistenceTransaction.clearDirty();
     autowakeupEnabled = preferences.getBool("ab_en", false);
 
     // Load schedule format: "time1|days1;time2|days2" where days is 7-bit string (e.g., "1111100" for weekdays only)
@@ -260,7 +260,7 @@ void Settings::unload() {
     // library serializes begin() internally, so the worst case is a redundant
     // write — not data corruption. This is a pre-existing design constraint,
     // not a regression of this teardown; see PRO-499 for context.
-    if (dirty) {
+    if (persistenceTransaction.isDirty()) {
         doSave();
     }
     if (taskHandle != nullptr) {
@@ -277,12 +277,11 @@ void Settings::batchUpdate(const SettingsCallback &callback) {
     bool saveImmediately = false;
     {
         ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
-        ++batchDepth;
+        persistenceTransaction.beginBatch();
         callback(this);
-        --batchDepth;
-        dirty = true;
-        saveImmediately = immediateSaveRequested;
-        immediateSaveRequested = false;
+        persistenceTransaction.endBatch();
+        persistenceTransaction.markDirty();
+        saveImmediately = persistenceTransaction.consumeImmediateSaveRequest();
     }
     if (saveImmediately) {
         doSave();
@@ -293,13 +292,10 @@ void Settings::save(bool noDelay) {
     bool saveImmediately = false;
     {
         ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
-        dirty = true;
+        persistenceTransaction.markDirty();
         if (noDelay) {
-            if (batchDepth > 0) {
-                immediateSaveRequested = true;
-                return;
-            }
-            saveImmediately = true;
+            persistenceTransaction.requestImmediateSave();
+            saveImmediately = persistenceTransaction.consumeImmediateSaveRequest();
         }
     }
     if (saveImmediately) {
@@ -720,6 +716,7 @@ void Settings::addFavoritedProfile(String profile) {
     if (!isSafeId(profile)) {
         return;
     }
+    ScopedRecursiveSemaphore persistenceLock(ensurePersistenceMutex());
     // PRO-481: guard the whole find+emplace under vectorMutex so a concurrent
     // doSave() implode() (or another setter) never observes the vector
     // mid-mutation. save() is only called when a profile was actually added,
@@ -743,6 +740,7 @@ void Settings::addFavoritedProfile(String profile) {
 }
 
 void Settings::removeFavoritedProfile(String profile) {
+    ScopedRecursiveSemaphore persistenceLock(ensurePersistenceMutex());
     // PRO-481: guard the erase+shrink_to_fit under vectorMutex; both mutate
     // the vector's storage and must not race a concurrent implode() read.
     // PRO-487: save() is only called when a profile was actually erased,
@@ -816,12 +814,8 @@ void Settings::migrateProfileIds(const std::vector<std::pair<String, String>> &m
     preferences.end();
 
     if (needsSave) {
-        // doSave() early-returns when !dirty. Without setting the flag here,
-        // save(true) would no-op and the migrated sp/fp/po values stay only in
-        // memory — a reboot before any other setter dirties the state would
-        // lose the migration for that boot. Mark dirty explicitly so the
-        // synchronous save actually writes to NVS.
-        dirty = true;
+        // save(true) marks the migrated sp/fp/po values dirty before taking
+        // the synchronous persistence snapshot.
         save(true);
     }
 }
@@ -924,7 +918,10 @@ void Settings::setManualPressure(float pressure) {
     manualPressure = std::clamp(pressure, MIN_MANUAL_PRESSURE, MAX_MANUAL_PRESSURE);
 }
 
-void Settings::setManualFlow(float flow) { manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW); }
+void Settings::setManualFlow(float flow) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+    manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW);
+}
 
 void Settings::setManualTemperature(int temperature) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
@@ -991,19 +988,93 @@ void Settings::setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &sch
     save();
 }
 
-
 Settings::PersistenceSnapshot Settings::takePersistenceSnapshot() {
     PersistenceSnapshot snapshot;
-    snapshot.startupMode = startupMode; snapshot.targetSteamTemp = targetSteamTemp; snapshot.targetWaterTemp = targetWaterTemp; snapshot.targetGrindDuration = targetGrindDuration; snapshot.temperatureOffset = temperatureOffset; snapshot.standbyTimeout = standbyTimeout;
-    snapshot.startupFillTime = startupFillTime; snapshot.steamFillTime = steamFillTime; snapshot.smartGrindMode = smartGrindMode; snapshot.homeAssistantPort = homeAssistantPort; snapshot.mainBrightness = mainBrightness; snapshot.standbyBrightness = standbyBrightness; snapshot.standbyBrightnessTimeout = standbyBrightnessTimeout; snapshot.wifiApTimeout = wifiApTimeout; snapshot.themeMode = themeMode; snapshot.historyIndex = historyIndex; snapshot.flushDuration = flushDuration; snapshot.manualTargetType = manualTargetType; snapshot.manualTemperature = manualTemperature; snapshot.sunriseR = sunriseR; snapshot.sunriseG = sunriseG; snapshot.sunriseB = sunriseB; snapshot.sunriseW = sunriseW; snapshot.sunriseExtBrightness = sunriseExtBrightness; snapshot.emptyTankDistance = emptyTankDistance; snapshot.fullTankDistance = fullTankDistance; snapshot.altRelayFunction = altRelayFunction;
-    snapshot.pressureScaling = pressureScaling; snapshot.steamPumpPercentage = steamPumpPercentage; snapshot.steamPumpCutoff = steamPumpCutoff; snapshot.manualPressure = manualPressure; snapshot.manualFlow = manualFlow; snapshot.targetGrindVolume = targetGrindVolume; snapshot.brewDelay = brewDelay; snapshot.grindDelay = grindDelay; snapshot.doseGrams = doseGrams;
-    snapshot.delayAdjust = delayAdjust; snapshot.homekit = homekit; snapshot.volumetricTarget = volumetricTarget; snapshot.allowYieldOverride = allowYieldOverride; snapshot.autoSteamEnabled = autoSteamEnabled; snapshot.boilerFillActive = boilerFillActive; snapshot.smartGrindActive = smartGrindActive; snapshot.diagnosticLogEnabled = diagnosticLogEnabled; snapshot.smartGrindToggle = smartGrindToggle; snapshot.homeAssistant = homeAssistant; snapshot.momentaryButtons = momentaryButtons; snapshot.clock24hFormat = clock24hFormat; snapshot.autowakeupEnabled = autowakeupEnabled; snapshot.altRelayConfigured = altRelayConfigured; snapshot.cloudRelayEnabled = cloudRelayEnabled; snapshot.localAuthProvisioned = localAuthProvisioned;
-    SemaphoreHandle_t stringLock = ensureSelectedNameMutex(); if (stringLock != nullptr) xSemaphoreTake(stringLock, portMAX_DELAY);
-    snapshot.pid = pid; snapshot.pumpModelCoeffs = pumpModelCoeffs; snapshot.wifiSsid = wifiSsid; snapshot.wifiPassword = wifiPassword; snapshot.mdnsName = mdnsName; snapshot.otaChannel = otaChannel; snapshot.installedChannel = installedChannel; snapshot.savedScale = savedScale; snapshot.smartGrindIp = smartGrindIp; snapshot.homeAssistantIP = homeAssistantIP; snapshot.homeAssistantTopic = homeAssistantTopic; snapshot.homeAssistantUser = homeAssistantUser; snapshot.homeAssistantPassword = homeAssistantPassword; snapshot.timezone = timezone; snapshot.selectedProfile = selectedProfile; snapshot.selectedBean = selectedBean; snapshot.selectedGrinder = selectedGrinder; snapshot.cloudRelayUrl = cloudRelayUrl; snapshot.cloudRelayToken = cloudRelayToken; snapshot.localAdminToken = localAdminToken;
-    if (stringLock != nullptr) xSemaphoreGive(stringLock);
-    SemaphoreHandle_t vectorLock = ensureVectorMutex(); if (vectorLock != nullptr) xSemaphoreTake(vectorLock, portMAX_DELAY);
-    snapshot.favoritedProfiles = implode(favoritedProfiles, ","); snapshot.profileOrder = implode(profileOrder, ","); snapshot.autowakeupSchedules = autowakeupSchedules;
-    if (vectorLock != nullptr) xSemaphoreGive(vectorLock);
+    snapshot.startupMode = startupMode;
+    snapshot.targetSteamTemp = targetSteamTemp;
+    snapshot.targetWaterTemp = targetWaterTemp;
+    snapshot.targetGrindDuration = targetGrindDuration;
+    snapshot.temperatureOffset = temperatureOffset;
+    snapshot.standbyTimeout = standbyTimeout;
+    snapshot.startupFillTime = startupFillTime;
+    snapshot.steamFillTime = steamFillTime;
+    snapshot.smartGrindMode = smartGrindMode;
+    snapshot.homeAssistantPort = homeAssistantPort;
+    snapshot.mainBrightness = mainBrightness;
+    snapshot.standbyBrightness = standbyBrightness;
+    snapshot.standbyBrightnessTimeout = standbyBrightnessTimeout;
+    snapshot.wifiApTimeout = wifiApTimeout;
+    snapshot.themeMode = themeMode;
+    snapshot.historyIndex = historyIndex;
+    snapshot.flushDuration = flushDuration;
+    snapshot.manualTargetType = manualTargetType;
+    snapshot.manualTemperature = manualTemperature;
+    snapshot.sunriseR = sunriseR;
+    snapshot.sunriseG = sunriseG;
+    snapshot.sunriseB = sunriseB;
+    snapshot.sunriseW = sunriseW;
+    snapshot.sunriseExtBrightness = sunriseExtBrightness;
+    snapshot.emptyTankDistance = emptyTankDistance;
+    snapshot.fullTankDistance = fullTankDistance;
+    snapshot.altRelayFunction = altRelayFunction;
+    snapshot.pressureScaling = pressureScaling;
+    snapshot.steamPumpPercentage = steamPumpPercentage;
+    snapshot.steamPumpCutoff = steamPumpCutoff;
+    snapshot.manualPressure = manualPressure;
+    snapshot.manualFlow = manualFlow;
+    snapshot.targetGrindVolume = targetGrindVolume;
+    snapshot.brewDelay = brewDelay;
+    snapshot.grindDelay = grindDelay;
+    snapshot.doseGrams = doseGrams;
+    snapshot.delayAdjust = delayAdjust;
+    snapshot.homekit = homekit;
+    snapshot.volumetricTarget = volumetricTarget;
+    snapshot.allowYieldOverride = allowYieldOverride;
+    snapshot.autoSteamEnabled = autoSteamEnabled;
+    snapshot.boilerFillActive = boilerFillActive;
+    snapshot.smartGrindActive = smartGrindActive;
+    snapshot.diagnosticLogEnabled = diagnosticLogEnabled;
+    snapshot.smartGrindToggle = smartGrindToggle;
+    snapshot.homeAssistant = homeAssistant;
+    snapshot.momentaryButtons = momentaryButtons;
+    snapshot.clock24hFormat = clock24hFormat;
+    snapshot.autowakeupEnabled = autowakeupEnabled;
+    snapshot.altRelayConfigured = altRelayConfigured;
+    snapshot.cloudRelayEnabled = cloudRelayEnabled;
+    snapshot.localAuthProvisioned = localAuthProvisioned;
+    SemaphoreHandle_t stringLock = ensureSelectedNameMutex();
+    if (stringLock != nullptr)
+        xSemaphoreTake(stringLock, portMAX_DELAY);
+    snapshot.pid = pid;
+    snapshot.pumpModelCoeffs = pumpModelCoeffs;
+    snapshot.wifiSsid = wifiSsid;
+    snapshot.wifiPassword = wifiPassword;
+    snapshot.mdnsName = mdnsName;
+    snapshot.otaChannel = otaChannel;
+    snapshot.installedChannel = installedChannel;
+    snapshot.savedScale = savedScale;
+    snapshot.smartGrindIp = smartGrindIp;
+    snapshot.homeAssistantIP = homeAssistantIP;
+    snapshot.homeAssistantTopic = homeAssistantTopic;
+    snapshot.homeAssistantUser = homeAssistantUser;
+    snapshot.homeAssistantPassword = homeAssistantPassword;
+    snapshot.timezone = timezone;
+    snapshot.selectedProfile = selectedProfile;
+    snapshot.selectedBean = selectedBean;
+    snapshot.selectedGrinder = selectedGrinder;
+    snapshot.cloudRelayUrl = cloudRelayUrl;
+    snapshot.cloudRelayToken = cloudRelayToken;
+    snapshot.localAdminToken = localAdminToken;
+    if (stringLock != nullptr)
+        xSemaphoreGive(stringLock);
+    SemaphoreHandle_t vectorLock = ensureVectorMutex();
+    if (vectorLock != nullptr)
+        xSemaphoreTake(vectorLock, portMAX_DELAY);
+    snapshot.favoritedProfiles = implode(favoritedProfiles, ",");
+    snapshot.profileOrder = implode(profileOrder, ",");
+    snapshot.autowakeupSchedules = autowakeupSchedules;
+    if (vectorLock != nullptr)
+        xSemaphoreGive(vectorLock);
     return snapshot;
 }
 
@@ -1013,10 +1084,9 @@ void Settings::doSave() {
     PersistenceSnapshot snapshot;
     {
         ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
-        if (!dirty) {
+        if (!persistenceTransaction.tryBeginSnapshot()) {
             return;
         }
-        dirty = false;
         snapshot = takePersistenceSnapshot();
     }
 

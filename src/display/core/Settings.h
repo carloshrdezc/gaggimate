@@ -2,6 +2,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
+#include "SettingsPersistenceTransaction.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <display/core/constants.h>
@@ -268,12 +269,10 @@ class Settings {
         std::vector<AutoWakeupSchedule> autowakeupSchedules;
     };
     Preferences preferences;
-    bool dirty = false;
+    SettingsPersistenceTransaction persistenceTransaction;
     // Serializes a settings batch and the state snapshot taken by doSave().
     // It is recursive because batchUpdate() calls setters that call save().
     SemaphoreHandle_t persistenceMutex = nullptr;
-    unsigned int batchDepth = 0;
-    bool immediateSaveRequested = false;
 
     String selectedProfile;
     int targetSteamTemp = 155;
