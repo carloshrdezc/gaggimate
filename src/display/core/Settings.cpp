@@ -1,5 +1,6 @@
 #include "Settings.h"
 #include <display/core/MdnsNamePolicy.h>
+#include <display/core/SettingsPersistenceMutexInitialization.h>
 
 #include <algorithm>
 #include <utility>
@@ -230,6 +231,11 @@ void Settings::load() {
         vectorMutex = xSemaphoreCreateMutex();
     }
 
+    // Create the persistence mutex before starting the flush task or exposing
+    // Settings to other tasks. If allocation fails, ScopedRecursiveSemaphore
+    // retains its existing null-handle degradation behavior.
+    persistenceMutex = initializePersistenceMutex(persistenceMutex, [] { return xSemaphoreCreateRecursiveMutex(); });
+
     // PRO-492: guard against double-init if load() is ever called twice,
     // mirroring the vectorMutex guard above (PRO-488). Without this, a
     // second call would spawn a duplicate Settings::loop task and
@@ -243,14 +249,14 @@ void Settings::load() {
 // stays logically complete -- if a future re-init path ever clears taskHandle
 // externally, it must go through here first, or the FreeRTOS task started by
 // load() would leak as a zombie. Only tears down resources load() explicitly
-// creates: the loop task and vectorMutex (created eagerly at PRO-486/PRO-488).
+// creates: the loop task, vectorMutex, and persistenceMutex.
 // selectedNameMutex is intentionally left alone -- it is lazily created by
 // ensureSelectedNameMutex() on first use, not by load(), so it is out of
 // scope for this teardown.
 void Settings::unload() {
     // Keep this in sync with Settings::load() — it must tear down every
-    // resource load() creates (loop task via vTaskDelete, vectorMutex via
-    // vSemaphoreDelete, etc.). selectedNameMutex is intentionally excluded:
+    // resource load() creates (loop task via vTaskDelete and the eager mutexes
+    // via vSemaphoreDelete). selectedNameMutex is intentionally excluded:
     // it is lazily created by ensureSelectedNameMutex(), not by load().
     // Flush any pending dirty write BEFORE killing the deferred-flush task,
     // otherwise a settings change made shortly before unload() would be
@@ -270,6 +276,10 @@ void Settings::unload() {
     if (vectorMutex != nullptr) {
         vSemaphoreDelete(vectorMutex);
         vectorMutex = nullptr;
+    }
+    if (persistenceMutex != nullptr) {
+        vSemaphoreDelete(persistenceMutex);
+        persistenceMutex = nullptr;
     }
 }
 
@@ -304,9 +314,6 @@ void Settings::save(bool noDelay) {
 }
 
 SemaphoreHandle_t Settings::ensurePersistenceMutex() {
-    if (persistenceMutex == nullptr) {
-        persistenceMutex = xSemaphoreCreateRecursiveMutex();
-    }
     return persistenceMutex;
 }
 
