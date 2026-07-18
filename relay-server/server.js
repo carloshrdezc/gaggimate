@@ -9,10 +9,12 @@ const PREFIX = 'gaggimate-token-';
 function relayTokenFromProtocols(protocols = '') {
   const values = protocols.split(',').map(value => value.trim());
   const encoded = values.find(value => value.startsWith(PREFIX))?.slice(PREFIX.length);
-  if (!values.includes('gaggimate-relay-v1') || !encoded) return null;
+  if (!values.includes('gaggimate-relay-v1') || !encoded || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
   try {
-    const token = Buffer.from(encoded.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - encoded.length % 4) % 4), 'base64').toString('utf8');
-    return token && /^[\x21-\x7e]+$/.test(token) ? token : null;
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Buffer.from(base64 + '='.repeat((4 - base64.length % 4) % 4), 'base64');
+    const token = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return token ? token : null;
   } catch {
     return null;
   }

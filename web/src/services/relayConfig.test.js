@@ -48,3 +48,10 @@ test('uses a WebSocket subprotocol token rather than a URL query string', () => 
   expect(relayWebSocketProtocols('token+/='))
     .toEqual(['gaggimate-relay-v1', 'gaggimate-token-dG9rZW4rLz0']);
 });
+
+test('encodes space-containing and non-ASCII tokens as UTF-8 base64url for firmware compatibility', () => {
+  expect(relayWebSocketProtocols('space token'))
+    .toEqual(['gaggimate-relay-v1', 'gaggimate-token-c3BhY2UgdG9rZW4']);
+  expect(relayWebSocketProtocols('café'))
+    .toEqual(['gaggimate-relay-v1', 'gaggimate-token-Y2Fmw6k']);
+});

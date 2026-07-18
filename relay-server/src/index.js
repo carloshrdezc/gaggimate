@@ -36,10 +36,13 @@ function connect() {
 export function relayTokenFromProtocols(protocols) {
   const tokenProtocol = (protocols || '').split(',').map(value => value.trim()).find(value => value.startsWith('gaggimate-token-'));
   if (!tokenProtocol || !(protocols || '').split(',').map(value => value.trim()).includes('gaggimate-relay-v1')) return null;
+  const encoded = tokenProtocol.slice('gaggimate-token-'.length);
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
   try {
-    const encoded = tokenProtocol.slice('gaggimate-token-'.length).replace(/-/g, '+').replace(/_/g, '/');
-    const token = atob(encoded + '='.repeat((4 - encoded.length % 4) % 4));
-    return token && /^[\x21-\x7e]+$/.test(token) ? token : null;
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(base64 + '='.repeat((4 - base64.length % 4) % 4)), byte => byte.charCodeAt(0));
+    const token = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return token ? token : null;
   } catch {
     return null;
   }

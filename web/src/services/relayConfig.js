@@ -77,7 +77,9 @@ export function saveRelayCredentials(relayUrl, relayToken, previousRelayUrl = ''
 }
 
 export function relayWebSocketProtocols(relayToken) {
-  const encoded = btoa(relayToken).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const bytes = new TextEncoder().encode(relayToken);
+  const binary = Array.from(bytes, byte => String.fromCharCode(byte)).join('');
+  const encoded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return ['gaggimate-relay-v1', `gaggimate-token-${encoded}`];
 }
 

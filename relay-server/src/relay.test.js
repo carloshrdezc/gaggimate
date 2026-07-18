@@ -82,7 +82,7 @@ test('worker rejects connect requests without a valid token and role', async () 
 test('worker routes each authenticated token to an isolated Durable Object instance', async () => {
   const { env, fetchCalls } = createRelayEnv();
   const request = (role, token) => new Request(`https://relay.example/connect?role=${role}`, {
-    headers: { 'Sec-WebSocket-Protocol': `gaggimate-relay-v1, gaggimate-token-${btoa(token)}` },
+    headers: { 'Sec-WebSocket-Protocol': `gaggimate-relay-v1, gaggimate-token-${btoa(token).replace(/=+$/, '')}` },
   });
 
   const alphaDevice = await worker.fetch(request('device', 'alpha'), env);
