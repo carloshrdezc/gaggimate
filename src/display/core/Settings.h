@@ -2,6 +2,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
+#include "SettingsPersistenceTransaction.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <display/core/constants.h>
@@ -250,8 +251,28 @@ class Settings {
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
 
   private:
+    struct PersistenceSnapshot {
+        int startupMode, targetSteamTemp, targetWaterTemp, targetGrindDuration, temperatureOffset, standbyTimeout;
+        int startupFillTime, steamFillTime, smartGrindMode, homeAssistantPort, mainBrightness, standbyBrightness;
+        int standbyBrightnessTimeout, wifiApTimeout, themeMode, historyIndex, flushDuration, manualTargetType;
+        int manualTemperature, sunriseR, sunriseG, sunriseB, sunriseW, sunriseExtBrightness, emptyTankDistance;
+        int fullTankDistance, altRelayFunction;
+        float pressureScaling, steamPumpPercentage, steamPumpCutoff, manualPressure, manualFlow;
+        double targetGrindVolume, brewDelay, grindDelay, doseGrams;
+        bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, boilerFillActive;
+        bool smartGrindActive, diagnosticLogEnabled, smartGrindToggle, homeAssistant, momentaryButtons;
+        bool clock24hFormat, autowakeupEnabled, altRelayConfigured, cloudRelayEnabled, localAuthProvisioned;
+        String pid, pumpModelCoeffs, wifiSsid, wifiPassword, mdnsName, otaChannel, installedChannel, savedScale;
+        String smartGrindIp, homeAssistantIP, homeAssistantTopic, homeAssistantUser, homeAssistantPassword, timezone;
+        String selectedProfile, selectedBean, selectedGrinder, favoritedProfiles, profileOrder, cloudRelayUrl, cloudRelayToken;
+        String localAdminToken;
+        std::vector<AutoWakeupSchedule> autowakeupSchedules;
+    };
     Preferences preferences;
-    bool dirty = false;
+    SettingsPersistenceTransaction persistenceTransaction;
+    // Serializes a settings batch and the state snapshot taken by doSave().
+    // It is recursive because batchUpdate() calls setters that call save().
+    SemaphoreHandle_t persistenceMutex = nullptr;
 
     String selectedProfile;
     int targetSteamTemp = 155;
@@ -362,6 +383,8 @@ class Settings {
     bool localAuthProvisioned = false;
 
     void doSave();
+    PersistenceSnapshot takePersistenceSnapshot();
+    SemaphoreHandle_t ensurePersistenceMutex();
     // PRO-427: lazily create selectedNameMutex on first use and return it (may be
     // null if creation fails, in which case callers degrade to lock-free access).
     // const because the const selected-name getters need to lock; the handle is
