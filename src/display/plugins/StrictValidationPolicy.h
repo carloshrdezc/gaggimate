@@ -14,6 +14,9 @@ struct Error {
     std::string message;
 };
 struct Field {
+    Field(std::string name, std::string value, bool isNumeric = false)
+        : name(std::move(name)), value(std::move(value)), isNumeric(isNumeric) {}
+
     std::string name;
     std::string value;
     bool isNumeric = false;
