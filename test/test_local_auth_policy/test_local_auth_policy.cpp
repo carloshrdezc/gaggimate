@@ -19,6 +19,21 @@ void test_only_ap_setup_can_bypass_http_authentication(void) {
     TEST_ASSERT_FALSE(localAuthMayBypassHttpInSetup(/*apMode=*/true, /*bootstrapRoute=*/false));
 }
 
+void test_ap_provisioning_requires_ap_mode_and_exact_required_fields(void) {
+    TEST_ASSERT_TRUE(localAuthMayProvisionInAp(/*apMode=*/true, /*authenticated=*/true, /*hasSsid=*/true,
+                                               /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/true, /*restart=*/true));
+    TEST_ASSERT_FALSE(localAuthMayProvisionInAp(/*apMode=*/false, /*authenticated=*/true, /*hasSsid=*/true,
+                                                /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/true, /*restart=*/true));
+    TEST_ASSERT_FALSE(localAuthMayProvisionInAp(/*apMode=*/true, /*authenticated=*/false, /*hasSsid=*/true,
+                                                /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/true, /*restart=*/true));
+    TEST_ASSERT_FALSE(localAuthMayProvisionInAp(/*apMode=*/true, /*authenticated=*/true, /*hasSsid=*/false,
+                                                /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/true, /*restart=*/true));
+    TEST_ASSERT_FALSE(localAuthMayProvisionInAp(/*apMode=*/true, /*authenticated=*/true, /*hasSsid=*/true,
+                                                /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/false, /*restart=*/true));
+    TEST_ASSERT_FALSE(localAuthMayProvisionInAp(/*apMode=*/true, /*authenticated=*/true, /*hasSsid=*/true,
+                                                /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/true, /*restart=*/false));
+}
+
 void test_saved_wifi_without_completed_provisioning_starts_recovery_ap(void) {
     TEST_ASSERT_TRUE(localAuthRequiresRecoveryAp(/*hasWifiCredentials=*/true, /*provisioned=*/false));
     TEST_ASSERT_FALSE(localAuthRequiresRecoveryAp(/*hasWifiCredentials=*/true, /*provisioned=*/true));
@@ -70,6 +85,7 @@ static int runLocalAuthPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_bearer_token_must_match_exactly);
     RUN_TEST(test_only_ap_setup_can_bypass_http_authentication);
+    RUN_TEST(test_ap_provisioning_requires_ap_mode_and_exact_required_fields);
     RUN_TEST(test_saved_wifi_without_completed_provisioning_starts_recovery_ap);
     RUN_TEST(test_websocket_requires_an_authenticated_session_for_commands);
     RUN_TEST(test_websocket_disconnect_does_not_preserve_authentication_for_a_reused_client_id);

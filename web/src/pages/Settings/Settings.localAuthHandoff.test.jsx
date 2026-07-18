@@ -43,6 +43,7 @@ import { Settings } from './index.jsx';
 beforeEach(() => {
   authenticatedFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
   vi.stubGlobal('alert', vi.fn());
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn() } });
 });
 
@@ -60,7 +61,7 @@ test.each(['attacker.example/', 'attacker?example', 'attacker#example', 'attacke
     );
 
     fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: hostname } });
-    fireEvent.click(screen.getByRole('button', { name: 'Copy Wi-Fi auth handoff link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Provision Wi-Fi and copy auth handoff link' }));
 
     expect(authenticatedFetch).not.toHaveBeenCalled();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
@@ -68,7 +69,7 @@ test.each(['attacker.example/', 'attacker?example', 'attacker#example', 'attacke
   },
 );
 
-test('persists the changed hostname with AP-to-STA credentials and hands off to that hostname', async () => {
+test('provisions only AP Wi-Fi fields, then copies and renders the matching handoff URL', async () => {
   render(
     h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)),
   );
@@ -79,11 +80,12 @@ test('persists the changed hostname with AP-to-STA credentials and hands off to 
   const hostname = screen.getByLabelText('Hostname');
   fireEvent.change(hostname, { target: { value: 'new-gaggimate' } });
   await waitFor(() => expect(hostname.value).toBe('new-gaggimate'));
-  fireEvent.click(screen.getByRole('button', { name: 'Copy Wi-Fi auth handoff link' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Provision Wi-Fi and copy auth handoff link' }));
 
   await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
 
-  const [, options] = authenticatedFetch.mock.calls[0];
+  const [url, options] = authenticatedFetch.mock.calls[0];
+  expect(url).toBe('/api/settings/provision');
   expect(options.method).toBe('post');
   expect(Object.fromEntries(options.body.entries())).toEqual({
     wifiSsid: 'setup-network',
@@ -96,4 +98,21 @@ test('persists the changed hostname with AP-to-STA credentials and hands off to 
     'http://new-gaggimate.local/#localAuthToken=bootstrap-token',
   );
   expect(screen.getByText('http://new-gaggimate.local/#localAuthToken=bootstrap-token')).toBeTruthy();
+});
+
+test.each([
+  ['network rejection', () => Promise.reject(new Error('offline'))],
+  ['server rejection', () => Promise.resolve({ ok: false, status: 503 })],
+])('does not disclose the handoff token after a %s', async (_description, response) => {
+  authenticatedFetch.mockImplementationOnce(response);
+  render(
+    h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)),
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Provision Wi-Fi and copy auth handoff link' }));
+
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Wi-Fi provisioning failed. Check the connection and try again.'));
+  expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  expect(screen.queryByText('http://gaggimate.local/#localAuthToken=bootstrap-token')).toBeNull();
+  expect(screen.queryByText(/The device restarts into STA after this successful provisioning/i)).toBeNull();
 });

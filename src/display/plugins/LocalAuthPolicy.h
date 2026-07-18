@@ -15,6 +15,14 @@ inline bool localAuthBearerMatches(const std::string &authorization, const std::
 // endpoint may use it without a token; all normal LAN operation is authenticated.
 inline bool localAuthMayBypassHttpInSetup(bool apMode, bool bootstrapRoute) { return apMode && bootstrapRoute; }
 
+// The AP handoff endpoint must remain a narrow, authenticated recovery action.
+// It never delegates to the general settings mutation, whose checkbox fields
+// intentionally treat omission as disabled.
+inline bool localAuthMayProvisionInAp(bool apMode, bool authenticated, bool hasSsid, bool hasPassword, bool hasMdnsName,
+                                      bool complete, bool restart) {
+    return apMode && authenticated && hasSsid && hasPassword && hasMdnsName && complete && restart;
+}
+
 // Existing STA installations predate local credentials. Keep the recovery AP
 // available until an owner completes the AP setup flow and persists the marker.
 inline bool localAuthRequiresRecoveryAp(bool hasWifiCredentials, bool provisioned) { return hasWifiCredentials && !provisioned; }

@@ -93,6 +93,7 @@ class WebUIPlugin : public Plugin {
     void serveWebAsset(AsyncWebServerRequest *request);
     void serveWebAsset(AsyncWebServerRequest *request, String path);
     void handleSettings(AsyncWebServerRequest *request);
+    void handleSettingsProvisioning(AsyncWebServerRequest *request);
     void handleBLEScaleList(AsyncWebServerRequest *request);
     void handleBLEScaleScan(AsyncWebServerRequest *request);
     void handleBLEScaleConnect(AsyncWebServerRequest *request);

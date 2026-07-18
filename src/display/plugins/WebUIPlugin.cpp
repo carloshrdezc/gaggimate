@@ -912,6 +912,8 @@ void WebUIPlugin::setupServer() {
     server.on("/success.txt", [](AsyncWebServerRequest *request) { request->send(200); }); // firefox captive portal call home
     server.on("/ncsi.txt", [](AsyncWebServerRequest *request) { request->redirect(LOCAL_URL); }); // windows call home
     server.on("/api/settings", [this](AsyncWebServerRequest *request) { handleSettings(request); });
+    server.on("/api/settings/provision", HTTP_POST,
+              [this](AsyncWebServerRequest *request) { handleSettingsProvisioning(request); });
     server.on("/api/status", [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         addCorsHeaders(response);
@@ -1936,6 +1938,48 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
     }
 
     sendResponse(clientId, response);
+}
+
+void WebUIPlugin::handleSettingsProvisioning(AsyncWebServerRequest *request) {
+    const bool authenticated = isHttpAuthenticated(request);
+    const bool hasSsid = request->hasArg("wifiSsid");
+    const bool hasPassword = request->hasArg("wifiPassword");
+    const bool hasMdnsName = request->hasArg("mdnsName");
+    const bool complete =
+        request->hasArg("completeLocalAuthProvisioning") && request->arg("completeLocalAuthProvisioning") == "1";
+    const bool restart = request->hasArg("restart") && request->arg("restart") == "1";
+    if (!localAuthMayProvisionInAp(apMode, authenticated, hasSsid, hasPassword, hasMdnsName, complete, restart)) {
+        sendUnauthorized(request);
+        return;
+    }
+
+    const String mdnsName = request->arg("mdnsName");
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        response->setCode(400);
+        addCorsHeaders(response);
+        response->print("{\"error\":\"Invalid mDNS hostname\"}");
+        request->send(response);
+        return;
+    }
+
+    // Deliberately do not call handleSettings(): omitted checkbox fields there
+    // mean false. This narrow endpoint mutates only AP recovery data atomically.
+    controller->getSettings().batchUpdate([request, mdnsName](Settings *settings) {
+        settings->setWifiSsid(request->arg("wifiSsid"));
+        settings->setWifiPassword(request->arg("wifiPassword"));
+        settings->setMdnsName(mdnsName);
+        settings->setLocalAuthProvisioned(true);
+        settings->save(true);
+    });
+
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    response->print("{\"success\":true}");
+    request->send(response);
+
+    if (restart)
+        ESP.restart();
 }
 
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
