@@ -27,6 +27,7 @@
 #include <display/plugins/LocalAuthPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/StandbyReassertPolicy.h>
+#include <display/plugins/StrictValidationPolicy.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
@@ -1405,6 +1406,44 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         ESP_LOGW("WebUIPlugin", "Rejected unauthenticated WebSocket request: %s", msgType.c_str());
         return;
     }
+
+    // PRO-521: command payload boundary. Known fields on control requests must
+    // have the documented JSON scalar type/range before any dispatch side effect.
+    // Unknown fields are deliberately ignored for forward compatibility.
+    static const char *const commandFields[] = {"target", "grams",       "mode", "targetType", "pressure",
+                                                "flow",   "temperature", "time", "samples"};
+    strict_validation::Fields commandValues;
+    for (const char *field : commandFields) {
+        const bool applies = (msgType == "req:change-grind-target" && String(field) == "target") ||
+                             (msgType == "req:change-mode" && String(field) == "mode") ||
+                             (msgType == "req:change-brew-target" && String(field) == "target") ||
+                             (msgType == "req:dose:set" && String(field) == "grams") || (msgType == "req:manual:update") ||
+                             (msgType == "req:autotune-start" && (String(field) == "time" || String(field) == "samples"));
+        if (!applies)
+            continue;
+        const bool required = (msgType == "req:change-grind-target" && String(field) == "target") ||
+                              (msgType == "req:change-mode" && String(field) == "mode") ||
+                              (msgType == "req:change-brew-target" && String(field) == "target") ||
+                              (msgType == "req:dose:set" && String(field) == "grams");
+        JsonVariantConst value = doc[field];
+        if (value.isNull()) {
+            if (required)
+                commandValues.push_back({field, ""});
+            continue;
+        }
+        const bool numericField = String(field) != "targetType";
+        const bool isNumeric = value.is<int>() || value.is<float>();
+        if ((numericField && !isNumeric) || (!numericField && !value.is<const char *>())) {
+            ESP_LOGW("WebUIPlugin", "Ignoring %s: invalid %s type", msgType.c_str(), field);
+            return;
+        }
+        commandValues.push_back({field, value.as<String>().c_str(), isNumeric});
+    }
+    strict_validation::Error commandError;
+    if (!strict_validation::validateWebSocketRequest(msgType.c_str(), commandValues, commandError)) {
+        ESP_LOGW("WebUIPlugin", "Ignoring %s: invalid %s", msgType.c_str(), commandError.field.c_str());
+        return;
+    }
     if (msgType.startsWith("req:profiles:")) {
         handleProfileRequest(clientId, doc);
     } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
@@ -1999,6 +2038,56 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 request->send(response);
                 return;
             }
+        }
+
+        // Validate every supplied scalar before mutating Settings. This is a
+        // transaction boundary: a bad field returns 400 and no partial update is
+        // persisted. String/toInt() coercion below is safe only after this pass.
+        static const char *const validatedFields[] = {"startupMode",
+                                                      "targetSteamTemp",
+                                                      "targetWaterTemp",
+                                                      "temperatureOffset",
+                                                      "pressureScaling",
+                                                      "startupFillTime",
+                                                      "steamFillTime",
+                                                      "smartGrindMode",
+                                                      "haPort",
+                                                      "brewDelay",
+                                                      "grindDelay",
+                                                      "standbyTimeout",
+                                                      "mainBrightness",
+                                                      "standbyBrightness",
+                                                      "standbyBrightnessTimeout",
+                                                      "steamPumpPercentage",
+                                                      "steamPumpCutoff",
+                                                      "themeMode",
+                                                      "sunriseR",
+                                                      "sunriseG",
+                                                      "sunriseB",
+                                                      "sunriseW",
+                                                      "sunriseExtBrightness",
+                                                      "emptyTankDistance",
+                                                      "fullTankDistance",
+                                                      "altRelayFunction",
+                                                      "autowakeupSchedules",
+                                                      "flushDuration"};
+        strict_validation::Fields fields;
+        for (const char *name : validatedFields) {
+            if (request->hasArg(name))
+                fields.push_back({name, request->arg(name).c_str()});
+        }
+        strict_validation::Error validationError;
+        if (!strict_validation::validateSettings(fields, validationError)) {
+            JsonDocument error;
+            error["error"] = "Invalid settings";
+            error["field"] = validationError.field.c_str();
+            error["detail"] = validationError.message.c_str();
+            AsyncResponseStream *response = request->beginResponseStream("application/json");
+            response->setCode(400);
+            addCorsHeaders(response);
+            serializeJson(error, *response);
+            request->send(response);
+            return;
         }
         controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
