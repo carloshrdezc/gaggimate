@@ -15,6 +15,7 @@ import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
 import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
+import { clearRelayCredentials, confirmRelayOrigin, relayCredentials, saveRelayCredentials } from '../../services/relayConfig.js';
 import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
 import { normalizeSettings } from './settingsNormalize.js';
 
@@ -224,6 +225,11 @@ export function Settings() {
         if (restart) {
           formDataToSubmit.append('restart', '1');
         }
+        const previousRelay = relayCredentials();
+        if (formData.cloudRelayEnabled && !confirmRelayOrigin(formData.cloudRelayUrl || '', previousRelay?.relayUrl)) {
+          return;
+        }
+
         const response = await authenticatedFetch(form.action, {
           method: 'post',
           body: formDataToSubmit,
@@ -235,28 +241,17 @@ export function Settings() {
 
         const data = await response.json();
 
-        // Sync relay config to localStorage so browser uses relay on next connection.
-        // The server returns the literal sentinel `SECRET_SENTINEL` in place of the
-        // real token on every /api/settings response, so we cannot read the token
-        // from `data`. Use the value we just POSTed (which is what the user typed,
-        // the sentinel if they didn't touch the field, or empty if they cleared it).
+        // Keep the relay URL persistent but hold the browser relay token only for
+        // this tab session. The firmware remains the durable credential store.
         const submittedToken = formDataToSubmit.get('cloudRelayToken');
         if (data.cloudRelayUrl && data.cloudRelayEnabled) {
-          localStorage.setItem('gaggimate_relay_url', data.cloudRelayUrl);
-          if (submittedToken === SECRET_SENTINEL || submittedToken === null) {
-            // User left the prefilled sentinel in place (or the field was absent
-            // from the form). Keep whatever was already in localStorage.
-          } else if (submittedToken === '') {
-            // User explicitly cleared the token field. Mirror that to storage so
-            // the browser doesn't keep reconnecting with stale credentials.
-            localStorage.removeItem('gaggimate_relay_token');
-          } else {
-            // User entered a new (or rotated) token. Persist it.
-            localStorage.setItem('gaggimate_relay_token', submittedToken);
-          }
+          const currentRelay = relayCredentials();
+          const tokenToUse = submittedToken === SECRET_SENTINEL || submittedToken === null
+            ? currentRelay?.relayToken || ''
+            : submittedToken;
+          if (!saveRelayCredentials(data.cloudRelayUrl, tokenToUse, data.cloudRelayUrl)) return;
         } else {
-          localStorage.removeItem('gaggimate_relay_url');
-          localStorage.removeItem('gaggimate_relay_token');
+          clearRelayCredentials();
         }
 
         const updatedData = {
@@ -1296,10 +1291,7 @@ function RemoteAccessCard({ formData, onChange }) {
   // can still be built. The sentinel itself is rejected by
   // buildRemoteAccessLink as a defense-in-depth check.
   const formToken = formData.cloudRelayToken || '';
-  const relayToken =
-    formToken && formToken !== SECRET_SENTINEL
-      ? formToken
-      : localStorage.getItem('gaggimate_relay_token') || '';
+  const relayToken = formToken && formToken !== SECRET_SENTINEL ? formToken : relayCredentials()?.relayToken || '';
   const relayEnabled = !!formData.cloudRelayEnabled;
   const remoteLink = buildRemoteAccessLink({
     relayEnabled,
@@ -1321,7 +1313,7 @@ function RemoteAccessCard({ formData, onChange }) {
     <Card sm={10} lg={10} title='Remote Access'>
       <div className='flex flex-col gap-5'>
         <p className='text-[14px] text-[var(--text-disabled,#666)]'>
-          Deploy the relay server and enter its URL below to access your machine from anywhere.
+          Deploy the relay server and enter its URL below to access your machine from anywhere. Relay tokens stay only in this browser tab; rotate the token here to revoke prior browser sessions.
         </p>
         <div className='flex items-center justify-between gap-4'>
           <div>
@@ -1355,6 +1347,9 @@ function RemoteAccessCard({ formData, onChange }) {
               value={relayUrl}
               onChange={onChange('cloudRelayUrl')}
             />
+            <p className='text-[12px] text-[var(--text-disabled,#666)]'>
+              You will confirm the target relay host before it is used. Prefer wss://. ws:// is unencrypted, and non-default/self-hosted relays require extra care.
+            </p>
           </div>
         )}
         {relayEnabled && (
