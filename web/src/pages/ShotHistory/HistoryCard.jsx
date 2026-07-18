@@ -52,14 +52,14 @@ export default function HistoryCard({ shot, onDelete, onLoad, onNotesChanged }) 
   const [isExporting, setIsExporting] = useState(false);
 
   // Reactive comparison state — read signal value to subscribe to updates
-  const inComparison = useComputed(() => isInComparison(shot.id));
+  const inComparison = useComputed(() => isInComparison(shot));
   const comparisonFull = useComputed(
     () => comparisonShots.value.length >= 4 && !inComparison.value,
   );
 
   const handleCompare = useCallback(() => {
     if (inComparison.value) {
-      removeFromComparison(shot.id);
+      removeFromComparison(shot);
     } else {
       addToComparison(shot);
       if (location.path !== '/analyzer') {
