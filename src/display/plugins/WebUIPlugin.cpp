@@ -2074,7 +2074,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
         strict_validation::Fields fields;
         for (const char *name : validatedFields) {
             if (request->hasArg(name))
-                fields.emplace_back(name, request->arg(name).c_str());
+                fields.push_back({name, request->arg(name).c_str()});
         }
         strict_validation::Error validationError;
         if (!strict_validation::validateSettings(fields, validationError)) {
