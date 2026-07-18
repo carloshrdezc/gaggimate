@@ -31,10 +31,20 @@ void test_websocket_validation_rejects_invalid_command_values() {
     TEST_ASSERT_TRUE(strict_validation::validateWebSocketRequest("req:manual:update", {{"targetType", "flow"}, {"pressure", "9.5"}}, error));
 }
 
+void test_websocket_validation_requires_command_fields() {
+    strict_validation::Error error;
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:dose:set", {}, error));
+    TEST_ASSERT_EQUAL_STRING("grams", error.field.c_str());
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:change-mode", {}, error));
+    TEST_ASSERT_EQUAL_STRING("mode", error.field.c_str());
+    TEST_ASSERT_TRUE(strict_validation::validateWebSocketRequest("req:manual:update", {}, error));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_integer_parser_rejects_partial_empty_and_non_finite);
     RUN_TEST(test_settings_validation_rejects_bad_enum_range_and_schedule_atomically);
     RUN_TEST(test_websocket_validation_rejects_invalid_command_values);
+    RUN_TEST(test_websocket_validation_requires_command_fields);
     return UNITY_END();
 }

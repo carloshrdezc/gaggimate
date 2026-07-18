@@ -1421,9 +1421,16 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                              (msgType == "req:autotune-start" && (String(field) == "time" || String(field) == "samples"));
         if (!applies)
             continue;
+        const bool required = (msgType == "req:change-grind-target" && String(field) == "target") ||
+                              (msgType == "req:change-mode" && String(field) == "mode") ||
+                              (msgType == "req:change-brew-target" && String(field) == "target") ||
+                              (msgType == "req:dose:set" && String(field) == "grams");
         JsonVariantConst value = doc[field];
-        if (value.isNull())
+        if (value.isNull()) {
+            if (required)
+                commandValues.emplace_back(field, "");
             continue;
+        }
         if (!value.is<const char *>() && !value.is<int>() && !value.is<float>()) {
             ESP_LOGW("WebUIPlugin", "Ignoring %s: invalid %s type", msgType.c_str(), field);
             return;

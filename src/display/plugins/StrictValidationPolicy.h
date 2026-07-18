@@ -75,7 +75,32 @@ inline bool validSchedule(const std::string &value) {
     return false;
 }
 
+inline bool requireFields(const Fields &fields, const std::vector<std::string> &required, Error &error) {
+    for (const std::string &requiredName : required) {
+        bool found = false;
+        for (const auto &field : fields) {
+            if (field.first == requiredName) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            error = {requiredName, "is required"};
+            return false;
+        }
+    }
+    return true;
+}
+
 inline bool validateWebSocketRequest(const std::string &type, const Fields &fields, Error &error) {
+    if (type == "req:change-grind-target" && !requireFields(fields, {"target"}, error))
+        return false;
+    if (type == "req:change-mode" && !requireFields(fields, {"mode"}, error))
+        return false;
+    if (type == "req:change-brew-target" && !requireFields(fields, {"target"}, error))
+        return false;
+    if (type == "req:dose:set" && !requireFields(fields, {"grams"}, error))
+        return false;
     for (const auto &field : fields) {
         const std::string &name = field.first;
         const std::string &value = field.second;
