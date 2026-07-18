@@ -34,6 +34,7 @@ class WebSocketsClient {
     void onEvent(WebSocketClientEvent cb) { _cb = std::move(cb); }
     void begin(const char * /*host*/, uint16_t /*port*/, const char * /*path*/ = "/") {}
     void beginSSL(const char * /*host*/, uint16_t /*port*/, const char * /*path*/ = "/") {}
+    void setExtraHeaders(const char * /*headers*/) {}
     bool sendTXT(const String & /*payload*/) { return false; }
     bool sendTXT(const char * /*payload*/) { return false; }
     void loop() {}

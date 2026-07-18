@@ -12,10 +12,9 @@ export function buildRemoteAccessLink({
   pagesOrigin = DEFAULT_REMOTE_PAGES_ORIGIN,
 }) {
   if (!relayEnabled || !relayUrl || !relayToken) return null;
-  // The firmware masks `cloudRelayToken` in /api/settings responses, so any
-  // caller that pulls `relayToken` from `formData` may receive the sentinel.
-  // Refusing to build a link in that case keeps users from copying a URL with
-  // an invalid token instead of the real one.
+  // The firmware masks `cloudRelayToken` in /api/settings GET. If the form
+  // round-trips that mask into buildRemoteAccessLink, we must NOT emit a URL
+  // with the literal sentinel as the token.
   if (relayToken === SECRET_SENTINEL) return null;
-  return `${pagesOrigin}?relay=${encodeURIComponent(relayUrl)}&token=${encodeURIComponent(relayToken)}`;
+  return `${pagesOrigin}#relay=${encodeURIComponent(relayUrl)}&token=${encodeURIComponent(relayToken)}`;
 }

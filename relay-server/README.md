@@ -1,47 +1,38 @@
 # GaggiMate Relay Server
 
-WebSocket relay that lets you access your GaggiMate from anywhere in the world without port forwarding.
+The relay forwards WebSocket frames between an outbound ESP32 connection and remote browsers without exposing the machine to the internet.
 
-## How it works
+## Configure
 
-```
-Browser (anywhere) ←→ Relay Server (cloud) ←→ ESP32 (home)
-```
+1. In the local GaggiMate Settings page, enable Remote Access.
+2. Enter a `wss://` relay URL and a new random token, then save.
+3. Copy the Remote Access Link and open it in the browser that will control the machine.
+4. Confirm the displayed relay host. `ws://` and non-default/self-hosted hosts show an explicit warning.
 
-The ESP32 connects **outbound** to the relay, so no port forwarding or public IP is needed.
+The browser receives the setup token in the URL fragment, which is not sent in an HTTP request. It retains the token only in `sessionStorage` for the active tab; the URL itself may persist in local storage. Existing `gaggimate_relay_token` local-storage entries are migrated into the active tab and deleted on first use.
 
-## Deploy to Fly.io (free)
+## Rotation and revocation
 
-```bash
-cd relay-server
-npm install
-fly launch          # creates app, generates fly.toml
-fly deploy
-```
+Change the relay token in Settings and save. The firmware reconnects using the new token; browser tabs with the prior session token cannot authenticate after reconnecting. Close tabs or use the new Remote Access Link to remove old browser credentials immediately.
 
-Set your Fly.io app name in `fly.toml` first. Free tier works fine — 1 shared CPU, 256 MB RAM.
+## Protocol
 
-## Configure in GaggiMate
+- `GET /` - landing page
+- `GET /health` - health check
+- `WS /connect?role=device` - ESP32 connection
+- `WS /connect?role=browser` - browser connection
 
-1. Open **Settings** in the GaggiMate web UI (on your local network)
-2. Scroll to **Remote Access**
-3. Enter your relay URL: `wss://your-app-name.fly.dev`
-4. Enter a secret token (any random string, keep it private)
-5. Save settings
-6. Copy the **Remote Access Link** and bookmark it
+`token` is never accepted as a query parameter. Clients authenticate with these WebSocket subprotocols:
+
+- `gaggimate-relay-v1`
+- `gaggimate-token-<base64url-token>`
+
+The server validates both subprotocols before selecting the session. It uses the validated token only as the in-memory/Durable Object session key and never logs it.
 
 ## Local development
 
 ```bash
-npm install
-npm run dev       # starts on port 8080
+npm ci
+npm test
+npm run dev
 ```
-
-## Protocol
-
-- `GET /` — landing page (enter token manually)
-- `GET /health` — health check
-- `WS /connect?token=TOKEN&role=device` — ESP32 connection
-- `WS /connect?token=TOKEN&role=browser` — browser connection
-
-All messages are forwarded unchanged between device and browsers.

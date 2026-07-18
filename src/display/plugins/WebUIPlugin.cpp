@@ -46,9 +46,27 @@ static WebUIPlugin *g_webUIPlugin = nullptr;
 // used at every read/write site.
 static constexpr const char *kSecretSentinel = "---unchanged---";
 
+static String relayTokenProtocol(const String &token) {
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    String encoded;
+    encoded.reserve(((token.length() + 2) / 3) * 4);
+    for (size_t index = 0; index < token.length(); index += 3) {
+        const uint32_t first = static_cast<uint8_t>(token[index]);
+        const uint32_t second = index + 1 < token.length() ? static_cast<uint8_t>(token[index + 1]) : 0;
+        const uint32_t third = index + 2 < token.length() ? static_cast<uint8_t>(token[index + 2]) : 0;
+        const uint32_t block = (first << 16) | (second << 8) | third;
+        encoded += alphabet[(block >> 18) & 0x3f];
+        encoded += alphabet[(block >> 12) & 0x3f];
+        if (index + 1 < token.length())
+            encoded += alphabet[(block >> 6) & 0x3f];
+        if (index + 2 < token.length())
+            encoded += alphabet[block & 0x3f];
+    }
+    return "gaggimate-token-" + encoded;
+}
+
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
-// Parse wss://host[:port][/path] or ws://host[:port][/path]
 static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_t &port, String &basePath) {
     if (url.startsWith("wss://")) {
         useSSL = true;
@@ -1209,8 +1227,9 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?token=" + relayToken + "&role=device"
-                                                          : basePath + "/connect?token=" + relayToken + "&role=device";
+    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?role=device" : basePath + "/connect?role=device";
+    String relayProtocols = "Sec-WebSocket-Protocol: gaggimate-relay-v1, " + relayTokenProtocol(relayToken) + "\r\n";
+    relayWs.setExtraHeaders(relayProtocols.c_str());
 
     relayWs.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
         switch (type) {

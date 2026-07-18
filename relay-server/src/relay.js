@@ -27,7 +27,11 @@ export class RelaySession {
       this._handleBrowser(server);
     }
 
-    return new Response(null, { status: 101, webSocket: client });
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+      headers: { 'Sec-WebSocket-Protocol': 'gaggimate-relay-v1' },
+    });
   }
 
   _handleDevice(ws) {

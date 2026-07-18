@@ -2,6 +2,7 @@ import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
 import { LOCAL_AUTH_TOKEN_KEY } from './localAuthFetch.js';
+import { beginRelayProvisioning, relayCredentials, relayWebSocketProtocols } from './relayConfig.js';
 
 /**
  * Thrown by `ApiService.request()` when the underlying WebSocket closes (or
@@ -105,29 +106,13 @@ export default class ApiService {
     this.connect();
   }
 
-  _resolveWsUrl() {
-    // Check URL params for relay configuration (one-time setup link)
-    const params = new URLSearchParams(window.location.search);
-    const relayParam = params.get('relay');
-    const tokenParam = params.get('token');
-    if (relayParam && tokenParam) {
-      localStorage.setItem('gaggimate_relay_url', relayParam);
-      localStorage.setItem('gaggimate_relay_token', tokenParam);
-      // Clean params from URL without reload
-      const url = new URL(window.location.href);
-      url.searchParams.delete('relay');
-      url.searchParams.delete('token');
-      history.replaceState(null, '', url.toString());
-    }
-
-    const relayUrl = localStorage.getItem('gaggimate_relay_url');
-    const relayToken = localStorage.getItem('gaggimate_relay_token');
-    if (relayUrl && relayToken) {
-      return `${relayUrl}/connect?token=${encodeURIComponent(relayToken)}&role=browser`;
-    }
+  _resolveWsConfig() {
+    beginRelayProvisioning();
+    const relay = relayCredentials();
+    if (relay) return { url: `${relay.relayUrl}/connect?role=browser`, protocols: relayWebSocketProtocols(relay.relayToken) };
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    return `${wsProtocol}${window.location.host}/ws`;
+    return { url: `${wsProtocol}${window.location.host}/ws`, protocols: undefined };
   }
 
   async connect() {
@@ -145,7 +130,8 @@ export default class ApiService {
         this.socket.close();
       }
 
-      this.socket = new WebSocket(this._resolveWsUrl());
+      const { url, protocols } = this._resolveWsConfig();
+      this.socket = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
 
       // Use bound references to enable proper cleanup
       this.socket.addEventListener('message', this._boundOnMessage);
