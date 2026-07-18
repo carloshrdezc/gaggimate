@@ -5,6 +5,23 @@
 #include <utility>
 
 namespace {
+class ScopedRecursiveSemaphore {
+  public:
+    explicit ScopedRecursiveSemaphore(SemaphoreHandle_t semaphore) : semaphore(semaphore) {
+        if (semaphore != nullptr) {
+            xSemaphoreTakeRecursive(semaphore, portMAX_DELAY);
+        }
+    }
+    ~ScopedRecursiveSemaphore() {
+        if (semaphore != nullptr) {
+            xSemaphoreGiveRecursive(semaphore);
+        }
+    }
+
+  private:
+    SemaphoreHandle_t semaphore;
+};
+
 String remapProfileId(const String &id, const std::vector<std::pair<String, String>> &migrations) {
     for (const auto &migration : migrations) {
         if (id == migration.first) {
@@ -257,93 +274,138 @@ void Settings::unload() {
 }
 
 void Settings::batchUpdate(const SettingsCallback &callback) {
-    callback(this);
-    save();
-}
-
-void Settings::save(bool noDelay) {
-    dirty = true;
-    if (noDelay) {
+    bool saveImmediately = false;
+    {
+        ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+        ++batchDepth;
+        callback(this);
+        --batchDepth;
+        dirty = true;
+        saveImmediately = immediateSaveRequested;
+        immediateSaveRequested = false;
+    }
+    if (saveImmediately) {
         doSave();
     }
 }
 
+void Settings::save(bool noDelay) {
+    bool saveImmediately = false;
+    {
+        ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+        dirty = true;
+        if (noDelay) {
+            if (batchDepth > 0) {
+                immediateSaveRequested = true;
+                return;
+            }
+            saveImmediately = true;
+        }
+    }
+    if (saveImmediately) {
+        doSave();
+    }
+}
+
+SemaphoreHandle_t Settings::ensurePersistenceMutex() {
+    if (persistenceMutex == nullptr) {
+        persistenceMutex = xSemaphoreCreateRecursiveMutex();
+    }
+    return persistenceMutex;
+}
+
 void Settings::setTargetSteamTemp(const int target_steam_temp) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     targetSteamTemp = target_steam_temp;
     save();
 }
 
 void Settings::setTargetWaterTemp(const int target_water_temp) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     targetWaterTemp = target_water_temp;
     save();
 }
 
 void Settings::setTemperatureOffset(const int temperature_offset) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     temperatureOffset = temperature_offset;
     save();
 }
 
 void Settings::setPressureScaling(const float pressure_scaling) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     pressureScaling = pressure_scaling;
     save();
 }
 
 void Settings::setTargetGrindVolume(double target_grind_volume) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     targetGrindVolume = target_grind_volume;
     save();
 }
 
 void Settings::setTargetGrindDuration(const int target_duration) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     targetGrindDuration = target_duration;
     save();
 }
 
 void Settings::setBrewDelay(double brew_Delay) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     brewDelay = std::clamp(brew_Delay, 0.0, 4000.0);
     save();
 }
 
 void Settings::setGrindDelay(double grind_Delay) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     grindDelay = std::clamp(grind_Delay, 0.0, 4000.0);
     save();
 }
 
 void Settings::setDelayAdjust(bool delay_adjust) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     delayAdjust = delay_adjust;
     save();
 }
 
 void Settings::setStartupMode(const int startup_mode) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     startupMode = startup_mode;
     save();
 }
 
 void Settings::setStandbyTimeout(int standby_timeout) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     standbyTimeout = standby_timeout;
     save();
 }
 
 void Settings::setPid(const String &pid) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->pid, String(pid));
     save();
 }
 
 void Settings::setPumpModelCoeffs(const String &pumpModelCoeffs) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->pumpModelCoeffs, String(pumpModelCoeffs));
     save();
 }
 
 void Settings::setWifiSsid(const String &wifiSsid) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->wifiSsid, String(wifiSsid));
     save();
 }
 
 void Settings::setWifiPassword(const String &wifiPassword) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->wifiPassword, String(wifiPassword));
     save();
 }
 
 void Settings::setMdnsName(const String &mdnsName) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
         ESP_LOGW("Settings", "Rejecting invalid mDNS name");
         return;
@@ -353,95 +415,114 @@ void Settings::setMdnsName(const String &mdnsName) {
 }
 
 void Settings::setHomekit(const bool homekit) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->homekit = homekit;
     save();
 }
 
 void Settings::setVolumetricTarget(bool volumetric_target) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->volumetricTarget = volumetric_target;
     save();
 }
 
 void Settings::setAllowYieldOverride(bool allow_yield_override) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->allowYieldOverride = allow_yield_override;
     save();
 }
 
 void Settings::setAutoSteamEnabled(bool auto_steam_enabled) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->autoSteamEnabled = auto_steam_enabled;
     save();
 }
 
 void Settings::setDoseGrams(double dose_grams) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->doseGrams = std::clamp(dose_grams, 0.1, 200.0);
     save();
 }
 
 void Settings::setOTAChannel(const String &otaChannel) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->otaChannel, String(otaChannel));
     save();
 }
 
 void Settings::setInstalledChannel(const String &installedChannel) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->installedChannel, String(installedChannel));
     save();
 }
 
 void Settings::setSavedScale(const String &savedScale) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->savedScale, String(savedScale));
     save();
 }
 
 void Settings::setBoilerFillActive(bool boiler_fill_active) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     boilerFillActive = boiler_fill_active;
     save();
 }
 
 void Settings::setStartupFillTime(int startup_fill_time) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     startupFillTime = startup_fill_time;
     save();
 }
 
 void Settings::setSteamFillTime(int steam_fill_time) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     steamFillTime = steam_fill_time;
     save();
 }
 
 void Settings::setSmartGrindActive(bool smart_grind_active) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     smartGrindActive = smart_grind_active;
     save();
 }
 
 void Settings::setDiagnosticLogEnabled(bool diagnostic_log_enabled) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     diagnosticLogEnabled = diagnostic_log_enabled;
     save();
 }
 
 void Settings::setSmartGrindIp(String smart_grind_ip) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->smartGrindIp, std::move(smart_grind_ip));
     save();
 }
 
 void Settings::setSmartGrindMode(int smart_grind_mode) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->smartGrindMode = smart_grind_mode;
     save();
 }
 
 void Settings::setHomeAssistant(const bool homeAssistant) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->homeAssistant = homeAssistant;
     save();
 }
 
 void Settings::setHomeAssistantIP(const String &homeAssistantIP) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->homeAssistantIP, String(homeAssistantIP));
     save();
 }
 
 void Settings::setHomeAssistantPort(const int homeAssistantPort) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->homeAssistantPort = homeAssistantPort;
     save();
 }
 void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     // Bound the discovery-topic prefix so the topic built in MQTTPlugin (an 80-byte buffer)
     // can never be silently truncated by snprintf. See MAX_HOME_ASSISTANT_TOPIC_LENGTH.
     if (homeAssistantTopic.length() > MAX_HOME_ASSISTANT_TOPIC_LENGTH) {
@@ -452,30 +533,36 @@ void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
     save();
 }
 void Settings::setHomeAssistantUser(const String &homeAssistantUser) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->homeAssistantUser, String(homeAssistantUser));
     save();
 }
 void Settings::setHomeAssistantPassword(const String &homeAssistantPassword) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->homeAssistantPassword, String(homeAssistantPassword));
     save();
 }
 
 void Settings::setMomentaryButtons(bool momentary_buttons) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     momentaryButtons = momentary_buttons;
     save();
 }
 
 void Settings::setTimezone(String timezone) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->timezone, std::move(timezone));
     save();
 }
 
 void Settings::setClockFormat(bool clock_24h_format) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->clock24hFormat = clock_24h_format;
     save();
 }
 
 void Settings::setSelectedProfile(String selected_profile) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->selectedProfile, std::move(selected_profile));
     save();
 }
@@ -609,6 +696,7 @@ std::vector<String> Settings::getFavoritedProfiles() const { return copyUnderVec
 std::vector<String> Settings::getProfileOrder() const { return copyUnderVectorLock(profileOrder); }
 
 void Settings::setSelectedBean(String selected_bean) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     // save() is intentionally left OUTSIDE the lock scope: it only sets dirty=true
     // (the deferred flush task calls doSave() later), so holding the lock across it
     // would gain nothing and risk widening the critical section over a flash write.
@@ -617,11 +705,13 @@ void Settings::setSelectedBean(String selected_bean) {
 }
 
 void Settings::setSelectedGrinder(String selected_grinder) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(selectedGrinder, std::move(selected_grinder));
     save();
 }
 
 void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderVectorLock(favoritedProfiles, cleanProfileIds(std::move(favorited_profiles), "favoritedProfiles"));
     save();
 }
@@ -677,6 +767,7 @@ void Settings::removeFavoritedProfile(String profile) {
 }
 
 void Settings::setProfileOrder(std::vector<String> profile_order) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderVectorLock(profileOrder, cleanProfileIds(std::move(profile_order), "profileOrder"));
     save();
 }
@@ -736,71 +827,85 @@ void Settings::migrateProfileIds(const std::vector<std::pair<String, String>> &m
 }
 
 void Settings::setMainBrightness(int main_brightness) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     mainBrightness = main_brightness;
     save();
 }
 
 void Settings::setStandbyBrightness(int standby_brightness) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     standbyBrightness = standby_brightness;
     save();
 }
 
 void Settings::setStandbyBrightnessTimeout(int standby_brightness_timeout) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     standbyBrightnessTimeout = standby_brightness_timeout;
     save();
 }
 
 void Settings::setWifiApTimeout(int timeout) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     wifiApTimeout = timeout;
     save();
 }
 
 void Settings::setSteamPumpPercentage(float steam_pump_percentage) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     steamPumpPercentage = steam_pump_percentage;
     save();
 }
 
 void Settings::setSteamPumpCutoff(float steam_pump_cutoff) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     steamPumpCutoff = steam_pump_cutoff;
     save();
 }
 
 void Settings::setThemeMode(int theme_mode) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     themeMode = theme_mode;
     save();
 }
 
 void Settings::setHistoryIndex(int history_index) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     historyIndex = history_index;
     save();
 }
 
 void Settings::setFlushDuration(int flush_duration) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     flushDuration = std::clamp(flush_duration, 1000, 60000);
     save();
 }
 
 void Settings::setCloudRelayUrl(const String &url) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(cloudRelayUrl, String(url));
     save();
 }
 
 void Settings::setCloudRelayToken(const String &token) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(cloudRelayToken, String(token));
     save();
 }
 
 void Settings::setCloudRelayEnabled(bool enabled) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     cloudRelayEnabled = enabled;
     save();
 }
 
 void Settings::setLocalAdminToken(const String &token) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     localAdminToken = token;
     save(true);
 }
 
 void Settings::setLocalAuthProvisioned(bool provisioned) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     localAuthProvisioned = provisioned;
     save(true);
 }
@@ -810,226 +915,205 @@ void Settings::setLocalAuthProvisioned(bool provisioned) {
 // after all four. NOTE: setManualTemperature has one additional call site
 // (Controller::setTargetTemp MODE_MANUAL) which calls save() explicitly.
 void Settings::setManualTargetType(int target_type) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     manualTargetType = target_type == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE;
 }
 
 void Settings::setManualPressure(float pressure) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     manualPressure = std::clamp(pressure, MIN_MANUAL_PRESSURE, MAX_MANUAL_PRESSURE);
 }
 
 void Settings::setManualFlow(float flow) { manualFlow = std::clamp(flow, MIN_MANUAL_FLOW, MAX_MANUAL_FLOW); }
 
 void Settings::setManualTemperature(int temperature) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     manualTemperature = std::clamp(temperature, MIN_MANUAL_TEMPERATURE, MAX_MANUAL_TEMPERATURE);
 }
 
 void Settings::setSunriseR(int sunrise_r) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     sunriseR = sunrise_r;
     save();
 }
 
 void Settings::setSunriseG(int sunrise_g) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     sunriseG = sunrise_g;
     save();
 }
 
 void Settings::setSunriseB(int sunrise_b) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     sunriseB = sunrise_b;
     save();
 }
 
 void Settings::setSunriseW(int sunrise_w) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     sunriseW = sunrise_w;
     save();
 }
 
 void Settings::setSunriseExtBrightness(int sunrise_ext_brightness) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     sunriseExtBrightness = sunrise_ext_brightness;
     save();
 }
 
 void Settings::setEmptyTankDistance(int empty_tank_distance) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     emptyTankDistance = empty_tank_distance;
     save();
 }
 
 void Settings::setFullTankDistance(int full_tank_distance) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     fullTankDistance = full_tank_distance;
     save();
 }
 
 void Settings::setAltRelayFunction(int alt_relay_function) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     altRelayFunction = alt_relay_function;
     altRelayConfigured = true;
 }
 
 void Settings::setAutoWakeupEnabled(bool enabled) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     autowakeupEnabled = enabled;
     save();
 }
 
 void Settings::setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     autowakeupSchedules = schedules;
     save();
 }
 
+
+Settings::PersistenceSnapshot Settings::takePersistenceSnapshot() {
+    PersistenceSnapshot snapshot;
+    snapshot.startupMode = startupMode; snapshot.targetSteamTemp = targetSteamTemp; snapshot.targetWaterTemp = targetWaterTemp; snapshot.targetGrindDuration = targetGrindDuration; snapshot.temperatureOffset = temperatureOffset; snapshot.standbyTimeout = standbyTimeout;
+    snapshot.startupFillTime = startupFillTime; snapshot.steamFillTime = steamFillTime; snapshot.smartGrindMode = smartGrindMode; snapshot.homeAssistantPort = homeAssistantPort; snapshot.mainBrightness = mainBrightness; snapshot.standbyBrightness = standbyBrightness; snapshot.standbyBrightnessTimeout = standbyBrightnessTimeout; snapshot.wifiApTimeout = wifiApTimeout; snapshot.themeMode = themeMode; snapshot.historyIndex = historyIndex; snapshot.flushDuration = flushDuration; snapshot.manualTargetType = manualTargetType; snapshot.manualTemperature = manualTemperature; snapshot.sunriseR = sunriseR; snapshot.sunriseG = sunriseG; snapshot.sunriseB = sunriseB; snapshot.sunriseW = sunriseW; snapshot.sunriseExtBrightness = sunriseExtBrightness; snapshot.emptyTankDistance = emptyTankDistance; snapshot.fullTankDistance = fullTankDistance; snapshot.altRelayFunction = altRelayFunction;
+    snapshot.pressureScaling = pressureScaling; snapshot.steamPumpPercentage = steamPumpPercentage; snapshot.steamPumpCutoff = steamPumpCutoff; snapshot.manualPressure = manualPressure; snapshot.manualFlow = manualFlow; snapshot.targetGrindVolume = targetGrindVolume; snapshot.brewDelay = brewDelay; snapshot.grindDelay = grindDelay; snapshot.doseGrams = doseGrams;
+    snapshot.delayAdjust = delayAdjust; snapshot.homekit = homekit; snapshot.volumetricTarget = volumetricTarget; snapshot.allowYieldOverride = allowYieldOverride; snapshot.autoSteamEnabled = autoSteamEnabled; snapshot.boilerFillActive = boilerFillActive; snapshot.smartGrindActive = smartGrindActive; snapshot.diagnosticLogEnabled = diagnosticLogEnabled; snapshot.smartGrindToggle = smartGrindToggle; snapshot.homeAssistant = homeAssistant; snapshot.momentaryButtons = momentaryButtons; snapshot.clock24hFormat = clock24hFormat; snapshot.autowakeupEnabled = autowakeupEnabled; snapshot.altRelayConfigured = altRelayConfigured; snapshot.cloudRelayEnabled = cloudRelayEnabled; snapshot.localAuthProvisioned = localAuthProvisioned;
+    SemaphoreHandle_t stringLock = ensureSelectedNameMutex(); if (stringLock != nullptr) xSemaphoreTake(stringLock, portMAX_DELAY);
+    snapshot.pid = pid; snapshot.pumpModelCoeffs = pumpModelCoeffs; snapshot.wifiSsid = wifiSsid; snapshot.wifiPassword = wifiPassword; snapshot.mdnsName = mdnsName; snapshot.otaChannel = otaChannel; snapshot.installedChannel = installedChannel; snapshot.savedScale = savedScale; snapshot.smartGrindIp = smartGrindIp; snapshot.homeAssistantIP = homeAssistantIP; snapshot.homeAssistantTopic = homeAssistantTopic; snapshot.homeAssistantUser = homeAssistantUser; snapshot.homeAssistantPassword = homeAssistantPassword; snapshot.timezone = timezone; snapshot.selectedProfile = selectedProfile; snapshot.selectedBean = selectedBean; snapshot.selectedGrinder = selectedGrinder; snapshot.cloudRelayUrl = cloudRelayUrl; snapshot.cloudRelayToken = cloudRelayToken; snapshot.localAdminToken = localAdminToken;
+    if (stringLock != nullptr) xSemaphoreGive(stringLock);
+    SemaphoreHandle_t vectorLock = ensureVectorMutex(); if (vectorLock != nullptr) xSemaphoreTake(vectorLock, portMAX_DELAY);
+    snapshot.favoritedProfiles = implode(favoritedProfiles, ","); snapshot.profileOrder = implode(profileOrder, ","); snapshot.autowakeupSchedules = autowakeupSchedules;
+    if (vectorLock != nullptr) xSemaphoreGive(vectorLock);
+    return snapshot;
+}
+
 void Settings::doSave() {
-    if (!dirty) {
-        return;
-    }
-    dirty = false;
-
-    // PRO-478: doSave() runs on the deferred flush task, while every String member
-    // below is written from the AsyncTCP/WebSocket-handler task via the setters
-    // (which already assign under selectedNameMutex per PRO-427/PRO-437 for
-    // selectedBean/selectedGrinder — this extends the same guard to the rest).
-    // Snapshot ALL String members under a single lock acquisition up front, then
-    // use the snapshots (not the live members) for every putString() below. This
-    // keeps the critical section short (no lock held across the flash-write
-    // preferences block) while eliminating the torn-String-read hazard on every
-    // member, not just selectedBean/selectedGrinder.
-    SemaphoreHandle_t stringLock = ensureSelectedNameMutex();
-    if (stringLock != nullptr) {
-        xSemaphoreTake(stringLock, portMAX_DELAY);
-    }
-    String pidSnap = pid;
-    String pumpModelCoeffsSnap = pumpModelCoeffs;
-    String wifiSsidSnap = wifiSsid;
-    String wifiPasswordSnap = wifiPassword;
-    String mdnsNameSnap = mdnsName;
-    String otaChannelSnap = otaChannel;
-    String installedChannelSnap = installedChannel;
-    String savedScaleSnap = savedScale;
-    String smartGrindIpSnap = smartGrindIp;
-    String homeAssistantIPSnap = homeAssistantIP;
-    String homeAssistantTopicSnap = homeAssistantTopic;
-    String homeAssistantUserSnap = homeAssistantUser;
-    String homeAssistantPasswordSnap = homeAssistantPassword;
-    String timezoneSnap = timezone;
-    String selectedProfileSnap = selectedProfile;
-    String beanSnap = selectedBean;
-    String grinderSnap = selectedGrinder;
-    // PRO-481: cloudRelayUrl/cloudRelayToken are also guarded by
-    // selectedNameMutex (see getCloudRelayUrl/getCloudRelayToken +
-    // setCloudRelayUrl/setCloudRelayToken). Snapshot them inside the
-    // same stringLock block so doSave() never observes them torn.
-    String cloudRelayUrlSnap = cloudRelayUrl;
-    String cloudRelayTokenSnap = cloudRelayToken;
-    if (stringLock != nullptr) {
-        xSemaphoreGive(stringLock);
-    }
-
-    // PRO-481: favoritedProfiles/profileOrder are guarded by the separate
-    // vectorMutex (not selectedNameMutex — see the vectorMutex declaration in
-    // Settings.h for why the two mutexes must stay independent). Take it only
-    // around the implode() calls so the vector iterator stays consistent
-    // against a concurrent setFavoritedProfiles()/addFavoritedProfile()/
-    // removeFavoritedProfile()/setProfileOrder() call from the WS-handler
-    // task, then release before the flash-write preferences block below.
-    SemaphoreHandle_t vecLock = ensureVectorMutex();
-    if (vecLock != nullptr) {
-        xSemaphoreTake(vecLock, portMAX_DELAY);
-    }
-    String favoritedProfilesSnap = implode(favoritedProfiles, ",");
-    String profileOrderSnap = implode(profileOrder, ",");
-    if (vecLock != nullptr) {
-        xSemaphoreGive(vecLock);
+    // Copy the complete persisted state while the batch transaction is locked,
+    // then release it before the slow NVS writes below.
+    PersistenceSnapshot snapshot;
+    {
+        ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+        if (!dirty) {
+            return;
+        }
+        dirty = false;
+        snapshot = takePersistenceSnapshot();
     }
 
     ESP_LOGI("Settings", "Saving settings");
     preferences.begin(PREFERENCES_KEY, false);
-    preferences.putInt("sm", startupMode);
-    preferences.putInt("ts", targetSteamTemp);
-    preferences.putInt("tw", targetWaterTemp);
-    preferences.putDouble("tgv", targetGrindVolume);
-    preferences.putInt("tgd", targetGrindDuration);
-    preferences.putDouble("del_br", brewDelay);
-    preferences.putDouble("del_gd", grindDelay);
-    preferences.putBool("del_ad", delayAdjust);
-    preferences.putInt("to", temperatureOffset);
-    preferences.putFloat("ps", pressureScaling);
-    preferences.putString("pid", pidSnap);
-    preferences.putString("pmc", pumpModelCoeffsSnap);
-    preferences.putString("ws", wifiSsidSnap);
-    preferences.putString("wp", wifiPasswordSnap);
-    preferences.putString("mn", mdnsNameSnap);
-    preferences.putBool("hk", homekit);
-    preferences.putBool("vt", volumetricTarget);
-    preferences.putBool("ayo", allowYieldOverride);
-    preferences.putBool("autosteam", autoSteamEnabled);
-    preferences.putDouble("dosegrams", doseGrams);
-    preferences.putString("oc", otaChannelSnap);
-    preferences.putString("ic", installedChannelSnap);
-    preferences.putString("ssc", savedScaleSnap);
-    preferences.putBool("bf_a", boilerFillActive);
-    preferences.putInt("bf_su", startupFillTime);
-    preferences.putInt("bf_st", steamFillTime);
-    preferences.putBool("sg_a", smartGrindActive);
-    preferences.putBool("diag_log", diagnosticLogEnabled);
-    preferences.putString("sg_i", smartGrindIpSnap);
-    preferences.putBool("sg_t", smartGrindToggle);
-    preferences.putInt("sg_m", smartGrindMode);
-    preferences.putBool("ha_a", homeAssistant);
-    preferences.putString("ha_i", homeAssistantIPSnap);
-    preferences.putInt("ha_p", homeAssistantPort);
-    preferences.putString("ha_t", homeAssistantTopicSnap);
-    preferences.putString("ha_u", homeAssistantUserSnap);
-    preferences.putString("ha_pw", homeAssistantPasswordSnap);
-    preferences.putString("tz", timezoneSnap);
-    preferences.putBool("clk_24h", clock24hFormat);
-    preferences.putString("sp", selectedProfileSnap);
-    preferences.putString("sb", beanSnap);
-    preferences.putString("sg", grinderSnap);
-    preferences.putInt("sbt", standbyTimeout);
-    preferences.putBool("mb", momentaryButtons);
-    preferences.putString("fp", favoritedProfilesSnap);
-    preferences.putString("po", profileOrderSnap);
-    preferences.putFloat("spp", steamPumpPercentage);
-    preferences.putFloat("spc", steamPumpCutoff);
-    preferences.putInt("hi", historyIndex);
-    preferences.putInt("fd", flushDuration);
-    preferences.putInt("mtt", manualTargetType);
-    preferences.putFloat("mp", manualPressure);
-    preferences.putFloat("mf", manualFlow);
-    preferences.putInt("mt", manualTemperature);
-    preferences.putBool("ab_en", autowakeupEnabled);
+    preferences.putInt("sm", snapshot.startupMode);
+    preferences.putInt("ts", snapshot.targetSteamTemp);
+    preferences.putInt("tw", snapshot.targetWaterTemp);
+    preferences.putDouble("tgv", snapshot.targetGrindVolume);
+    preferences.putInt("tgd", snapshot.targetGrindDuration);
+    preferences.putDouble("del_br", snapshot.brewDelay);
+    preferences.putDouble("del_gd", snapshot.grindDelay);
+    preferences.putBool("del_ad", snapshot.delayAdjust);
+    preferences.putInt("to", snapshot.temperatureOffset);
+    preferences.putFloat("ps", snapshot.pressureScaling);
+    preferences.putString("pid", snapshot.pid);
+    preferences.putString("pmc", snapshot.pumpModelCoeffs);
+    preferences.putString("ws", snapshot.wifiSsid);
+    preferences.putString("wp", snapshot.wifiPassword);
+    preferences.putString("mn", snapshot.mdnsName);
+    preferences.putBool("hk", snapshot.homekit);
+    preferences.putBool("vt", snapshot.volumetricTarget);
+    preferences.putBool("ayo", snapshot.allowYieldOverride);
+    preferences.putBool("autosteam", snapshot.autoSteamEnabled);
+    preferences.putDouble("dosegrams", snapshot.doseGrams);
+    preferences.putString("oc", snapshot.otaChannel);
+    preferences.putString("ic", snapshot.installedChannel);
+    preferences.putString("ssc", snapshot.savedScale);
+    preferences.putBool("bf_a", snapshot.boilerFillActive);
+    preferences.putInt("bf_su", snapshot.startupFillTime);
+    preferences.putInt("bf_st", snapshot.steamFillTime);
+    preferences.putBool("sg_a", snapshot.smartGrindActive);
+    preferences.putBool("diag_log", snapshot.diagnosticLogEnabled);
+    preferences.putString("sg_i", snapshot.smartGrindIp);
+    preferences.putBool("sg_t", snapshot.smartGrindToggle);
+    preferences.putInt("sg_m", snapshot.smartGrindMode);
+    preferences.putBool("ha_a", snapshot.homeAssistant);
+    preferences.putString("ha_i", snapshot.homeAssistantIP);
+    preferences.putInt("ha_p", snapshot.homeAssistantPort);
+    preferences.putString("ha_t", snapshot.homeAssistantTopic);
+    preferences.putString("ha_u", snapshot.homeAssistantUser);
+    preferences.putString("ha_pw", snapshot.homeAssistantPassword);
+    preferences.putString("tz", snapshot.timezone);
+    preferences.putBool("clk_24h", snapshot.clock24hFormat);
+    preferences.putString("sp", snapshot.selectedProfile);
+    preferences.putString("sb", snapshot.selectedBean);
+    preferences.putString("sg", snapshot.selectedGrinder);
+    preferences.putInt("sbt", snapshot.standbyTimeout);
+    preferences.putBool("mb", snapshot.momentaryButtons);
+    preferences.putString("fp", snapshot.favoritedProfiles);
+    preferences.putString("po", snapshot.profileOrder);
+    preferences.putFloat("spp", snapshot.steamPumpPercentage);
+    preferences.putFloat("spc", snapshot.steamPumpCutoff);
+    preferences.putInt("hi", snapshot.historyIndex);
+    preferences.putInt("fd", snapshot.flushDuration);
+    preferences.putInt("mtt", snapshot.manualTargetType);
+    preferences.putFloat("mp", snapshot.manualPressure);
+    preferences.putFloat("mf", snapshot.manualFlow);
+    preferences.putInt("mt", snapshot.manualTemperature);
+    preferences.putBool("ab_en", snapshot.autowakeupEnabled);
 
     // Save schedule format
     String schedulesForSave = "";
-    for (size_t i = 0; i < autowakeupSchedules.size(); i++) {
+    for (size_t i = 0; i < snapshot.autowakeupSchedules.size(); i++) {
         if (i > 0)
             schedulesForSave += ";";
-        schedulesForSave += autowakeupSchedules[i].time + "|";
+        schedulesForSave += snapshot.autowakeupSchedules[i].time + "|";
 
         // Convert days array to 7-bit string
         for (int j = 0; j < 7; j++) {
-            schedulesForSave += autowakeupSchedules[i].days[j] ? "1" : "0";
+            schedulesForSave += snapshot.autowakeupSchedules[i].days[j] ? "1" : "0";
         }
     }
     preferences.putString("ab_schedules", schedulesForSave);
 
     // Display settings
-    preferences.putInt("main_b", mainBrightness);
-    preferences.putInt("standby_b", standbyBrightness);
-    preferences.putInt("standby_bt", standbyBrightnessTimeout);
-    preferences.putInt("wifi_apt", wifiApTimeout);
-    preferences.putInt("theme", themeMode);
+    preferences.putInt("main_b", snapshot.mainBrightness);
+    preferences.putInt("standby_b", snapshot.standbyBrightness);
+    preferences.putInt("standby_bt", snapshot.standbyBrightnessTimeout);
+    preferences.putInt("wifi_apt", snapshot.wifiApTimeout);
+    preferences.putInt("theme", snapshot.themeMode);
 
     // Sunrise Settings
-    preferences.putInt("sr_r", sunriseR);
-    preferences.putInt("sr_g", sunriseG);
-    preferences.putInt("sr_b", sunriseB);
-    preferences.putInt("sr_w", sunriseW);
-    preferences.putInt("sr_exb", sunriseExtBrightness);
-    preferences.putInt("sr_ed", emptyTankDistance);
-    preferences.putInt("sr_fd", fullTankDistance);
-    preferences.putInt("alt_relay", altRelayFunction);
-    preferences.putBool("alt_set", altRelayConfigured);
-    preferences.putString("cr_url", cloudRelayUrlSnap);
-    preferences.putString("cr_token", cloudRelayTokenSnap);
-    preferences.putBool("cr_enabled", cloudRelayEnabled);
-    preferences.putString("admin_token", localAdminToken);
-    preferences.putBool("admin_ready", localAuthProvisioned);
+    preferences.putInt("sr_r", snapshot.sunriseR);
+    preferences.putInt("sr_g", snapshot.sunriseG);
+    preferences.putInt("sr_b", snapshot.sunriseB);
+    preferences.putInt("sr_w", snapshot.sunriseW);
+    preferences.putInt("sr_exb", snapshot.sunriseExtBrightness);
+    preferences.putInt("sr_ed", snapshot.emptyTankDistance);
+    preferences.putInt("sr_fd", snapshot.fullTankDistance);
+    preferences.putInt("alt_relay", snapshot.altRelayFunction);
+    preferences.putBool("alt_set", snapshot.altRelayConfigured);
+    preferences.putString("cr_url", snapshot.cloudRelayUrl);
+    preferences.putString("cr_token", snapshot.cloudRelayToken);
+    preferences.putBool("cr_enabled", snapshot.cloudRelayEnabled);
+    preferences.putString("admin_token", snapshot.localAdminToken);
+    preferences.putBool("admin_ready", snapshot.localAuthProvisioned);
 
     preferences.end();
 }
