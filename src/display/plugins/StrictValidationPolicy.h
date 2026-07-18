@@ -13,7 +13,12 @@ struct Error {
     std::string field;
     std::string message;
 };
-using Fields = std::vector<std::pair<std::string, std::string>>;
+struct Field {
+    std::string name;
+    std::string value;
+    bool isNumeric = false;
+};
+using Fields = std::vector<Field>;
 
 inline bool parseInteger(const std::string &text, long &value) {
     if (text.empty())
@@ -79,7 +84,7 @@ inline bool requireFields(const Fields &fields, const std::vector<std::string> &
     for (const std::string &requiredName : required) {
         bool found = false;
         for (const auto &field : fields) {
-            if (field.first == requiredName) {
+            if (field.name == requiredName) {
                 found = true;
                 break;
             }
@@ -102,8 +107,23 @@ inline bool validateWebSocketRequest(const std::string &type, const Fields &fiel
     if (type == "req:dose:set" && !requireFields(fields, {"grams"}, error))
         return false;
     for (const auto &field : fields) {
-        const std::string &name = field.first;
-        const std::string &value = field.second;
+        const std::string &name = field.name;
+        const std::string &value = field.value;
+        const bool numericField = (type == "req:change-grind-target" && name == "target") ||
+                                  (type == "req:change-mode" && name == "mode") ||
+                                  (type == "req:change-brew-target" && name == "target") ||
+                                  (type == "req:dose:set" && name == "grams") ||
+                                  (type == "req:manual:update" &&
+                                   (name == "pressure" || name == "flow" || name == "temperature")) ||
+                                  (type == "req:autotune-start" && (name == "time" || name == "samples"));
+        if (numericField && !field.isNumeric) {
+            error = {name, "must be a JSON number"};
+            return false;
+        }
+        if (type == "req:manual:update" && name == "targetType" && field.isNumeric) {
+            error = {name, "must be a JSON string"};
+            return false;
+        }
         if (type == "req:change-grind-target" && name == "target" && !inRange(name, value, 0, 1, error))
             return false;
         if (type == "req:change-mode" && name == "mode" && !inRange(name, value, 0, 5, error))
@@ -132,8 +152,8 @@ inline bool validateWebSocketRequest(const std::string &type, const Fields &fiel
 
 inline bool validateSettings(const Fields &fields, Error &error) {
     for (const auto &field : fields) {
-        const std::string &name = field.first;
-        const std::string &value = field.second;
+        const std::string &name = field.name;
+        const std::string &value = field.value;
         if (name == "startupMode") {
             if (value != "brew" && value != "standby") {
                 error = {name, "must be 'brew' or 'standby'"};

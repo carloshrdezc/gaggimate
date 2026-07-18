@@ -1428,14 +1428,16 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         JsonVariantConst value = doc[field];
         if (value.isNull()) {
             if (required)
-                commandValues.emplace_back(field, "");
+                commandValues.push_back({field, ""});
             continue;
         }
-        if (!value.is<const char *>() && !value.is<int>() && !value.is<float>()) {
+        const bool numericField = String(field) != "targetType";
+        const bool isNumeric = value.is<int>() || value.is<float>();
+        if ((numericField && !isNumeric) || (!numericField && !value.is<const char *>())) {
             ESP_LOGW("WebUIPlugin", "Ignoring %s: invalid %s type", msgType.c_str(), field);
             return;
         }
-        commandValues.emplace_back(field, value.as<String>().c_str());
+        commandValues.push_back({field, value.as<String>().c_str(), isNumeric});
     }
     strict_validation::Error commandError;
     if (!strict_validation::validateWebSocketRequest(msgType.c_str(), commandValues, commandError)) {
