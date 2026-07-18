@@ -19,6 +19,18 @@ void test_only_ap_setup_can_bypass_http_authentication(void) {
     TEST_ASSERT_FALSE(localAuthMayBypassHttpInSetup(/*apMode=*/true, /*bootstrapRoute=*/false));
 }
 
+void test_query_token_is_limited_to_explicit_log_download_routes(void) {
+    const std::string token = "unit-test-token";
+
+    TEST_ASSERT_TRUE(localAuthHttpRequestAuthenticated("", token, "GET", "/api/diag/log.txt", token));
+    TEST_ASSERT_TRUE(localAuthHttpRequestAuthenticated("", token, "GET", "/api/diag/log.1", token));
+    TEST_ASSERT_TRUE(localAuthHttpRequestAuthenticated("Bearer unit-test-token", "", "GET", "/api/diag/log.txt", token));
+    TEST_ASSERT_FALSE(localAuthHttpRequestAuthenticated("", token, "GET", "/api/settings", token));
+    TEST_ASSERT_FALSE(localAuthHttpRequestAuthenticated("", token, "POST", "/api/settings", token));
+    TEST_ASSERT_FALSE(localAuthHttpRequestAuthenticated("", token, "GET", "/api/scales/list", token));
+    TEST_ASSERT_FALSE(localAuthHttpRequestAuthenticated("", "wrong-token", "GET", "/api/diag/log.txt", token));
+}
+
 void test_ap_provisioning_requires_ap_mode_and_exact_required_fields(void) {
     TEST_ASSERT_TRUE(localAuthMayProvisionInAp(/*apMode=*/true, /*authenticated=*/true, /*hasSsid=*/true,
                                                /*hasPassword=*/true, /*hasMdnsName=*/true, /*complete=*/true, /*restart=*/true));
@@ -85,6 +97,7 @@ static int runLocalAuthPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_bearer_token_must_match_exactly);
     RUN_TEST(test_only_ap_setup_can_bypass_http_authentication);
+    RUN_TEST(test_query_token_is_limited_to_explicit_log_download_routes);
     RUN_TEST(test_ap_provisioning_requires_ap_mode_and_exact_required_fields);
     RUN_TEST(test_saved_wifi_without_completed_provisioning_starts_recovery_ap);
     RUN_TEST(test_websocket_requires_an_authenticated_session_for_commands);

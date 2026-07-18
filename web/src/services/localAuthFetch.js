@@ -21,6 +21,8 @@ export function authenticatedFetch(url, options = {}) {
 }
 
 export function localAuthDownloadUrl(url) {
+  if (!['/api/diag/log.txt', '/api/diag/log.1'].includes(url.split('?')[0])) return url;
+
   const token = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
   if (!token) return url;
 

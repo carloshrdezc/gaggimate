@@ -111,9 +111,10 @@ bool WebUIPlugin::isSetupBootstrapRequest(AsyncWebServerRequest *request) const 
 bool WebUIPlugin::isHttpAuthenticated(AsyncWebServerRequest *request) const {
     if (localAuthMayBypassHttpInSetup(apMode, isSetupBootstrapRequest(request)))
         return true;
-    const String token = request->hasArg("localAuthToken") ? request->arg("localAuthToken") : String("");
-    const String authorization = token.isEmpty() ? request->header("Authorization") : String("Bearer ") + token;
-    return localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
+    const String queryToken = request->hasArg("localAuthToken") ? request->arg("localAuthToken") : String("");
+    return localAuthHttpRequestAuthenticated(request->header("Authorization").c_str(), queryToken.c_str(),
+                                             request->method() == HTTP_GET ? "GET" : "OTHER", request->url().c_str(),
+                                             controller->getSettings().getLocalAdminToken().c_str());
 }
 
 void WebUIPlugin::sendUnauthorized(AsyncWebServerRequest *request) const {

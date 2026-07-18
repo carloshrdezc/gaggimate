@@ -38,6 +38,13 @@ describe('localAuthDownloadUrl', () => {
     expect(localAuthDownloadUrl('/api/diag/log.txt')).toBe('/api/diag/log.txt?localAuthToken=unit-token');
   });
 
+  it('does not add a query credential to non-download routes', () => {
+    localStorage.setItem(TOKEN_KEY, 'unit-token');
+
+    expect(localAuthDownloadUrl('/api/settings')).toBe('/api/settings');
+    expect(localAuthDownloadUrl('/api/scales/list')).toBe('/api/scales/list');
+  });
+
   it('leaves bootstrap/download URLs unchanged without a stored token', () => {
     expect(localAuthDownloadUrl('/api/diag/log.txt')).toBe('/api/diag/log.txt');
   });
