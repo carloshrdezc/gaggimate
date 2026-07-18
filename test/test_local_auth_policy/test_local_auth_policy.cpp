@@ -1,3 +1,4 @@
+#include "display/core/MdnsNamePolicy.h"
 #include "display/plugins/LocalAuthPolicy.h"
 #include <unity.h>
 
@@ -50,6 +51,21 @@ void test_normal_operation_never_emits_wildcard_cors(void) {
     TEST_ASSERT_TRUE(localAuthShouldEmitCors(/*apMode=*/false, /*developmentBuild=*/true));
 }
 
+void test_mdns_name_policy_rejects_unsafe_persisted_values(void) {
+    TEST_ASSERT_TRUE(isValidMdnsName("new-gaggimate"));
+    TEST_ASSERT_TRUE(isValidMdnsName("gaggimate2"));
+    TEST_ASSERT_TRUE(isValidMdnsName("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk"));
+    TEST_ASSERT_FALSE(isValidMdnsName("attacker.example/"));
+    TEST_ASSERT_FALSE(isValidMdnsName("attacker?example"));
+    TEST_ASSERT_FALSE(isValidMdnsName("attacker#example"));
+    TEST_ASSERT_FALSE(isValidMdnsName("attacker@example"));
+    TEST_ASSERT_FALSE(isValidMdnsName("attacker example"));
+    TEST_ASSERT_FALSE(isValidMdnsName("-attacker"));
+    TEST_ASSERT_FALSE(isValidMdnsName("attacker-"));
+    TEST_ASSERT_FALSE(isValidMdnsName(""));
+    TEST_ASSERT_FALSE(isValidMdnsName("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl"));
+}
+
 static int runLocalAuthPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_bearer_token_must_match_exactly);
@@ -58,6 +74,7 @@ static int runLocalAuthPolicyTests() {
     RUN_TEST(test_websocket_requires_an_authenticated_session_for_commands);
     RUN_TEST(test_websocket_disconnect_does_not_preserve_authentication_for_a_reused_client_id);
     RUN_TEST(test_normal_operation_never_emits_wildcard_cors);
+    RUN_TEST(test_mdns_name_policy_rejects_unsafe_persisted_values);
     return UNITY_END();
 }
 

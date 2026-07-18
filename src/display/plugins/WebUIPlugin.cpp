@@ -7,6 +7,7 @@
 #include <display/core/Controller.h>
 #include <display/core/EventIds.h>
 #include <display/core/GrinderManager.h>
+#include <display/core/MdnsNamePolicy.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -1943,6 +1944,17 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
         return;
     }
     if (request->method() == HTTP_POST) {
+        if (request->hasArg("mdnsName")) {
+            const String mdnsName = request->arg("mdnsName");
+            if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+                AsyncResponseStream *response = request->beginResponseStream("application/json");
+                response->setCode(400);
+                addCorsHeaders(response);
+                response->print("{\"error\":\"Invalid mDNS hostname\"}");
+                request->send(response);
+                return;
+            }
+        }
         controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
                 settings->setStartupMode(request->arg("startupMode") == "brew" ? MODE_BREW : MODE_STANDBY);

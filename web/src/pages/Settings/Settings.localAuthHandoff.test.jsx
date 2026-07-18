@@ -2,8 +2,9 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { h } from 'preact';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
-const { authenticatedFetch, fetchedSettings } = vi.hoisted(() => ({
+const { authenticatedFetch, localAuthHandoffUrl, fetchedSettings } = vi.hoisted(() => ({
   authenticatedFetch: vi.fn(),
+  localAuthHandoffUrl: vi.fn(hostname => `http://${hostname}.local/#localAuthToken=bootstrap-token`),
   fetchedSettings: {
     pid: '3.000,0.100,40.000,0.000',
     autowakeupSchedules: '07:00|1111111',
@@ -26,7 +27,8 @@ vi.mock('../../services/localAuthFetch.js', () => ({
   authenticatedFetch,
   bootstrapLocalAuth: vi.fn(),
   localAuthDownloadUrl: url => url,
-  localAuthHandoffUrl: hostname => `http://${hostname}.local/#localAuthToken=bootstrap-token`,
+  localAuthHandoffUrl,
+  MDNS_NAME_ERROR: 'Hostname must be 1-63 ASCII letters, digits, or hyphens, without a leading or trailing hyphen.',
 }));
 
 vi.mock('../../components/Card.jsx', () => ({ default: ({ children }) => h('section', {}, children) }));
@@ -49,6 +51,22 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+test.each(['attacker.example/', 'attacker?example', 'attacker#example', 'attacker@example', 'attacker example'])(
+  'rejects unsafe hostname %s before provisioning or copying a handoff URL', async hostname => {
+    localAuthHandoffUrl.mockReturnValueOnce(null);
+    render(
+      h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)),
+    );
+
+    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: hostname } });
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Wi-Fi auth handoff link' }));
+
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(screen.getByText('Hostname must be 1-63 ASCII letters, digits, or hyphens, without a leading or trailing hyphen.')).toBeTruthy();
+  },
+);
 
 test('persists the changed hostname with AP-to-STA credentials and hands off to that hostname', async () => {
   render(

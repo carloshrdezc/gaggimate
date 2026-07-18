@@ -50,6 +50,33 @@ describe('localAuthHandoff', () => {
     expect(localAuthHandoffUrl('gaggimate')).toBe('http://gaggimate.local/#localAuthToken=unit-token');
   });
 
+  it.each(['attacker.example/', 'attacker?example', 'attacker#example', 'attacker@example', 'attacker example', '-attacker', 'attacker-'])(
+    'rejects unsafe hostname %s instead of producing a handoff URL', hostname => {
+      localStorage.setItem(TOKEN_KEY, 'unit-token');
+
+      expect(localAuthHandoffUrl(hostname)).toBeNull();
+    },
+  );
+
+  it('uses the parsed validated hostname as the exact STA handoff origin', () => {
+    localStorage.setItem(TOKEN_KEY, 'unit-token');
+
+    const handoff = new URL(localAuthHandoffUrl('new-gaggimate'));
+
+    expect(handoff.origin).toBe('http://new-gaggimate.local');
+    expect(handoff.hostname).toBe('new-gaggimate.local');
+    expect(handoff.hash).toBe('#localAuthToken=unit-token');
+  });
+
+  it('canonicalizes a valid mixed-case label before asserting its parsed STA origin', () => {
+    localStorage.setItem(TOKEN_KEY, 'unit-token');
+
+    const handoff = new URL(localAuthHandoffUrl('New-GaggiMate'));
+
+    expect(handoff.origin).toBe('http://new-gaggimate.local');
+    expect(handoff.hostname).toBe('new-gaggimate.local');
+  });
+
   it('imports a handoff token into the STA origin, authenticates the socket, and clears the fragment', () => {
     const apiService = { authenticateLocal: vi.fn() };
     const replaceState = vi.spyOn(history, 'replaceState');

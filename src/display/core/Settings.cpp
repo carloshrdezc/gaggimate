@@ -1,4 +1,5 @@
 #include "Settings.h"
+#include <display/core/MdnsNamePolicy.h>
 
 #include <algorithm>
 #include <utility>
@@ -67,6 +68,11 @@ void Settings::load() {
     wifiSsid = preferences.getString("ws", "");
     wifiPassword = preferences.getString("wp", "");
     mdnsName = preferences.getString("mn", DEFAULT_MDNS_NAME);
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        ESP_LOGW("Settings", "Ignoring invalid persisted mDNS name");
+        mdnsName = DEFAULT_MDNS_NAME;
+        preferences.putString("mn", mdnsName);
+    }
     homekit = preferences.getBool("hk", false);
     volumetricTarget = preferences.getBool("vt", false);
     allowYieldOverride = preferences.getBool("ayo", false);
@@ -338,6 +344,10 @@ void Settings::setWifiPassword(const String &wifiPassword) {
 }
 
 void Settings::setMdnsName(const String &mdnsName) {
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        ESP_LOGW("Settings", "Rejecting invalid mDNS name");
+        return;
+    }
     assignUnderSelectedNameLock(this->mdnsName, String(mdnsName));
     save();
 }

@@ -8,7 +8,7 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { timezones } from '../../config/zones.js';
 import { machine, ApiServiceContext } from '../../services/ApiService.js';
-import { authenticatedFetch, localAuthDownloadUrl, bootstrapLocalAuth, localAuthHandoffUrl } from '../../services/localAuthFetch.js';
+import { authenticatedFetch, localAuthDownloadUrl, bootstrapLocalAuth, localAuthHandoffUrl, MDNS_NAME_ERROR } from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
@@ -29,6 +29,7 @@ export function Settings() {
   const [currentTheme, setCurrentTheme] = useState('midnight');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
+  const [authHandoffError, setAuthHandoffError] = useState(null);
   const [autowakeupSchedules, setAutoWakeupSchedules] = useState([
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
@@ -63,8 +64,13 @@ export function Settings() {
 
   const prepareAuthHandoff = async () => {
     const url = localAuthHandoffUrl(formData.mdnsName);
-    if (!url) return;
+    if (!url) {
+      setAuthHandoffUrl(null);
+      setAuthHandoffError(MDNS_NAME_ERROR);
+      return;
+    }
 
+    setAuthHandoffError(null);
     setAuthHandoffUrl(url);
     if (navigator.clipboard) navigator.clipboard.writeText(url);
     const wifiCredentials = new FormData(formRef.current);
@@ -651,7 +657,9 @@ export function Settings() {
                   placeholder='Hostname'
                   value={formData.mdnsName}
                   onChange={onChange('mdnsName')}
+                  aria-describedby={authHandoffError ? 'mdnsNameError' : undefined}
                 />
+                {authHandoffError && <div id='mdnsNameError' role='alert' className='text-sm text-red-400'>{authHandoffError}</div>}
               </div>
               <div className='border-l-2 border-[var(--text-secondary,#999)] pl-4'>
                 <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
