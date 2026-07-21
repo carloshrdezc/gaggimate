@@ -11,8 +11,12 @@ import { notesService } from '../pages/ShotAnalyzer/services/NotesService';
 export function useShotDoseRecorder(api, dose, manualGrind, onDoseAttached) {
   const status = computed(() => machine.value.status);
   const mountedRef = useRef(true);
-  // Set only once the shot-start attach actually succeeds. Left null on failure
-  // so a later status tick / re-render retries instead of permanently skipping.
+  // Per-field save tracking for the current shot. Shape: { shotId, dose, grind }
+  // where `dose`/`grind` are booleans marking whether that field's write has
+  // already succeeded for this shot. Kept per-field (rather than a single
+  // "allSucceeded" boolean) so a retry after a partial failure only re-attempts
+  // the field(s) that actually failed, never redundantly resending a sibling
+  // field that already persisted.
   const savedForShotRef = useRef(null);
   // Guards against concurrent attempts for the same shot when the effect re-runs
   // (dose/grind change, new status frame) while a prior attempt is still pending.
@@ -35,11 +39,16 @@ export function useShotDoseRecorder(api, dose, manualGrind, onDoseAttached) {
       return;
     }
 
-    // Attach once per shot, as soon as the shot ID appears while active. Skip if
-    // already saved, or if an attempt for this shot is still in flight.
-    if (!isActive || savedForShotRef.current === shotId || inFlightForShotRef.current === shotId) {
+    // Skip if not active, or if an attempt for this shot is still in flight.
+    if (!isActive || inFlightForShotRef.current === shotId) {
       return;
     }
+
+    // Start fresh per-field tracking whenever a new shot ID appears.
+    if (savedForShotRef.current?.shotId !== shotId) {
+      savedForShotRef.current = { shotId, dose: false, grind: false };
+    }
+    const saved = savedForShotRef.current;
 
     const hasDose = Number.isFinite(dose) && dose > 0;
     const beanType = status.value.selectedBean || '';
@@ -52,41 +61,45 @@ export function useShotDoseRecorder(api, dose, manualGrind, onDoseAttached) {
     if (beanType) doseNotes.beanType = beanType;
     const hasDoseNotes = hasDose || !!beanType;
 
-    if (!hasDoseNotes && !hasGrind) return;
+    // Only re-attempt fields that are still outstanding: applicable to this shot
+    // and not already persisted on a prior attempt.
+    const needDose = hasDoseNotes && !saved.dose;
+    const needGrind = hasGrind && !saved.grind;
+
+    if (!needDose && !needGrind) return;
 
     inFlightForShotRef.current = shotId;
     notesService.setApiService(api);
     (async () => {
-      let allSucceeded = true;
       let doseAttached = false;
 
-      if (hasDoseNotes) {
+      if (needDose) {
         try {
           // The device applies the bean-quantity delta while saving notes, using
           // the already-persisted notes as the idempotency source of truth.
           await notesService.saveNotes(shotId, 'gaggimate', doseNotes);
+          saved.dose = true;
           doseAttached = true;
         } catch (err) {
-          allSucceeded = false;
           console.error('Failed to attach dose/bean notes to shot:', err);
         }
       }
 
-      if (hasGrind) {
+      if (needGrind) {
         try {
           // fill-only-if-absent: never overwrite an existing grindSetting.
           await notesService.saveNotesIfMissing(shotId, 'gaggimate', {
             grindSetting: String(manualGrind),
           });
+          saved.grind = true;
         } catch (err) {
-          allSucceeded = false;
           console.error('Failed to attach manual grind setting to shot:', err);
         }
       }
 
-      // Only mark the shot as saved once every attempted write succeeded; on any
-      // failure leave the ref null so the next status tick retries this shot ID.
-      if (allSucceeded) savedForShotRef.current = shotId;
+      // Per-field flags are updated above; a field left false will be retried on
+      // the next status tick, while a field already true is skipped — so a retry
+      // only resends the field(s) that actually failed.
       if (inFlightForShotRef.current === shotId) inFlightForShotRef.current = null;
 
       if (mountedRef.current && doseAttached) {

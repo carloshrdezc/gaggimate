@@ -126,4 +126,42 @@ describe('useShotDoseRecorder — failed save retry', () => {
 
     errSpy.mockRestore();
   });
+
+  it('retry only resends the failed field (grind succeeds, dose fails)', async () => {
+    // Grind write succeeds on the first attempt; the dose/bean write fails.
+    saveNotes.mockRejectedValueOnce(new Error('ws hiccup'));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderHook(() => useShotDoseRecorder(api, 18, 14.5));
+
+    // Shot appears -> first attempt: grind persists, dose rejects.
+    setStatus({ shotId: 'shot-1', active: true });
+    await waitFor(() => expect(errSpy).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // First attempt sent both fields exactly once.
+    expect(saveNotes).toHaveBeenCalledTimes(1);
+    expect(saveNotesIfMissing).toHaveBeenCalledTimes(1);
+
+    // Retry tick for the same shot: only the failed dose field is re-sent; the
+    // already-succeeded grind field must NOT be resent redundantly.
+    setStatus({ shotId: 'shot-1', active: true });
+
+    await waitFor(() => expect(saveNotes).toHaveBeenCalledTimes(2));
+    // grind still only sent once total.
+    expect(saveNotesIfMissing).toHaveBeenCalledTimes(1);
+    // Both dose calls target the same shot ID.
+    expect(saveNotes.mock.calls[0][0]).toBe('shot-1');
+    expect(saveNotes.mock.calls[1][0]).toBe('shot-1');
+
+    // After the successful dose retry, further ticks re-send nothing.
+    setStatus({ shotId: 'shot-1', active: true });
+    await Promise.resolve();
+    expect(saveNotes).toHaveBeenCalledTimes(2);
+    expect(saveNotesIfMissing).toHaveBeenCalledTimes(1);
+
+    errSpy.mockRestore();
+  });
 });
