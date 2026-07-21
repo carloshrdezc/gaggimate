@@ -104,6 +104,7 @@ class Settings {
     bool isVolumetricTarget() const { return volumetricTarget; }
     bool isAllowYieldOverride() const { return allowYieldOverride; }
     bool isAutoSteamEnabled() const { return autoSteamEnabled; }
+    bool isStandbyOnBrewEnabled() const { return standbyOnBrewEnabled; }
     double getDoseGrams() const { return doseGrams; }
     String getOTAChannel() const;
     // PRO-400: the channel whose resolved head is believed to be flashed on the
@@ -203,6 +204,7 @@ class Settings {
     void setVolumetricTarget(bool volumetric_target);
     void setAllowYieldOverride(bool allow_yield_override);
     void setAutoSteamEnabled(bool auto_steam_enabled);
+    void setStandbyOnBrewEnabled(bool standby_on_brew_enabled);
     void setDoseGrams(double dose_grams);
     void setOTAChannel(const String &otaChannel);
     void setInstalledChannel(const String &installedChannel);
@@ -259,7 +261,8 @@ class Settings {
         int fullTankDistance, altRelayFunction;
         float pressureScaling, steamPumpPercentage, steamPumpCutoff, manualPressure, manualFlow;
         double targetGrindVolume, brewDelay, grindDelay, doseGrams;
-        bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, boilerFillActive;
+        bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, standbyOnBrewEnabled,
+            boilerFillActive;
         bool smartGrindActive, diagnosticLogEnabled, smartGrindToggle, homeAssistant, momentaryButtons;
         bool clock24hFormat, autowakeupEnabled, altRelayConfigured, cloudRelayEnabled, localAuthProvisioned;
         String pid, pumpModelCoeffs, wifiSsid, wifiPassword, mdnsName, otaChannel, installedChannel, savedScale;
@@ -298,6 +301,7 @@ class Settings {
     bool volumetricTarget = false;
     bool allowYieldOverride = false;
     bool autoSteamEnabled = false;
+    bool standbyOnBrewEnabled = false;
     double doseGrams = 18.0;
     bool boilerFillActive = false;
     int startupFillTime = 0;

@@ -8,6 +8,7 @@ import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { useProcessActions } from '../../hooks/useProcessActions.js';
 import { useProfileData } from '../../hooks/useProfileData.js';
 import { useAutoSteam } from '../../hooks/useAutoSteam.js';
+import { useStandbyOnBrew } from '../../hooks/useStandbyOnBrew.js';
 import { useActiveShotManualGrindRecorder } from '../../hooks/useActiveShotManualGrindRecorder.js';
 import { useShotDoseRecorder } from '../../hooks/useShotDoseRecorder.js';
 import { useGrindSettings } from '../../hooks/useGrindSettings.js';
@@ -45,7 +46,9 @@ import {
   getProcessKindForMode,
   getPrimaryActionState,
   getTemperatureRingMetrics,
+  computeStandbyOnBrewButtonState,
   shouldFireAutoSteamOnStop,
+  shouldFireStandbyOnStop,
   shouldKeepManualDraftDirty,
   shouldSendManualUpdate,
 } from './dashboardLogic.js';
@@ -1267,6 +1270,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   }, []);
 
   const { autoSteamEnabled, toggleAutoSteam } = useAutoSteam();
+  const { standbyOnBrewEnabled, toggleStandbyOnBrew } = useStandbyOnBrew();
+  const standbyButtonState = computeStandbyOnBrewButtonState({ standbyOnBrewEnabled, autoSteamEnabled });
   // Track whether the *last* shot was started in brew mode, captured while active.
   // We cannot rely on `brew` being true when `active` flips false because the
   // controller transitions mode to STANDBY before the WebSocket delivers active=false.
@@ -1283,7 +1288,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     wasActiveRef.current = false;
     setIsFlushing(false);
     if (shouldFireAutoSteamOnStop({ lastActiveWasBrew: lastActiveWasBrewRef.current, autoSteamEnabled })) {
-      try { api.send({ tp: 'req:change-mode', mode: 2 }); } catch {}
+      try { api.send({ tp: 'req:change-mode', mode: MODE_STEAM }); } catch {}
       // PRO-421: auto-steam fires exactly once per brew shot. Clearing the flag
       // (and the underlying last-process type) prevents the effect from firing
       // AGAIN when the auto-steamed session is later stopped: without this, the
@@ -1292,8 +1297,25 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       // right after the STANDBY and bounce the machine back to Steam.
       lastActiveWasBrewRef.current = false;
       lastProcessTypeRef.current = null;
+    } else if (
+      shouldFireStandbyOnStop({
+        lastActiveWasBrew: lastActiveWasBrewRef.current,
+        standbyOnBrewEnabled,
+        autoSteamEnabled,
+      })
+    ) {
+      // PRO-545: standby-on-brew drops the machine to Standby after a brew shot.
+      // Auto-steam takes priority (the branch above / the predicate's
+      // !autoSteamEnabled guard), so this only fires when auto-steam is off.
+      // This is the FIRST change-mode of the transition (not a re-assert), so it
+      // passes through StandbyReassertPolicy/ChangeModeDeferPolicy untouched.
+      // Same exactly-once discipline as auto-steam: clear the refs so the effect
+      // does not re-fire on subsequent inactive transitions of the same shot.
+      try { api.send({ tp: 'req:change-mode', mode: MODE_STANDBY }); } catch {}
+      lastActiveWasBrewRef.current = false;
+      lastProcessTypeRef.current = null;
     }
-  }, [active, autoSteamEnabled, api, setIsFlushing]);
+  }, [active, autoSteamEnabled, standbyOnBrewEnabled, api, setIsFlushing]);
 
   const actions = useProcessActions(api, isGrind, setIsFlushing, lastProcessTypeRef, processKind);
   const [manualDraft, setManualDraft] = useState(() => manualDraftFromStatus(s));
@@ -1856,6 +1878,37 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               }}
             >
               {autoSteamEnabled ? '~ AUTO STEAM ON' : '~ AUTO STEAM'}
+            </button>
+          )}
+          {(brew || isManualMode) && (
+            <button
+              type='button'
+              onClick={standbyButtonState.disabled ? undefined : toggleStandbyOnBrew}
+              disabled={standbyButtonState.disabled}
+              title={
+                standbyButtonState.disabled
+                  ? 'Disabled while Auto Steam is on (Auto Steam takes priority)'
+                  : 'Auto-switch to standby when brew ends'
+              }
+              className={standbyButtonState.armed ? 'nd-chip-danger-active' : ''}
+              style={{
+                ...(standbyButtonState.armed ? {} : {
+                  background: 'transparent',
+                  color: 'var(--dm-fg-faint)',
+                  border: '1px solid var(--dm-line)',
+                }),
+                fontFamily: 'var(--dm-font-mono)',
+                fontSize: 9,
+                letterSpacing: '0.18em',
+                padding: '4px 8px',
+                borderRadius: 6,
+                cursor: standbyButtonState.disabled ? 'not-allowed' : 'pointer',
+                opacity: standbyButtonState.disabled ? 0.4 : 1,
+                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {standbyButtonState.armed ? '~ STANDBY ON' : '~ STANDBY'}
             </button>
           )}
         </div>

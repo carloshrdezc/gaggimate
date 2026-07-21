@@ -765,6 +765,7 @@ void WebUIPlugin::loop() {
         doc["btv"] = profileManager->getSelectedProfile().getTotalVolume(); // raw volumetric target for frontend Weight card
         doc["ayo"] = controller->getSettings().isAllowYieldOverride() ? 1 : 0;
         doc["as"] = controller->getSettings().isAutoSteamEnabled() ? 1 : 0;
+        doc["sb"] = controller->getSettings().isStandbyOnBrewEnabled() ? 1 : 0;
         // Round dose grams to 1 decimal so the wire value matches the "float" web contract
         // (avoids noisy full-precision doubles; firmware keeps full precision internally).
         doc["dg"] = std::round(controller->getSettings().getDoseGrams() * 10.0) / 10.0;
@@ -1615,6 +1616,20 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             controller->getSettings().setAutoSteamEnabled(enabledValue.as<int>() != 0);
         } else {
             ESP_LOGW("WebUIPlugin", "req:autosteam:set ignored: missing or invalid 'enabled'");
+        }
+    } else if (msgType == "req:standby-on-brew:set") {
+        // Device-authoritative standby-on-brew toggle (PRO-545). Persisted via
+        // Settings and rebroadcast to all clients in the next evt:status as "sb".
+        // Mirrors req:autosteam:set exactly. Mutual exclusion with auto-steam is
+        // enforced client-side (the button disables while auto-steam is on); the
+        // stored value is preserved here so it resumes when auto-steam is cleared.
+        JsonVariantConst enabledValue = doc["enabled"];
+        if (enabledValue.is<bool>()) {
+            controller->getSettings().setStandbyOnBrewEnabled(enabledValue.as<bool>());
+        } else if (enabledValue.is<int>()) {
+            controller->getSettings().setStandbyOnBrewEnabled(enabledValue.as<int>() != 0);
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:standby-on-brew:set ignored: missing or invalid 'enabled'");
         }
     } else if (msgType == "req:dose:set") {
         // Device-authoritative brew dose in grams (PRO-225). Validated and

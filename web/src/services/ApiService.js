@@ -465,6 +465,8 @@ export default class ApiService {
       allowYieldOverride: !!message.ayo,
       // PRO-226: device-authoritative auto-steam (as: 0/1) and brew dose (dg: float).
       autoSteamEnabled: !!message.as,
+      // PRO-545: device-authoritative standby-on-brew (sb: 0/1).
+      standbyOnBrewEnabled: !!message.sb,
       // Legacy (pre-PRO-225) firmware doesn't send `dg`; emit null so the
       // consumer falls back to its localStorage cache instead of clobbering it.
       doseGrams: Number.isFinite(message.dg) ? message.dg : null,
@@ -543,6 +545,7 @@ export const machine = signal({
     brewTargetVolume: 0,
     allowYieldOverride: false,
     autoSteamEnabled: false,
+    standbyOnBrewEnabled: false,
     doseGrams: DEFAULT_DOSE_GRAMS,
     grindTargetDuration: 0,
     grindTargetVolume: 0,
