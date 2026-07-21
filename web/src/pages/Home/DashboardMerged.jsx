@@ -1464,8 +1464,10 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     }
   }, [recordActiveShotManualGrind]);
 
-  // Auto-attach dose and bean to shot notes as soon as the shot becomes active
-  useShotDoseRecorder(api, dose);
+  // Auto-attach dose, bean, and the manual grind value to shot notes as soon as
+  // the shot becomes active. Dose/bean overwrite (read-merge-write); grind is
+  // fill-only-if-absent so an in-shot commit or manual Shot Notes edit wins.
+  useShotDoseRecorder(api, dose, manualGrind);
 
   // Target yield — profile-authoritative (CAR-375). The displayed yield always
   // tracks the active profile's volumetric target (s.brewTargetVolume),
