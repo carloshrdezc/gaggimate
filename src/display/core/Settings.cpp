@@ -95,6 +95,7 @@ void Settings::load() {
     volumetricTarget = preferences.getBool("vt", false);
     allowYieldOverride = preferences.getBool("ayo", false);
     autoSteamEnabled = preferences.getBool("autosteam", false);
+    standbyOnBrewEnabled = preferences.getBool("sbonbrew", false);
     doseGrams = preferences.getDouble("dosegrams", 18.0);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
     // PRO-400: EMPTY default so a device that never stored "ic" is detectable.
@@ -438,6 +439,12 @@ void Settings::setAllowYieldOverride(bool allow_yield_override) {
 void Settings::setAutoSteamEnabled(bool auto_steam_enabled) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->autoSteamEnabled = auto_steam_enabled;
+    save();
+}
+
+void Settings::setStandbyOnBrewEnabled(bool standby_on_brew_enabled) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+    this->standbyOnBrewEnabled = standby_on_brew_enabled;
     save();
 }
 
@@ -1038,6 +1045,7 @@ Settings::PersistenceSnapshot Settings::takePersistenceSnapshot() {
     snapshot.volumetricTarget = volumetricTarget;
     snapshot.allowYieldOverride = allowYieldOverride;
     snapshot.autoSteamEnabled = autoSteamEnabled;
+    snapshot.standbyOnBrewEnabled = standbyOnBrewEnabled;
     snapshot.boilerFillActive = boilerFillActive;
     snapshot.smartGrindActive = smartGrindActive;
     snapshot.diagnosticLogEnabled = diagnosticLogEnabled;
@@ -1118,6 +1126,7 @@ void Settings::doSave() {
     preferences.putBool("vt", snapshot.volumetricTarget);
     preferences.putBool("ayo", snapshot.allowYieldOverride);
     preferences.putBool("autosteam", snapshot.autoSteamEnabled);
+    preferences.putBool("sbonbrew", snapshot.standbyOnBrewEnabled);
     preferences.putDouble("dosegrams", snapshot.doseGrams);
     preferences.putString("oc", snapshot.otaChannel);
     preferences.putString("ic", snapshot.installedChannel);

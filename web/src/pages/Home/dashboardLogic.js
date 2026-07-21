@@ -214,6 +214,41 @@ export function shouldFireAutoSteamOnStop({ lastActiveWasBrew, autoSteamEnabled 
   return Boolean(lastActiveWasBrew) && Boolean(autoSteamEnabled);
 }
 
+// PRO-545: decide whether the standby-on-brew effect should fire
+// change-mode:STANDBY when a process transitions active -> inactive.
+//
+// Like auto-steam, this must fire EXACTLY ONCE per brew/manual shot: after the
+// shot ends we drop the machine to Standby. The caller enforces the once-only
+// semantics by clearing lastActiveWasBrew after a fire; this helper is the pure
+// decision so it can be unit-tested.
+//
+// Mutual exclusion: auto-steam wins. When auto-steam is enabled the standby-on
+// button is disabled in the UI, but we also guard here so that even if both
+// flags are somehow set, only the auto-steam STEAM transition fires and we do
+// NOT also try to drop to Standby (the two post-shot actions conflict).
+//
+//   lastActiveWasBrew    - was the just-ended active session a brew/manual shot?
+//   standbyOnBrewEnabled - the (device-authoritative) standby-on-brew setting.
+//   autoSteamEnabled     - the (device-authoritative) auto-steam setting; when
+//                          true it takes priority and this predicate is false.
+export function shouldFireStandbyOnStop({ lastActiveWasBrew, standbyOnBrewEnabled, autoSteamEnabled }) {
+  return Boolean(lastActiveWasBrew) && Boolean(standbyOnBrewEnabled) && !autoSteamEnabled;
+}
+
+// PRO-545: pure rendering state for the "Standby On" chip button. Mutual
+// exclusion is enforced at the button: while auto-steam is enabled the chip is
+// disabled (non-interactive, grayed) and shown un-armed regardless of the
+// stored standby-on-brew value — but that value is PRESERVED (not cleared), so
+// the chip resumes its armed appearance and behavior once auto-steam is turned
+// back off. `armed` drives the active (danger) styling and the "ON" label.
+export function computeStandbyOnBrewButtonState({ standbyOnBrewEnabled, autoSteamEnabled }) {
+  const disabled = Boolean(autoSteamEnabled);
+  return {
+    disabled,
+    armed: Boolean(standbyOnBrewEnabled) && !disabled,
+  };
+}
+
 // PRO-426: standby profile mini-curve.
 //
 // Builds SVG polyline point strings for a pro profile's pressure + flow target

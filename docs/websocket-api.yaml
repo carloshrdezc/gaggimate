@@ -119,6 +119,7 @@ channels:
           - $ref: '#/components/messages/ChangeModeRequest'
           - $ref: '#/components/messages/ChangeBrewTargetRequest'
           - $ref: '#/components/messages/AutosteamSetRequest'
+          - $ref: '#/components/messages/StandbyOnBrewSetRequest'
           - $ref: '#/components/messages/DoseSetRequest'
           - $ref: '#/components/messages/BeansSelectRequest'
           - $ref: '#/components/messages/FlushStartRequest'
@@ -220,6 +221,10 @@ components:
           type: integer
           enum: [0, 1]
           description: Auto-steam enabled setting.
+        sb:
+          type: integer
+          enum: [0, 1]
+          description: Standby-on-brew enabled setting (auto-switch to standby after a brew shot).
         dg:
           type: number
           description: Brew dose in grams (rounded to 1 decimal).
@@ -1048,6 +1053,23 @@ components:
           tp:
             type: string
             enum: ['req:autosteam:set']
+          enabled:
+            type: boolean
+        required: [tp]
+    StandbyOnBrewSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Device-authoritative standby-on-brew toggle. When enabled, the machine
+          switches to Standby (mode 0) after a brew shot finishes. Persisted and
+          rebroadcast as `sb` in the next `evt:status`. No response is sent.
+          Mutually exclusive with auto-steam in the UI (auto-steam wins); the
+          stored value is preserved while auto-steam is enabled.
+        properties:
+          tp:
+            type: string
+            enum: ['req:standby-on-brew:set']
           enabled:
             type: boolean
         required: [tp]
