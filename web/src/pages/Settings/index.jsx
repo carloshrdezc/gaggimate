@@ -31,6 +31,7 @@ export function Settings() {
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
   const [authHandoffError, setAuthHandoffError] = useState(null);
+  const [authHandoffCopied, setAuthHandoffCopied] = useState(false);
   const [autowakeupSchedules, setAutoWakeupSchedules] = useState([
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
@@ -73,6 +74,7 @@ export function Settings() {
 
     setAuthHandoffUrl(null);
     setAuthHandoffError(null);
+    setAuthHandoffCopied(false);
     const wifiCredentials = new FormData(formRef.current);
 
     try {
@@ -96,10 +98,19 @@ export function Settings() {
     }
 
     setAuthHandoffUrl(url);
+    // AP setup is served over plain HTTP, so navigator.clipboard is normally
+    // undefined (Clipboard API requires a secure context) or throws even when
+    // present in some browsers' insecure-origin shims. Either way, the ONLY
+    // guaranteed way to hand the token to the user here is the visible link
+    // rendered below via authHandoffUrl -- never rely on the copy succeeding.
     try {
-      if (navigator.clipboard) await navigator.clipboard.writeText(url);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setAuthHandoffCopied(true);
+      }
     } catch (error) {
-      console.error('Failed to copy Wi-Fi auth handoff:', error);
+      console.error('Failed to copy Wi-Fi auth handoff (expected on insecure/HTTP origins):', error);
+      setAuthHandoffCopied(false);
     }
   };
 
@@ -677,7 +688,25 @@ export function Settings() {
                 </button>
                 {authHandoffUrl && <>
                   <div className='mt-2 font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>The device restarts into STA after this successful provisioning.</div>
-                  <div className='mt-2 break-all text-xs'>{authHandoffUrl}</div>
+                  {authHandoffCopied ? (
+                    <div role='status' className='mt-2 text-sm text-green-400'>Link copied to clipboard.</div>
+                  ) : (
+                    <div role='alert' className='mt-2 text-sm text-yellow-400'>
+                      Could not copy automatically (common on this insecure setup page) -- select and copy the link below manually before leaving this page.
+                    </div>
+                  )}
+                  <div
+                    className='mt-2 break-all text-xs select-all cursor-text rounded border border-[var(--text-secondary,#999)] p-2'
+                    onClick={e => {
+                      const selection = window.getSelection();
+                      const range = document.createRange();
+                      range.selectNodeContents(e.currentTarget);
+                      selection.removeAllRanges();
+                      selection.addRange(range);
+                    }}
+                  >
+                    {authHandoffUrl}
+                  </div>
                 </>}
               </div>
               <div className='flex flex-col gap-2'>
