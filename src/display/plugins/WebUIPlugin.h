@@ -16,8 +16,8 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 constexpr uint32_t RELAY_CLIENT_ID = 0xFFFFFFFE;
 
@@ -229,6 +229,22 @@ class WebUIPlugin : public Plugin {
         String pinnedTag;
         bool selectedEqInstalled;
         bool installedEmpty;
+        // PRO-556: snapshot of the periodic background check's cached result,
+        // taken by value at spawn time on the loop task so the resolve task can
+        // decide (via otaResolveCanReusePeriodic()) whether to reuse it instead
+        // of opening a second TLS connection. `resolveChannel` is the channel
+        // being resolved for (== otaResolveChannel); `periodicChannel` /
+        // `periodicResolvedAtMs` are the loop's otaPeriodicResolvedChannel /
+        // lastUpdateCheck; `periodicVersion` / `periodicFailed` are read from
+        // `ota` on the loop task (getCurrentVersion() / isUpdateCheckFailed())
+        // BEFORE the task is created, so the task never races the loop for them.
+        // `haveEverChecked` is (lastUpdateCheck != 0).
+        String resolveChannel;
+        String periodicChannel;
+        String periodicVersion;
+        bool periodicFailed;
+        bool haveEverChecked;
+        uint32_t periodicResolvedAtMs;
     };
 
     AsyncWebServer server;
@@ -295,6 +311,17 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
+    // PRO-556: the channel the periodic background OTA check last SUCCESSFULLY
+    // resolved against (settings.getOTAChannel() at that check's run time). The
+    // click-driven resolve task (otaResolveTask) may reuse the periodic check's
+    // cached head (ota->getCurrentVersion()) instead of opening a second TLS
+    // connection ONLY when this equals the channel it is resolving for AND the
+    // result is fresh (see OtaResolveReusePolicy.h). Set alongside
+    // lastUpdateCheck on a successful periodic check; a failed/deferred check
+    // does NOT update it (PRO-555 defers without advancing lastUpdateCheck, so
+    // there is no fresh result to reuse). Loop-task owned, snapshotted by value
+    // into OtaResolveTaskParams at spawn time.
+    String otaPeriodicResolvedChannel = "";
     // PRO-411: consecutive OTA update-check failures, driving the exponential
     // backoff of the effective check interval (see otaBackoffInterval() /
     // UPDATE_CHECK_MAX_INTERVAL). Reset to 0 on any successful check. Loop-task
