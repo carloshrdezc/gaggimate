@@ -1,6 +1,7 @@
 #include "WebUIPlugin.h"
 #include "OtaChannelSwitchPolicy.h"
 #include "OtaIntentState.h"
+#include "OtaResolveHeapPolicy.h"
 #include "OtaUpdateCheckPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
@@ -15,6 +16,7 @@
 #include <display/models/profile.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <esp_system.h>
 #include <inttypes.h>
@@ -297,18 +299,43 @@ void WebUIPlugin::otaResolveTask(void *arg) {
     WebUIPlugin *plugin = params->plugin;
     GitHubOTA *ota = plugin->ota;
 
-    ota->checkForUpdates();
-    const String resolved = ota->getCurrentVersion();
-    // resolveFailed at this layer == the last checkForUpdates() failed to
-    // resolve a head (network error / GitHub redirect quirk / malformed
-    // channel). We consult the AUTHORITATIVE failure flag
-    // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
-    // resolve getCurrentVersion() returns the STALE version string from a
-    // prior successful check, so a periodic check that already populated a
-    // version would otherwise mask a failed channel-switch resolve and
-    // force-flash against a stale _latest_url. Keep the || isEmpty() as a
-    // belt-and-suspenders guard (empty is untrustworthy).
-    const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+    // PRO-554: pre-flight internal-DRAM guard. checkForUpdates() below opens a
+    // FRESH, independent HTTPS/TLS connection to GitHub (a second one, on top of
+    // the periodic background check's own WiFiClientSecure). Under current
+    // internal-DRAM pressure (same failure class as PRO-334/PRO-358) that extra
+    // TLS handshake can trip an OOM deep in mbedtls's certificate-verify path,
+    // which on this ESP-IDF/mbedtls port PANICS (LoadProhibited) instead of
+    // failing cleanly — crash-looping the device on every channel-switch click.
+    // If the largest contiguous free internal-DRAM block is below the floor,
+    // skip the TLS attempt entirely and fail the resolve closed, mirroring the
+    // xTaskCreatePinnedToCore-OOM branch in loop()'s Idle case: an empty
+    // resolved version drives decideOtaFlash() to Refuse -> OtaResolveState::
+    // Failed -> "Update failed" surfaced to the UI, never a panic.
+    const size_t largestFreeInternalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    const bool heapSufficient = otaResolveHeapSufficient(largestFreeInternalBlock);
+
+    String resolved;
+    bool resolveFailed;
+    if (!heapSufficient) {
+        ESP_LOGE("WebUIPlugin",
+                 "Skipping OTA resolve TLS handshake: largest free internal DRAM block %u < floor %u — failing closed to "
+                 "avoid an mbedtls OOM panic",
+                 static_cast<unsigned>(largestFreeInternalBlock), static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+        resolveFailed = true;
+    } else {
+        ota->checkForUpdates();
+        resolved = ota->getCurrentVersion();
+        // resolveFailed at this layer == the last checkForUpdates() failed to
+        // resolve a head (network error / GitHub redirect quirk / malformed
+        // channel). We consult the AUTHORITATIVE failure flag
+        // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+        // resolve getCurrentVersion() returns the STALE version string from a
+        // prior successful check, so a periodic check that already populated a
+        // version would otherwise mask a failed channel-switch resolve and
+        // force-flash against a stale _latest_url. Keep the || isEmpty() as a
+        // belt-and-suspenders guard (empty is untrustworthy).
+        resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+    }
     const OtaFlashDecision decision = decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled,
                                                      params->installedEmpty, resolved.c_str(), resolveFailed);
 
@@ -978,13 +1005,12 @@ void WebUIPlugin::setupServer() {
     if (controller->isSDCard()) {
         fs = &SD_MMC;
     }
-    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store").setFilter(
-        [this](AsyncWebServerRequest *request) {
-            const bool authenticated = isHttpAuthenticated(request);
-            if (!authenticated)
-                sendUnauthorized(request);
-            return authenticated;
-        });
+    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store").setFilter([this](AsyncWebServerRequest *request) {
+        const bool authenticated = isHttpAuthenticated(request);
+        if (!authenticated)
+            sendUnauthorized(request);
+        return authenticated;
+    });
     server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
         if (!isHttpAuthenticated(request))
             return sendUnauthorized(request);
