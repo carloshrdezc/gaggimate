@@ -155,7 +155,7 @@ export function otaChannelDiffersFromInstalled({ selectedChannel, installedChann
 // Gate (all must hold):
 //   1. The dropdown selection has been saved & acknowledged
 //      (pendingChannel === formData.channel).
-//   2. A real status came back (not "Checking..." / "Update failed" / empty).
+//   2. A real status came back (not a resolve-in-flight/failed status / empty).
 //   3. The acknowledged channel differs from formData.installedChannel.
 //
 // Intentionally weaker than canFlashTaggedRelease for a `tag:` channel: when a
