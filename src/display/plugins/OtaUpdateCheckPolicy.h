@@ -1,6 +1,7 @@
 #ifndef OTAUPDATECHECKPOLICY_H
 #define OTAUPDATECHECKPOLICY_H
 
+#include "OtaResolveHeapPolicy.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -108,5 +109,53 @@ static_assert(otaBackoffInterval(300000, 3600000, 5) == 3600000, "PRO-411: 5 fai
 static_assert(otaBackoffInterval(300000, 3600000, 100) == 3600000, "PRO-411: many failures stay capped, no overflow");
 static_assert(otaBackoffInterval(300000, 3600000, 0xFFFFFFFF) == 3600000, "PRO-411: extreme failure count stays capped");
 static_assert(otaBackoffInterval(500, 500, 10) == 500, "PRO-411: base==max always returns cap");
+
+// PRO-555: pre-flight internal-DRAM guard for the PERIODIC background OTA check.
+//
+// Background: the periodic update-check at WebUIPlugin::loop calls the exact
+// same GitHubOTA::checkForUpdates() -> WiFiClientSecure -> mbedtls
+// certificate-verify path that PRO-554 guarded for the one-shot resolve task
+// (otaResolveTask, see OtaResolveHeapPolicy.h). Under internal-DRAM pressure
+// that TLS handshake can OOM deep in mbedtls and PANIC (LoadProhibited) instead
+// of failing cleanly. The periodic check runs every ~5 minutes with no user
+// action, so it is arguably MORE likely than the click-driven resolve to land
+// in the DRAM-pressure window.
+//
+// CRITICAL — this path DEFERS, it does NOT fail closed. The resolve path fails
+// closed (routes to OtaResolveState::Failed) because a UI flash decision is
+// blocked waiting on it. The periodic check has no such dependant: nothing is
+// waiting on this cycle's result, so under heap pressure the correct response
+// is to SKIP this cycle entirely — do NOT call checkForUpdates(), do NOT bump
+// otaCheckFailureCount (this is not a check FAILURE; the check never ran, so it
+// must not feed the PRO-411 network-failure backoff), and do NOT advance
+// lastUpdateCheck. Leaving lastUpdateCheck untouched means the next loop pass
+// retries promptly once internal DRAM recovers, rather than waiting a full
+// interval for a transient pressure spike that may already be gone. This
+// mirrors the "defer, not fail" shape of the pre-PRO-345 periodic-check guards
+// in this header (otaRedirectLocationValid / otaVersionValid bail-and-back-off),
+// as opposed to the fail-closed OtaResolveHeapPolicy.h / OtaAsyncResolvePolicy.h
+// resolve path.
+//
+// Reuses otaResolveHeapSufficient() (same 48 KiB contiguous-internal-DRAM floor)
+// rather than duplicating the floor: it is the same physical constraint (a
+// single large contiguous internal-DRAM block for mbedtls's TLS record +
+// certificate-verify scratch), just a different response to failing it.
+//
+// Returns true when the periodic check MUST be deferred (skipped this cycle)
+// because the largest contiguous free internal-DRAM block is below the TLS
+// floor; false when it is safe to open the TLS connection.
+constexpr bool otaPeriodicCheckShouldDefer(size_t largestFreeInternalBlock) {
+    return !otaResolveHeapSufficient(largestFreeInternalBlock);
+}
+
+// Compile-time truth table for the periodic-check defer guard. Pins that it
+// shares the resolve path's floor (single-sourced) and that the boundary is the
+// inverse of otaResolveHeapSufficient (defer iff NOT sufficient).
+static_assert(!otaPeriodicCheckShouldDefer(49152u), "PRO-555: exactly the floor is sufficient — do not defer");
+static_assert(!otaPeriodicCheckShouldDefer(49153u), "PRO-555: one byte above the floor — do not defer");
+static_assert(!otaPeriodicCheckShouldDefer(1024u * 1024u), "PRO-555: a large free block — do not defer");
+static_assert(otaPeriodicCheckShouldDefer(49151u), "PRO-555: one byte below the floor — defer this cycle");
+static_assert(otaPeriodicCheckShouldDefer(0u), "PRO-555: zero free internal DRAM — defer this cycle");
+static_assert(otaPeriodicCheckShouldDefer(16u * 1024u), "PRO-555: a fragmented 16 KiB block — defer this cycle");
 
 #endif // OTAUPDATECHECKPOLICY_H
