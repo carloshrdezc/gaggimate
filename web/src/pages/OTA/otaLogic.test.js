@@ -101,6 +101,30 @@ test('canFlashTaggedRelease: returns false for malformed input', () => {
   expect(canFlashTaggedRelease({ formData: { channel: 'tag:', status: 'whatever' }, pendingChannel: 'tag:' })).toBe(false);
 });
 
+// PRO-559: the firmware's async resolve state machine emits transient/failure
+// status strings the old two-string deny-list ("Checking..." / "Update failed")
+// did NOT cover, so the Flash button could report enabled before the device
+// confirmed a resolved head. All three must gate off (return false).
+
+test('canFlashTaggedRelease: disabled while resolve is in flight ("Verifying release...")', () => {
+  const formData = { channel: 'tag:2.0.8', status: 'Verifying release...' };
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
+});
+
+test('canFlashTaggedRelease: disabled when resolve failed ("Update failed (tag not resolved)")', () => {
+  const formData = { channel: 'tag:2.0.8', status: 'Update failed (tag not resolved)' };
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
+});
+
+test('canFlashTaggedRelease: disabled on timeout ("Could not verify release <target> — check network")', () => {
+  // <target> is interpolated by the firmware, so this is a prefix match.
+  const formData = {
+    channel: 'tag:2.0.8',
+    status: 'Could not verify release 2.0.8 — check network',
+  };
+  expect(canFlashTaggedRelease({ formData, pendingChannel: 'tag:2.0.8' })).toBe(false);
+});
+
 // v-prefix tolerance — GitHub release tags occasionally carry a leading `v`
 // (`v1.8.2`). The firmware resolver strips it before reporting, but the
 // channel string keeps it. Both directions must compare equal so legacy
@@ -305,6 +329,28 @@ test('canSwitchChannel: blocked while status is Checking...', () => {
 
 test('canSwitchChannel: blocked when the acknowledged status reports a failure', () => {
   const formData = { channel: 'beta', installedChannel: 'latest', status: 'Update failed' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+// PRO-559: same gate-completeness fix as canFlashTaggedRelease — the resolve
+// state machine's transient/failure strings must also block the switch button.
+
+test('canSwitchChannel: blocked while resolve is in flight ("Verifying release...")', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: 'Verifying release...' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: blocked when resolve failed ("Update failed (tag not resolved)")', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: 'Update failed (tag not resolved)' };
+  expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
+});
+
+test('canSwitchChannel: blocked on timeout ("Could not verify release <target> — check network")', () => {
+  const formData = {
+    channel: 'beta',
+    installedChannel: 'latest',
+    status: 'Could not verify release beta — check network',
+  };
   expect(canSwitchChannel({ formData, pendingChannel: 'beta' })).toBe(false);
 });
 

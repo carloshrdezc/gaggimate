@@ -23,6 +23,29 @@ export function updateOtaChannel(formData, channel) {
   return { ...formData, channel: 'latest' };
 }
 
+// Statuses that mean "the device has NOT confirmed a resolved, flashable head"
+// and therefore must gate the flash/switch buttons off.
+//
+// This is deliberately an allow-list *inversion* over the firmware's async
+// resolve state machine (src/display/plugins/WebUIPlugin.cpp,
+// OtaResolveState::Resolving / Failed). The old two-string deny-list
+// ("Checking..." / "Update failed") missed the transient/failure strings the
+// resolver actually emits, so those values fell through and the button could
+// report enabled before OtaResolveState::ReadyToFlash (PRO-559):
+//   - "Verifying release..."               — Idle -> Resolving; resolve in flight.
+//   - "Update failed (tag not resolved)"   — Failed default branch (not a timeout).
+//   - "Could not verify release <target> — check network" — Failed timeout branch;
+//     <target> is interpolated, so this is matched as a prefix.
+function isResolveInFlightOrFailed(status) {
+  return (
+    status === 'Checking...' ||
+    status === 'Update failed' ||
+    status === 'Verifying release...' ||
+    status === 'Update failed (tag not resolved)' ||
+    status.startsWith('Could not verify release')
+  );
+}
+
 // Decide whether the "Flash Display" / "Flash Controller" buttons should be
 // enabled when the channel is pinned to a specific tag (tag:<semver>).
 //
@@ -37,7 +60,7 @@ export function updateOtaChannel(formData, channel) {
 // Gate (all four must hold):
 //   1. The device-acknowledged channel is `tag:<semver>` (formData.channel).
 //   2. There's no pending unsaved selection (pendingChannel === formData.channel).
-//   3. A real status came back (not "Checking..." / "Update failed" / empty).
+//   3. A real status came back (not a resolve-in-flight/failed status / empty).
 //   4. The reported status equals the pinned tag's semver — proves the
 //      device has resolved `_latest_url` to *that* tag, not a stale one.
 export function canFlashTaggedRelease({ formData, pendingChannel } = {}) {
@@ -52,7 +75,7 @@ export function canFlashTaggedRelease({ formData, pendingChannel } = {}) {
   if (typeof status !== 'string' || status.length === 0) {
     return false;
   }
-  if (status === 'Checking...' || status === 'Update failed') {
+  if (isResolveInFlightOrFailed(status)) {
     return false;
   }
   // Tag is "tag:2.0.8" -> compare against "2.0.8".
@@ -155,7 +178,7 @@ export function canSwitchChannel({ formData, pendingChannel } = {}) {
   if (typeof channel !== 'string' || channel.length === 0) return false;
   if (pendingChannel !== channel) return false;
   if (typeof status !== 'string' || status.length === 0) return false;
-  if (status === 'Checking...' || status === 'Update failed') return false;
+  if (isResolveInFlightOrFailed(status)) return false;
   return otaChannelDiffersFromInstalled({ selectedChannel: channel, installedChannel });
 }
 
