@@ -2,6 +2,7 @@
 #include "OtaChannelSwitchPolicy.h"
 #include "OtaIntentState.h"
 #include "OtaResolveHeapPolicy.h"
+#include "OtaResolveReusePolicy.h"
 #include "OtaUpdateCheckPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
@@ -299,42 +300,68 @@ void WebUIPlugin::otaResolveTask(void *arg) {
     WebUIPlugin *plugin = params->plugin;
     GitHubOTA *ota = plugin->ota;
 
-    // PRO-554: pre-flight internal-DRAM guard. checkForUpdates() below opens a
-    // FRESH, independent HTTPS/TLS connection to GitHub (a second one, on top of
-    // the periodic background check's own WiFiClientSecure). Under current
-    // internal-DRAM pressure (same failure class as PRO-334/PRO-358) that extra
-    // TLS handshake can trip an OOM deep in mbedtls's certificate-verify path,
-    // which on this ESP-IDF/mbedtls port PANICS (LoadProhibited) instead of
-    // failing cleanly — crash-looping the device on every channel-switch click.
-    // If the largest contiguous free internal-DRAM block is below the floor,
-    // skip the TLS attempt entirely and fail the resolve closed, mirroring the
-    // xTaskCreatePinnedToCore-OOM branch in loop()'s Idle case: an empty
-    // resolved version drives decideOtaFlash() to Refuse -> OtaResolveState::
-    // Failed -> "Update failed" surfaced to the UI, never a panic.
-    const size_t largestFreeInternalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    const bool heapSufficient = otaResolveHeapSufficient(largestFreeInternalBlock);
+    // PRO-556: before opening a SECOND, independent HTTPS/TLS connection, try to
+    // reuse the periodic background OTA check's already-resolved head. The
+    // periodic check (loop(), PRO-411/PRO-555) runs checkForUpdates() on this
+    // same `ota` instance every ~5 min and caches getCurrentVersion(). If it
+    // last succeeded against the SAME channel we are resolving for and that
+    // result is fresh (< half the check interval old), reusing it avoids an
+    // entire TLS handshake — eliminating that handshake's memory-pressure /
+    // latency / cert-verify exposure from this click-driven path and reducing
+    // load on github.com. The snapshot (channel/version/failed/timestamp) was
+    // taken by value on the loop task at spawn time, so this decision races
+    // nothing. When reuse is refused (different channel, too stale, empty, or
+    // the periodic check itself failed/deferred under PRO-555) we fall through
+    // to the existing independent checkForUpdates() call, STILL protected by the
+    // PRO-554 heap guard below.
+    const bool canReusePeriodic = otaResolveCanReusePeriodic(
+        params->haveEverChecked, params->periodicFailed, params->periodicVersion.c_str(), params->periodicChannel.c_str(),
+        params->resolveChannel.c_str(), params->periodicResolvedAtMs, static_cast<uint32_t>(millis()));
 
     String resolved;
     bool resolveFailed;
-    if (!heapSufficient) {
-        ESP_LOGE("WebUIPlugin",
-                 "Skipping OTA resolve TLS handshake: largest free internal DRAM block %u < floor %u — failing closed to "
-                 "avoid an mbedtls OOM panic",
-                 static_cast<unsigned>(largestFreeInternalBlock), static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
-        resolveFailed = true;
+    if (canReusePeriodic) {
+        ESP_LOGI("WebUIPlugin",
+                 "Reusing fresh periodic OTA check result for channel '%s' (head '%s') — skipping redundant TLS handshake",
+                 params->resolveChannel.c_str(), params->periodicVersion.c_str());
+        resolved = params->periodicVersion;
+        resolveFailed = false;
     } else {
-        ota->checkForUpdates();
-        resolved = ota->getCurrentVersion();
-        // resolveFailed at this layer == the last checkForUpdates() failed to
-        // resolve a head (network error / GitHub redirect quirk / malformed
-        // channel). We consult the AUTHORITATIVE failure flag
-        // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
-        // resolve getCurrentVersion() returns the STALE version string from a
-        // prior successful check, so a periodic check that already populated a
-        // version would otherwise mask a failed channel-switch resolve and
-        // force-flash against a stale _latest_url. Keep the || isEmpty() as a
-        // belt-and-suspenders guard (empty is untrustworthy).
-        resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+        // PRO-554: pre-flight internal-DRAM guard. checkForUpdates() below opens a
+        // FRESH, independent HTTPS/TLS connection to GitHub (a second one, on top of
+        // the periodic background check's own WiFiClientSecure). Under current
+        // internal-DRAM pressure (same failure class as PRO-334/PRO-358) that extra
+        // TLS handshake can trip an OOM deep in mbedtls's certificate-verify path,
+        // which on this ESP-IDF/mbedtls port PANICS (LoadProhibited) instead of
+        // failing cleanly — crash-looping the device on every channel-switch click.
+        // If the largest contiguous free internal-DRAM block is below the floor,
+        // skip the TLS attempt entirely and fail the resolve closed, mirroring the
+        // xTaskCreatePinnedToCore-OOM branch in loop()'s Idle case: an empty
+        // resolved version drives decideOtaFlash() to Refuse -> OtaResolveState::
+        // Failed -> "Update failed" surfaced to the UI, never a panic.
+        const size_t largestFreeInternalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        const bool heapSufficient = otaResolveHeapSufficient(largestFreeInternalBlock);
+
+        if (!heapSufficient) {
+            ESP_LOGE("WebUIPlugin",
+                     "Skipping OTA resolve TLS handshake: largest free internal DRAM block %u < floor %u — failing closed to "
+                     "avoid an mbedtls OOM panic",
+                     static_cast<unsigned>(largestFreeInternalBlock), static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+            resolveFailed = true;
+        } else {
+            ota->checkForUpdates();
+            resolved = ota->getCurrentVersion();
+            // resolveFailed at this layer == the last checkForUpdates() failed to
+            // resolve a head (network error / GitHub redirect quirk / malformed
+            // channel). We consult the AUTHORITATIVE failure flag
+            // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+            // resolve getCurrentVersion() returns the STALE version string from a
+            // prior successful check, so a periodic check that already populated a
+            // version would otherwise mask a failed channel-switch resolve and
+            // force-flash against a stale _latest_url. Keep the || isEmpty() as a
+            // belt-and-suspenders guard (empty is untrustworthy).
+            resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+        }
     }
     const OtaFlashDecision decision = decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled,
                                                      params->installedEmpty, resolved.c_str(), resolveFailed);
@@ -544,12 +571,19 @@ void WebUIPlugin::loop() {
                 otaResolveStartMs = static_cast<uint32_t>(millis());
                 const uint32_t generation = otaResolveGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 
-                auto *params = new OtaResolveTaskParams{this,
-                                                        generation,
-                                                        isTag,
-                                                        otaResolvePinnedTag,
+                auto *params = new OtaResolveTaskParams{this, generation, isTag, otaResolvePinnedTag,
                                                         /*selectedEqInstalled=*/!channelSwitch,
-                                                        /*installedEmpty=*/previousInstalledChannel.isEmpty()};
+                                                        /*installedEmpty=*/previousInstalledChannel.isEmpty(),
+                                                        // PRO-556: snapshot the periodic check's cached result on
+                                                        // the loop task, before the resolve task exists, so the
+                                                        // task can decide whether to reuse it (same channel +
+                                                        // fresh + succeeded) instead of opening a 2nd TLS conn.
+                                                        /*resolveChannel=*/channel,
+                                                        /*periodicChannel=*/otaPeriodicResolvedChannel,
+                                                        /*periodicVersion=*/ota->getCurrentVersion(),
+                                                        /*periodicFailed=*/ota->isUpdateCheckFailed(),
+                                                        /*haveEverChecked=*/lastUpdateCheck != 0,
+                                                        /*periodicResolvedAtMs=*/static_cast<uint32_t>(lastUpdateCheck)};
                 TaskHandle_t createdHandle = nullptr;
                 const BaseType_t created =
                     xTaskCreatePinnedToCore(otaResolveTask, "OtaResolve", 8192, params, 1, &createdHandle, 1);
@@ -759,6 +793,15 @@ void WebUIPlugin::loop() {
                 }
             } else {
                 otaCheckFailureCount = 0;
+                // PRO-556: record WHICH channel this successful check resolved
+                // against so a subsequent click-driven resolve (otaResolveTask)
+                // can safely reuse ota->getCurrentVersion() for the SAME channel
+                // instead of opening a second TLS connection. Only updated on
+                // success — a failed check leaves a stale head and must not be
+                // reused (see OtaResolveReusePolicy.h). Deferred checks (PRO-555)
+                // never reach this branch, so neither this nor lastUpdateCheck
+                // advances, and reuse is correctly refused.
+                otaPeriodicResolvedChannel = controller->getSettings().getOTAChannel();
             }
             pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
             lastUpdateCheck = now;
