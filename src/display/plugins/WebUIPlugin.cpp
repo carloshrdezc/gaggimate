@@ -735,17 +735,35 @@ void WebUIPlugin::loop() {
     const unsigned long effectiveInterval = otaBackoffInterval(
         static_cast<uint32_t>(UPDATE_CHECK_INTERVAL), static_cast<uint32_t>(UPDATE_CHECK_MAX_INTERVAL), otaCheckFailureCount);
     if (lastUpdateCheck == 0 || now - lastUpdateCheck > effectiveInterval) {
-        ota->checkForUpdates();
-        if (ota->isUpdateCheckFailed()) {
-            if (otaCheckFailureCount < UINT32_MAX) {
-                otaCheckFailureCount++;
-            }
+        // PRO-555: pre-flight internal-DRAM guard. checkForUpdates() opens a fresh
+        // TLS connection to github.com whose mbedtls certificate-verify path needs
+        // a large contiguous internal-DRAM allocation; under DRAM pressure that OOM
+        // can PANIC (LoadProhibited) instead of failing cleanly — the same hazard
+        // PRO-554 guarded for the click-driven resolve task. Unlike the resolve
+        // path (which fails closed because a UI flash decision waits on it), nothing
+        // depends on this cycle, so we DEFER: skip the TLS attempt this loop pass
+        // WITHOUT bumping otaCheckFailureCount (the check never ran — this is not a
+        // network failure and must not feed the PRO-411 backoff) and WITHOUT
+        // advancing lastUpdateCheck, so the next loop pass retries promptly once
+        // internal DRAM recovers rather than waiting a full interval for what may be
+        // a transient pressure spike.
+        if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
+            ESP_LOGW("WebUIPlugin",
+                     "Deferring periodic OTA check: largest free internal DRAM block < %u floor — retrying next loop",
+                     static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
         } else {
-            otaCheckFailureCount = 0;
+            ota->checkForUpdates();
+            if (ota->isUpdateCheckFailed()) {
+                if (otaCheckFailureCount < UINT32_MAX) {
+                    otaCheckFailureCount++;
+                }
+            } else {
+                otaCheckFailureCount = 0;
+            }
+            pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
+            lastUpdateCheck = now;
+            updateOTAStatus(ota->getCurrentVersion());
         }
-        pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
-        lastUpdateCheck = now;
-        updateOTAStatus(ota->getCurrentVersion());
     }
     // PRO-313: reading the WS client list (even .empty()) races with the
     // AsyncTCP task's connect/disconnect mutation, so snapshot it under wsMutex.

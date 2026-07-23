@@ -80,6 +80,33 @@ void test_backoff_base_ge_max_returns_cap(void) {
     TEST_ASSERT_EQUAL_UINT32(500u, otaBackoffInterval(1000u, 500u, 3u));
 }
 
+// PRO-555: the periodic background OTA check defers (skips this cycle) when the
+// largest contiguous free internal-DRAM block is below the mbedtls TLS floor,
+// mirroring the resolve path's floor (OtaResolveHeapPolicy.h) but with the
+// opposite response — defer/retry rather than fail closed. Sufficient heap ->
+// do NOT defer (open the TLS connection this cycle); insufficient heap -> defer.
+void test_periodic_check_defers_iff_heap_insufficient(void) {
+    // Sufficient: at or above the shared 48 KiB floor -> proceed (do not defer).
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldDefer(kOtaResolveInternalDramFloorBytes)); // inclusive boundary
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldDefer(49153u));
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldDefer(1024u * 1024u));
+    // Insufficient: below the floor (incl. a fragmented internal heap with no
+    // single large contiguous block) -> defer this cycle, retry next loop.
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldDefer(49151u));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldDefer(16u * 1024u));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldDefer(0u));
+}
+
+// PRO-555: the defer guard is single-sourced against the resolve path's floor —
+// it is exactly the inverse of otaResolveHeapSufficient, so the periodic-check
+// and resolve paths can never drift onto different floors.
+void test_periodic_check_defer_is_inverse_of_resolve_sufficient(void) {
+    const size_t samples[] = {0u, 16u * 1024u, 49151u, 49152u, 49153u, 1024u * 1024u};
+    for (size_t s : samples) {
+        TEST_ASSERT_EQUAL(!otaResolveHeapSufficient(s), otaPeriodicCheckShouldDefer(s));
+    }
+}
+
 static int runOtaUpdateCheckPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_redirect_location_rejects_null_and_empty);
@@ -89,6 +116,8 @@ static int runOtaUpdateCheckPolicyTests() {
     RUN_TEST(test_backoff_grows_exponentially);
     RUN_TEST(test_backoff_caps_at_max);
     RUN_TEST(test_backoff_base_ge_max_returns_cap);
+    RUN_TEST(test_periodic_check_defers_iff_heap_insufficient);
+    RUN_TEST(test_periodic_check_defer_is_inverse_of_resolve_sufficient);
     return UNITY_END();
 }
 
