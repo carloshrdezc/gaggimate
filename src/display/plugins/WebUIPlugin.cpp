@@ -782,10 +782,26 @@ void WebUIPlugin::loop() {
         // internal DRAM recovers rather than waiting a full interval for what may be
         // a transient pressure spike.
         if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
-            ESP_LOGW("WebUIPlugin",
-                     "Deferring periodic OTA check: largest free internal DRAM block < %u floor — retrying next loop",
-                     static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+            // PRO-557: the defer branch deliberately does NOT advance
+            // lastUpdateCheck (so the DRAM re-check retries every loop tick until
+            // pressure clears), which keeps this outer guard true every ~2 ms
+            // tick. Rate-limit ONLY the log so it does not fire at ~500 Hz for
+            // the whole pressure window — flooding synchronous UART (diagnostics
+            // off) or the bounded DiagnosticLogPlugin queue (diagnostics on).
+            // The DRAM re-check cadence is untouched.
+            if (otaDeferLogShouldEmit(lastOtaDeferLogMs, static_cast<uint32_t>(now), kOtaDeferLogCooldownMs, otaDeferLogged)) {
+                ESP_LOGW("WebUIPlugin",
+                         "Deferring periodic OTA check: largest free internal DRAM block < %u floor — retrying next loop",
+                         static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+                lastOtaDeferLogMs = static_cast<uint32_t>(now);
+                otaDeferLogged = true;
+            }
         } else {
+            // PRO-557: DRAM pressure cleared and the check actually ran — reset
+            // the defer-log gate so the FIRST defer of any future pressure window
+            // logs immediately again (rather than being suppressed by a stale
+            // in-cooldown timestamp from the previous window).
+            otaDeferLogged = false;
             ota->checkForUpdates();
             if (ota->isUpdateCheckFailed()) {
                 if (otaCheckFailureCount < UINT32_MAX) {

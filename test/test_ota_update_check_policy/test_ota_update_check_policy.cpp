@@ -107,6 +107,60 @@ void test_periodic_check_defer_is_inverse_of_resolve_sufficient(void) {
     }
 }
 
+// PRO-557: the deferred periodic OTA check does NOT advance lastUpdateCheck (so
+// the DRAM re-check retries every ~2 ms loop tick until pressure clears), which
+// means the outer interval guard stays true every tick and the "Deferring..."
+// ESP_LOGW would fire at ~500 Hz for the whole pressure window. The log — and
+// ONLY the log — is rate-limited by this pure predicate; the DRAM re-check
+// itself is untouched. The first defer in a pressure window always logs
+// (haveLoggedBefore == false); subsequent ticks log only once the cooldown has
+// elapsed since the last emitted line.
+
+// The very first defer tick always logs regardless of the timestamps, because
+// no prior log has happened (a zero lastLogMs must not be mistaken for "logged
+// at millis()==0").
+void test_defer_log_first_defer_always_emits(void) {
+    TEST_ASSERT_TRUE(otaDeferLogShouldEmit(0u, 0u, 4000u, /*haveLoggedBefore=*/false));
+    TEST_ASSERT_TRUE(otaDeferLogShouldEmit(0u, 500u, 4000u, /*haveLoggedBefore=*/false));
+    // Even if a stale lastLogMs sits within the cooldown window, the never-logged
+    // flag wins — the first line of a fresh pressure window is never suppressed.
+    TEST_ASSERT_TRUE(otaDeferLogShouldEmit(1000u, 1200u, 4000u, /*haveLoggedBefore=*/false));
+}
+
+// After the first log, subsequent ticks within the cooldown are suppressed and
+// ticks at/after the cooldown emit again. This is what caps ~500 Hz spam to one
+// line per cooldown.
+void test_defer_log_rate_limits_within_cooldown(void) {
+    // Logged at t=1000; cooldown 4000 ms.
+    TEST_ASSERT_FALSE(otaDeferLogShouldEmit(1000u, 1000u, 4000u, /*haveLoggedBefore=*/true)); // same tick
+    TEST_ASSERT_FALSE(otaDeferLogShouldEmit(1000u, 2000u, 4000u, /*haveLoggedBefore=*/true)); // +1s
+    TEST_ASSERT_FALSE(otaDeferLogShouldEmit(1000u, 4999u, 4000u, /*haveLoggedBefore=*/true)); // +3999ms
+    TEST_ASSERT_TRUE(otaDeferLogShouldEmit(1000u, 5000u, 4000u, /*haveLoggedBefore=*/true));  // exactly cooldown
+    TEST_ASSERT_TRUE(otaDeferLogShouldEmit(1000u, 9000u, 4000u, /*haveLoggedBefore=*/true));  // well past
+}
+
+// millis() wraps back to 0 roughly every ~49.7 days. The elapsed computation is
+// unsigned subtraction so it stays correct across the wrap: a now that has
+// wrapped below lastLogMs still yields the true elapsed interval and does NOT
+// suppress forever.
+void test_defer_log_survives_millis_wraparound(void) {
+    const uint32_t nearMax = 0xFFFFFFFFu - 1000u; // logged 1000 ms before wrap
+    // 500 ms after logging (still 500 ms before wrap): within cooldown -> suppress.
+    TEST_ASSERT_FALSE(otaDeferLogShouldEmit(nearMax, nearMax + 500u, 4000u, /*haveLoggedBefore=*/true));
+    // now has wrapped past 0 to 3001: elapsed = 1000 + 3001 = 4001 >= 4000 -> emit.
+    TEST_ASSERT_TRUE(otaDeferLogShouldEmit(nearMax, 3001u, 4000u, /*haveLoggedBefore=*/true));
+    // now wrapped to 2000: elapsed = 1000 + 2000 = 3000 < 4000 -> still suppress.
+    TEST_ASSERT_FALSE(otaDeferLogShouldEmit(nearMax, 2000u, 4000u, /*haveLoggedBefore=*/true));
+}
+
+// The cooldown constant is a few seconds — long enough to cap UART/queue spam,
+// far shorter than the ~5 min UPDATE_CHECK_INTERVAL, so it only gates the LOG
+// and never the retry-promptly DRAM re-check cadence.
+void test_defer_log_cooldown_is_a_few_seconds(void) {
+    TEST_ASSERT_TRUE(kOtaDeferLogCooldownMs >= 3000u);
+    TEST_ASSERT_TRUE(kOtaDeferLogCooldownMs <= 5000u);
+}
+
 static int runOtaUpdateCheckPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_redirect_location_rejects_null_and_empty);
@@ -118,6 +172,10 @@ static int runOtaUpdateCheckPolicyTests() {
     RUN_TEST(test_backoff_base_ge_max_returns_cap);
     RUN_TEST(test_periodic_check_defers_iff_heap_insufficient);
     RUN_TEST(test_periodic_check_defer_is_inverse_of_resolve_sufficient);
+    RUN_TEST(test_defer_log_first_defer_always_emits);
+    RUN_TEST(test_defer_log_rate_limits_within_cooldown);
+    RUN_TEST(test_defer_log_survives_millis_wraparound);
+    RUN_TEST(test_defer_log_cooldown_is_a_few_seconds);
     return UNITY_END();
 }
 
