@@ -311,6 +311,16 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
+    // PRO-557: rate-limit for the deferred periodic-check log line (see
+    // otaDeferLogShouldEmit() in OtaUpdateCheckPolicy.h). A deferred check
+    // (PRO-555) never advances lastUpdateCheck, so the outer interval guard —
+    // and thus the "Deferring…" ESP_LOGW — would otherwise fire on every ~2 ms
+    // loop tick for the whole DRAM-pressure window. These gate ONLY the log; the
+    // DRAM re-check still runs every tick. `otaDeferLogged` distinguishes the
+    // first defer of a pressure window (always logged) from a zero timestamp;
+    // both are loop-task owned like lastUpdateCheck.
+    uint32_t lastOtaDeferLogMs = 0;
+    bool otaDeferLogged = false;
     // PRO-556: the channel the periodic background OTA check last SUCCESSFULLY
     // resolved against (settings.getOTAChannel() at that check's run time). The
     // click-driven resolve task (otaResolveTask) may reuse the periodic check's

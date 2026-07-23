@@ -158,4 +158,57 @@ static_assert(otaPeriodicCheckShouldDefer(49151u), "PRO-555: one byte below the 
 static_assert(otaPeriodicCheckShouldDefer(0u), "PRO-555: zero free internal DRAM — defer this cycle");
 static_assert(otaPeriodicCheckShouldDefer(16u * 1024u), "PRO-555: a fragmented 16 KiB block — defer this cycle");
 
+// PRO-557: rate-limit for the deferred periodic-check LOG line.
+//
+// A deferred check (PRO-555) intentionally does NOT advance lastUpdateCheck, so
+// the outer interval guard in WebUIPlugin::loop stays true on EVERY ~2 ms loop
+// tick for as long as internal-DRAM pressure persists — that is what preserves
+// the "retry the DRAM re-check promptly once pressure clears" intent. The side
+// effect is that the accompanying ESP_LOGW("Deferring periodic OTA check…")
+// would fire at ~500 Hz for the whole pressure window: with diagnostics off it
+// goes straight to a synchronous UART vprintf (EspLogTee.h); with diagnostics on
+// it floods the bounded, drop-on-full DiagnosticLogPlugin queue and starves real
+// shot-recording/BLE/WiFi log traffic — the opposite of the "stays online and
+// responsive" property PRO-555 set out to protect.
+//
+// We rate-limit ONLY the log, never the DRAM re-check: the caller still calls
+// otaPeriodicCheckShouldDefer() every tick and still leaves lastUpdateCheck
+// untouched. A few-seconds cooldown (far below UPDATE_CHECK_INTERVAL) caps the
+// line to at most one per cooldown while still surfacing that a pressure window
+// is ongoing.
+constexpr uint32_t kOtaDeferLogCooldownMs = 4000u;
+
+// Whether the deferred-check log line should be emitted this tick.
+//
+// - `haveLoggedBefore` false => this is the first defer of a fresh pressure
+//   window; always emit (a zero `lastLogMs` must not be mistaken for "logged at
+//   millis()==0", which would swallow the very first line).
+// - otherwise emit only once at least `cooldownMs` has elapsed since the last
+//   emitted line. The elapsed interval is computed with unsigned subtraction so
+//   it stays correct across the ~49.7-day millis() wraparound (a `nowMs` that
+//   has wrapped below `lastLogMs` still yields the true elapsed time).
+//
+// Pure (no clock, no side effects) so it is identical on host and device and
+// unit-testable, mirroring otaBackoffInterval / otaPeriodicCheckShouldDefer.
+constexpr bool otaDeferLogShouldEmit(uint32_t lastLogMs, uint32_t nowMs, uint32_t cooldownMs, bool haveLoggedBefore) {
+    if (!haveLoggedBefore) {
+        return true;
+    }
+    return static_cast<uint32_t>(nowMs - lastLogMs) >= cooldownMs;
+}
+
+// Compile-time truth table for the deferred-check log rate-limiter.
+static_assert(kOtaDeferLogCooldownMs >= 3000u && kOtaDeferLogCooldownMs <= 5000u,
+              "PRO-557: defer-log cooldown is a few seconds — gates the log, not the retry cadence");
+static_assert(otaDeferLogShouldEmit(0u, 0u, 4000u, false), "PRO-557: first defer always logs (never-logged flag wins)");
+static_assert(otaDeferLogShouldEmit(1000u, 1200u, 4000u, false),
+              "PRO-557: first defer logs even if a stale timestamp is within cooldown");
+static_assert(!otaDeferLogShouldEmit(1000u, 2000u, 4000u, true), "PRO-557: within cooldown -> suppress");
+static_assert(!otaDeferLogShouldEmit(1000u, 4999u, 4000u, true), "PRO-557: one ms before cooldown -> suppress");
+static_assert(otaDeferLogShouldEmit(1000u, 5000u, 4000u, true), "PRO-557: exactly cooldown -> emit");
+static_assert(otaDeferLogShouldEmit(0xFFFFFFFFu - 1000u, 3001u, 4000u, true),
+              "PRO-557: elapsed spanning the millis() wrap still emits when >= cooldown");
+static_assert(!otaDeferLogShouldEmit(0xFFFFFFFFu - 1000u, 2000u, 4000u, true),
+              "PRO-557: elapsed spanning the millis() wrap still suppresses when < cooldown");
+
 #endif // OTAUPDATECHECKPOLICY_H
