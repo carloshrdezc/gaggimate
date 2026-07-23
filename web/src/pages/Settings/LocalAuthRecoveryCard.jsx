@@ -34,6 +34,7 @@ export function LocalAuthRecoveryCard() {
   const [currentToken, setCurrentToken] = useState(() => getLocalAuthToken());
   const [revealCurrent, setRevealCurrent] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const onApply = async () => {
     const token = tokenInput.trim();
@@ -72,15 +73,22 @@ export function LocalAuthRecoveryCard() {
   const onCopyCurrent = async () => {
     if (!currentToken) return;
     setCopied(false);
+    setCopyFailed(false);
+    // The Clipboard API requires a secure context, so navigator.clipboard is
+    // normally undefined on plain-HTTP LAN access to the device (and can throw
+    // even when present). Either way, tell the user to copy the visible field
+    // manually rather than silently no-op'ing. Mirrors the AP-handoff flow in
+    // Settings/index.jsx.
     try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(currentToken);
-        setCopied(true);
+      if (!navigator.clipboard) {
+        setCopyFailed(true);
+        return;
       }
+      await navigator.clipboard.writeText(currentToken);
+      setCopied(true);
     } catch (err) {
-      // Clipboard API needs a secure context; fall back to the visible field.
       console.error('Failed to copy local admin token:', err);
-      setCopied(false);
+      setCopyFailed(true);
     }
   };
 
@@ -172,6 +180,12 @@ export function LocalAuthRecoveryCard() {
                 <span className='ml-2'>{copied ? 'Copied' : 'Copy'}</span>
               </button>
             </div>
+            {copyFailed && (
+              <div role='alert' className='mt-2 text-sm text-yellow-400'>
+                Could not copy automatically (common on plain-HTTP LAN access) -- select and copy
+                the token from the field above manually.
+              </div>
+            )}
           </div>
         )}
       </div>
