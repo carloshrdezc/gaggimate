@@ -14,6 +14,7 @@ import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
 import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
+import { LocalAuthRecoveryCard } from './LocalAuthRecoveryCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
 import { clearRelayCredentials, confirmRelayOrigin, relayCredentials, saveRelayCredentials } from '../../services/relayConfig.js';
 import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
@@ -319,9 +320,18 @@ export function Settings() {
   };
 
   if (isLoading) {
+    // Render the token-recovery card even while (or if) /api/settings never
+    // resolves. In a browser/storage context with no local admin token (PRO-517),
+    // that request 401s and this page would otherwise be stuck behind the spinner
+    // with no way to paste a token back in. See LocalAuthRecoveryCard for context.
     return (
-      <div className='flex w-full flex-row items-center justify-center py-16'>
-        <Spinner size={8} />
+      <div className='flex flex-col gap-6'>
+        <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
+          <LocalAuthRecoveryCard />
+        </div>
+        <div className='flex w-full flex-row items-center justify-center py-16'>
+          <Spinner size={8} />
+        </div>
       </div>
     );
   }
@@ -345,6 +355,10 @@ export function Settings() {
           </button>
           <ImportButton onChange={onUpload} title='Import Settings' />
         </div>
+      </div>
+
+      <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
+        <LocalAuthRecoveryCard />
       </div>
 
       <form key='settings' ref={formRef} method='post' action='/api/settings' onSubmit={onSubmit}>
