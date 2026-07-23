@@ -127,6 +127,60 @@ describe('LocalAuthRecoveryCard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     expect(writeText).toHaveBeenCalledWith(VALID_TOKEN);
+    // Happy path: success label shown, no fallback alert.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Copied/ })).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a fallback alert (and no success) when navigator.clipboard is unavailable', async () => {
+    localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, VALID_TOKEN);
+    // Plain-HTTP LAN access: Clipboard API requires a secure context, so it is
+    // undefined. The copy must not silently no-op.
+    vi.stubGlobal('navigator', {});
+
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByRole('alert').textContent).toContain('Could not copy automatically');
+    // Success flag never set: the button still reads "Copy", not "Copied".
+    expect(screen.queryByRole('button', { name: /Copied/ })).toBeNull();
+  });
+
+  it('shows a fallback alert (and no success) when clipboard.writeText rejects', async () => {
+    localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, VALID_TOKEN);
+    const writeText = vi.fn().mockRejectedValue(new Error('NotAllowedError'));
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByRole('alert').textContent).toContain('Could not copy automatically');
+    expect(writeText).toHaveBeenCalledWith(VALID_TOKEN);
+    expect(screen.queryByRole('button', { name: /Copied/ })).toBeNull();
+  });
+
+  it('clears the fallback alert when a retry succeeds', async () => {
+    localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, VALID_TOKEN);
+    const writeText = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('NotAllowedError'))
+      .mockResolvedValueOnce();
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    renderCard();
+
+    // First attempt fails -> alert shown.
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+
+    // Retry succeeds -> alert cleared, success label shown.
+    fireEvent.click(screen.getByRole('button', { name: /Copy/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Copied/ })).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('disables Apply until something is typed', () => {
