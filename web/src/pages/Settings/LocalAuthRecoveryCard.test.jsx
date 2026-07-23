@@ -183,6 +183,37 @@ describe('LocalAuthRecoveryCard', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('settles into a single consistent state on a rapid double-click (before writeText resolves)', async () => {
+    localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, VALID_TOKEN);
+    // Controllable clipboard: writeText returns a promise we resolve manually,
+    // so we can fire the second click while the first is still in-flight
+    // (onCopyCurrent resets copied/copyFailed synchronously at the top of every
+    // invocation, before its own writeText settles).
+    const resolvers = [];
+    const writeText = vi.fn(() => new Promise(resolve => resolvers.push(resolve)));
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    renderCard();
+
+    const copyButton = screen.getByRole('button', { name: /Copy/ });
+    fireEvent.click(copyButton);
+    fireEvent.click(copyButton);
+
+    // Both clicks fired writeText before either settled -- a benign redundant
+    // call, not a correctness bug.
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenNthCalledWith(1, VALID_TOKEN);
+    expect(writeText).toHaveBeenNthCalledWith(2, VALID_TOKEN);
+
+    // Let both in-flight promises settle.
+    resolvers.forEach(resolve => resolve());
+
+    // Single consistent success state: "Copied" shown, no stale fallback alert,
+    // and no unhandled rejection/crash.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Copied/ })).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('disables Apply until something is typed', () => {
     renderCard();
 
