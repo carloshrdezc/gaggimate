@@ -2,7 +2,11 @@ import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
 import { LOCAL_AUTH_TOKEN_KEY } from './localAuthFetch.js';
-import { beginRelayProvisioning, relayCredentials, relayWebSocketProtocols } from './relayConfig.js';
+import {
+  beginRelayProvisioning,
+  relayCredentials,
+  relayWebSocketProtocols,
+} from './relayConfig.js';
 
 /**
  * Thrown by `ApiService.request()` when the underlying WebSocket closes (or
@@ -48,26 +52,48 @@ export const ConnState = Object.freeze({
 });
 
 export function validateWebSocketRequest(data) {
-  if (!data || typeof data !== 'object' || typeof data.tp !== 'string' || !data.tp.startsWith('req:')) {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    typeof data.tp !== 'string' ||
+    !data.tp.startsWith('req:')
+  ) {
     throw new TypeError('WebSocket request requires a req:* tp string');
   }
   const numeric = (field, min, max) => {
-    if (typeof data[field] !== 'number' || !Number.isFinite(data[field]) || data[field] < min || data[field] > max) {
+    if (
+      typeof data[field] !== 'number' ||
+      !Number.isFinite(data[field]) ||
+      data[field] < min ||
+      data[field] > max
+    ) {
       throw new TypeError(`${field} must be a finite number between ${min} and ${max}`);
     }
   };
   switch (data.tp) {
-    case 'req:dose:set': numeric('grams', Number.EPSILON, 200); break;
-    case 'req:change-brew-target': numeric('target', 0, 200); break;
-    case 'req:change-grind-target': numeric('target', 0, 1); if (!Number.isInteger(data.target)) throw new TypeError('target must be 0 or 1'); break;
-    case 'req:change-mode': numeric('mode', 0, 5); if (!Number.isInteger(data.mode)) throw new TypeError('mode must be an integer'); break;
+    case 'req:dose:set':
+      numeric('grams', Number.EPSILON, 200);
+      break;
+    case 'req:change-brew-target':
+      numeric('target', 0, 200);
+      break;
+    case 'req:change-grind-target':
+      numeric('target', 0, 1);
+      if (!Number.isInteger(data.target)) throw new TypeError('target must be 0 or 1');
+      break;
+    case 'req:change-mode':
+      numeric('mode', 0, 5);
+      if (!Number.isInteger(data.mode)) throw new TypeError('mode must be an integer');
+      break;
     case 'req:manual:update':
-      if (data.targetType !== undefined && !['flow', 'pressure'].includes(data.targetType)) throw new TypeError("targetType must be 'flow' or 'pressure'");
+      if (data.targetType !== undefined && !['flow', 'pressure'].includes(data.targetType))
+        throw new TypeError("targetType must be 'flow' or 'pressure'");
       if (data.pressure !== undefined) numeric('pressure', 0, 12);
       if (data.flow !== undefined) numeric('flow', 0, 20);
       if (data.temperature !== undefined) numeric('temperature', 0, 150);
       break;
-    default: break;
+    default:
+      break;
   }
   return data;
 }
@@ -109,7 +135,11 @@ export default class ApiService {
   _resolveWsConfig() {
     beginRelayProvisioning();
     const relay = relayCredentials();
-    if (relay) return { url: `${relay.relayUrl}/connect?role=browser`, protocols: relayWebSocketProtocols(relay.relayToken) };
+    if (relay)
+      return {
+        url: `${relay.relayUrl}/connect?role=browser`,
+        protocols: relayWebSocketProtocols(relay.relayToken),
+      };
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     return { url: `${wsProtocol}${window.location.host}/ws`, protocols: undefined };

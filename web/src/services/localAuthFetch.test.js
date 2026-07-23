@@ -79,7 +79,9 @@ describe('localAuthDownloadUrl', () => {
   it('adds the stored token as the firmware download-link query parameter', () => {
     localStorage.setItem(TOKEN_KEY, 'unit-token');
 
-    expect(localAuthDownloadUrl('/api/diag/log.txt')).toBe('/api/diag/log.txt?localAuthToken=unit-token');
+    expect(localAuthDownloadUrl('/api/diag/log.txt')).toBe(
+      '/api/diag/log.txt?localAuthToken=unit-token',
+    );
   });
 
   it('does not add a query credential to non-download routes', () => {
@@ -98,16 +100,24 @@ describe('localAuthHandoff', () => {
   it('uses an mDNS URL fragment so the AP-to-STA credential is never sent in an HTTP request', () => {
     localStorage.setItem(TOKEN_KEY, 'unit-token');
 
-    expect(localAuthHandoffUrl('gaggimate')).toBe('http://gaggimate.local/#localAuthToken=unit-token');
+    expect(localAuthHandoffUrl('gaggimate')).toBe(
+      'http://gaggimate.local/#localAuthToken=unit-token',
+    );
   });
 
-  it.each(['attacker.example/', 'attacker?example', 'attacker#example', 'attacker@example', 'attacker example', '-attacker', 'attacker-'])(
-    'rejects unsafe hostname %s instead of producing a handoff URL', hostname => {
-      localStorage.setItem(TOKEN_KEY, 'unit-token');
+  it.each([
+    'attacker.example/',
+    'attacker?example',
+    'attacker#example',
+    'attacker@example',
+    'attacker example',
+    '-attacker',
+    'attacker-',
+  ])('rejects unsafe hostname %s instead of producing a handoff URL', hostname => {
+    localStorage.setItem(TOKEN_KEY, 'unit-token');
 
-      expect(localAuthHandoffUrl(hostname)).toBeNull();
-    },
-  );
+    expect(localAuthHandoffUrl(hostname)).toBeNull();
+  });
 
   it('uses the parsed validated hostname as the exact STA handoff origin', () => {
     localStorage.setItem(TOKEN_KEY, 'unit-token');
@@ -132,7 +142,13 @@ describe('localAuthHandoff', () => {
     const apiService = { authenticateLocal: vi.fn() };
     const replaceState = vi.spyOn(history, 'replaceState');
 
-    expect(importLocalAuthHandoff(apiService, { hash: '#localAuthToken=sta-token', pathname: '/', search: '' })).toBe(true);
+    expect(
+      importLocalAuthHandoff(apiService, {
+        hash: '#localAuthToken=sta-token',
+        pathname: '/',
+        search: '',
+      }),
+    ).toBe(true);
     expect(localStorage.getItem(TOKEN_KEY)).toBe('sta-token');
     expect(apiService.authenticateLocal).toHaveBeenCalledWith('sta-token');
     expect(replaceState).toHaveBeenCalledWith(null, '', '/');

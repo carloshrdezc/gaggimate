@@ -88,16 +88,15 @@ export function LocalAuthRecoveryCard() {
     <Card sm={10} lg={10} title='Local admin token'>
       <div className='flex flex-col gap-4'>
         <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
-          If Brew/Steam/Water or Save Settings fail because this browser has no
-          saved admin token (for example an iOS home-screen app, a second device,
-          or a private window), paste the device token here to sign in without
-          re-running the AP setup flow.
+          If Brew/Steam/Water or Save Settings fail because this browser has no saved admin token
+          (for example an iOS home-screen app, a second device, or a private window), paste the
+          device token here to sign in without re-running the AP setup flow.
         </div>
 
         <div className='flex flex-col gap-2'>
           <label
             htmlFor='localAdminTokenInput'
-            className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+            className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
           >
             Paste admin token
           </label>
@@ -145,12 +144,11 @@ export function LocalAuthRecoveryCard() {
         {currentToken && (
           <div className='border-l-2 border-[var(--text-secondary,#999)] pl-4'>
             <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
-              This session's current token -- copy it to sign in on another device
-              or browser.
+              This session's current token -- copy it to sign in on another device or browser.
             </div>
             <div className='mt-2 flex items-center gap-2'>
               <div
-                className='flex-1 break-all font-nd-mono text-xs select-all cursor-text rounded border border-[var(--text-secondary,#999)] p-2'
+                className='font-nd-mono flex-1 cursor-text rounded border border-[var(--text-secondary,#999)] p-2 text-xs break-all select-all'
                 onClick={e => {
                   const selection = window.getSelection();
                   const range = document.createRange();
@@ -169,11 +167,7 @@ export function LocalAuthRecoveryCard() {
               >
                 <FontAwesomeIcon icon={revealCurrent ? faEyeSlash : faEye} />
               </button>
-              <button
-                type='button'
-                className='btn btn-secondary'
-                onClick={onCopyCurrent}
-              >
+              <button type='button' className='btn btn-secondary' onClick={onCopyCurrent}>
                 <FontAwesomeIcon icon={copied ? faCheck : faCopy} />
                 <span className='ml-2'>{copied ? 'Copied' : 'Copy'}</span>
               </button>
