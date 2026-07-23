@@ -1231,6 +1231,10 @@ void WebUIPlugin::start() {
         ESP_LOGI("WebUIPlugin", "Started catchall DNS for captive portal");
     }
     lastUpdateCheck = 0;
+    // PRO-562: reset the defer-log gate alongside the periodic-check timer so the
+    // first deferred-check log after startup isn't suppressed by a stale in-cooldown
+    // timestamp carried over from before the restart (mirrors the reset at ~L806).
+    otaDeferLogged = false;
     serverRunning = true;
     startRelay();
 }
@@ -1843,6 +1847,10 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     // force-recheck sentinel where a stale read merely delays the next check by one
     // interval. So it is safe to set directly here rather than via a deferred flag.
     lastUpdateCheck = 0;
+    // PRO-562: reset the defer-log gate alongside the force-recheck sentinel so the
+    // first deferred-check log after this recheck isn't suppressed by a stale
+    // in-cooldown timestamp (mirrors the reset at ~L806).
+    otaDeferLogged = false;
     // This handler runs on the AsyncTCP web-server task (local WS clients) or the
     // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
     // and owned by the loop task (CAR-178), so we must not call into it here.
