@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
-vi.mock('../../components/Card.jsx', () => ({ default: ({ title, children }) => h('section', {}, [h('h2', {}, title), children]) }));
+vi.mock('../../components/Card.jsx', () => ({
+  default: ({ title, children }) => h('section', {}, [h('h2', {}, title), children]),
+}));
 vi.mock('@fortawesome/react-fontawesome', () => ({ FontAwesomeIcon: () => null }));
 
 import { ApiServiceContext } from '../../services/ApiService.js';
@@ -49,7 +51,9 @@ describe('LocalAuthRecoveryCard', () => {
   it('persists a valid pasted token and confirms it with the device before showing success', async () => {
     const apiService = renderCard();
 
-    fireEvent.input(screen.getByLabelText('Paste admin token'), { target: { value: `  ${VALID_TOKEN}  ` } });
+    fireEvent.input(screen.getByLabelText('Paste admin token'), {
+      target: { value: `  ${VALID_TOKEN}  ` },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     // Success banner appears only after res:auth {ok:true} resolves.
@@ -61,7 +65,9 @@ describe('LocalAuthRecoveryCard', () => {
   it('rejects an invalid token with a clear error and never touches storage or the socket', () => {
     const apiService = renderCard();
 
-    fireEvent.input(screen.getByLabelText('Paste admin token'), { target: { value: 'not-a-real-token' } });
+    fireEvent.input(screen.getByLabelText('Paste admin token'), {
+      target: { value: 'not-a-real-token' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     expect(localStorage.getItem(LOCAL_AUTH_TOKEN_KEY)).toBeNull();
