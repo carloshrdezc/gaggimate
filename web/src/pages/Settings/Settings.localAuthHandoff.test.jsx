@@ -26,6 +26,9 @@ vi.mock('preact-fetching', () => ({
 vi.mock('../../services/localAuthFetch.js', () => ({
   authenticatedFetch,
   bootstrapLocalAuth: vi.fn(),
+  getLocalAuthToken: () => 'bootstrap-token',
+  isValidLocalAuthToken: token => /^[0-9a-f]{32}$/.test(String(token).trim()),
+  LOCAL_AUTH_TOKEN_ERROR: 'Enter a 32-character token (lowercase hex, e.g. a1b2c3d4...).',
   localAuthDownloadUrl: url => url,
   localAuthHandoffUrl,
   MDNS_NAME_ERROR: 'Hostname must be 1-63 ASCII letters, digits, or hyphens, without a leading or trailing hyphen.',

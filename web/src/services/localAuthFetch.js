@@ -1,8 +1,19 @@
 export const LOCAL_AUTH_TOKEN_KEY = 'gaggimate_local_admin_token';
 export const MDNS_NAME_ERROR = 'Hostname must be 1-63 ASCII letters, digits, or hyphens, without a leading or trailing hyphen.';
+// WebUIPlugin::setup() mints the token as four %08lx words -> 32 lowercase hex chars.
+export const LOCAL_AUTH_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
+export const LOCAL_AUTH_TOKEN_ERROR = 'Enter a 32-character token (lowercase hex, e.g. a1b2c3d4...).';
 
 export function isValidMdnsName(hostname) {
   return typeof hostname === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(hostname);
+}
+
+export function isValidLocalAuthToken(token) {
+  return typeof token === 'string' && LOCAL_AUTH_TOKEN_PATTERN.test(token.trim());
+}
+
+export function getLocalAuthToken() {
+  return localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
 }
 
 export function bootstrapLocalAuth(token, apiService) {

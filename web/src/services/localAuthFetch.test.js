@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { authenticatedFetch, importLocalAuthHandoff, localAuthDownloadUrl, localAuthHandoffUrl } from './localAuthFetch.js';
+import {
+  authenticatedFetch,
+  getLocalAuthToken,
+  importLocalAuthHandoff,
+  isValidLocalAuthToken,
+  localAuthDownloadUrl,
+  localAuthHandoffUrl,
+} from './localAuthFetch.js';
 
 const TOKEN_KEY = 'gaggimate_local_admin_token';
 
@@ -28,6 +35,43 @@ describe('authenticatedFetch', () => {
     await authenticatedFetch('/api/settings');
 
     expect(fetchMock).toHaveBeenCalledWith('/api/settings', { headers: {} });
+  });
+});
+
+describe('isValidLocalAuthToken', () => {
+  it('accepts a 32-char lowercase hex token (matches the firmware %08lx x4 mint format)', () => {
+    expect(isValidLocalAuthToken('a1b2c3d4e5f60718293a4b5c6d7e8f90')).toBe(true);
+  });
+
+  it('trims surrounding whitespace before validating a pasted token', () => {
+    expect(isValidLocalAuthToken('  a1b2c3d4e5f60718293a4b5c6d7e8f90  ')).toBe(true);
+  });
+
+  it.each([
+    ['too short', 'a1b2c3d4'],
+    ['too long', 'a1b2c3d4e5f60718293a4b5c6d7e8f900'],
+    ['uppercase hex', 'A1B2C3D4E5F60718293A4B5C6D7E8F90'],
+    ['non-hex chars', 'z1b2c3d4e5f60718293a4b5c6d7e8f90'],
+    ['empty', ''],
+  ])('rejects an invalid token (%s)', (_desc, token) => {
+    expect(isValidLocalAuthToken(token)).toBe(false);
+  });
+
+  it('rejects non-string input without throwing', () => {
+    expect(isValidLocalAuthToken(null)).toBe(false);
+    expect(isValidLocalAuthToken(undefined)).toBe(false);
+    expect(isValidLocalAuthToken(1234)).toBe(false);
+  });
+});
+
+describe('getLocalAuthToken', () => {
+  it('returns the stored token', () => {
+    localStorage.setItem(TOKEN_KEY, 'stored-token');
+    expect(getLocalAuthToken()).toBe('stored-token');
+  });
+
+  it('returns null when no token is stored', () => {
+    expect(getLocalAuthToken()).toBeNull();
   });
 });
 
