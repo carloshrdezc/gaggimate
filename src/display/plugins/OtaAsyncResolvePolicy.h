@@ -76,6 +76,37 @@ constexpr bool otaResolveResultIsCurrent(uint32_t resultGeneration, uint32_t cur
     return resultGeneration == currentGeneration;
 }
 
+// PRO-560: whether loop()'s periodic background OTA check must be SKIPPED this
+// pass because a click-driven resolve task is currently in flight.
+//
+// Background: the periodic check (WebUIPlugin::loop, PRO-411/PRO-555) and the
+// forced-tag/channel-switch resolve task (otaResolveTask, PRO-13) both call
+// ota->checkForUpdates() on the SAME shared GitHubOTA instance — one on the
+// loop task, one on the resolve task. checkForUpdates() (and the WiFiClientSecure
+// / mbedtls connection it drives) is NOT re-entrant/atomic. PRO-556 narrowed the
+// window (a reuse-hit never touches `ota` from the resolve task), but the
+// non-reuse FALLBACK path still opens its own handshake; if the ~5 min periodic
+// interval elapses while a resolve is mid-flight, BOTH tasks can be inside
+// checkForUpdates() on the same instance at once. This is the long-standing
+// PRO-13/PRO-411 interaction race, not a regression from any single prior PR.
+//
+// otaResolveState is loop-task-owned (only loop() reads/writes it, transitioning
+// Idle -> Resolving -> ReadyToFlash/Failed -> Idle), so loop() can read it here
+// with no new mutex. A resolve task only touches `ota` while the state is
+// Resolving (it is spawned as loop() sets Resolving and is drained back to
+// ReadyToFlash/Failed before Idle), so skipping the periodic check exactly while
+// state == Resolving gives mutual exclusion on `ota` BY CONSTRUCTION — no runtime
+// mutex around the instance is needed.
+//
+// Like PRO-555's DRAM defer, this SKIPS rather than fails: the caller must NOT
+// bump otaCheckFailureCount (the check never ran — it is not a network failure
+// and must not feed the PRO-411 backoff) and must NOT advance lastUpdateCheck
+// (so the periodic check retries promptly on the next loop pass once the resolve
+// completes and state leaves Resolving), matching the PRO-555 defer semantics.
+constexpr bool otaPeriodicCheckShouldSkipForResolve(OtaResolveState resolveState) {
+    return resolveState == OtaResolveState::Resolving;
+}
+
 // Compile-time truth table — pins the contract so a future edit to the
 // predicate fails the firmware compile rather than silently changing the
 // async-resolve state machine (mirrors the OtaChannelSwitchPolicy.h /
@@ -101,5 +132,18 @@ static_assert(!otaResolveTimedOut(4294967295u, 5u, 10000),
 static_assert(otaResolveResultIsCurrent(3, 3), "PRO-13: matching generations are current");
 static_assert(!otaResolveResultIsCurrent(2, 3), "PRO-13: a stale (older) generation is not current");
 static_assert(!otaResolveResultIsCurrent(4, 3), "PRO-13: a mismatched (never-current) generation is not current");
+
+// PRO-560: the periodic check is skipped IFF a resolve is in flight (Resolving),
+// giving mutual exclusion on the shared `ota` instance. Every terminal/settled
+// state (Idle, ReadyToFlash, Failed) leaves the periodic check free to run — a
+// resolve task only touches `ota` during Resolving.
+static_assert(otaPeriodicCheckShouldSkipForResolve(OtaResolveState::Resolving),
+              "PRO-560: skip the periodic check while a resolve is in flight (mutual exclusion on `ota`)");
+static_assert(!otaPeriodicCheckShouldSkipForResolve(OtaResolveState::Idle),
+              "PRO-560: no resolve in flight -> periodic check runs");
+static_assert(!otaPeriodicCheckShouldSkipForResolve(OtaResolveState::ReadyToFlash),
+              "PRO-560: a settled (ReadyToFlash) resolve no longer touches `ota` -> periodic check runs");
+static_assert(!otaPeriodicCheckShouldSkipForResolve(OtaResolveState::Failed),
+              "PRO-560: a settled (Failed) resolve no longer touches `ota` -> periodic check runs");
 
 #endif // OTAASYNCRESOLVEPOLICY_H

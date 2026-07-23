@@ -769,59 +769,62 @@ void WebUIPlugin::loop() {
     const unsigned long effectiveInterval = otaBackoffInterval(
         static_cast<uint32_t>(UPDATE_CHECK_INTERVAL), static_cast<uint32_t>(UPDATE_CHECK_MAX_INTERVAL), otaCheckFailureCount);
     if (lastUpdateCheck == 0 || now - lastUpdateCheck > effectiveInterval) {
-        // PRO-555: pre-flight internal-DRAM guard. checkForUpdates() opens a fresh
-        // TLS connection to github.com whose mbedtls certificate-verify path needs
-        // a large contiguous internal-DRAM allocation; under DRAM pressure that OOM
-        // can PANIC (LoadProhibited) instead of failing cleanly — the same hazard
-        // PRO-554 guarded for the click-driven resolve task. Unlike the resolve
-        // path (which fails closed because a UI flash decision waits on it), nothing
-        // depends on this cycle, so we DEFER: skip the TLS attempt this loop pass
-        // WITHOUT bumping otaCheckFailureCount (the check never ran — this is not a
-        // network failure and must not feed the PRO-411 backoff) and WITHOUT
-        // advancing lastUpdateCheck, so the next loop pass retries promptly once
-        // internal DRAM recovers rather than waiting a full interval for what may be
-        // a transient pressure spike.
-        if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
-            // PRO-557: the defer branch deliberately does NOT advance
-            // lastUpdateCheck (so the DRAM re-check retries every loop tick until
-            // pressure clears), which keeps this outer guard true every ~2 ms
-            // tick. Rate-limit ONLY the log so it does not fire at ~500 Hz for
-            // the whole pressure window — flooding synchronous UART (diagnostics
-            // off) or the bounded DiagnosticLogPlugin queue (diagnostics on).
-            // The DRAM re-check cadence is untouched.
-            if (otaDeferLogShouldEmit(lastOtaDeferLogMs, static_cast<uint32_t>(now), kOtaDeferLogCooldownMs, otaDeferLogged)) {
-                ESP_LOGW("WebUIPlugin",
-                         "Deferring periodic OTA check: largest free internal DRAM block < %u floor — retrying next loop",
-                         static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
-                lastOtaDeferLogMs = static_cast<uint32_t>(now);
-                otaDeferLogged = true;
-            }
-        } else {
-            // PRO-557: DRAM pressure cleared and the check actually ran — reset
-            // the defer-log gate so the FIRST defer of any future pressure window
-            // logs immediately again (rather than being suppressed by a stale
-            // in-cooldown timestamp from the previous window).
-            otaDeferLogged = false;
-            ota->checkForUpdates();
-            if (ota->isUpdateCheckFailed()) {
-                if (otaCheckFailureCount < UINT32_MAX) {
-                    otaCheckFailureCount++;
+        // PRO-560: skip the periodic check while a click-driven resolve
+        // (otaResolveTask, PRO-13) is in flight. Both this loop-task path and the
+        // resolve task's non-reuse fallback call ota->checkForUpdates() on the
+        // SAME non-reentrant GitHubOTA instance; if this interval elapses mid-
+        // resolve they could run concurrently (the long-standing PRO-13/PRO-411
+        // race, only narrowed by PRO-556's reuse hit). otaResolveState is loop-
+        // task-owned so this read needs no mutex, and a resolve only touches `ota`
+        // while Resolving — skipping here gives mutual exclusion by construction.
+        // Like the PRO-555 defer below, this is a SKIP not a failure: do NOT bump
+        // otaCheckFailureCount (the check never ran) and do NOT advance
+        // lastUpdateCheck, so the check retries promptly next loop pass once the
+        // resolve settles out of Resolving.
+        if (!otaPeriodicCheckShouldSkipForResolve(otaResolveState)) {
+            if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
+                // PRO-557: the defer branch deliberately does NOT advance
+                // lastUpdateCheck (so the DRAM re-check retries every loop tick until
+                // pressure clears), which keeps this outer guard true every ~2 ms
+                // tick. Rate-limit ONLY the log so it does not fire at ~500 Hz for
+                // the whole pressure window — flooding synchronous UART (diagnostics
+                // off) or the bounded DiagnosticLogPlugin queue (diagnostics on).
+                // The DRAM re-check cadence is untouched.
+                if (otaDeferLogShouldEmit(lastOtaDeferLogMs, static_cast<uint32_t>(now), kOtaDeferLogCooldownMs,
+                                          otaDeferLogged)) {
+                    ESP_LOGW("WebUIPlugin",
+                             "Deferring periodic OTA check: largest free internal DRAM block < %u floor — retrying next loop",
+                             static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+                    lastOtaDeferLogMs = static_cast<uint32_t>(now);
+                    otaDeferLogged = true;
                 }
             } else {
-                otaCheckFailureCount = 0;
-                // PRO-556: record WHICH channel this successful check resolved
-                // against so a subsequent click-driven resolve (otaResolveTask)
-                // can safely reuse ota->getCurrentVersion() for the SAME channel
-                // instead of opening a second TLS connection. Only updated on
-                // success — a failed check leaves a stale head and must not be
-                // reused (see OtaResolveReusePolicy.h). Deferred checks (PRO-555)
-                // never reach this branch, so neither this nor lastUpdateCheck
-                // advances, and reuse is correctly refused.
-                otaPeriodicResolvedChannel = controller->getSettings().getOTAChannel();
+                // PRO-557: DRAM pressure cleared and the check actually ran — reset
+                // the defer-log gate so the FIRST defer of any future pressure window
+                // logs immediately again (rather than being suppressed by a stale
+                // in-cooldown timestamp from the previous window).
+                otaDeferLogged = false;
+                ota->checkForUpdates();
+                if (ota->isUpdateCheckFailed()) {
+                    if (otaCheckFailureCount < UINT32_MAX) {
+                        otaCheckFailureCount++;
+                    }
+                } else {
+                    otaCheckFailureCount = 0;
+                    // PRO-556: record WHICH channel this successful check resolved
+                    // against so a subsequent click-driven resolve (otaResolveTask)
+                    // can safely reuse ota->getCurrentVersion() for the SAME channel
+                    // instead of opening a second TLS connection. Only updated on
+                    // success — a failed check leaves a stale head and must not be
+                    // reused (see OtaResolveReusePolicy.h). Deferred checks (PRO-555)
+                    // never reach this branch, so neither this nor lastUpdateCheck
+                    // advances, and reuse is correctly refused.
+                    otaPeriodicResolvedChannel = controller->getSettings().getOTAChannel();
+                }
+                pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
+                lastUpdateCheck = now;
+                updateOTAStatus(ota->getCurrentVersion());
             }
-            pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
-            lastUpdateCheck = now;
-            updateOTAStatus(ota->getCurrentVersion());
         }
     }
     // PRO-313: reading the WS client list (even .empty()) races with the
