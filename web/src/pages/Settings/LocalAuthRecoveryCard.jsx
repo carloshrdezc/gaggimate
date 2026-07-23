@@ -4,11 +4,20 @@ import { useContext, useState } from 'preact/hooks';
 import Card from '../../components/Card.jsx';
 import { ApiServiceContext } from '../../services/ApiService.js';
 import {
-  bootstrapLocalAuth,
   getLocalAuthToken,
   isValidLocalAuthToken,
   LOCAL_AUTH_TOKEN_ERROR,
+  LOCAL_AUTH_TOKEN_KEY,
 } from '../../services/localAuthFetch.js';
+
+// Shown when the device rejects the pasted token (wrong/stale) or never
+// confirms. Mirrors the AP-handoff discipline in Settings/index.jsx: a
+// positive signal (res:auth {ok:true}) is required before claiming success --
+// a clipboard/socket send is not provisioning success.
+const LOCAL_AUTH_REJECTED_ERROR =
+  'Device rejected this token. Double-check you pasted the current token for THIS device (it changes if the device is reflashed).';
+const LOCAL_AUTH_NO_CONFIRM_ERROR =
+  'Could not confirm the token with the device. Check the connection (still connecting?) and try again.';
 
 // Recovery UI for browser/storage contexts that lack the local admin token
 // (PRO-517 local auth). Renders unconditionally -- it must NOT depend on the
@@ -21,11 +30,12 @@ export function LocalAuthRecoveryCard() {
   const [tokenInput, setTokenInput] = useState('');
   const [error, setError] = useState(null);
   const [applied, setApplied] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [currentToken, setCurrentToken] = useState(() => getLocalAuthToken());
   const [revealCurrent, setRevealCurrent] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const onApply = () => {
+  const onApply = async () => {
     const token = tokenInput.trim();
     setApplied(false);
     if (!isValidLocalAuthToken(token)) {
@@ -33,7 +43,27 @@ export function LocalAuthRecoveryCard() {
       return;
     }
     setError(null);
-    bootstrapLocalAuth(token, apiService);
+    setApplying(true);
+    // Do NOT claim success until the device confirms with res:auth {ok:true}.
+    // authenticateLocalAndConfirm rejects if the socket isn't open (still
+    // connecting) or the reply never arrives, and resolves {ok:false} when the
+    // firmware rejects a wrong/stale token -- all three used to render a false
+    // "Token applied" banner (PRO-549 review P1).
+    try {
+      const { ok } = await apiService.authenticateLocalAndConfirm(token);
+      if (!ok) {
+        setError(LOCAL_AUTH_REJECTED_ERROR);
+        return;
+      }
+    } catch (err) {
+      console.error('Local admin token was not confirmed by the device:', err);
+      setError(LOCAL_AUTH_NO_CONFIRM_ERROR);
+      return;
+    } finally {
+      setApplying(false);
+    }
+    // Confirmed: persist the token and surface success.
+    localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, token);
     setCurrentToken(token);
     setTokenInput('');
     setApplied(true);
@@ -95,9 +125,9 @@ export function LocalAuthRecoveryCard() {
               type='button'
               className='btn btn-secondary ml-2'
               onClick={onApply}
-              disabled={!tokenInput.trim()}
+              disabled={!tokenInput.trim() || applying}
             >
-              Apply
+              {applying ? 'Applying...' : 'Apply'}
             </button>
           </div>
           {error && (

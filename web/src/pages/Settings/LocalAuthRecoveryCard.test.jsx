@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 vi.mock('../../components/Card.jsx', () => ({ default: ({ title, children }) => h('section', {}, [h('h2', {}, title), children]) }));
 vi.mock('@fortawesome/react-fontawesome', () => ({ FontAwesomeIcon: () => null }));
@@ -11,7 +11,16 @@ import { LOCAL_AUTH_TOKEN_KEY } from '../../services/localAuthFetch.js';
 
 const VALID_TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
-function renderCard(apiService = { authenticateLocal: vi.fn() }) {
+// Default mock: device confirms the token (res:auth {ok:true}).
+function makeApi(overrides = {}) {
+  return {
+    authenticateLocal: vi.fn(),
+    authenticateLocalAndConfirm: vi.fn().mockResolvedValue({ ok: true }),
+    ...overrides,
+  };
+}
+
+function renderCard(apiService = makeApi()) {
   render(h(ApiServiceContext.Provider, { value: apiService }, h(LocalAuthRecoveryCard)));
   return apiService;
 }
@@ -37,15 +46,16 @@ describe('LocalAuthRecoveryCard', () => {
     expect(screen.queryByText("This session's current token", { exact: false })).toBeNull();
   });
 
-  it('persists a valid pasted token and authenticates the WebSocket', () => {
+  it('persists a valid pasted token and confirms it with the device before showing success', async () => {
     const apiService = renderCard();
 
     fireEvent.input(screen.getByLabelText('Paste admin token'), { target: { value: `  ${VALID_TOKEN}  ` } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
+    // Success banner appears only after res:auth {ok:true} resolves.
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Token applied'));
+    expect(apiService.authenticateLocalAndConfirm).toHaveBeenCalledWith(VALID_TOKEN);
     expect(localStorage.getItem(LOCAL_AUTH_TOKEN_KEY)).toBe(VALID_TOKEN);
-    expect(apiService.authenticateLocal).toHaveBeenCalledWith(VALID_TOKEN);
-    expect(screen.getByRole('status').textContent).toContain('Token applied');
   });
 
   it('rejects an invalid token with a clear error and never touches storage or the socket', () => {
@@ -55,8 +65,47 @@ describe('LocalAuthRecoveryCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     expect(localStorage.getItem(LOCAL_AUTH_TOKEN_KEY)).toBeNull();
-    expect(apiService.authenticateLocal).not.toHaveBeenCalled();
+    expect(apiService.authenticateLocalAndConfirm).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('shows an error (never the success banner) when the device rejects the token (res:auth {ok:false})', async () => {
+    const apiService = renderCard(
+      makeApi({
+        authenticateLocalAndConfirm: vi
+          .fn()
+          .mockResolvedValue({ ok: false, error: 'Authentication failed' }),
+      }),
+    );
+
+    fireEvent.input(screen.getByLabelText('Paste admin token'), { target: { value: VALID_TOKEN } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByRole('alert').textContent).toContain('Device rejected this token');
+    // No false success, and the rejected token is NOT persisted.
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(localStorage.getItem(LOCAL_AUTH_TOKEN_KEY)).toBeNull();
+    expect(apiService.authenticateLocalAndConfirm).toHaveBeenCalledWith(VALID_TOKEN);
+  });
+
+  it('shows an error (never the success banner) when the socket is not open / never confirms', async () => {
+    renderCard(
+      makeApi({
+        authenticateLocalAndConfirm: vi
+          .fn()
+          .mockRejectedValue(new Error('WebSocket is not connected')),
+      }),
+    );
+
+    fireEvent.input(screen.getByLabelText('Paste admin token'), { target: { value: VALID_TOKEN } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByRole('alert').textContent).toContain('Could not confirm the token');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(localStorage.getItem(LOCAL_AUTH_TOKEN_KEY)).toBeNull();
   });
 
   it('shows a stored token for copying and writes it to the clipboard', async () => {

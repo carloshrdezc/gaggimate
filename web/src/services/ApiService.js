@@ -151,6 +151,64 @@ export default class ApiService {
     }
   }
 
+  /**
+   * Send `req:auth` and resolve only once the firmware confirms with a
+   * `res:auth {ok, error?}` frame (WebUIPlugin.cpp:1414-1421). Unlike
+   * `authenticateLocal` (fire-and-forget, used at `_onOpen` where no user is
+   * waiting), this is for interactive callers that must NOT claim success until
+   * the device actually accepts the token.
+   *
+   * `res:auth` carries no `rid`, so it can't ride the `request()` rid-pairing
+   * path — we listen on the `res:auth` type bus for the next reply instead.
+   *
+   * Rejects with:
+   * - `WebSocketDisconnectedError` if the socket isn't open at send time (still
+   *   connecting/reconnecting — the fire-and-forget path would silently no-op).
+   * - `Error('Authentication timed out')` if no `res:auth` arrives in time.
+   *
+   * Resolves with `{ ok: boolean, error?: string }` — `ok:false` means the
+   * device rejected the token (wrong/stale). Callers decide UI from `ok`.
+   *
+   * @param {string} token
+   * @param {number} [timeoutMs]
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  authenticateLocalAndConfirm(token, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      if (!token || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        reject(new WebSocketDisconnectedError('WebSocket is not connected'));
+        return;
+      }
+
+      let settled = false;
+      let listenerId;
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.off('res:auth', listenerId);
+        reject(new Error('Authentication timed out'));
+      }, timeoutMs);
+
+      listenerId = this.on('res:auth', message => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.off('res:auth', listenerId);
+        resolve({ ok: !!message.ok, error: message.error });
+      });
+
+      try {
+        this.socket.send(JSON.stringify({ tp: 'req:auth', token }));
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.off('res:auth', listenerId);
+        reject(error);
+      }
+    });
+  }
+
   _onOpen() {
     console.log('WebSocket connected successfully');
     const localAdminToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
