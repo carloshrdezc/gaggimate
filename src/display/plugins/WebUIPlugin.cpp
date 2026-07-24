@@ -1,12 +1,16 @@
 #include "WebUIPlugin.h"
 #include "OtaChannelSwitchPolicy.h"
 #include "OtaIntentState.h"
+#include "OtaResolveHeapPolicy.h"
+#include "OtaResolveReusePolicy.h"
 #include "OtaUpdateCheckPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
 #include <display/core/EventIds.h>
+#include <display/core/GmHeapDiag.h> // PRO-566
 #include <display/core/GrinderManager.h>
+#include <display/core/MdnsNamePolicy.h>
 #include <display/core/ProfileManager.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
@@ -14,6 +18,7 @@
 #include <display/models/profile.h>
 #include <esp_core_dump.h>
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <esp_system.h>
 #include <inttypes.h>
@@ -23,8 +28,10 @@
 #include <cmath>
 #include <display/plugins/BLEScalePlugin.h>
 #include <display/plugins/ChangeModeDeferPolicy.h>
+#include <display/plugins/LocalAuthPolicy.h>
 #include <display/plugins/ShotHistoryPlugin.h>
 #include <display/plugins/StandbyReassertPolicy.h>
+#include <display/plugins/StrictValidationPolicy.h>
 #include <display/plugins/WsBroadcastClosePolicy.h>
 #include <display/plugins/WsReassemblyPolicy.h>
 #include <display/webassets/web_ui_manifest.h>
@@ -43,9 +50,27 @@ static WebUIPlugin *g_webUIPlugin = nullptr;
 // used at every read/write site.
 static constexpr const char *kSecretSentinel = "---unchanged---";
 
+static String relayTokenProtocol(const String &token) {
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    String encoded;
+    encoded.reserve(((token.length() + 2) / 3) * 4);
+    for (size_t index = 0; index < token.length(); index += 3) {
+        const uint32_t first = static_cast<uint8_t>(token[index]);
+        const uint32_t second = index + 1 < token.length() ? static_cast<uint8_t>(token[index + 1]) : 0;
+        const uint32_t third = index + 2 < token.length() ? static_cast<uint8_t>(token[index + 2]) : 0;
+        const uint32_t block = (first << 16) | (second << 8) | third;
+        encoded += alphabet[(block >> 18) & 0x3f];
+        encoded += alphabet[(block >> 12) & 0x3f];
+        if (index + 1 < token.length())
+            encoded += alphabet[(block >> 6) & 0x3f];
+        if (index + 2 < token.length())
+            encoded += alphabet[block & 0x3f];
+    }
+    return "gaggimate-token-" + encoded;
+}
+
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
-// Parse wss://host[:port][/path] or ws://host[:port][/path]
 static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_t &port, String &basePath) {
     if (url.startsWith("wss://")) {
         useSSL = true;
@@ -83,16 +108,49 @@ static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_
 }
 
 void WebUIPlugin::addCorsHeaders(AsyncWebServerResponse *response) const {
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    response->addHeader("Access-Control-Max-Age", "86400");
+#if defined(GAGGIMATE_DEVELOPMENT_CORS) && GAGGIMATE_DEVELOPMENT_CORS
+    // Explicit local Vite development exception. Production LAN and AP setup use
+    // same-origin requests and emit no CORS headers.
+    if (localAuthShouldEmitCors(apMode, true)) {
+        response->addHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+        response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+#else
+    (void)response;
+#endif
 }
 
 void WebUIPlugin::handleOptions(AsyncWebServerRequest *request) const {
     AsyncWebServerResponse *response = request->beginResponse(204);
     addCorsHeaders(response);
     request->send(response);
+}
+
+bool WebUIPlugin::isSetupBootstrapRequest(AsyncWebServerRequest *request) const {
+    return request->method() == HTTP_GET && request->url() == "/api/settings";
+}
+
+bool WebUIPlugin::isHttpAuthenticated(AsyncWebServerRequest *request) const {
+    if (localAuthMayBypassHttpInSetup(apMode, isSetupBootstrapRequest(request)))
+        return true;
+    const String queryToken = request->hasArg("localAuthToken") ? request->arg("localAuthToken") : String("");
+    return localAuthHttpRequestAuthenticated(request->header("Authorization").c_str(), queryToken.c_str(),
+                                             request->method() == HTTP_GET ? "GET" : "OTHER", request->url().c_str(),
+                                             controller->getSettings().getLocalAdminToken().c_str());
+}
+
+void WebUIPlugin::sendUnauthorized(AsyncWebServerRequest *request) const {
+    request->send(401, "application/json", "{\"error\":\"authentication required\"}");
+}
+
+bool WebUIPlugin::authenticateWebSocket(uint32_t clientId, JsonDocument &request) {
+    const String token = request["token"].is<String>() ? request["token"].as<String>() : String("");
+    const String authorization = String("Bearer ") + token;
+    const bool authenticated =
+        localAuthBearerMatches(authorization.c_str(), controller->getSettings().getLocalAdminToken().c_str());
+    authenticatedWebSocketClients[clientId] = authenticated;
+    return authenticated;
 }
 
 // Forward declarations of channel helpers defined below.
@@ -105,6 +163,14 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     this->grinderManager = _controller->getGrinderManager();
     this->profileManager = _controller->getProfileManager();
     this->pluginManager = _pluginManager;
+    if (controller->getSettings().getLocalAdminToken().isEmpty()) {
+        char token[33];
+        snprintf(token, sizeof(token), "%08lx%08lx%08lx%08lx", static_cast<unsigned long>(esp_random()),
+                 static_cast<unsigned long>(esp_random()), static_cast<unsigned long>(esp_random()),
+                 static_cast<unsigned long>(esp_random()));
+        controller->getSettings().setLocalAdminToken(token);
+        ESP_LOGW("WebUIPlugin", "Generated device-local admin token; retrieve it only through AP setup");
+    }
     this->ota = new GitHubOTA(
         BUILD_GIT_VERSION, controller->getSystemInfo().version, resolveReleaseUrl(controller->getSettings().getOTAChannel()),
         [this](uint8_t phase) {
@@ -235,18 +301,69 @@ void WebUIPlugin::otaResolveTask(void *arg) {
     WebUIPlugin *plugin = params->plugin;
     GitHubOTA *ota = plugin->ota;
 
-    ota->checkForUpdates();
-    const String resolved = ota->getCurrentVersion();
-    // resolveFailed at this layer == the last checkForUpdates() failed to
-    // resolve a head (network error / GitHub redirect quirk / malformed
-    // channel). We consult the AUTHORITATIVE failure flag
-    // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
-    // resolve getCurrentVersion() returns the STALE version string from a
-    // prior successful check, so a periodic check that already populated a
-    // version would otherwise mask a failed channel-switch resolve and
-    // force-flash against a stale _latest_url. Keep the || isEmpty() as a
-    // belt-and-suspenders guard (empty is untrustworthy).
-    const bool resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+    // PRO-556: before opening a SECOND, independent HTTPS/TLS connection, try to
+    // reuse the periodic background OTA check's already-resolved head. The
+    // periodic check (loop(), PRO-411/PRO-555) runs checkForUpdates() on this
+    // same `ota` instance every ~5 min and caches getCurrentVersion(). If it
+    // last succeeded against the SAME channel we are resolving for and that
+    // result is fresh (< half the check interval old), reusing it avoids an
+    // entire TLS handshake — eliminating that handshake's memory-pressure /
+    // latency / cert-verify exposure from this click-driven path and reducing
+    // load on github.com. The snapshot (channel/version/failed/timestamp) was
+    // taken by value on the loop task at spawn time, so this decision races
+    // nothing. When reuse is refused (different channel, too stale, empty, or
+    // the periodic check itself failed/deferred under PRO-555) we fall through
+    // to the existing independent checkForUpdates() call, STILL protected by the
+    // PRO-554 heap guard below.
+    const bool canReusePeriodic = otaResolveCanReusePeriodic(
+        params->haveEverChecked, params->periodicFailed, params->periodicVersion.c_str(), params->periodicChannel.c_str(),
+        params->resolveChannel.c_str(), params->periodicResolvedAtMs, static_cast<uint32_t>(millis()));
+
+    String resolved;
+    bool resolveFailed;
+    if (canReusePeriodic) {
+        ESP_LOGI("WebUIPlugin",
+                 "Reusing fresh periodic OTA check result for channel '%s' (head '%s') — skipping redundant TLS handshake",
+                 params->resolveChannel.c_str(), params->periodicVersion.c_str());
+        resolved = params->periodicVersion;
+        resolveFailed = false;
+    } else {
+        // PRO-554: pre-flight internal-DRAM guard. checkForUpdates() below opens a
+        // FRESH, independent HTTPS/TLS connection to GitHub (a second one, on top of
+        // the periodic background check's own WiFiClientSecure). Under current
+        // internal-DRAM pressure (same failure class as PRO-334/PRO-358) that extra
+        // TLS handshake can trip an OOM deep in mbedtls's certificate-verify path,
+        // which on this ESP-IDF/mbedtls port PANICS (LoadProhibited) instead of
+        // failing cleanly — crash-looping the device on every channel-switch click.
+        // If the largest contiguous free internal-DRAM block is below the floor,
+        // skip the TLS attempt entirely and fail the resolve closed, mirroring the
+        // xTaskCreatePinnedToCore-OOM branch in loop()'s Idle case: an empty
+        // resolved version drives decideOtaFlash() to Refuse -> OtaResolveState::
+        // Failed -> "Update failed" surfaced to the UI, never a panic.
+        const size_t largestFreeInternalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        const bool heapSufficient = otaResolveHeapSufficient(largestFreeInternalBlock);
+
+        if (!heapSufficient) {
+            ESP_LOGE("WebUIPlugin",
+                     "Skipping OTA resolve TLS handshake: largest free internal DRAM block %u < floor %u — failing closed to "
+                     "avoid an mbedtls OOM panic",
+                     static_cast<unsigned>(largestFreeInternalBlock), static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+            resolveFailed = true;
+        } else {
+            ota->checkForUpdates();
+            resolved = ota->getCurrentVersion();
+            // resolveFailed at this layer == the last checkForUpdates() failed to
+            // resolve a head (network error / GitHub redirect quirk / malformed
+            // channel). We consult the AUTHORITATIVE failure flag
+            // (isUpdateCheckFailed()) rather than emptiness alone: on a failed
+            // resolve getCurrentVersion() returns the STALE version string from a
+            // prior successful check, so a periodic check that already populated a
+            // version would otherwise mask a failed channel-switch resolve and
+            // force-flash against a stale _latest_url. Keep the || isEmpty() as a
+            // belt-and-suspenders guard (empty is untrustworthy).
+            resolveFailed = ota->isUpdateCheckFailed() || resolved.isEmpty();
+        }
+    }
     const OtaFlashDecision decision = decideOtaFlash(params->isTag, params->pinnedTag.c_str(), params->selectedEqInstalled,
                                                      params->installedEmpty, resolved.c_str(), resolveFailed);
 
@@ -455,12 +572,19 @@ void WebUIPlugin::loop() {
                 otaResolveStartMs = static_cast<uint32_t>(millis());
                 const uint32_t generation = otaResolveGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 
-                auto *params = new OtaResolveTaskParams{this,
-                                                        generation,
-                                                        isTag,
-                                                        otaResolvePinnedTag,
+                auto *params = new OtaResolveTaskParams{this, generation, isTag, otaResolvePinnedTag,
                                                         /*selectedEqInstalled=*/!channelSwitch,
-                                                        /*installedEmpty=*/previousInstalledChannel.isEmpty()};
+                                                        /*installedEmpty=*/previousInstalledChannel.isEmpty(),
+                                                        // PRO-556: snapshot the periodic check's cached result on
+                                                        // the loop task, before the resolve task exists, so the
+                                                        // task can decide whether to reuse it (same channel +
+                                                        // fresh + succeeded) instead of opening a 2nd TLS conn.
+                                                        /*resolveChannel=*/channel,
+                                                        /*periodicChannel=*/otaPeriodicResolvedChannel,
+                                                        /*periodicVersion=*/ota->getCurrentVersion(),
+                                                        /*periodicFailed=*/ota->isUpdateCheckFailed(),
+                                                        /*haveEverChecked=*/lastUpdateCheck != 0,
+                                                        /*periodicResolvedAtMs=*/static_cast<uint32_t>(lastUpdateCheck)};
                 TaskHandle_t createdHandle = nullptr;
                 const BaseType_t created =
                     xTaskCreatePinnedToCore(otaResolveTask, "OtaResolve", 8192, params, 1, &createdHandle, 1);
@@ -646,17 +770,71 @@ void WebUIPlugin::loop() {
     const unsigned long effectiveInterval = otaBackoffInterval(
         static_cast<uint32_t>(UPDATE_CHECK_INTERVAL), static_cast<uint32_t>(UPDATE_CHECK_MAX_INTERVAL), otaCheckFailureCount);
     if (lastUpdateCheck == 0 || now - lastUpdateCheck > effectiveInterval) {
-        ota->checkForUpdates();
-        if (ota->isUpdateCheckFailed()) {
-            if (otaCheckFailureCount < UINT32_MAX) {
-                otaCheckFailureCount++;
+        // PRO-560: skip the periodic check while a click-driven resolve
+        // (otaResolveTask, PRO-13) is in flight. Both this loop-task path and the
+        // resolve task's non-reuse fallback call ota->checkForUpdates() on the
+        // SAME non-reentrant GitHubOTA instance; if this interval elapses mid-
+        // resolve they could run concurrently (the long-standing PRO-13/PRO-411
+        // race, only narrowed by PRO-556's reuse hit). otaResolveState is loop-
+        // task-owned so this read needs no mutex, and a resolve only touches `ota`
+        // while Resolving — skipping here gives mutual exclusion by construction.
+        // PRO-563: that "while Resolving" guard has a residual gap — a resolve
+        // abandoned on the soft 10s timeout is never force-killed (PRO-13 point 7)
+        // and its task can keep touching `ota` for a few more seconds AFTER state
+        // has left Resolving. otaPeriodicCheckShouldSkip() therefore ALSO keeps the
+        // check skipped through a bounded post-timeout grace window (keyed off the
+        // same otaResolveStartMs / kOtaResolveTimeoutMs, gated on the timeout flag).
+        // Like the PRO-555 defer below, this is a SKIP not a failure: do NOT bump
+        // otaCheckFailureCount (the check never ran) and do NOT advance
+        // lastUpdateCheck, so the check retries promptly next loop pass once the
+        // resolve settles out of Resolving and the grace window closes.
+        if (!otaPeriodicCheckShouldSkip(OtaResolveSnapshot{otaResolveState, otaResolveTimedOutFlag, otaResolveStartMs,
+                                                           static_cast<uint32_t>(now), kOtaResolveTimeoutMs,
+                                                           kOtaResolveAbandonGraceMs})) {
+            if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
+                // PRO-557: the defer branch deliberately does NOT advance
+                // lastUpdateCheck (so the DRAM re-check retries every loop tick until
+                // pressure clears), which keeps this outer guard true every ~2 ms
+                // tick. Rate-limit ONLY the log so it does not fire at ~500 Hz for
+                // the whole pressure window — flooding synchronous UART (diagnostics
+                // off) or the bounded DiagnosticLogPlugin queue (diagnostics on).
+                // The DRAM re-check cadence is untouched.
+                if (otaDeferLogShouldEmit(lastOtaDeferLogMs, static_cast<uint32_t>(now), kOtaDeferLogCooldownMs,
+                                          otaDeferLogged)) {
+                    ESP_LOGW("WebUIPlugin",
+                             "Deferring periodic OTA check: largest free internal DRAM block < %u floor — retrying next loop",
+                             static_cast<unsigned>(kOtaResolveInternalDramFloorBytes));
+                    lastOtaDeferLogMs = static_cast<uint32_t>(now);
+                    otaDeferLogged = true;
+                }
+            } else {
+                // PRO-557: DRAM pressure cleared and the check actually ran — reset
+                // the defer-log gate so the FIRST defer of any future pressure window
+                // logs immediately again (rather than being suppressed by a stale
+                // in-cooldown timestamp from the previous window).
+                otaDeferLogged = false;
+                ota->checkForUpdates();
+                if (ota->isUpdateCheckFailed()) {
+                    if (otaCheckFailureCount < UINT32_MAX) {
+                        otaCheckFailureCount++;
+                    }
+                } else {
+                    otaCheckFailureCount = 0;
+                    // PRO-556: record WHICH channel this successful check resolved
+                    // against so a subsequent click-driven resolve (otaResolveTask)
+                    // can safely reuse ota->getCurrentVersion() for the SAME channel
+                    // instead of opening a second TLS connection. Only updated on
+                    // success — a failed check leaves a stale head and must not be
+                    // reused (see OtaResolveReusePolicy.h). Deferred checks (PRO-555)
+                    // never reach this branch, so neither this nor lastUpdateCheck
+                    // advances, and reuse is correctly refused.
+                    otaPeriodicResolvedChannel = controller->getSettings().getOTAChannel();
+                }
+                pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
+                lastUpdateCheck = now;
+                updateOTAStatus(ota->getCurrentVersion());
             }
-        } else {
-            otaCheckFailureCount = 0;
         }
-        pluginManager->trigger(EventIds::OTA_UPDATE_STATUS, "value", ota->isUpdateAvailable());
-        lastUpdateCheck = now;
-        updateOTAStatus(ota->getCurrentVersion());
     }
     // PRO-313: reading the WS client list (even .empty()) races with the
     // AsyncTCP task's connect/disconnect mutation, so snapshot it under wsMutex.
@@ -703,6 +881,7 @@ void WebUIPlugin::loop() {
         doc["btv"] = profileManager->getSelectedProfile().getTotalVolume(); // raw volumetric target for frontend Weight card
         doc["ayo"] = controller->getSettings().isAllowYieldOverride() ? 1 : 0;
         doc["as"] = controller->getSettings().isAutoSteamEnabled() ? 1 : 0;
+        doc["sb"] = controller->getSettings().isStandbyOnBrewEnabled() ? 1 : 0;
         // Round dose grams to 1 decimal so the wire value matches the "float" web contract
         // (avoids noisy full-precision doubles; firmware keeps full precision internally).
         doc["dg"] = std::round(controller->getSettings().getDoseGrams() * 10.0) / 10.0;
@@ -870,6 +1049,8 @@ void WebUIPlugin::setupServer() {
     server.on("/success.txt", [](AsyncWebServerRequest *request) { request->send(200); }); // firefox captive portal call home
     server.on("/ncsi.txt", [](AsyncWebServerRequest *request) { request->redirect(LOCAL_URL); }); // windows call home
     server.on("/api/settings", [this](AsyncWebServerRequest *request) { handleSettings(request); });
+    server.on("/api/settings/provision", HTTP_POST,
+              [this](AsyncWebServerRequest *request) { handleSettingsProvisioning(request); });
     server.on("/api/status", [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         addCorsHeaders(response);
@@ -889,26 +1070,53 @@ void WebUIPlugin::setupServer() {
     // payload (list: [], info: {connected:false,...}, scan/connect:
     // {success:false}) with HTTP 200 so the client renders an empty list
     // (CAR-386). The default BLE-on behavior is unchanged.
-    server.on("/api/scales/list", [this](AsyncWebServerRequest *request) { handleBLEScaleList(request); });
-    server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) { handleBLEScaleConnect(request); });
-    server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
-    server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
+    server.on("/api/scales/list", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleList(request);
+    });
+    server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleConnect(request);
+    });
+    server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleScan(request);
+    });
+    server.on("/api/scales/info", [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleBLEScaleInfo(request);
+    });
     FS *fs = &LittleFS;
     if (controller->isSDCard()) {
         fs = &SD_MMC;
     }
-    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store");
+    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store").setFilter([this](AsyncWebServerRequest *request) {
+        const bool authenticated = isHttpAuthenticated(request);
+        if (!authenticated)
+            sendUnauthorized(request);
+        return authenticated;
+    });
     server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
-        // Serve the binary index file directly
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
         if (fs->exists("/h/index.bin")) {
             AsyncWebServerResponse *response = request->beginResponse(*fs, "/h/index.bin", "application/octet-stream");
+            response->addHeader("Cache-Control", "no-store");
             addCorsHeaders(response);
             request->send(response);
         } else {
             request->send(404, "text/plain", "Index not found");
         }
     });
-    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) { handleCoreDumpDownload(request); });
+    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleCoreDumpDownload(request);
+    });
     // Diagnostic SD log download (PRO-274). Explicit handlers (not serveStatic)
     // so a missing file returns a clean 404 instead of falling through to the
     // SPA catch-all (onNotFound) below. Registered before onNotFound so these
@@ -917,10 +1125,16 @@ void WebUIPlugin::setupServer() {
     // SD card inside the handler. Paths mirror DiagnosticLogPlugin::SD_LOG_PATH /
     // SD_LOG_PATH_OLD; literals are used here rather than including that plugin's
     // header (it pulls WiFiUdp.h, which the native display-sim build can't resolve).
-    server.on("/api/diag/log.txt", HTTP_GET,
-              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.txt"); });
-    server.on("/api/diag/log.1", HTTP_GET,
-              [this](AsyncWebServerRequest *request) { handleDiagLogDownload(request, "/diag/log.1"); });
+    server.on("/api/diag/log.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleDiagLogDownload(request, "/diag/log.txt");
+    });
+    server.on("/api/diag/log.1", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!isHttpAuthenticated(request))
+            return sendUnauthorized(request);
+        handleDiagLogDownload(request, "/diag/log.1");
+    });
     server.on("/test", [](AsyncWebServerRequest *request) {
         ESP_LOGI("WebUI", "TEST endpoint hit!");
         request->send(200, "text/plain", "ESP32 server is alive!");
@@ -1007,6 +1221,7 @@ void WebUIPlugin::setupServer() {
                     ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
                 }
                 rxBuffers.erase(client->id());
+                authenticatedWebSocketClients.erase(client->id());
             } else if (type == WS_EVT_DATA) {
                 handleWebSocketData(server, client, type, arg, data, len);
             }
@@ -1016,6 +1231,7 @@ void WebUIPlugin::setupServer() {
 
 void WebUIPlugin::start() {
     stop();
+    GM_HEAP_DIAG("before webserver+relay start"); // PRO-566
     server.begin();
     ESP_LOGI("WebUIPlugin", "Started webserver");
     if (apMode) {
@@ -1025,8 +1241,13 @@ void WebUIPlugin::start() {
         ESP_LOGI("WebUIPlugin", "Started catchall DNS for captive portal");
     }
     lastUpdateCheck = 0;
+    // PRO-562: reset the defer-log gate alongside the periodic-check timer so the
+    // first deferred-check log after startup isn't suppressed by a stale in-cooldown
+    // timestamp carried over from before the restart (mirrors the reset at ~L806).
+    otaDeferLogged = false;
     serverRunning = true;
     startRelay();
+    GM_HEAP_DIAG("after webserver+relay start"); // PRO-566
 }
 
 void WebUIPlugin::stop() {
@@ -1128,8 +1349,9 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?token=" + relayToken + "&role=device"
-                                                          : basePath + "/connect?token=" + relayToken + "&role=device";
+    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?role=device" : basePath + "/connect?role=device";
+    String relayProtocols = "Sec-WebSocket-Protocol: gaggimate-relay-v1, " + relayTokenProtocol(relayToken) + "\r\n";
+    relayWs.setExtraHeaders(relayProtocols.c_str());
 
     relayWs.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
         switch (type) {
@@ -1310,6 +1532,59 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         return;
 
     String msgType = doc["tp"].as<String>();
+    if (clientId != RELAY_CLIENT_ID && msgType == "req:auth") {
+        JsonDocument response;
+        response["tp"] = "res:auth";
+        response["ok"] = authenticateWebSocket(clientId, doc);
+        if (!response["ok"].as<bool>())
+            response["error"] = "Authentication failed";
+        sendResponse(clientId, response);
+        return;
+    }
+    const bool sessionAuthenticated =
+        clientId != RELAY_CLIENT_ID && localAuthWebSocketSessionAuthenticated(authenticatedWebSocketClients, clientId);
+    if (!localAuthWebSocketMessageAllowed(clientId == RELAY_CLIENT_ID, sessionAuthenticated, msgType.c_str())) {
+        ESP_LOGW("WebUIPlugin", "Rejected unauthenticated WebSocket request: %s", msgType.c_str());
+        return;
+    }
+
+    // PRO-521: command payload boundary. Known fields on control requests must
+    // have the documented JSON scalar type/range before any dispatch side effect.
+    // Unknown fields are deliberately ignored for forward compatibility.
+    static const char *const commandFields[] = {"target", "grams",       "mode", "targetType", "pressure",
+                                                "flow",   "temperature", "time", "samples"};
+    strict_validation::Fields commandValues;
+    for (const char *field : commandFields) {
+        const bool applies = (msgType == "req:change-grind-target" && String(field) == "target") ||
+                             (msgType == "req:change-mode" && String(field) == "mode") ||
+                             (msgType == "req:change-brew-target" && String(field) == "target") ||
+                             (msgType == "req:dose:set" && String(field) == "grams") || (msgType == "req:manual:update") ||
+                             (msgType == "req:autotune-start" && (String(field) == "time" || String(field) == "samples"));
+        if (!applies)
+            continue;
+        const bool required = (msgType == "req:change-grind-target" && String(field) == "target") ||
+                              (msgType == "req:change-mode" && String(field) == "mode") ||
+                              (msgType == "req:change-brew-target" && String(field) == "target") ||
+                              (msgType == "req:dose:set" && String(field) == "grams");
+        JsonVariantConst value = doc[field];
+        if (value.isNull()) {
+            if (required)
+                commandValues.push_back({field, ""});
+            continue;
+        }
+        const bool numericField = String(field) != "targetType";
+        const bool isNumeric = value.is<int>() || value.is<float>();
+        if ((numericField && !isNumeric) || (!numericField && !value.is<const char *>())) {
+            ESP_LOGW("WebUIPlugin", "Ignoring %s: invalid %s type", msgType.c_str(), field);
+            return;
+        }
+        commandValues.push_back({field, value.as<String>().c_str(), isNumeric});
+    }
+    strict_validation::Error commandError;
+    if (!strict_validation::validateWebSocketRequest(msgType.c_str(), commandValues, commandError)) {
+        ESP_LOGW("WebUIPlugin", "Ignoring %s: invalid %s", msgType.c_str(), commandError.field.c_str());
+        return;
+    }
     if (msgType.startsWith("req:profiles:")) {
         handleProfileRequest(clientId, doc);
     } else if (msgType.startsWith("req:beans:") && msgType != "req:beans:select") {
@@ -1463,6 +1738,20 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         } else {
             ESP_LOGW("WebUIPlugin", "req:autosteam:set ignored: missing or invalid 'enabled'");
         }
+    } else if (msgType == "req:standby-on-brew:set") {
+        // Device-authoritative standby-on-brew toggle (PRO-545). Persisted via
+        // Settings and rebroadcast to all clients in the next evt:status as "sb".
+        // Mirrors req:autosteam:set exactly. Mutual exclusion with auto-steam is
+        // enforced client-side (the button disables while auto-steam is on); the
+        // stored value is preserved here so it resumes when auto-steam is cleared.
+        JsonVariantConst enabledValue = doc["enabled"];
+        if (enabledValue.is<bool>()) {
+            controller->getSettings().setStandbyOnBrewEnabled(enabledValue.as<bool>());
+        } else if (enabledValue.is<int>()) {
+            controller->getSettings().setStandbyOnBrewEnabled(enabledValue.as<int>() != 0);
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:standby-on-brew:set ignored: missing or invalid 'enabled'");
+        }
     } else if (msgType == "req:dose:set") {
         // Device-authoritative brew dose in grams (PRO-225). Validated and
         // clamped by Settings::setDoseGrams, rebroadcast as "dg" in evt:status.
@@ -1569,6 +1858,14 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     // force-recheck sentinel where a stale read merely delays the next check by one
     // interval. So it is safe to set directly here rather than via a deferred flag.
     lastUpdateCheck = 0;
+    // PRO-562: reset the defer-log gate alongside the force-recheck sentinel so the
+    // first deferred-check log after this recheck isn't suppressed by a stale
+    // in-cooldown timestamp. This mirrors the reset in loop() at ~L806, but note
+    // that L806 runs on the loop task whereas this reset runs on the AsyncTCP/relay
+    // task — see the atomic-bool-write exemption on `otaDeferLogged` in the header:
+    // a single `bool` write doesn't tear on ESP32 and a stale read is at worst a
+    // cosmetic extra (un)suppressed log line, so the cross-task write is safe.
+    otaDeferLogged = false;
     // This handler runs on the AsyncTCP web-server task (local WS clients) or the
     // relay task (remote clients) — NOT the loop task. `ota` is single-threaded
     // and owned by the loop task (CAR-178), so we must not call into it here.
@@ -1846,9 +2143,116 @@ void WebUIPlugin::handleGrinderRequest(uint32_t clientId, JsonDocument &request)
     sendResponse(clientId, response);
 }
 
+void WebUIPlugin::handleSettingsProvisioning(AsyncWebServerRequest *request) {
+    const bool authenticated = isHttpAuthenticated(request);
+    const bool hasSsid = request->hasArg("wifiSsid");
+    const bool hasPassword = request->hasArg("wifiPassword");
+    const bool hasMdnsName = request->hasArg("mdnsName");
+    const bool complete =
+        request->hasArg("completeLocalAuthProvisioning") && request->arg("completeLocalAuthProvisioning") == "1";
+    const bool restart = request->hasArg("restart") && request->arg("restart") == "1";
+    if (!localAuthMayProvisionInAp(apMode, authenticated, hasSsid, hasPassword, hasMdnsName, complete, restart)) {
+        sendUnauthorized(request);
+        return;
+    }
+
+    const String mdnsName = request->arg("mdnsName");
+    if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        response->setCode(400);
+        addCorsHeaders(response);
+        response->print("{\"error\":\"Invalid mDNS hostname\"}");
+        request->send(response);
+        return;
+    }
+
+    // Deliberately do not call handleSettings(): omitted checkbox fields there
+    // mean false. This narrow endpoint mutates only AP recovery data atomically.
+    controller->getSettings().batchUpdate([request, mdnsName](Settings *settings) {
+        settings->setWifiSsid(request->arg("wifiSsid"));
+        settings->setWifiPassword(request->arg("wifiPassword"));
+        settings->setMdnsName(mdnsName);
+        settings->setLocalAuthProvisioned(true);
+        settings->save(true);
+    });
+
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    addCorsHeaders(response);
+    response->print("{\"success\":true}");
+    request->send(response);
+
+    if (restart)
+        ESP.restart();
+}
+
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
+    if (!isHttpAuthenticated(request)) {
+        sendUnauthorized(request);
+        return;
+    }
     if (request->method() == HTTP_POST) {
-        controller->getSettings().batchUpdate([request](Settings *settings) {
+        if (request->hasArg("mdnsName")) {
+            const String mdnsName = request->arg("mdnsName");
+            if (!isValidMdnsName(mdnsName.c_str(), mdnsName.length())) {
+                AsyncResponseStream *response = request->beginResponseStream("application/json");
+                response->setCode(400);
+                addCorsHeaders(response);
+                response->print("{\"error\":\"Invalid mDNS hostname\"}");
+                request->send(response);
+                return;
+            }
+        }
+
+        // Validate every supplied scalar before mutating Settings. This is a
+        // transaction boundary: a bad field returns 400 and no partial update is
+        // persisted. String/toInt() coercion below is safe only after this pass.
+        static const char *const validatedFields[] = {"startupMode",
+                                                      "targetSteamTemp",
+                                                      "targetWaterTemp",
+                                                      "temperatureOffset",
+                                                      "pressureScaling",
+                                                      "startupFillTime",
+                                                      "steamFillTime",
+                                                      "smartGrindMode",
+                                                      "haPort",
+                                                      "brewDelay",
+                                                      "grindDelay",
+                                                      "standbyTimeout",
+                                                      "mainBrightness",
+                                                      "standbyBrightness",
+                                                      "standbyBrightnessTimeout",
+                                                      "steamPumpPercentage",
+                                                      "steamPumpCutoff",
+                                                      "themeMode",
+                                                      "sunriseR",
+                                                      "sunriseG",
+                                                      "sunriseB",
+                                                      "sunriseW",
+                                                      "sunriseExtBrightness",
+                                                      "emptyTankDistance",
+                                                      "fullTankDistance",
+                                                      "altRelayFunction",
+                                                      "autowakeupSchedules",
+                                                      "flushDuration"};
+        strict_validation::Fields fields;
+        for (const char *name : validatedFields) {
+            if (request->hasArg(name))
+                fields.push_back({name, request->arg(name).c_str()});
+        }
+        strict_validation::Error validationError;
+        if (!strict_validation::validateSettings(fields, validationError)) {
+            JsonDocument error;
+            error["error"] = "Invalid settings";
+            error["field"] = validationError.field.c_str();
+            error["detail"] = validationError.message.c_str();
+            AsyncResponseStream *response = request->beginResponseStream("application/json");
+            response->setCode(400);
+            addCorsHeaders(response);
+            serializeJson(error, *response);
+            request->send(response);
+            return;
+        }
+        controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
                 settings->setStartupMode(request->arg("startupMode") == "brew" ? MODE_BREW : MODE_STANDBY);
             if (request->hasArg("targetSteamTemp"))
@@ -1988,6 +2392,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setCloudRelayToken(request->arg("cloudRelayToken"));
             if (request->hasArg("cloudRelayEnabled"))
                 settings->setCloudRelayEnabled(request->arg("cloudRelayEnabled") == "1");
+            if (apMode && request->hasArg("completeLocalAuthProvisioning")) {
+                settings->setLocalAuthProvisioned(true);
+            }
             settings->save(true);
         });
         pluginManager->trigger(EventIds::SETTINGS_CHANGED);
@@ -2057,6 +2464,13 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["flushDuration"] = settings.getFlushDuration() / 1000;
     doc["cloudRelayUrl"] = settings.getCloudRelayUrl();
     doc["cloudRelayToken"] = kSecretSentinel;
+    // AP fallback is the physical-presence setup channel. It is the only place
+    // the bootstrap token is returned; normal LAN responses never disclose it.
+    if (apMode)
+        doc["localAdminToken"] = settings.getLocalAdminToken();
+    else
+        doc["localAdminToken"] = kSecretSentinel;
+    doc["localAuthRecovery"] = apMode && !settings.isLocalAuthProvisioned();
     doc["cloudRelayEnabled"] = settings.isCloudRelayEnabled();
 
     // Add schedule format with days

@@ -16,6 +16,7 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
+#include <unordered_map>
 #include <vector>
 
 constexpr uint32_t RELAY_CLIENT_ID = 0xFFFFFFFE;
@@ -60,6 +61,10 @@ class WebUIPlugin : public Plugin {
     void stop();
     void addCorsHeaders(AsyncWebServerResponse *response) const;
     void handleOptions(AsyncWebServerRequest *request) const;
+    bool isHttpAuthenticated(AsyncWebServerRequest *request) const;
+    bool isSetupBootstrapRequest(AsyncWebServerRequest *request) const;
+    void sendUnauthorized(AsyncWebServerRequest *request) const;
+    bool authenticateWebSocket(uint32_t clientId, JsonDocument &request);
 
     // Cloud relay
     void startRelay();
@@ -88,6 +93,7 @@ class WebUIPlugin : public Plugin {
     void serveWebAsset(AsyncWebServerRequest *request);
     void serveWebAsset(AsyncWebServerRequest *request, String path);
     void handleSettings(AsyncWebServerRequest *request);
+    void handleSettingsProvisioning(AsyncWebServerRequest *request);
     void handleBLEScaleList(AsyncWebServerRequest *request);
     void handleBLEScaleScan(AsyncWebServerRequest *request);
     void handleBLEScaleConnect(AsyncWebServerRequest *request);
@@ -223,6 +229,22 @@ class WebUIPlugin : public Plugin {
         String pinnedTag;
         bool selectedEqInstalled;
         bool installedEmpty;
+        // PRO-556: snapshot of the periodic background check's cached result,
+        // taken by value at spawn time on the loop task so the resolve task can
+        // decide (via otaResolveCanReusePeriodic()) whether to reuse it instead
+        // of opening a second TLS connection. `resolveChannel` is the channel
+        // being resolved for (== otaResolveChannel); `periodicChannel` /
+        // `periodicResolvedAtMs` are the loop's otaPeriodicResolvedChannel /
+        // lastUpdateCheck; `periodicVersion` / `periodicFailed` are read from
+        // `ota` on the loop task (getCurrentVersion() / isUpdateCheckFailed())
+        // BEFORE the task is created, so the task never races the loop for them.
+        // `haveEverChecked` is (lastUpdateCheck != 0).
+        String resolveChannel;
+        String periodicChannel;
+        String periodicVersion;
+        bool periodicFailed;
+        bool haveEverChecked;
+        uint32_t periodicResolvedAtMs;
     };
 
     AsyncWebServer server;
@@ -289,6 +311,33 @@ class WebUIPlugin : public Plugin {
     static void relayLoopTask(void *arg);
 
     unsigned long lastUpdateCheck = 0;
+    // PRO-557: rate-limit for the deferred periodic-check log line (see
+    // otaDeferLogShouldEmit() in OtaUpdateCheckPolicy.h). A deferred check
+    // (PRO-555) never advances lastUpdateCheck, so the outer interval guard —
+    // and thus the "Deferring…" ESP_LOGW — would otherwise fire on every ~2 ms
+    // loop tick for the whole DRAM-pressure window. These gate ONLY the log; the
+    // DRAM re-check still runs every tick. `otaDeferLogged` distinguishes the
+    // first defer of a pressure window (always logged) from a zero timestamp.
+    // These are primarily loop-task owned, BUT `otaDeferLogged` is also reset
+    // from handleOTASettings() (PRO-562), which runs on the AsyncTCP/relay task,
+    // not the loop task. That cross-task write is intentionally exempt from the
+    // loop-task-ownership model the rest of the handler follows, for the same
+    // reason lastUpdateCheck is (CAR-178/CAR-377): a `bool` write does not tear
+    // on ESP32, and the only consequence of a stale read is one extra
+    // suppressed/unsuppressed "Deferring…" log line, which is purely cosmetic.
+    uint32_t lastOtaDeferLogMs = 0;
+    bool otaDeferLogged = false;
+    // PRO-556: the channel the periodic background OTA check last SUCCESSFULLY
+    // resolved against (settings.getOTAChannel() at that check's run time). The
+    // click-driven resolve task (otaResolveTask) may reuse the periodic check's
+    // cached head (ota->getCurrentVersion()) instead of opening a second TLS
+    // connection ONLY when this equals the channel it is resolving for AND the
+    // result is fresh (see OtaResolveReusePolicy.h). Set alongside
+    // lastUpdateCheck on a successful periodic check; a failed/deferred check
+    // does NOT update it (PRO-555 defers without advancing lastUpdateCheck, so
+    // there is no fresh result to reuse). Loop-task owned, snapshotted by value
+    // into OtaResolveTaskParams at spawn time.
+    String otaPeriodicResolvedChannel = "";
     // PRO-411: consecutive OTA update-check failures, driving the exponential
     // backoff of the effective check interval (see otaBackoffInterval() /
     // UPDATE_CHECK_MAX_INTERVAL). Reset to 0 on any successful check. Loop-task
@@ -320,6 +369,7 @@ class WebUIPlugin : public Plugin {
     std::atomic<WebUiLifecycleIntent> pendingLifecycle{WebUiLifecycleIntent::None};
     String updateComponent = ""; // loop-task-owned; latched from pendingUpdateComponent (CAR-377)
     float currentBluetoothWeight = 0.0f;
+    std::unordered_map<uint32_t, bool> authenticatedWebSocketClients;
 
     // Deferred mode-change intent (PRO-261). A `req:change-mode` arrives on the
     // AsyncTCP (`handleWebSocketData`) or relay (`relayLoopTask`) task, never the

@@ -19,6 +19,7 @@
 #include <display/config.h>
 #include <display/config/features.h>
 #include <display/core/EventIds.h>
+#include <display/core/GmHeapDiag.h> // PRO-566: gated internal-DRAM checkpoints (no-op unless -DGM_HEAP_DIAG_ENABLED)
 #include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/SteamButtonPolicy.h>
 #include <display/core/constants.h>
@@ -30,6 +31,7 @@
 #include <display/core/static_profiles.h>
 #include <display/core/zones.h>
 #include <display/plugins/AutoWakeupPlugin.h>
+#include <display/plugins/LocalAuthPolicy.h>
 #include <display/ui/default/DisplayRestartPolicy.h>
 #if GAGGIMATE_ENABLE_BLE_SCALE
 #include <display/plugins/BLEScalePlugin.h>
@@ -73,6 +75,7 @@
 const String LOG_TAG = F("Controller");
 
 void Controller::setup() {
+    GM_HEAP_DIAG("setup() begin"); // PRO-566
     // PRO-331: load persisted settings from NVS now, NOT in the Settings
     // constructor. Settings is a member of the global `controller`, so its
     // constructor runs during C++ static-init — before the Arduino core calls
@@ -105,6 +108,7 @@ void Controller::setup() {
 #ifndef GAGGIMATE_HEADLESS
     setupPanel();
 #endif
+    GM_HEAP_DIAG("after setupPanel"); // PRO-566
 
     pluginManager = new PluginManager();
 #ifndef GAGGIMATE_HEADLESS
@@ -162,7 +166,7 @@ void Controller::setup() {
     pluginManager->registerPlugin(new DiagnosticLogPlugin());
 #endif
     pluginManager->setup(this);
-
+    GM_HEAP_DIAG("after pluginManager->setup"); // PRO-566
     pluginManager->on(EventIds::PROFILES_PROFILE_SAVE, [this](Event const &event) {
         String id = event.getString("id");
         if (id == profileManager->getSelectedProfile().id) {
@@ -175,10 +179,12 @@ void Controller::setup() {
 #ifndef GAGGIMATE_HEADLESS
     ui->init();
 #endif
+    GM_HEAP_DIAG("after ui->init"); // PRO-566
     this->onScreenReady();
 
     updateLastAction();
     xTaskCreatePinnedToCore(loopTask, "Controller::loopControl", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle, 1);
+    GM_HEAP_DIAG("setup() end"); // PRO-566
 }
 
 void Controller::onScreenReady() { screenReady = true; }
@@ -194,13 +200,17 @@ void Controller::connect() {
     connectStartTime = millis();
     pluginManager->trigger(EventIds::CONTROLLER_STARTUP);
 
+    GM_HEAP_DIAG("connect() begin"); // PRO-566
     setupWifi();
+    GM_HEAP_DIAG("after setupWifi"); // PRO-566
     setupBluetooth();
+    GM_HEAP_DIAG("after setupBluetooth"); // PRO-566
     pluginManager->on(EventIds::OTA_UPDATE_START, [this](Event const &) { this->updating = true; });
     pluginManager->on(EventIds::OTA_UPDATE_END, [this](Event const &) { this->updating = false; });
 
     updateLastAction();
     initialized = true;
+    GM_HEAP_DIAG("connect() end"); // PRO-566
 }
 
 #ifndef GAGGIMATE_HEADLESS
@@ -261,7 +271,9 @@ void Controller::setupBluetooth() {
     // enforces it, which is why the NimBLE 1.x->2.x + platform bump regressed it.
     esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 #endif
+    GM_HEAP_DIAG("before clientController.initClient"); // PRO-566
     clientController.initClient();
+    GM_HEAP_DIAG("after clientController.initClient"); // PRO-566
     clientController.registerDisconnectCallback([this]() {
         if (initialized) {
             pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT);
@@ -361,7 +373,9 @@ void Controller::setupInfos() {
 }
 
 void Controller::setupWifi() {
-    if (settings.getWifiSsid() != "" && settings.getWifiPassword() != "") {
+    const bool recoveryAp = localAuthRequiresRecoveryAp(settings.getWifiSsid() != "" && settings.getWifiPassword() != "",
+                                                        settings.isLocalAuthProvisioned());
+    if (!recoveryAp && settings.getWifiSsid() != "" && settings.getWifiPassword() != "") {
         WiFi.setHostname(settings.getMdnsName().c_str());
         WiFi.mode(WIFI_STA);
         WiFi.setAutoReconnect(true);
@@ -421,6 +435,24 @@ void Controller::loop() {
     }
 
     unsigned long now = millis();
+
+#if defined(GM_HEAP_DIAG_ENABLED) && GM_HEAP_DIAG_ENABLED && !defined(GAGGIMATE_SIM)
+    // PRO-566: steady-state internal-DRAM sampler. Once the device is initialized
+    // (WiFi + BLE + plugins all up), log the internal-DRAM free/largest-block every
+    // ~5 s so the audit captures the true STEADY-STATE floor the OTA gate sees,
+    // separate from the transient boot trajectory bracketed above. Also dumps the
+    // free-block histogram once (exhaustion vs fragmentation) on the first sample.
+    static unsigned long lastHeapDiagMs = 0;
+    static bool heapDiagInfoDumped = false;
+    if (initialized && (now - lastHeapDiagMs) >= 5000UL) {
+        lastHeapDiagMs = now;
+        GM_HEAP_DIAG("steady-state loop");
+        if (!heapDiagInfoDumped) {
+            heapDiagInfoDumped = true;
+            GM_HEAP_DIAG_INFO();
+        }
+    }
+#endif
 
     // If BLE scanning has been running for a while without finding the controller,
     // notify the UI so it can update the startup label accordingly.

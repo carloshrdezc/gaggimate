@@ -1,3 +1,4 @@
+import { authenticatedFetch } from '../services/localAuthFetch.js';
 import { parseBinaryIndex, indexToShotList } from '../pages/ShotHistory/parseBinaryIndex.js';
 import { parseBinaryShot } from '../pages/ShotHistory/parseBinaryShot.js';
 import {
@@ -58,7 +59,7 @@ function sanitizeProfile(profile) {
 }
 
 async function fetchSettingsSnapshot() {
-  const response = await fetch('/api/settings');
+  const response = await authenticatedFetch('/api/settings');
   if (!response.ok) {
     throw new Error(`Failed to load settings (HTTP ${response.status}).`);
   }
@@ -77,7 +78,7 @@ async function fetchProfilesSnapshot(apiService) {
 async function loadDeviceShotSamples(shot) {
   const paddedId = String(shot.id).padStart(6, '0');
   try {
-    const resp = await fetch(`/api/history/${paddedId}.slog`);
+    const resp = await authenticatedFetch(`/api/history/${paddedId}.slog`);
     if (!resp.ok) return shot;
     const parsed = parseBinaryShot(await resp.arrayBuffer(), shot.id);
     return { ...shot, samples: parsed.samples, loaded: true };
@@ -103,7 +104,7 @@ async function fetchShotHistorySnapshot(apiService) {
     });
   }
 
-  const indexResponse = await fetch('/api/history/index.bin');
+  const indexResponse = await authenticatedFetch('/api/history/index.bin');
   if (indexResponse.ok) {
     const indexData = parseBinaryIndex(await indexResponse.arrayBuffer());
     const deviceShotsMeta = indexToShotList(indexData);
@@ -163,7 +164,7 @@ async function restoreSettingsSnapshot(settings) {
     }
   }
 
-  const response = await fetch('/api/settings', {
+  const response = await authenticatedFetch('/api/settings', {
     method: 'POST',
     body: formData,
   });

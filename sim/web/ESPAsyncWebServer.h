@@ -7,8 +7,11 @@
 #include "FS.h"
 #include "Print.h"
 #include "WString.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <string>
@@ -81,6 +84,13 @@ class AsyncWebServerRequest {
         return it == _args.end() ? String() : String(it->second.c_str());
     }
     String arg(const String &name) const { return arg(name.c_str()); }
+    String header(const char *name) const {
+        std::string normalizedName(name);
+        std::transform(normalizedName.begin(), normalizedName.end(), normalizedName.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        auto it = _headers.find(normalizedName);
+        return it == _headers.end() ? String() : String(it->second.c_str());
+    }
 
     AsyncWebServerResponse *beginResponse(int code, const String &contentType, const uint8_t *content, size_t len);
     AsyncWebServerResponse *beginResponse(const String &contentType, size_t len, AwsResponseFiller callback);
@@ -97,6 +107,7 @@ class AsyncWebServerRequest {
     String _url;
     int _method = HTTP_GET;
     std::map<std::string, std::string> _args;
+    std::map<std::string, std::string> _headers;
     std::string _body;
     int _fd;
     AsyncWebServer *_server;
@@ -164,8 +175,14 @@ class AsyncWebSocket {
 class AsyncStaticWebHandler {
   public:
     AsyncStaticWebHandler &setCacheControl(const char *) { return *this; }
+    AsyncStaticWebHandler &setFilter(std::function<bool(AsyncWebServerRequest *)> filter) {
+        _filter = std::move(filter);
+        return *this;
+    }
     AsyncStaticWebHandler &setDefaultFile(const char *) { return *this; }
     AsyncStaticWebHandler &setTryGzipFirst(bool) { return *this; }
+
+    std::function<bool(AsyncWebServerRequest *)> _filter;
 };
 
 class AsyncWebServer {
@@ -196,13 +213,14 @@ class AsyncWebServer {
         std::string uri;
         FS *fs;
         std::string path;
+        AsyncStaticWebHandler *handler;
     };
 
     uint16_t _port;
     int _listenFd = -1;
     std::vector<Route> _routes;
     std::vector<StaticRoute> _static;
-    std::vector<AsyncStaticWebHandler> _staticHandlers;
+    std::list<AsyncStaticWebHandler> _staticHandlers;
     ArRequestHandlerFunction _notFound;
     AsyncWebSocket *_ws = nullptr;
 

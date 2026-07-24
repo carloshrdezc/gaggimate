@@ -79,21 +79,15 @@ test('worker rejects connect requests without a valid token and role', async () 
   assert.equal(invalidRole.status, 400);
 });
 
-test('worker routes each token to an isolated Durable Object instance', async () => {
+test('worker routes each authenticated token to an isolated Durable Object instance', async () => {
   const { env, fetchCalls } = createRelayEnv();
+  const request = (role, token) => new Request(`https://relay.example/connect?role=${role}`, {
+    headers: { 'Sec-WebSocket-Protocol': `gaggimate-relay-v1, gaggimate-token-${btoa(token).replace(/=+$/, '')}` },
+  });
 
-  const alphaDevice = await worker.fetch(
-    new Request('https://relay.example/connect?token=alpha&role=device'),
-    env,
-  );
-  const alphaBrowser = await worker.fetch(
-    new Request('https://relay.example/connect?token=alpha&role=browser'),
-    env,
-  );
-  const betaDevice = await worker.fetch(
-    new Request('https://relay.example/connect?token=beta&role=device'),
-    env,
-  );
+  const alphaDevice = await worker.fetch(request('device', 'alpha'), env);
+  const alphaBrowser = await worker.fetch(request('browser', 'alpha'), env);
+  const betaDevice = await worker.fetch(request('device', 'beta'), env);
 
   assert.equal(await alphaDevice.text(), 'id:alpha');
   assert.equal(await alphaBrowser.text(), 'id:alpha');

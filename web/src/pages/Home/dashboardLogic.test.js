@@ -16,7 +16,9 @@ import {
   getPrimaryActionState,
   getProcessKindForMode,
   getTemperatureRingMetrics,
+  computeStandbyOnBrewButtonState,
   shouldFireAutoSteamOnStop,
+  shouldFireStandbyOnStop,
   shouldKeepManualDraftDirty,
   shouldSendManualUpdate,
 } from './dashboardLogic.js';
@@ -231,6 +233,53 @@ test('auto-steam fires only for a brew/manual shot when enabled (PRO-421)', () =
   // right after the STANDBY.
   expect(shouldFireAutoSteamOnStop({ lastActiveWasBrew: false, autoSteamEnabled: true })).toBe(false);
   expect(shouldFireAutoSteamOnStop({ lastActiveWasBrew: false, autoSteamEnabled: false })).toBe(false);
+});
+
+test('standby-on-brew fires only for a brew/manual shot when enabled and auto-steam off (PRO-545)', () => {
+  // Brew shot just ended, standby-on-brew on, auto-steam off -> fire standby.
+  expect(
+    shouldFireStandbyOnStop({ lastActiveWasBrew: true, standbyOnBrewEnabled: true, autoSteamEnabled: false })
+  ).toBe(true);
+  // Standby-on-brew off -> never fire.
+  expect(
+    shouldFireStandbyOnStop({ lastActiveWasBrew: true, standbyOnBrewEnabled: false, autoSteamEnabled: false })
+  ).toBe(false);
+  // Auto-steam takes priority: even if standby-on-brew is armed, auto-steam wins
+  // and standby-on-brew must NOT fire (the two post-shot actions conflict).
+  expect(
+    shouldFireStandbyOnStop({ lastActiveWasBrew: true, standbyOnBrewEnabled: true, autoSteamEnabled: true })
+  ).toBe(false);
+  // Not a brew/manual session (caller cleared lastActiveWasBrew) -> never fire.
+  // This is the once-per-shot bounce guard, mirroring auto-steam.
+  expect(
+    shouldFireStandbyOnStop({ lastActiveWasBrew: false, standbyOnBrewEnabled: true, autoSteamEnabled: false })
+  ).toBe(false);
+});
+
+test('standby-on-brew button is disabled and un-armed while auto-steam is on, value preserved (PRO-545)', () => {
+  // Auto-steam off, standby-on-brew on -> interactive and armed (danger styling + ON label).
+  expect(computeStandbyOnBrewButtonState({ standbyOnBrewEnabled: true, autoSteamEnabled: false })).toEqual({
+    disabled: false,
+    armed: true,
+  });
+  // Auto-steam off, standby-on-brew off -> interactive but not armed.
+  expect(computeStandbyOnBrewButtonState({ standbyOnBrewEnabled: false, autoSteamEnabled: false })).toEqual({
+    disabled: false,
+    armed: false,
+  });
+  // Auto-steam ON while standby-on-brew was armed -> button disabled and shown
+  // un-armed. Mutual exclusion enforced at the button (auto-steam wins). The
+  // stored standbyOnBrewEnabled value is untouched (AC #5: preserved, not
+  // force-cleared) so it resumes once auto-steam is turned off again.
+  expect(computeStandbyOnBrewButtonState({ standbyOnBrewEnabled: true, autoSteamEnabled: true })).toEqual({
+    disabled: true,
+    armed: false,
+  });
+  // Auto-steam on, standby-on-brew off -> still just disabled.
+  expect(computeStandbyOnBrewButtonState({ standbyOnBrewEnabled: false, autoSteamEnabled: true })).toEqual({
+    disabled: true,
+    armed: false,
+  });
 });
 
 test('standby primary action wakes the machine into brew', () => {

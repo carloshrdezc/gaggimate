@@ -79,19 +79,19 @@ describe('comparisonShots', () => {
       addToComparison(makeShot({ id: 's2' }));
       addToComparison(makeShot({ id: 's3' }));
 
-      removeFromComparison('s2');
+      removeFromComparison(makeShot({ id: 's2' }));
 
       expect(comparisonShots.value.map(s => s.id)).toEqual(['s1', 's3']);
     });
 
     it('is a no-op when the ID is not present', () => {
       addToComparison(makeShot({ id: 's1' }));
-      removeFromComparison('does-not-exist');
+      removeFromComparison(makeShot({ id: 'does-not-exist' }));
       expect(comparisonShots.value.map(s => s.id)).toEqual(['s1']);
     });
 
     it('is a no-op on an empty list', () => {
-      removeFromComparison('ghost');
+      removeFromComparison(makeShot({ id: 'ghost' }));
       expect(comparisonShots.value).toEqual([]);
     });
   });
@@ -110,12 +110,55 @@ describe('comparisonShots', () => {
   describe('isInComparison', () => {
     it('returns true when the shot is in the set', () => {
       addToComparison(makeShot({ id: 's1' }));
-      expect(isInComparison('s1')).toBe(true);
+      expect(isInComparison(makeShot({ id: 's1' }))).toBe(true);
     });
 
     it('returns false when the shot is not in the set', () => {
       addToComparison(makeShot({ id: 's1' }));
-      expect(isInComparison('not-there')).toBe(false);
+      expect(isInComparison(makeShot({ id: 'not-there' }))).toBe(false);
+    });
+  });
+
+  describe('browser imports', () => {
+    it('compares imports with duplicate IDs when their storage keys differ', () => {
+      const firstImport = makeShot({
+        id: 'duplicate-import-id',
+        source: 'browser',
+        storageKey: 'first-import.json',
+      });
+      const secondImport = makeShot({
+        id: 'duplicate-import-id',
+        source: 'browser',
+        storageKey: 'second-import.json',
+      });
+
+      addToComparison(firstImport);
+      addToComparison(secondImport);
+
+      expect(comparisonShots.value).toEqual([firstImport, secondImport]);
+      expect(isInComparison(firstImport)).toBe(true);
+      expect(isInComparison(secondImport)).toBe(true);
+    });
+
+    it('removes only the selected browser import with a duplicate ID', () => {
+      const firstImport = makeShot({
+        id: 'duplicate-import-id',
+        source: 'browser',
+        name: 'first-import.json',
+      });
+      const secondImport = makeShot({
+        id: 'duplicate-import-id',
+        source: 'browser',
+        name: 'second-import.json',
+      });
+      addToComparison(firstImport);
+      addToComparison(secondImport);
+
+      removeFromComparison(firstImport);
+
+      expect(comparisonShots.value).toEqual([secondImport]);
+      expect(isInComparison(firstImport)).toBe(false);
+      expect(isInComparison(secondImport)).toBe(true);
     });
   });
 });

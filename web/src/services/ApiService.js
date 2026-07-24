@@ -1,6 +1,12 @@
 import { createContext } from 'preact';
 import { signal } from '@preact/signals';
 import uuidv4 from '../utils/uuid.js';
+import { LOCAL_AUTH_TOKEN_KEY } from './localAuthFetch.js';
+import {
+  beginRelayProvisioning,
+  relayCredentials,
+  relayWebSocketProtocols,
+} from './relayConfig.js';
 
 /**
  * Thrown by `ApiService.request()` when the underlying WebSocket closes (or
@@ -45,6 +51,53 @@ export const ConnState = Object.freeze({
   RECONNECTING: 'RECONNECTING',
 });
 
+export function validateWebSocketRequest(data) {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    typeof data.tp !== 'string' ||
+    !data.tp.startsWith('req:')
+  ) {
+    throw new TypeError('WebSocket request requires a req:* tp string');
+  }
+  const numeric = (field, min, max) => {
+    if (
+      typeof data[field] !== 'number' ||
+      !Number.isFinite(data[field]) ||
+      data[field] < min ||
+      data[field] > max
+    ) {
+      throw new TypeError(`${field} must be a finite number between ${min} and ${max}`);
+    }
+  };
+  switch (data.tp) {
+    case 'req:dose:set':
+      numeric('grams', Number.EPSILON, 200);
+      break;
+    case 'req:change-brew-target':
+      numeric('target', 0, 200);
+      break;
+    case 'req:change-grind-target':
+      numeric('target', 0, 1);
+      if (!Number.isInteger(data.target)) throw new TypeError('target must be 0 or 1');
+      break;
+    case 'req:change-mode':
+      numeric('mode', 0, 5);
+      if (!Number.isInteger(data.mode)) throw new TypeError('mode must be an integer');
+      break;
+    case 'req:manual:update':
+      if (data.targetType !== undefined && !['flow', 'pressure'].includes(data.targetType))
+        throw new TypeError("targetType must be 'flow' or 'pressure'");
+      if (data.pressure !== undefined) numeric('pressure', 0, 12);
+      if (data.flow !== undefined) numeric('flow', 0, 20);
+      if (data.temperature !== undefined) numeric('temperature', 0, 150);
+      break;
+    default:
+      break;
+  }
+  return data;
+}
+
 export default class ApiService {
   static HISTORY_MAX_SIZE = 600;
 
@@ -79,29 +132,17 @@ export default class ApiService {
     this.connect();
   }
 
-  _resolveWsUrl() {
-    // Check URL params for relay configuration (one-time setup link)
-    const params = new URLSearchParams(window.location.search);
-    const relayParam = params.get('relay');
-    const tokenParam = params.get('token');
-    if (relayParam && tokenParam) {
-      localStorage.setItem('gaggimate_relay_url', relayParam);
-      localStorage.setItem('gaggimate_relay_token', tokenParam);
-      // Clean params from URL without reload
-      const url = new URL(window.location.href);
-      url.searchParams.delete('relay');
-      url.searchParams.delete('token');
-      history.replaceState(null, '', url.toString());
-    }
-
-    const relayUrl = localStorage.getItem('gaggimate_relay_url');
-    const relayToken = localStorage.getItem('gaggimate_relay_token');
-    if (relayUrl && relayToken) {
-      return `${relayUrl}/connect?token=${encodeURIComponent(relayToken)}&role=browser`;
-    }
+  _resolveWsConfig() {
+    beginRelayProvisioning();
+    const relay = relayCredentials();
+    if (relay)
+      return {
+        url: `${relay.relayUrl}/connect?role=browser`,
+        protocols: relayWebSocketProtocols(relay.relayToken),
+      };
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    return `${wsProtocol}${window.location.host}/ws`;
+    return { url: `${wsProtocol}${window.location.host}/ws`, protocols: undefined };
   }
 
   async connect() {
@@ -119,7 +160,8 @@ export default class ApiService {
         this.socket.close();
       }
 
-      this.socket = new WebSocket(this._resolveWsUrl());
+      const { url, protocols } = this._resolveWsConfig();
+      this.socket = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
 
       // Use bound references to enable proper cleanup
       this.socket.addEventListener('message', this._boundOnMessage);
@@ -133,8 +175,74 @@ export default class ApiService {
     }
   }
 
+  authenticateLocal(token) {
+    if (token && this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ tp: 'req:auth', token }));
+    }
+  }
+
+  /**
+   * Send `req:auth` and resolve only once the firmware confirms with a
+   * `res:auth {ok, error?}` frame (WebUIPlugin.cpp:1414-1421). Unlike
+   * `authenticateLocal` (fire-and-forget, used at `_onOpen` where no user is
+   * waiting), this is for interactive callers that must NOT claim success until
+   * the device actually accepts the token.
+   *
+   * `res:auth` carries no `rid`, so it can't ride the `request()` rid-pairing
+   * path — we listen on the `res:auth` type bus for the next reply instead.
+   *
+   * Rejects with:
+   * - `WebSocketDisconnectedError` if the socket isn't open at send time (still
+   *   connecting/reconnecting — the fire-and-forget path would silently no-op).
+   * - `Error('Authentication timed out')` if no `res:auth` arrives in time.
+   *
+   * Resolves with `{ ok: boolean, error?: string }` — `ok:false` means the
+   * device rejected the token (wrong/stale). Callers decide UI from `ok`.
+   *
+   * @param {string} token
+   * @param {number} [timeoutMs]
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  authenticateLocalAndConfirm(token, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      if (!token || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        reject(new WebSocketDisconnectedError('WebSocket is not connected'));
+        return;
+      }
+
+      let settled = false;
+      let listenerId;
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.off('res:auth', listenerId);
+        reject(new Error('Authentication timed out'));
+      }, timeoutMs);
+
+      listenerId = this.on('res:auth', message => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.off('res:auth', listenerId);
+        resolve({ ok: !!message.ok, error: message.error });
+      });
+
+      try {
+        this.socket.send(JSON.stringify({ tp: 'req:auth', token }));
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.off('res:auth', listenerId);
+        reject(error);
+      }
+    });
+  }
+
   _onOpen() {
     console.log('WebSocket connected successfully');
+    const localAdminToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+    this.authenticateLocal(localAdminToken);
     this.reconnectAttempts = 0;
     this.isConnecting = false;
     this._connState = ConnState.OPEN;
@@ -336,6 +444,7 @@ export default class ApiService {
   }
 
   send(event) {
+    validateWebSocketRequest(event);
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(event));
     } else {
@@ -444,6 +553,8 @@ export default class ApiService {
       allowYieldOverride: !!message.ayo,
       // PRO-226: device-authoritative auto-steam (as: 0/1) and brew dose (dg: float).
       autoSteamEnabled: !!message.as,
+      // PRO-545: device-authoritative standby-on-brew (sb: 0/1).
+      standbyOnBrewEnabled: !!message.sb,
       // Legacy (pre-PRO-225) firmware doesn't send `dg`; emit null so the
       // consumer falls back to its localStorage cache instead of clobbering it.
       doseGrams: Number.isFinite(message.dg) ? message.dg : null,
@@ -522,6 +633,7 @@ export const machine = signal({
     brewTargetVolume: 0,
     allowYieldOverride: false,
     autoSteamEnabled: false,
+    standbyOnBrewEnabled: false,
     doseGrams: DEFAULT_DOSE_GRAMS,
     grindTargetDuration: 0,
     grindTargetVolume: 0,

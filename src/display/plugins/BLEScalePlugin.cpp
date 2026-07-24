@@ -5,6 +5,7 @@
 #include "BLEScaleConnectPolicy.h"
 #include "BLEScaleMeasurementPolicy.h"
 #include "BLEScaleScanPolicy.h"
+#include "BLEVolumetricOverridePolicy.h"
 #include "ShotHistoryPlugin.h"
 #include "remote_scales.h"
 #include "remote_scales_plugin_registry.h"
@@ -195,10 +196,12 @@ void BLEScalePlugin::update() {
         return;
     }
 
-    bool hasConnectedScale = false;
-
-    if (!active)
+    if (!active) {
+        controller->setVolumetricOverride(shouldEnableBleVolumetricOverride(false, false));
         return;
+    }
+
+    bool hasConnectedScale = false;
 
     if (scale != nullptr) {
         // Call scale update with error checking
@@ -227,8 +230,7 @@ void BLEScalePlugin::update() {
             }
         }
 
-        if (controller->isVolumetricAvailable())
-            controller->setVolumetricOverride(hasConnectedScale);
+        controller->setVolumetricOverride(shouldEnableBleVolumetricOverride(active, hasConnectedScale));
 
         // PRO-5: route the counter through nextReconnectionTries() (tested in
         // test_ble_scale_scan_policy) so it measures CONSECUTIVE failed reconnect
@@ -304,6 +306,10 @@ void BLEScalePlugin::disconnect() {
     bool expected = false;
     if (!tearingDown.compare_exchange_strong(expected, true)) {
         return;
+    }
+
+    if (controller != nullptr) {
+        controller->setVolumetricOverride(shouldEnableBleVolumetricOverride(false, false));
     }
 
     if (scale != nullptr) {

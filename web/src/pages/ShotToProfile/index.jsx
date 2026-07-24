@@ -6,6 +6,7 @@ import { setPendingProfile } from '../../state/pendingProfile.js';
 import { BoundaryChart } from './BoundaryChart.jsx';
 import { SegmentCard } from './SegmentCard.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
+import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { parseBinaryShot } from '../ShotHistory/parseBinaryShot.js';
 import { avg } from '../../utils/shotMath.js';
 
@@ -80,7 +81,7 @@ export function ShotToProfile() {
     async function load() {
       try {
         const paddedId = String(shotId).padStart(6, '0');
-        const res = await fetch(`/api/history/${paddedId}.slog`, { signal: controller.signal });
+        const res = await authenticatedFetch(`/api/history/${paddedId}.slog`, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
         const parsed = parseBinaryShot(buf, shotId);

@@ -1,4 +1,11 @@
-import { faFileExport, faCheck, faEye, faEyeSlash, faArrowLeft, faSave } from '@fortawesome/free-solid-svg-icons';
+import {
+  faFileExport,
+  faCheck,
+  faEye,
+  faEyeSlash,
+  faArrowLeft,
+  faSave,
+} from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ImportButton } from '../../components/ImportButton.jsx';
 import { computed } from '@preact/signals';
@@ -8,13 +15,31 @@ import Card from '../../components/Card.jsx';
 import { Spinner } from '../../components/Spinner.jsx';
 import { timezones } from '../../config/zones.js';
 import { machine, ApiServiceContext } from '../../services/ApiService.js';
+import {
+  authenticatedFetch,
+  localAuthDownloadUrl,
+  bootstrapLocalAuth,
+  localAuthHandoffUrl,
+  MDNS_NAME_ERROR,
+} from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
 import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
+import { LocalAuthRecoveryCard } from './LocalAuthRecoveryCard.jsx';
 import { GoogleDriveBackupCard } from './GoogleDriveBackupCard.jsx';
-import { buildRemoteAccessLink, DEFAULT_REMOTE_PAGES_ORIGIN, SECRET_SENTINEL } from './remoteAccessLogic.js';
+import {
+  clearRelayCredentials,
+  confirmRelayOrigin,
+  relayCredentials,
+  saveRelayCredentials,
+} from '../../services/relayConfig.js';
+import {
+  buildRemoteAccessLink,
+  DEFAULT_REMOTE_PAGES_ORIGIN,
+  SECRET_SENTINEL,
+} from './remoteAccessLogic.js';
 import { normalizeSettings } from './settingsNormalize.js';
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
@@ -27,11 +52,14 @@ export function Settings() {
   const [formData, setFormData] = useState({});
   const [currentTheme, setCurrentTheme] = useState('midnight');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
+  const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
+  const [authHandoffError, setAuthHandoffError] = useState(null);
+  const [authHandoffCopied, setAuthHandoffCopied] = useState(false);
   const [autowakeupSchedules, setAutoWakeupSchedules] = useState([
     { time: '07:00', days: [true, true, true, true, true, true, true] },
   ]);
   const { isLoading, data: fetchedSettings } = useQuery(`settings/${gen}`, async () => {
-    const response = await fetch(`/api/settings`);
+    const response = await authenticatedFetch(`/api/settings`);
     const data = await response.json();
     return data;
   });
@@ -46,6 +74,9 @@ export function Settings() {
       );
       setAutoWakeupSchedules(schedules);
       setFormData(normalized);
+      if (fetchedSettings.localAdminToken && fetchedSettings.localAdminToken !== SECRET_SENTINEL) {
+        bootstrapLocalAuth(fetchedSettings.localAdminToken, apiService);
+      }
     } else {
       setFormData({});
       setAutoWakeupSchedules([{ time: '07:00', days: [true, true, true, true, true, true, true] }]);
@@ -55,6 +86,59 @@ export function Settings() {
   useEffect(() => {
     setCurrentTheme(getStoredTheme());
   }, []);
+
+  const prepareAuthHandoff = async () => {
+    const url = localAuthHandoffUrl(formData.mdnsName);
+    if (!url) {
+      setAuthHandoffUrl(null);
+      setAuthHandoffError(MDNS_NAME_ERROR);
+      return;
+    }
+
+    setAuthHandoffUrl(null);
+    setAuthHandoffError(null);
+    setAuthHandoffCopied(false);
+    const wifiCredentials = new FormData(formRef.current);
+
+    try {
+      // The recovery marker must be written with the pending Wi-Fi credentials.
+      // Otherwise Controller::setupWifi() deliberately remains in AP recovery.
+      const response = await authenticatedFetch('/api/settings/provision', {
+        method: 'post',
+        body: new URLSearchParams({
+          wifiSsid: wifiCredentials.get('wifiSsid') || '',
+          wifiPassword: wifiCredentials.get('wifiPassword') || '',
+          mdnsName: formData.mdnsName || '',
+          completeLocalAuthProvisioning: '1',
+          restart: '1',
+        }),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+    } catch (error) {
+      console.error('Failed to provision Wi-Fi auth handoff:', error);
+      setAuthHandoffError('Wi-Fi provisioning failed. Check the connection and try again.');
+      return;
+    }
+
+    setAuthHandoffUrl(url);
+    // AP setup is served over plain HTTP, so navigator.clipboard is normally
+    // undefined (Clipboard API requires a secure context) or throws even when
+    // present in some browsers' insecure-origin shims. Either way, the ONLY
+    // guaranteed way to hand the token to the user here is the visible link
+    // rendered below via authHandoffUrl -- never rely on the copy succeeding.
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setAuthHandoffCopied(true);
+      }
+    } catch (error) {
+      console.error(
+        'Failed to copy Wi-Fi auth handoff (expected on insecure/HTTP origins):',
+        error,
+      );
+      setAuthHandoffCopied(false);
+    }
+  };
 
   const onChange = key => {
     return e => {
@@ -178,7 +262,15 @@ export function Settings() {
         if (restart) {
           formDataToSubmit.append('restart', '1');
         }
-        const response = await fetch(form.action, {
+        const previousRelay = relayCredentials();
+        if (
+          formData.cloudRelayEnabled &&
+          !confirmRelayOrigin(formData.cloudRelayUrl || '', previousRelay?.relayUrl)
+        ) {
+          return;
+        }
+
+        const response = await authenticatedFetch(form.action, {
           method: 'post',
           body: formDataToSubmit,
         });
@@ -189,33 +281,24 @@ export function Settings() {
 
         const data = await response.json();
 
-        // Sync relay config to localStorage so browser uses relay on next connection.
-        // The server returns the literal sentinel `SECRET_SENTINEL` in place of the
-        // real token on every /api/settings response, so we cannot read the token
-        // from `data`. Use the value we just POSTed (which is what the user typed,
-        // the sentinel if they didn't touch the field, or empty if they cleared it).
+        // Keep the relay URL persistent but hold the browser relay token only for
+        // this tab session. The firmware remains the durable credential store.
         const submittedToken = formDataToSubmit.get('cloudRelayToken');
         if (data.cloudRelayUrl && data.cloudRelayEnabled) {
-          localStorage.setItem('gaggimate_relay_url', data.cloudRelayUrl);
-          if (submittedToken === SECRET_SENTINEL || submittedToken === null) {
-            // User left the prefilled sentinel in place (or the field was absent
-            // from the form). Keep whatever was already in localStorage.
-          } else if (submittedToken === '') {
-            // User explicitly cleared the token field. Mirror that to storage so
-            // the browser doesn't keep reconnecting with stale credentials.
-            localStorage.removeItem('gaggimate_relay_token');
-          } else {
-            // User entered a new (or rotated) token. Persist it.
-            localStorage.setItem('gaggimate_relay_token', submittedToken);
-          }
+          const currentRelay = relayCredentials();
+          const tokenToUse =
+            submittedToken === SECRET_SENTINEL || submittedToken === null
+              ? currentRelay?.relayToken || ''
+              : submittedToken;
+          if (!saveRelayCredentials(data.cloudRelayUrl, tokenToUse, data.cloudRelayUrl)) return;
         } else {
-          localStorage.removeItem('gaggimate_relay_url');
-          localStorage.removeItem('gaggimate_relay_token');
+          clearRelayCredentials();
         }
 
         const updatedData = {
           ...data,
-          standbyDisplayEnabled: data.standbyBrightness > 0 ? formData.standbyDisplayEnabled : false,
+          standbyDisplayEnabled:
+            data.standbyBrightness > 0 ? formData.standbyDisplayEnabled : false,
         };
 
         setGrindSettings(updatedData);
@@ -267,9 +350,18 @@ export function Settings() {
   };
 
   if (isLoading) {
+    // Render the token-recovery card even while (or if) /api/settings never
+    // resolves. In a browser/storage context with no local admin token (PRO-517),
+    // that request 401s and this page would otherwise be stuck behind the spinner
+    // with no way to paste a token back in. See LocalAuthRecoveryCard for context.
     return (
-      <div className='flex w-full flex-row items-center justify-center py-16'>
-        <Spinner size={8} />
+      <div className='flex flex-col gap-6'>
+        <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
+          <LocalAuthRecoveryCard />
+        </div>
+        <div className='flex w-full flex-row items-center justify-center py-16'>
+          <Spinner size={8} />
+        </div>
       </div>
     );
   }
@@ -278,7 +370,7 @@ export function Settings() {
     <div className='flex flex-col gap-6'>
       {/* Header */}
       <div className='flex items-center justify-between gap-4'>
-        <h1 className='font-nd-mono text-[20px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+        <h1 className='font-nd-mono text-[20px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
           Settings
         </h1>
         <div className='flex items-center gap-2'>
@@ -295,6 +387,10 @@ export function Settings() {
         </div>
       </div>
 
+      <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
+        <LocalAuthRecoveryCard />
+      </div>
+
       <form key='settings' ref={formRef} method='post' action='/api/settings' onSubmit={onSubmit}>
         <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
           {/* Temperature Settings */}
@@ -303,7 +399,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='targetSteamTemp'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Default Steam Temperature
                 </label>
@@ -324,7 +420,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='targetWaterTemp'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Default Water Temperature
                 </label>
@@ -351,7 +447,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='startup-mode'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Startup Mode
                 </label>
@@ -369,7 +465,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='standbyTimeout'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Standby Timeout
                 </label>
@@ -394,8 +490,8 @@ export function Settings() {
                 </div>
               </div>
               <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
-                Shuts off the process ahead of time based on the flow rate to account for any dripping
-                or delays in the control.
+                Shuts off the process ahead of time based on the flow rate to account for any
+                dripping or delays in the control.
               </div>
               <div className='flex items-center justify-between'>
                 <span className='font-nd-mono text-[14px] text-[var(--text-primary,#e8e8e8)]'>
@@ -415,7 +511,7 @@ export function Settings() {
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='brewDelay'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     Brew
                   </label>
@@ -437,7 +533,7 @@ export function Settings() {
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='grindDelay'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     Grind
                   </label>
@@ -466,11 +562,11 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='flushDuration'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Flush Duration
                 </label>
-                <div className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mb-2'>
+                <div className='font-nd-mono mb-2 text-[11px] text-[var(--text-disabled,#666)]'>
                   Maximum duration for flushing. (1-60s)
                 </div>
                 <div className='flex'>
@@ -522,8 +618,9 @@ export function Settings() {
                   <span className='nd-toggle-thumb' />
                 </button>
               </div>
-              <p className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)] -mt-2'>
-                When off, the dashboard yield follows the active profile and can't be edited per shot.
+              <p className='font-nd-mono -mt-2 text-[12px] text-[var(--text-secondary,#999)]'>
+                When off, the dashboard yield follows the active profile and can't be edited per
+                shot.
               </p>
             </div>
           </Card>
@@ -534,7 +631,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='webui-theme'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Theme
                 </label>
@@ -568,7 +665,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='wifiSsid'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Wi-Fi SSID
                 </label>
@@ -585,7 +682,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='wifiPassword'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Wi-Fi Password
                 </label>
@@ -611,7 +708,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='mdnsName'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Hostname
                 </label>
@@ -623,12 +720,61 @@ export function Settings() {
                   placeholder='Hostname'
                   value={formData.mdnsName}
                   onChange={onChange('mdnsName')}
+                  aria-describedby={authHandoffError ? 'mdnsNameError' : undefined}
                 />
+                {authHandoffError && (
+                  <div id='mdnsNameError' role='alert' className='text-sm text-red-400'>
+                    {authHandoffError}
+                  </div>
+                )}
+              </div>
+              <div className='border-l-2 border-[var(--text-secondary,#999)] pl-4'>
+                <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
+                  Before moving from the setup AP to Wi-Fi, provision the device and copy this
+                  one-time auth handoff link. Its credential stays in the URL fragment and is not
+                  sent to the network.
+                </div>
+                <button
+                  type='button'
+                  className='btn btn-secondary mt-2'
+                  onClick={prepareAuthHandoff}
+                >
+                  Provision Wi-Fi and copy auth handoff link
+                </button>
+                {authHandoffUrl && (
+                  <>
+                    <div className='font-nd-mono mt-2 text-[13px] text-[var(--text-disabled,#666)]'>
+                      The device restarts into STA after this successful provisioning.
+                    </div>
+                    {authHandoffCopied ? (
+                      <div role='status' className='mt-2 text-sm text-green-400'>
+                        Link copied to clipboard.
+                      </div>
+                    ) : (
+                      <div role='alert' className='mt-2 text-sm text-yellow-400'>
+                        Could not copy automatically (common on this insecure setup page) -- select
+                        and copy the link below manually before leaving this page.
+                      </div>
+                    )}
+                    <div
+                      className='mt-2 cursor-text rounded border border-[var(--text-secondary,#999)] p-2 text-xs break-all select-all'
+                      onClick={e => {
+                        const selection = window.getSelection();
+                        const range = document.createRange();
+                        range.selectNodeContents(e.currentTarget);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                      }}
+                    >
+                      {authHandoffUrl}
+                    </div>
+                  </>
+                )}
               </div>
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='timezone'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Time Zone
                 </label>
@@ -684,24 +830,24 @@ export function Settings() {
                   <span className='nd-toggle-thumb' />
                 </button>
               </div>
-              <p className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)] -mt-2'>
-                When on, all device logs (INFO and above) are broadcast unencrypted over UDP on
-                port 9999 to the whole local network. Enable only on a trusted network, for
-                debugging. Default off.
+              <p className='font-nd-mono -mt-2 text-[12px] text-[var(--text-secondary,#999)]'>
+                When on, all device logs (INFO and above) are broadcast unencrypted over UDP on port
+                9999 to the whole local network. Enable only on a trusted network, for debugging.
+                Default off.
               </p>
-              <div className='flex flex-wrap items-center gap-x-4 gap-y-1 -mt-1'>
+              <div className='-mt-1 flex flex-wrap items-center gap-x-4 gap-y-1'>
                 <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
                   Download SD log:
                 </span>
                 <a
-                  href='/api/diag/log.txt'
+                  href={localAuthDownloadUrl('/api/diag/log.txt')}
                   download='diag-log.txt'
                   className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
                 >
                   log.txt
                 </a>
                 <a
-                  href='/api/diag/log.1'
+                  href={localAuthDownloadUrl('/api/diag/log.1')}
                   download='diag-log.1.txt'
                   className='font-nd-mono text-[12px] text-[var(--accent,#4ea1ff)] underline'
                 >
@@ -717,7 +863,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='pid'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   PID Values
                 </label>
@@ -737,7 +883,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='kf'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Thermal Feedforward Gain
                 </label>
@@ -755,18 +901,18 @@ export function Settings() {
                   />
                   <span className='nd-input-unit'>Kff</span>
                 </div>
-                <div className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mt-1'>
+                <div className='font-nd-mono mt-1 text-[11px] text-[var(--text-disabled,#666)]'>
                   Set to 0 to disable feedforward control.
                 </div>
               </div>
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='pumpModelCoeffs'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Pump Flow Coefficients
                 </label>
-                <div className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mb-2'>
+                <div className='font-nd-mono mb-2 text-[11px] text-[var(--text-disabled,#666)]'>
                   Enter 2 values (flow at 1 bar, flow at 9 bar)
                 </div>
                 <input
@@ -782,7 +928,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='temperatureOffset'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Temperature Offset (°C)
                 </label>
@@ -805,11 +951,11 @@ export function Settings() {
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='pressureScaling'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     Pressure Sensor Rating
                   </label>
-                  <div className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mb-2'>
+                  <div className='font-nd-mono mb-2 text-[11px] text-[var(--text-disabled,#666)]'>
                     Enter the bar rating of the pressure sensor being used
                   </div>
                   <div className='flex'>
@@ -831,11 +977,11 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='steamPumpPercentage'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Steam Pump Assist
                 </label>
-                <div className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mb-2'>
+                <div className='font-nd-mono mb-2 text-[11px] text-[var(--text-disabled,#666)]'>
                   {pressureAvailable.value
                     ? 'How many ml/s to pump into the boiler during steaming'
                     : 'What percentage to run the pump at during steaming'}
@@ -861,22 +1007,20 @@ export function Settings() {
                       })
                     }
                   />
-                  <span className='nd-input-unit'>
-                    {pressureAvailable.value ? 'ml/s' : '%'}
-                  </span>
+                  <span className='nd-input-unit'>{pressureAvailable.value ? 'ml/s' : '%'}</span>
                 </div>
               </div>
               {pressureAvailable.value && (
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='steamPumpCutoff'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     Pump Assist Cutoff
                   </label>
-                  <div className='font-nd-mono text-[11px] text-[var(--text-disabled,#666)] mb-2'>
-                    At how many bars should the pump assist stop. This makes it so the pump will only
-                    run when steam is flowing.
+                  <div className='font-nd-mono mb-2 text-[11px] text-[var(--text-disabled,#666)]'>
+                    At how many bars should the pump assist stop. This makes it so the pump will
+                    only run when steam is flowing.
                   </div>
                   <div className='flex'>
                     <input
@@ -897,7 +1041,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='altRelayFunction'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Alt Relay / SSR2 Function
                 </label>
@@ -924,7 +1068,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='mainBrightness'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Main Brightness (1-16)
                 </label>
@@ -963,7 +1107,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='standbyBrightness'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Standby Brightness (0-16)
                 </label>
@@ -984,7 +1128,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='standbyBrightnessTimeout'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Standby Brightness Timeout (s)
                 </label>
@@ -1006,7 +1150,7 @@ export function Settings() {
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='themeMode'
-                  className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                  className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                 >
                   Theme
                 </label>
@@ -1035,7 +1179,7 @@ export function Settings() {
                   <div className='flex flex-col gap-2'>
                     <label
                       htmlFor='sunriseR'
-                      className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                      className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                     >
                       Red (0 - 255)
                     </label>
@@ -1053,7 +1197,7 @@ export function Settings() {
                   <div className='flex flex-col gap-2'>
                     <label
                       htmlFor='sunriseG'
-                      className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                      className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                     >
                       Green (0 - 255)
                     </label>
@@ -1071,7 +1215,7 @@ export function Settings() {
                   <div className='flex flex-col gap-2'>
                     <label
                       htmlFor='sunriseB'
-                      className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                      className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                     >
                       Blue (0 - 255)
                     </label>
@@ -1089,7 +1233,7 @@ export function Settings() {
                   <div className='flex flex-col gap-2'>
                     <label
                       htmlFor='sunriseW'
-                      className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                      className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                     >
                       White (0 - 255)
                     </label>
@@ -1108,7 +1252,7 @@ export function Settings() {
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='sunriseExtBrightness'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     External LED (0 - 255)
                   </label>
@@ -1126,7 +1270,7 @@ export function Settings() {
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='emptyTankDistance'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     Distance from sensor to bottom of the tank
                   </label>
@@ -1147,7 +1291,7 @@ export function Settings() {
                 <div className='flex flex-col gap-2'>
                   <label
                     htmlFor='fullTankDistance'
-                    className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+                    className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
                   >
                     Distance from sensor to the fill line
                   </label>
@@ -1187,7 +1331,7 @@ export function Settings() {
 
         {/* Warning + Action buttons */}
         <div className='col-span-10 pt-6'>
-          <div className='border-l-2 border-[var(--color-warning,#d4a843)] pl-4 mb-4'>
+          <div className='mb-4 border-l-2 border-[var(--color-warning,#d4a843)] pl-4'>
             <span className='font-nd-mono text-[14px] text-[var(--text-disabled,#666)]'>
               Some options like Wi-Fi, NTP, and managing plugins require a restart.
             </span>
@@ -1237,9 +1381,7 @@ function RemoteAccessCard({ formData, onChange }) {
   // buildRemoteAccessLink as a defense-in-depth check.
   const formToken = formData.cloudRelayToken || '';
   const relayToken =
-    formToken && formToken !== SECRET_SENTINEL
-      ? formToken
-      : localStorage.getItem('gaggimate_relay_token') || '';
+    formToken && formToken !== SECRET_SENTINEL ? formToken : relayCredentials()?.relayToken || '';
   const relayEnabled = !!formData.cloudRelayEnabled;
   const remoteLink = buildRemoteAccessLink({
     relayEnabled,
@@ -1262,11 +1404,17 @@ function RemoteAccessCard({ formData, onChange }) {
       <div className='flex flex-col gap-5'>
         <p className='text-[14px] text-[var(--text-disabled,#666)]'>
           Deploy the relay server and enter its URL below to access your machine from anywhere.
+          Relay tokens stay only in this browser tab; rotate the token here to revoke prior browser
+          sessions.
         </p>
         <div className='flex items-center justify-between gap-4'>
           <div>
-            <div className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>Enable Relay</div>
-            <div className='text-[12px] text-[var(--text-disabled,#666)]'>Turn off when not in use to keep the device stable</div>
+            <div className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
+              Enable Relay
+            </div>
+            <div className='text-[12px] text-[var(--text-disabled,#666)]'>
+              Turn off when not in use to keep the device stable
+            </div>
           </div>
           <button
             type='button'
@@ -1282,7 +1430,7 @@ function RemoteAccessCard({ formData, onChange }) {
           <div className='flex flex-col gap-2'>
             <label
               htmlFor='cloudRelayUrl'
-              className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+              className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
             >
               Relay Server URL
             </label>
@@ -1295,13 +1443,17 @@ function RemoteAccessCard({ formData, onChange }) {
               value={relayUrl}
               onChange={onChange('cloudRelayUrl')}
             />
+            <p className='text-[12px] text-[var(--text-disabled,#666)]'>
+              You will confirm the target relay host before it is used. Prefer wss://. ws:// is
+              unencrypted, and non-default/self-hosted relays require extra care.
+            </p>
           </div>
         )}
         {relayEnabled && (
           <div className='flex flex-col gap-2'>
             <label
               htmlFor='cloudRelayToken'
-              className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'
+              className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'
             >
               Relay Token
             </label>
@@ -1318,7 +1470,7 @@ function RemoteAccessCard({ formData, onChange }) {
         )}
         {hasRelay && (
           <div className='flex flex-col gap-2'>
-            <span className='font-nd-mono text-[14px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+            <span className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
               Remote Access Link
             </span>
             <div className='flex items-center gap-2'>
@@ -1327,12 +1479,17 @@ function RemoteAccessCard({ formData, onChange }) {
                 className='nd-input nd-input--lg flex-1 font-mono text-xs'
                 value={remoteLink}
               />
-              <button type='button' onClick={copyLink} className='nd-action-btn nd-action-btn--text px-3'>
+              <button
+                type='button'
+                onClick={copyLink}
+                className='nd-action-btn nd-action-btn--text px-3'
+              >
                 {copied ? <FontAwesomeIcon icon={faCheck} /> : 'Copy'}
               </button>
             </div>
             <p className='text-[12px] text-[var(--text-disabled,#666)]'>
-              Bookmark this link to access your machine remotely. Save settings first to activate the relay.
+              Bookmark this link to access your machine remotely. Save settings first to activate
+              the relay.
             </p>
           </div>
         )}

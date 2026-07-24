@@ -2,6 +2,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
+#include "SettingsPersistenceTransaction.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <display/core/constants.h>
@@ -103,6 +104,7 @@ class Settings {
     bool isVolumetricTarget() const { return volumetricTarget; }
     bool isAllowYieldOverride() const { return allowYieldOverride; }
     bool isAutoSteamEnabled() const { return autoSteamEnabled; }
+    bool isStandbyOnBrewEnabled() const { return standbyOnBrewEnabled; }
     double getDoseGrams() const { return doseGrams; }
     String getOTAChannel() const;
     // PRO-400: the channel whose resolved head is believed to be flashed on the
@@ -166,6 +168,10 @@ class Settings {
     String getCloudRelayUrl() const;
     String getCloudRelayToken() const;
     bool isCloudRelayEnabled() const { return cloudRelayEnabled; }
+    String getLocalAdminToken() const { return localAdminToken; }
+    bool isLocalAuthProvisioned() const { return localAuthProvisioned; }
+    void setLocalAdminToken(const String &token);
+    void setLocalAuthProvisioned(bool provisioned);
     int getManualTargetType() const { return manualTargetType; }
     float getManualPressure() const { return manualPressure; }
     float getManualFlow() const { return manualFlow; }
@@ -198,6 +204,7 @@ class Settings {
     void setVolumetricTarget(bool volumetric_target);
     void setAllowYieldOverride(bool allow_yield_override);
     void setAutoSteamEnabled(bool auto_steam_enabled);
+    void setStandbyOnBrewEnabled(bool standby_on_brew_enabled);
     void setDoseGrams(double dose_grams);
     void setOTAChannel(const String &otaChannel);
     void setInstalledChannel(const String &installedChannel);
@@ -246,8 +253,29 @@ class Settings {
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
 
   private:
+    struct PersistenceSnapshot {
+        int startupMode, targetSteamTemp, targetWaterTemp, targetGrindDuration, temperatureOffset, standbyTimeout;
+        int startupFillTime, steamFillTime, smartGrindMode, homeAssistantPort, mainBrightness, standbyBrightness;
+        int standbyBrightnessTimeout, wifiApTimeout, themeMode, historyIndex, flushDuration, manualTargetType;
+        int manualTemperature, sunriseR, sunriseG, sunriseB, sunriseW, sunriseExtBrightness, emptyTankDistance;
+        int fullTankDistance, altRelayFunction;
+        float pressureScaling, steamPumpPercentage, steamPumpCutoff, manualPressure, manualFlow;
+        double targetGrindVolume, brewDelay, grindDelay, doseGrams;
+        bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, standbyOnBrewEnabled,
+            boilerFillActive;
+        bool smartGrindActive, diagnosticLogEnabled, smartGrindToggle, homeAssistant, momentaryButtons;
+        bool clock24hFormat, autowakeupEnabled, altRelayConfigured, cloudRelayEnabled, localAuthProvisioned;
+        String pid, pumpModelCoeffs, wifiSsid, wifiPassword, mdnsName, otaChannel, installedChannel, savedScale;
+        String smartGrindIp, homeAssistantIP, homeAssistantTopic, homeAssistantUser, homeAssistantPassword, timezone;
+        String selectedProfile, selectedBean, selectedGrinder, favoritedProfiles, profileOrder, cloudRelayUrl, cloudRelayToken;
+        String localAdminToken;
+        std::vector<AutoWakeupSchedule> autowakeupSchedules;
+    };
     Preferences preferences;
-    bool dirty = false;
+    SettingsPersistenceTransaction persistenceTransaction;
+    // Serializes a settings batch and the state snapshot taken by doSave().
+    // It is recursive because batchUpdate() calls setters that call save().
+    SemaphoreHandle_t persistenceMutex = nullptr;
 
     String selectedProfile;
     int targetSteamTemp = 155;
@@ -273,6 +301,7 @@ class Settings {
     bool volumetricTarget = false;
     bool allowYieldOverride = false;
     bool autoSteamEnabled = false;
+    bool standbyOnBrewEnabled = false;
     double doseGrams = 18.0;
     bool boilerFillActive = false;
     int startupFillTime = 0;
@@ -354,8 +383,12 @@ class Settings {
     String cloudRelayUrl = "";
     String cloudRelayToken = "";
     bool cloudRelayEnabled = false;
+    String localAdminToken = "";
+    bool localAuthProvisioned = false;
 
     void doSave();
+    PersistenceSnapshot takePersistenceSnapshot();
+    SemaphoreHandle_t ensurePersistenceMutex();
     // PRO-427: lazily create selectedNameMutex on first use and return it (may be
     // null if creation fails, in which case callers degrade to lock-free access).
     // const because the const selected-name getters need to lock; the handle is

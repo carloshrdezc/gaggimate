@@ -36,6 +36,27 @@ afterEach(() => {
 });
 
 describe('Scales', () => {
+  test('connects with the stored bearer token and preserves the POST form request', async () => {
+    localStorage.setItem('gaggimate_local_admin_token', 'scale-token');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true }),
+    });
+
+    render(h(Scales, {}));
+
+    fireEvent.click(screen.getAllByRole('button')[1]);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/scales/connect', {
+        method: 'post',
+        body: expect.any(FormData),
+        headers: { Authorization: 'Bearer scale-token' },
+      });
+    });
+    expect(fetchMock.mock.calls[0][1].body.get('uuid')).toBe('scale-uuid-1');
+  });
+
   test('surfaces connect API errors inline', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: false,
