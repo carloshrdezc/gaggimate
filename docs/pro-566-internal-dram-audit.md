@@ -1,7 +1,7 @@
 # PRO-566 — Internal-DRAM consumer audit (display board, OTA 48 KiB floor)
 
 **Type:** Spike (investigation) · **Status:** findings + recommendations, on-device
-measurement deferred to Carlos · **Branch:** `pro-566-dram-audit-spike`
+measurement deferred to the operator · **Branch:** `pro-566-dram-audit-spike`
 
 ## TL;DR
 
@@ -19,7 +19,7 @@ measurement deferred to Carlos · **Branch:** `pro-566-dram-audit-spike`
 - Instrumentation to *measure* the per-subsystem trajectory on hardware is committed on this
   branch behind `-DGM_HEAP_DIAG_ENABLED=1` (`[env:display-heapdiag]`), zero-cost in production.
   **The absolute KB numbers below are ESTIMATED from static code + sdkconfig reads and must be
-  confirmed by flashing `display-heapdiag` and capturing serial** (Carlos's manual step).
+  confirmed by flashing `display-heapdiag` and capturing serial** (the operator's manual step).
 
 ---
 
@@ -70,13 +70,13 @@ confirmation.
 |---|---|---|---|---|---|
 | 1 | **NimBLE host mempools (msys mbufs, ACL bufs, GATT)** via `NimBLEDevice::init()` | ~30–70 KB (measure) | Steady | **YES** (build flag) | `esp_nimble_mem.c`: `_INTERNAL` → `MALLOC_CAP_INTERNAL`; `_EXTERNAL` → `MALLOC_CAP_SPIRAM`. Selected by app `#define` in NimBLE-Arduino 1.4.3 (`nimconfig.h` L177). PRO-358 measured ~68 KB on IDF 5.x — re-measure. Single BLE stack (`NimBLEDevice`) shared by client scan + the peripheral GATT service. |
 | 2 | **BT controller (`libbt.a` link-layer)** | ~20–40 KB (measure) | Steady | **NO** (prebuilt lib, needs `custom_sdkconfig` which is unavailable) | Distinct from the host mempools above. Cannot be moved without the from-source rebuild lever this platform lacks. Effectively a floor we can't easily lower. |
-| 3 | **DiagnosticLogPlugin** (`DiagLogUDP` task + queue) | **~32.7 KB** *(near-exact from code)* | Steady *(while enabled)* | **YES** (both) | Queue `64 × sizeof(DiagLogLine≈260 B)` ≈ 16.6 KB + drain-task stack `16384 B`. **Default OFF** but was observed **ON** on Carlos's device ("UDP log tee armed"). No free/uninstall path once armed. Neither the queue storage nor the drain-task stack needs DMA memory. |
+| 3 | **DiagnosticLogPlugin** (`DiagLogUDP` task + queue) | **~32.7 KB** *(near-exact from code)* | Steady *(while enabled)* | **YES** (both) | Queue `64 × sizeof(DiagLogLine≈260 B)` ≈ 16.6 KB + drain-task stack `16384 B`. **Default OFF** but was observed **ON** on the test device ("UDP log tee armed"). No free/uninstall path once armed. Neither the queue storage nor the drain-task stack needs DMA memory. |
 | 4 | **WiFi + lwIP** (`setupWifi()`) | ~10–40 KB (measure — likely << IDF-5.x's 58 KB) | Steady | Partly already PSRAM | IDF 4.4 sdkconfig: `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`, `SPIRAM_MALLOC_ALWAYSINTERNAL=4096` → allocs ≥4 KB already prefer PSRAM. Buffer-count trims are *unavailable* here (no `custom_sdkconfig`), and PRO-364 proved count-trims don't grow the contiguous block anyway. |
 | 5 | **mbedTLS SSL I/O buffers** (OTA-check TLS handshake) | 2 × 16.4 KB **transient peak** | Transient (per handshake) | contiguous internal required | `CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=16384`, `CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN` **not set** in the prebuilt esp32s3 sdkconfig → in/out record buffers are 16.4 KB each, exactly PRO-364's finding. **This is the allocation the 48 KiB floor exists to protect.** The `-DCONFIG_MBEDTLS_SSL_IN/OUT_CONTENT_LEN=4096` caps used elsewhere are INERT on the prebuilt lib (no `custom_sdkconfig` to make them live). |
 | 6 | **WebUIRelay task** (`WebUIPlugin`) | 16 KB | Steady | YES (stack) | `xTaskCreatePinnedToCore(relayLoopTask,"WebUIRelay",16384,…)`. Flat 16 KB stack. |
 | 7 | **async_tcp task** (AsyncTCP) | 8 KB + queue | Steady | stack YES | `CONFIG_ASYNC_TCP_STACK_SIZE=8192`, `CONFIG_ASYNC_TCP_QUEUE_SIZE=64`. Per-WS-client buffers (`DEFAULT_MAX_WS_CLIENTS=4`) add up under multi-tab load. |
 | 8 | **Firmware task stacks** (steady) | ~25–35 KB aggregate (measure) | Steady | stacks are internal-only | Controller loopControl `MIN×6`, DefaultUI loop `MIN×6` + loopProfiles `MIN×4`, Settings loop `MIN×6`, ShotHistory loop `MIN×6`, NimBLE client loop `MIN×4`, NimBLE server loop `MIN×4`. These are load-bearing; not a refactor target. |
-| 9 | **HomeSpan / HomeKit** (`homeSpan.begin()`) | ~0 unless runtime-ON | Steady *(if on)* | n/a | **Double-gated**: compile `GAGGIMATE_ENABLE_HOMEKIT=1` AND runtime `settings.isHomekit()` (default false). `HomekitPlugin` is only *registered* when `isHomekit()` is true (else `mDNSPlugin`). PRO-364 measured near-zero when runtime-off. **Confirm Carlos's device state before treating as a suspect** (Trap 6). |
+| 9 | **HomeSpan / HomeKit** (`homeSpan.begin()`) | ~0 unless runtime-ON | Steady *(if on)* | n/a | **Double-gated**: compile `GAGGIMATE_ENABLE_HOMEKIT=1` AND runtime `settings.isHomekit()` (default false). `HomekitPlugin` is only *registered* when `isHomekit()` is true (else `mDNSPlugin`). PRO-364 measured near-zero when runtime-off. **Confirm the test device's state before treating as a suspect** (Trap 6). |
 | 10 | **MQTT** (`MQTTPlugin`, 256dpi/MQTT) | ~1–2 KB | Steady *(if HA on)* | small | `MQTTClient` default lwmqtt buffers (~128 B r/w, `setBufferSize` not called). Registered only if `settings.isHomeAssistant()`. Negligible. |
 | — | Transient (not steady-state): ShotHistory rebuild task `MIN×8` (self-deletes), `OtaResolve` task 8192 B (per channel-switch click), ShotHistory file-op task | varies | Transient | — | Not steady-state floor contributors; only spike during their operation. |
 
@@ -120,8 +120,8 @@ confirmation.
 - **How:** allocate the queue with `xQueueCreateStatic` backed by a `heap_caps_malloc(…,
   MALLOC_CAP_SPIRAM)` storage buffer, and create the drain task with `xTaskCreateStaticPinnedToCore`
   using a PSRAM-backed stack buffer (FreeRTOS static creation lets you place both in PSRAM; neither
-  needs DMA memory). Alternatively, and simpler: this is a **debug-only** feature Carlos doesn't need
-  steady-state — ensure it stays **default OFF** and is turned off on his device, which frees the
+  needs DMA memory). Alternatively, and simpler: this is a **debug-only** feature the operator doesn't need
+  steady-state — ensure it stays **default OFF** and is turned off on the device, which frees the
   full ~32.7 KB immediately with zero code change.
 - **Est. recovered:** ~32.7 KB internal when enabled → PSRAM (or freed entirely if left OFF).
 - **Risk/effort:** LOW-MEDIUM / small. Static FreeRTOS creation is well-trodden; the only care is
@@ -168,7 +168,7 @@ Committed on `pro-566-dram-audit-spike`, all behind `-DGM_HEAP_DIAG_ENABLED=1`
 - `Controller::loop()`: 5 s steady-state internal-DRAM sampler + one-shot
   `heap_caps_print_heap_info` (exhaustion vs fragmentation).
 
-### Carlos's manual measurement step (deferred — no hardware access in this env)
+### Operator manual measurement step (deferred — no hardware access in this env)
 
 ```bash
 cd <repo-clone-path>
