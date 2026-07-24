@@ -1856,7 +1856,11 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     lastUpdateCheck = 0;
     // PRO-562: reset the defer-log gate alongside the force-recheck sentinel so the
     // first deferred-check log after this recheck isn't suppressed by a stale
-    // in-cooldown timestamp (mirrors the reset at ~L806).
+    // in-cooldown timestamp. This mirrors the reset in loop() at ~L806, but note
+    // that L806 runs on the loop task whereas this reset runs on the AsyncTCP/relay
+    // task — see the atomic-bool-write exemption on `otaDeferLogged` in the header:
+    // a single `bool` write doesn't tear on ESP32 and a stale read is at worst a
+    // cosmetic extra (un)suppressed log line, so the cross-task write is safe.
     otaDeferLogged = false;
     // This handler runs on the AsyncTCP web-server task (local WS clients) or the
     // relay task (remote clients) — NOT the loop task. `ota` is single-threaded

@@ -317,8 +317,14 @@ class WebUIPlugin : public Plugin {
     // and thus the "Deferring…" ESP_LOGW — would otherwise fire on every ~2 ms
     // loop tick for the whole DRAM-pressure window. These gate ONLY the log; the
     // DRAM re-check still runs every tick. `otaDeferLogged` distinguishes the
-    // first defer of a pressure window (always logged) from a zero timestamp;
-    // both are loop-task owned like lastUpdateCheck.
+    // first defer of a pressure window (always logged) from a zero timestamp.
+    // These are primarily loop-task owned, BUT `otaDeferLogged` is also reset
+    // from handleOTASettings() (PRO-562), which runs on the AsyncTCP/relay task,
+    // not the loop task. That cross-task write is intentionally exempt from the
+    // loop-task-ownership model the rest of the handler follows, for the same
+    // reason lastUpdateCheck is (CAR-178/CAR-377): a `bool` write does not tear
+    // on ESP32, and the only consequence of a stale read is one extra
+    // suppressed/unsuppressed "Deferring…" log line, which is purely cosmetic.
     uint32_t lastOtaDeferLogMs = 0;
     bool otaDeferLogged = false;
     // PRO-556: the channel the periodic background OTA check last SUCCESSFULLY
