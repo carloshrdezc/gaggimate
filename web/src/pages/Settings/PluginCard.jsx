@@ -6,6 +6,9 @@ import { CollapsibleHeader } from '../../components/CollapsibleHeader.jsx';
 
 // A single collapsible plugin sub-card (PRO-572). Local open state, independent
 // from Settings' top-level openMap and from the enable toggle:
+//  - if the plugin is already enabled at mount (fetched enabled from
+//    /api/settings), the body starts expanded so the settings are visible on
+//    the first click into the Plugins card (PRO-573),
 //  - toggling the plugin ON auto-expands the body (matches the prior behaviour
 //    of revealing the body on enable),
 //  - toggling OFF collapses AND resets open=false, so the next ON starts
@@ -15,7 +18,10 @@ import { CollapsibleHeader } from '../../components/CollapsibleHeader.jsx';
 // The body only renders while both enabled and open (the enable flag remains
 // the wire-format source of truth; open is UI-only).
 function PluginSubCard({ title, enabled, onToggle, children }) {
-  const [open, setOpen] = useState(false);
+  // Start expanded if the plugin is already enabled at mount time (PRO-573):
+  // a plugin fetched as enabled from /api/settings should reveal its body on
+  // the first click into the Plugins card, not require a second click.
+  const [open, setOpen] = useState(enabled);
   const prevEnabled = useRef(enabled);
 
   useEffect(() => {
