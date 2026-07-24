@@ -33,7 +33,13 @@ const STATUS_BORDER = {
   info: 'border-[var(--color-warning,#d4a843)]',
 };
 
-export function GoogleDriveBackupCard({ apiService, onRestoreComplete }) {
+export function GoogleDriveBackupCard({
+  apiService,
+  onRestoreComplete,
+  collapsible = false,
+  open,
+  onToggle,
+}) {
   const [clientId, setClientId] = useState(() => getStoredGoogleDriveClientId());
   const [busyAction, setBusyAction] = useState('');
   const [status, setStatus] = useState({ text: '', type: 'info' });
@@ -166,7 +172,14 @@ export function GoogleDriveBackupCard({ apiService, onRestoreComplete }) {
   }, [apiService, setMsg]);
 
   return (
-    <Card sm={10} lg={5} title='Google Drive Backup'>
+    <Card
+      sm={10}
+      lg={5}
+      title='Google Drive Backup'
+      collapsible={collapsible}
+      open={open}
+      onToggle={onToggle}
+    >
       <div className='flex flex-col gap-5'>
         <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
           Save and restore settings, profiles, beans, and shot history using a private file in your
