@@ -91,8 +91,8 @@ void test_grace_survives_millis_rollover(void) {
 // An in-flight resolve is skipped (PRO-560 mutual exclusion) regardless of any
 // timing / grace inputs — Resolving alone forces the skip.
 void test_combined_skips_while_resolving(void) {
-    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(OtaResolveState::Resolving, /*lastResolveTimedOut=*/false, 0, 0, kTimeoutMs,
-                                                kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Resolving, /*lastResolveTimedOut=*/false, 0, 0, kTimeoutMs, kGraceMs}));
 }
 
 // The whole point of PRO-563: immediately after a timeout the state is Failed
@@ -101,8 +101,8 @@ void test_combined_skips_while_resolving(void) {
 // would let it run.
 void test_combined_skips_failed_just_after_timeout(void) {
     // 2s past the 10s timeout -> inside the 5s grace window.
-    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(OtaResolveState::Failed, /*lastResolveTimedOut=*/true, 0,
-                                                kTimeoutMs + 2000, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Failed, /*lastResolveTimedOut=*/true, 0, kTimeoutMs + 2000, kTimeoutMs, kGraceMs}));
     // Sanity: PRO-560's predicate on its own would NOT skip a Failed state —
     // this is exactly the gap the combined predicate closes.
     TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkipForResolve(OtaResolveState::Failed));
@@ -111,36 +111,36 @@ void test_combined_skips_failed_just_after_timeout(void) {
 // loop() flips Failed -> Idle within one tick post-timeout; the grace window must
 // span that transition, so an Idle state inside the window is still skipped.
 void test_combined_skips_idle_inside_grace_after_timeout(void) {
-    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, kTimeoutMs + 2000,
-                                                kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, kTimeoutMs + 2000, kTimeoutMs, kGraceMs}));
 }
 
 // Once the grace window closes, the abandoned task has finished; an Idle state
 // lets the periodic check run again — the skip is bounded, not permanent.
 void test_combined_runs_idle_after_grace_closes(void) {
-    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0,
-                                                 kTimeoutMs + kGraceMs, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, kTimeoutMs + kGraceMs, kTimeoutMs, kGraceMs}));
 }
 
 // A NON-timeout Failed (immediate refuse) never gets a grace window: the task
 // already exited, so the periodic check runs — no regression to the settled-state
 // behavior PRO-560 established.
 void test_combined_runs_non_timeout_failed(void) {
-    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(OtaResolveState::Failed, /*lastResolveTimedOut=*/false, 0, 5000,
-                                                 kTimeoutMs, kGraceMs));
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Failed, /*lastResolveTimedOut=*/false, 0, 5000, kTimeoutMs, kGraceMs}));
 }
 
 // The plain no-resolve-pending case: Idle, never timed out -> periodic check runs.
 void test_combined_runs_when_idle_no_timeout(void) {
-    TEST_ASSERT_FALSE(
-        otaPeriodicCheckShouldSkip(OtaResolveState::Idle, /*lastResolveTimedOut=*/false, 0, 0, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Idle, /*lastResolveTimedOut=*/false, 0, 0, kTimeoutMs, kGraceMs}));
 }
 
 // ReadyToFlash (a confirmed resolve) still runs the check — its task posted and
 // exited, and it was never a timeout, so no grace applies.
 void test_combined_runs_when_ready_to_flash(void) {
-    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(OtaResolveState::ReadyToFlash, /*lastResolveTimedOut=*/false, 0, 0,
-                                                 kTimeoutMs, kGraceMs));
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::ReadyToFlash, /*lastResolveTimedOut=*/false, 0, 0, kTimeoutMs, kGraceMs}));
 }
 
 // End-to-end timeline walk of the exact PRO-563 scenario: a resolve starts,
@@ -151,31 +151,31 @@ void test_combined_timeout_abandon_timeline(void) {
     const uint32_t startMs = 100000;
 
     // t = startMs: resolve just spawned, in flight -> skipped (PRO-560).
-    TEST_ASSERT_TRUE(
-        otaPeriodicCheckShouldSkip(OtaResolveState::Resolving, false, startMs, startMs, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Resolving, false, startMs, startMs, kTimeoutMs, kGraceMs}));
 
     // t = startMs + 9.9s: still resolving, not yet timed out -> skipped.
-    TEST_ASSERT_TRUE(
-        otaPeriodicCheckShouldSkip(OtaResolveState::Resolving, false, startMs, startMs + 9900, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Resolving, false, startMs, startMs + 9900, kTimeoutMs, kGraceMs}));
 
     // t = startMs + 10s: timeout fires; loop() sets Failed and the timeout flag.
     // The abandoned task may still be inside checkForUpdates() -> skipped (grace).
-    TEST_ASSERT_TRUE(
-        otaPeriodicCheckShouldSkip(OtaResolveState::Failed, true, startMs, startMs + kTimeoutMs, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Failed, true, startMs, startMs + kTimeoutMs, kTimeoutMs, kGraceMs}));
 
     // t = startMs + 10s + 1 tick: Failed drained to Idle; still inside grace -> skipped.
-    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(OtaResolveState::Idle, true, startMs, startMs + kTimeoutMs + 2,
-                                                kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Idle, true, startMs, startMs + kTimeoutMs + 2, kTimeoutMs, kGraceMs}));
 
     // t = startMs + 14.999s: still inside grace -> skipped (the periodic interval
     // elapsing here must NOT trigger a concurrent checkForUpdates()).
-    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(OtaResolveState::Idle, true, startMs,
-                                                startMs + kTimeoutMs + kGraceMs - 1, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_TRUE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Idle, true, startMs, startMs + kTimeoutMs + kGraceMs - 1, kTimeoutMs, kGraceMs}));
 
     // t = startMs + 15s: grace closed; abandoned task has plausibly finished ->
     // periodic check runs again.
-    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(OtaResolveState::Idle, true, startMs,
-                                                 startMs + kTimeoutMs + kGraceMs, kTimeoutMs, kGraceMs));
+    TEST_ASSERT_FALSE(otaPeriodicCheckShouldSkip(
+        OtaResolveSnapshot{OtaResolveState::Idle, true, startMs, startMs + kTimeoutMs + kGraceMs, kTimeoutMs, kGraceMs}));
 }
 
 static int runOtaPeriodicCheckResolveGraceTests() {

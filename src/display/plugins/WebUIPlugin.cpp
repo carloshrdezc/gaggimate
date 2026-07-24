@@ -787,8 +787,9 @@ void WebUIPlugin::loop() {
         // otaCheckFailureCount (the check never ran) and do NOT advance
         // lastUpdateCheck, so the check retries promptly next loop pass once the
         // resolve settles out of Resolving and the grace window closes.
-        if (!otaPeriodicCheckShouldSkip(otaResolveState, otaResolveTimedOutFlag, otaResolveStartMs, static_cast<uint32_t>(now),
-                                        kOtaResolveTimeoutMs, kOtaResolveAbandonGraceMs)) {
+        if (!otaPeriodicCheckShouldSkip(OtaResolveSnapshot{otaResolveState, otaResolveTimedOutFlag, otaResolveStartMs,
+                                                           static_cast<uint32_t>(now), kOtaResolveTimeoutMs,
+                                                           kOtaResolveAbandonGraceMs})) {
             if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
                 // PRO-557: the defer branch deliberately does NOT advance
                 // lastUpdateCheck (so the DRAM re-check retries every loop tick until
