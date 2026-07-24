@@ -171,10 +171,10 @@ Committed on `pro-566-dram-audit-spike`, all behind `-DGM_HEAP_DIAG_ENABLED=1`
 ### Carlos's manual measurement step (deferred — no hardware access in this env)
 
 ```bash
-cd /home/carlos/gaggimate-pro566
+cd <repo-clone-path>
 export NODE_ENV=development
 # (web bundle already packed; rebuild if stale: bash scripts/build_webui.sh)
-pio run -e display-heapdiag -t upload --upload-port /dev/ttyACM0
+pio run -e display-heapdiag -t upload --upload-port <serial-port>
 # capture ~30 s of boot serial (DTR/RTS reset recipe from the flashing skill), then:
 #   grep GmHeapDiag /tmp/boot.log
 ```
