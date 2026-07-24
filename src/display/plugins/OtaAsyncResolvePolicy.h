@@ -158,13 +158,31 @@ constexpr bool otaPeriodicCheckShouldSkipForResolveDuringGrace(bool lastResolveT
     return lastResolveTimedOut && (nowMs - startMs) < (timeoutMs + graceMs);
 }
 
+// PRO-565: the resolve-state snapshot loop() hands to otaPeriodicCheckShouldSkip().
+// A constexpr-friendly POD bundling the six inputs the combined skip decision
+// needs, replacing what had grown to a six-arg positional call (PRO-563/PR #554
+// review nit). Keeps the predicate's contract identical — it is a pure function
+// of these fields — while making the call sites self-documenting and avoiding a
+// long list of same-typed uint32_t positional args that are easy to transpose.
+// Plain aggregate (no ctor/methods) so it stays usable in the compile-time
+// static_asserts below and links unchanged on [env:native] under gnu++17.
+struct OtaResolveSnapshot {
+    OtaResolveState resolveState;
+    bool lastResolveTimedOut;
+    uint32_t startMs;
+    uint32_t nowMs;
+    uint32_t timeoutMs;
+    uint32_t graceMs;
+};
+
 // PRO-563: the full periodic-check skip decision — skip while a resolve is in
 // flight (PRO-560) OR while inside the post-timeout abandon grace window (this
 // change). Combines the two above so loop() has a single call site.
-constexpr bool otaPeriodicCheckShouldSkip(OtaResolveState resolveState, bool lastResolveTimedOut, uint32_t startMs,
-                                          uint32_t nowMs, uint32_t timeoutMs, uint32_t graceMs) {
-    return otaPeriodicCheckShouldSkipForResolve(resolveState) ||
-           otaPeriodicCheckShouldSkipForResolveDuringGrace(lastResolveTimedOut, startMs, nowMs, timeoutMs, graceMs);
+// PRO-565: takes the bundled OtaResolveSnapshot instead of six positional args.
+constexpr bool otaPeriodicCheckShouldSkip(const OtaResolveSnapshot &snapshot) {
+    return otaPeriodicCheckShouldSkipForResolve(snapshot.resolveState) ||
+           otaPeriodicCheckShouldSkipForResolveDuringGrace(snapshot.lastResolveTimedOut, snapshot.startMs, snapshot.nowMs,
+                                                           snapshot.timeoutMs, snapshot.graceMs);
 }
 
 // Compile-time truth table — pins the contract so a future edit to the
@@ -226,17 +244,24 @@ static_assert(otaPeriodicCheckShouldSkipForResolveDuringGrace(/*lastResolveTimed
 
 // PRO-563: the combined skip decision loop() uses. Skips while Resolving (PRO-560)
 // OR while inside the post-timeout abandon grace window, regardless of state.
-static_assert(otaPeriodicCheckShouldSkip(OtaResolveState::Resolving, /*lastResolveTimedOut=*/false, 0, 0, 10000, 5000),
+// PRO-565: constructs the OtaResolveSnapshot aggregate (constexpr) at each call site.
+static_assert(otaPeriodicCheckShouldSkip(OtaResolveSnapshot{OtaResolveState::Resolving, /*lastResolveTimedOut=*/false, 0, 0,
+                                                            10000, 5000}),
               "PRO-563: an in-flight resolve is skipped (PRO-560 mutual exclusion) regardless of the grace window");
-static_assert(otaPeriodicCheckShouldSkip(OtaResolveState::Failed, /*lastResolveTimedOut=*/true, 0, 12000, 10000, 5000),
+static_assert(otaPeriodicCheckShouldSkip(OtaResolveSnapshot{OtaResolveState::Failed, /*lastResolveTimedOut=*/true, 0, 12000,
+                                                            10000, 5000}),
               "PRO-563: a just-timed-out (Failed) resolve is skipped while the abandoned task may still touch `ota`");
-static_assert(otaPeriodicCheckShouldSkip(OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, 12000, 10000, 5000),
+static_assert(otaPeriodicCheckShouldSkip(OtaResolveSnapshot{OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, 12000, 10000,
+                                                            5000}),
               "PRO-563: the grace window still skips after Failed->Idle flips within one tick post-timeout");
-static_assert(!otaPeriodicCheckShouldSkip(OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, 15000, 10000, 5000),
+static_assert(!otaPeriodicCheckShouldSkip(OtaResolveSnapshot{OtaResolveState::Idle, /*lastResolveTimedOut=*/true, 0, 15000, 10000,
+                                                             5000}),
               "PRO-563: once the grace window closes, an Idle state lets the periodic check run again");
-static_assert(!otaPeriodicCheckShouldSkip(OtaResolveState::Idle, /*lastResolveTimedOut=*/false, 0, 0, 10000, 5000),
+static_assert(!otaPeriodicCheckShouldSkip(OtaResolveSnapshot{OtaResolveState::Idle, /*lastResolveTimedOut=*/false, 0, 0, 10000,
+                                                             5000}),
               "PRO-563: no resolve pending and no timeout -> periodic check runs");
-static_assert(!otaPeriodicCheckShouldSkip(OtaResolveState::Failed, /*lastResolveTimedOut=*/false, 0, 0, 10000, 5000),
+static_assert(!otaPeriodicCheckShouldSkip(OtaResolveSnapshot{OtaResolveState::Failed, /*lastResolveTimedOut=*/false, 0, 0, 10000,
+                                                             5000}),
               "PRO-563: a non-timeout (immediate refuse) Failed -> periodic check runs, no grace needed");
 
 #endif // OTAASYNCRESOLVEPOLICY_H
