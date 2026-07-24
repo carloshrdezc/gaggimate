@@ -777,11 +777,18 @@ void WebUIPlugin::loop() {
         // race, only narrowed by PRO-556's reuse hit). otaResolveState is loop-
         // task-owned so this read needs no mutex, and a resolve only touches `ota`
         // while Resolving — skipping here gives mutual exclusion by construction.
+        // PRO-563: that "while Resolving" guard has a residual gap — a resolve
+        // abandoned on the soft 10s timeout is never force-killed (PRO-13 point 7)
+        // and its task can keep touching `ota` for a few more seconds AFTER state
+        // has left Resolving. otaPeriodicCheckShouldSkip() therefore ALSO keeps the
+        // check skipped through a bounded post-timeout grace window (keyed off the
+        // same otaResolveStartMs / kOtaResolveTimeoutMs, gated on the timeout flag).
         // Like the PRO-555 defer below, this is a SKIP not a failure: do NOT bump
         // otaCheckFailureCount (the check never ran) and do NOT advance
         // lastUpdateCheck, so the check retries promptly next loop pass once the
-        // resolve settles out of Resolving.
-        if (!otaPeriodicCheckShouldSkipForResolve(otaResolveState)) {
+        // resolve settles out of Resolving and the grace window closes.
+        if (!otaPeriodicCheckShouldSkip(otaResolveState, otaResolveTimedOutFlag, otaResolveStartMs, static_cast<uint32_t>(now),
+                                        kOtaResolveTimeoutMs, kOtaResolveAbandonGraceMs)) {
             if (otaPeriodicCheckShouldDefer(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL))) {
                 // PRO-557: the defer branch deliberately does NOT advance
                 // lastUpdateCheck (so the DRAM re-check retries every loop tick until
