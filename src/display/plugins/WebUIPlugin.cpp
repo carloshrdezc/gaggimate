@@ -8,6 +8,7 @@
 #include <LittleFS.h>
 #include <display/core/Controller.h>
 #include <display/core/EventIds.h>
+#include <display/core/GmHeapDiag.h> // PRO-566
 #include <display/core/GrinderManager.h>
 #include <display/core/MdnsNamePolicy.h>
 #include <display/core/ProfileManager.h>
@@ -1230,6 +1231,7 @@ void WebUIPlugin::setupServer() {
 
 void WebUIPlugin::start() {
     stop();
+    GM_HEAP_DIAG("before webserver+relay start"); // PRO-566
     server.begin();
     ESP_LOGI("WebUIPlugin", "Started webserver");
     if (apMode) {
@@ -1245,6 +1247,7 @@ void WebUIPlugin::start() {
     otaDeferLogged = false;
     serverRunning = true;
     startRelay();
+    GM_HEAP_DIAG("after webserver+relay start"); // PRO-566
 }
 
 void WebUIPlugin::stop() {

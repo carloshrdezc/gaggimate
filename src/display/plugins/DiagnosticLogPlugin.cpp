@@ -2,6 +2,7 @@
 #include "../core/Controller.h"
 #include "../core/Event.h"
 #include "../core/EventIds.h"
+#include "../core/GmHeapDiag.h" // PRO-566
 #include "../core/PluginManager.h"
 #include "DiagLogFormat.h"
 #include <SD_MMC.h>
@@ -116,6 +117,7 @@ void DiagnosticLogPlugin::tryInstall() {
     if (WiFi.status() != WL_CONNECTED)
         return; // no STA link yet — try again next loop / next event
 
+    GM_HEAP_DIAG("before DiagLog install (queue+task)"); // PRO-566
     queue = xQueueCreate(QUEUE_DEPTH, sizeof(DiagLogLine));
     if (queue == nullptr) {
         ESP_LOGE(LOG_TAG, "Failed to allocate log queue (OOM); tee not installed");
@@ -148,6 +150,7 @@ void DiagnosticLogPlugin::tryInstall() {
     // serial-over-USB keeps working for anyone tethered.
     previousVprintf = esp_log_set_vprintf(&DiagnosticLogPlugin::teeVprintf);
     installed = true;
+    GM_HEAP_DIAG("after DiagLog install (queue+task)"); // PRO-566
 
     // PRO-268: enable the persistent SD-card sink whenever a card is mounted.
     // The drain task opens the file lazily on first line; here we only record
