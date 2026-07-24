@@ -72,13 +72,18 @@ export default function Card({
             </h2>
           </div>
         ))}
-      {(!collapsible || isOpen) && (
-        <div
-          className={`nd-card-body flex flex-col gap-3 p-5 sm:p-6 ${fullHeight ? 'flex-1' : ''}`}
-        >
-          {children}
-        </div>
-      )}
+      {/* Keep the body mounted even when collapsed and hide it with the `hidden`
+          attribute instead of unmounting it (PRO-572). Settings' onSubmit builds
+          the save payload from `new FormData(form)`, which only picks up fields
+          currently in the DOM; unmounting a collapsed card silently dropped any
+          field the user edited before collapsing it. `hidden` keeps every input
+          mounted so FormData still captures it regardless of collapse state. */}
+      <div
+        hidden={collapsible && !isOpen}
+        className={`nd-card-body flex flex-col gap-3 p-5 sm:p-6 ${fullHeight ? 'flex-1' : ''}`}
+      >
+        {children}
+      </div>
       {onResize && <ResizeHandle onResizeStart={onResize} />}
     </div>
   );

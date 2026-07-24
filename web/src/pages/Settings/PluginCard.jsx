@@ -51,7 +51,19 @@ function PluginSubCard({ title, enabled, onToggle, children }) {
           </button>
         </div>
       </div>
-      {enabled && open && children}
+      {/* When enabled, keep the body mounted even while collapsed and hide it
+          with the `hidden` attribute instead of unmounting it (PRO-572).
+          Settings' onSubmit builds the save payload from `new FormData(form)`,
+          which only captures inputs currently in the DOM, and these plugin
+          sub-fields (startupFillTime, smartGrindIp, haIP, …) have no explicit
+          form.set()/delete() override in onSubmit — so unmounting a collapsed
+          (but still enabled) sub-card silently dropped any field the user
+          edited before collapsing it. `hidden` keeps every input mounted so
+          FormData still captures it regardless of collapse state. When the
+          plugin is disabled the body stays unmounted on purpose: the enable
+          toggle is handled explicitly in onSubmit and a disabled plugin's
+          sub-fields should be absent from the payload. */}
+      {enabled && <div hidden={!open}>{children}</div>}
     </div>
   );
 }

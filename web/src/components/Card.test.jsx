@@ -14,6 +14,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// PRO-572: a collapsed Card keeps its body MOUNTED and hides it with the
+// `hidden` attribute (so Settings' `new FormData(form)` still captures fields
+// edited before collapse). So "collapsed" no longer means the body left the
+// DOM — it means the body is present but inside a `hidden` wrapper.
+function bodyVisible() {
+  const el = screen.queryByTestId('body');
+  return el != null && el.closest('[hidden]') == null;
+}
+function bodyMountedButHidden() {
+  const el = screen.queryByTestId('body');
+  return el != null && el.closest('[hidden]') != null;
+}
+
 describe('Card', () => {
   it('renders unchanged (no collapse chrome, body always shown) when collapsible is omitted', () => {
     render(h(Card, { title: 'Plain Card' }, h('p', { 'data-testid': 'body' }, 'content')));
@@ -21,8 +34,8 @@ describe('Card', () => {
     // Title renders as a plain heading, not a toggle button.
     expect(screen.getByRole('heading', { name: 'Plain Card' })).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
-    // Body is present.
-    expect(screen.getByTestId('body')).toBeTruthy();
+    // Body is present and visible.
+    expect(bodyVisible()).toBe(true);
   });
 
   it('uncontrolled mode toggles open state on header click (default collapsed)', () => {
@@ -31,19 +44,19 @@ describe('Card', () => {
     );
 
     const header = screen.getByRole('button', { name: 'Collapsible' });
-    // Default collapsed: body unmounted, aria-expanded false.
+    // Default collapsed: body mounted-but-hidden, aria-expanded false.
     expect(header.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByTestId('body')).toBeNull();
+    expect(bodyMountedButHidden()).toBe(true);
 
     // Click opens.
     fireEvent.click(header);
     expect(header.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.getByTestId('body')).toBeTruthy();
+    expect(bodyVisible()).toBe(true);
 
     // Click closes again.
     fireEvent.click(header);
     expect(header.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByTestId('body')).toBeNull();
+    expect(bodyMountedButHidden()).toBe(true);
   });
 
   it('respects defaultOpen in uncontrolled mode', () => {
@@ -54,7 +67,7 @@ describe('Card', () => {
         h('p', { 'data-testid': 'body' }, 'x'),
       ),
     );
-    expect(screen.getByTestId('body')).toBeTruthy();
+    expect(bodyVisible()).toBe(true);
     expect(
       screen.getByRole('button', { name: 'Open By Default' }).getAttribute('aria-expanded'),
     ).toBe('true');
@@ -72,7 +85,7 @@ describe('Card', () => {
 
     const header = screen.getByRole('button', { name: 'Controlled' });
     expect(header.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByTestId('body')).toBeNull();
+    expect(bodyMountedButHidden()).toBe(true);
 
     // Clicking calls onToggle but does NOT change its own state (parent owns it).
     fireEvent.click(header);
@@ -80,9 +93,9 @@ describe('Card', () => {
     expect(screen.getByRole('button', { name: 'Controlled' }).getAttribute('aria-expanded')).toBe(
       'false',
     );
-    expect(screen.queryByTestId('body')).toBeNull();
+    expect(bodyMountedButHidden()).toBe(true);
 
-    // Parent flips the prop -> body appears.
+    // Parent flips the prop -> body becomes visible.
     rerender(
       h(
         Card,
@@ -90,7 +103,7 @@ describe('Card', () => {
         h('p', { 'data-testid': 'body' }, 'x'),
       ),
     );
-    expect(screen.getByTestId('body')).toBeTruthy();
+    expect(bodyVisible()).toBe(true);
     expect(screen.getByRole('button', { name: 'Controlled' }).getAttribute('aria-expanded')).toBe(
       'true',
     );

@@ -92,10 +92,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// A card body is mounted only while open. Card headers are toggle buttons whose
-// accessible name is the title; aria-expanded reflects open state.
+// A card body stays MOUNTED while collapsed and is hidden via the `hidden`
+// attribute (PRO-572), so Settings' `new FormData(form)` still captures fields
+// edited before collapse. Card headers are toggle buttons whose accessible name
+// is the title; aria-expanded reflects open state.
 function cardHeader(title) {
   return screen.getByRole('button', { name: title });
+}
+// "collapsed" now means present-but-inside-a-hidden-wrapper, not unmounted.
+function isCollapsedHidden(el) {
+  return el != null && el.closest('[hidden]') != null;
 }
 
 describe('Settings collapsible cards (PRO-572)', () => {
@@ -104,9 +110,9 @@ describe('Settings collapsible cards (PRO-572)', () => {
     for (const title of TOP_LEVEL_TITLES) {
       expect(cardHeader(title).getAttribute('aria-expanded')).toBe('false');
     }
-    // Bodies are unmounted while collapsed (sample a couple).
-    expect(screen.queryByLabelText('Default Steam Temperature')).toBeNull();
-    expect(screen.queryByText('plugins-body')).toBeNull();
+    // Bodies stay mounted while collapsed but are hidden (sample a couple).
+    expect(isCollapsedHidden(screen.queryByLabelText('Default Steam Temperature'))).toBe(true);
+    expect(isCollapsedHidden(screen.queryByText('plugins-body'))).toBe(true);
   });
 
   it('Expand All opens all 10 cards and flips the button label to Collapse All', () => {
@@ -164,8 +170,8 @@ describe('Settings collapsible cards (PRO-572)', () => {
     renderSettings();
     const header = screen.getByRole('button', { name: 'Local admin token' });
     expect(header.getAttribute('aria-expanded')).toBe('false');
-    // Body hidden until opened.
-    expect(screen.queryByLabelText('Paste admin token')).toBeNull();
+    // Body stays mounted but hidden until opened.
+    expect(isCollapsedHidden(screen.queryByLabelText('Paste admin token'))).toBe(true);
     fireEvent.click(header);
     expect(screen.getByLabelText('Paste admin token')).toBeTruthy();
   });
