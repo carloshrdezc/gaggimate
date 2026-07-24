@@ -3,6 +3,7 @@
 #include "../core/Controller.h"
 #include "../core/Event.h"
 #include "../core/EventIds.h"
+#include "../core/GmHeapDiag.h" // PRO-566
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_log.h>
@@ -18,11 +19,12 @@ void mDNSPlugin::start(Event const &event) const {
     const int apMode = event.getInt("AP");
     if (apMode)
         return;
+    GM_HEAP_DIAG("before MDNS.begin"); // PRO-566
     if (!MDNS.begin(controller->getSettings().getMdnsName().c_str())) {
         ESP_LOGE(LOG_TAG, "Error setting up mDNS responder");
         return;
     }
-
+    GM_HEAP_DIAG("after MDNS.begin"); // PRO-566
 #if GAGGIMATE_ENABLE_WEBUI
     // Advertise HTTP service for web interface. All of these services point at
     // port 80, which is owned exclusively by WebUIPlugin's server. When the
