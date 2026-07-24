@@ -104,6 +104,34 @@ describe('PluginCard sub-card collapse (PRO-572)', () => {
     expect(bodyVisible()).toBe(true);
   });
 
+  it('starts the sub-card expanded when the plugin is already enabled at initial mount (PRO-573)', () => {
+    // A plugin fetched as enabled from /api/settings on page load must reveal
+    // its body immediately — no click needed. Pre-PRO-573 the internal open
+    // state hardcoded `false`, so an already-enabled plugin rendered collapsed
+    // and the user had to expand the sub-card manually. Harness mounts with
+    // HomeKit already enabled (mirrors formData.homekit === true from the API).
+    function PreEnabledHarness() {
+      const [formData, setFormData] = useState({ homekit: true });
+      const onChange = key => () => setFormData(prev => ({ ...prev, [key]: !prev[key] }));
+      return h(PluginCard, {
+        formData,
+        onChange,
+        autowakeupSchedules: [],
+        addAutoWakeupSchedule: vi.fn(),
+        removeAutoWakeupSchedule: vi.fn(),
+        updateAutoWakeupTime: vi.fn(),
+        updateAutoWakeupDay: vi.fn(),
+      });
+    }
+    render(h(PreEnabledHarness));
+
+    // Body visible on first paint, without any click.
+    expect(bodyVisible()).toBe(true);
+    // Toggle reflects the enabled state, and the chevron (Collapse) is present.
+    expect(screen.getAllByRole('switch')[1].getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('button', { name: /Collapse HomeKit/ })).toBeTruthy();
+  });
+
   it('keeps an edited sub-field in FormData after the enabled sub-card is collapsed', () => {
     // The core PRO-572 bug for plugin sub-cards: enable a plugin, edit one of
     // its inputs, collapse the sub-card via the chevron (plugin still ON), then
