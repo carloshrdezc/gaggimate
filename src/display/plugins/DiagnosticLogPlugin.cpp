@@ -119,25 +119,13 @@ void DiagnosticLogPlugin::tryInstall() {
         return; // no STA link yet — try again next loop / next event
 
     GM_HEAP_DIAG("before DiagLog install (queue+task)"); // PRO-566
-    // PRO-568: place the ~16.6 KiB log queue (QUEUE_DEPTH * sizeof(DiagLogLine))
-    // in external PSRAM instead of scarce internal DRAM. FreeRTOS static creation
-    // (xQueueCreateStatic) lets us supply both the item-storage array and the
-    // queue control block from a memory region of our choosing, so we allocate
-    // both from PSRAM (MALLOC_CAP_SPIRAM). Non-DMA PSRAM is correct here: queue
-    // items are copied by value in software (teeVprintf enqueues, drainTask
-    // dequeues) and are never touched from an ISR or a DMA transfer, so the queue
-    // needs no internal/DMA-capable memory. The two buffers are owned for the
-    // plugin's lifetime (it is a long-lived singleton that never tears down
-    // mid-run) and are stored as member fields so they outlive the queue; the OOM
-    // rollback below frees them if task creation fails. See the PRO-566 audit.
-    //
-    // NOTE (PRO-568): only the QUEUE moves to PSRAM. The 16 KiB drain-task STACK
-    // cannot: on this platform (Arduino-ESP32 2.0.17 / IDF 4.4.7) the xtensa
-    // FreeRTOS port hard-codes portStackMemoryCaps = MALLOC_CAP_INTERNAL and
-    // CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY is NOT set in the board sdkconfig,
-    // because the ROM routines don't handle a stack in external RAM correctly
-    // (see freertos portmacro.h). A PSRAM task stack is therefore unsupported and
-    // the task keeps its internal-DRAM stack (created dynamically below).
+    // PRO-568: place the ~16.6 KiB log queue in external PSRAM (MALLOC_CAP_SPIRAM)
+    // via FreeRTOS static creation (xQueueCreateStatic), supplying both the
+    // item-storage array and the control block from PSRAM. The buffers are member
+    // fields owned for the plugin's lifetime; the OOM rollback below frees them if
+    // task creation fails. For the full PSRAM/stack-placement rationale (why the
+    // queue may live in non-DMA PSRAM but the drain-task stack cannot), see the
+    // class-doc comment in DiagnosticLogPlugin.h.
     queueStorage = static_cast<uint8_t *>(heap_caps_malloc(QUEUE_DEPTH * sizeof(DiagLogLine), MALLOC_CAP_SPIRAM));
     queueControlBlock = static_cast<StaticQueue_t *>(heap_caps_malloc(sizeof(StaticQueue_t), MALLOC_CAP_SPIRAM));
     if (queueStorage == nullptr || queueControlBlock == nullptr) {
@@ -166,9 +154,8 @@ void DiagnosticLogPlugin::tryInstall() {
     // Stack matches the WebUI relay task (WebUIPlugin.cpp, "WebUIRelay" = 16384):
     // both share the lwip UDP/socket send path, and a logger must never crash the
     // device on stack overflow.
-    // PRO-568: this stack stays in internal DRAM (see the queue comment above): the
-    // IDF 4.4.7 xtensa port forces task stacks to MALLOC_CAP_INTERNAL, so it cannot
-    // be routed to PSRAM. Only the queue was reclaimed from internal DRAM.
+    // PRO-568: this 16 KiB stack stays in internal DRAM (it cannot be routed to
+    // PSRAM on this platform) — see the placement rationale in DiagnosticLogPlugin.h.
     BaseType_t created = xTaskCreatePinnedToCore(drainTask, "DiagLogUDP", 16384, this, 1, &taskHandle, 0);
     if (created != pdPASS) {
         ESP_LOGE(LOG_TAG, "Failed to create drain task (OOM); tee not installed");
