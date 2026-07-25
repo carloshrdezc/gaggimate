@@ -1,4 +1,7 @@
 #include <unity.h>
+#include <cstdio>
+#include <string>
+#include "display/core/constants.h"
 #include "display/plugins/StrictValidationPolicy.h"
 
 void test_integer_parser_rejects_partial_empty_and_non_finite() {
@@ -21,6 +24,25 @@ void test_settings_validation_rejects_bad_enum_range_and_schedule_atomically() {
     TEST_ASSERT_FALSE(strict_validation::validateSettings({{"smartGrindMode", "3"}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateSettings({{"autowakeupSchedules", "25:00|1111111"}}, error));
     TEST_ASSERT_TRUE(strict_validation::validateSettings({{"targetSteamTemp", "155"}, {"pressureScaling", "1.5"}, {"autowakeupSchedules", "07:00|1111100"}}, error));
+}
+
+void test_settings_validation_accepts_common_pressure_sensor_ratings() {
+    strict_validation::Error error;
+    // Regression for PRO-577: the firmware's own DEFAULT_PRESSURE_SCALING (16.0)
+    // must pass validateSettings(). Previously the bound was capped at 10 bar,
+    // locking out any user whose sensor is rated above 10 bar.
+    char defaultRating[32];
+    std::snprintf(defaultRating, sizeof(defaultRating), "%g", static_cast<double>(DEFAULT_PRESSURE_SCALING));
+    TEST_ASSERT_TRUE(strict_validation::validateSettings({{"pressureScaling", std::string(defaultRating)}}, error));
+    // Common espresso transducer bar ratings must all validate.
+    TEST_ASSERT_TRUE(strict_validation::validateSettings({{"pressureScaling", "12"}}, error));
+    TEST_ASSERT_TRUE(strict_validation::validateSettings({{"pressureScaling", "16"}}, error));
+    TEST_ASSERT_TRUE(strict_validation::validateSettings({{"pressureScaling", "20"}}, error));
+    TEST_ASSERT_TRUE(strict_validation::validateSettings({{"pressureScaling", "30"}}, error));
+    // Above the range is still rejected.
+    TEST_ASSERT_FALSE(strict_validation::validateSettings({{"pressureScaling", "31"}}, error));
+    TEST_ASSERT_EQUAL_STRING("pressureScaling", error.field.c_str());
+    TEST_ASSERT_FALSE(strict_validation::validateSettings({{"pressureScaling", "-1"}}, error));
 }
 
 void test_websocket_validation_rejects_invalid_command_values() {
@@ -58,6 +80,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_integer_parser_rejects_partial_empty_and_non_finite);
     RUN_TEST(test_settings_validation_rejects_bad_enum_range_and_schedule_atomically);
+    RUN_TEST(test_settings_validation_accepts_common_pressure_sensor_ratings);
     RUN_TEST(test_websocket_validation_rejects_invalid_command_values);
     RUN_TEST(test_websocket_validation_rejects_numeric_strings);
     RUN_TEST(test_websocket_validation_requires_command_fields);

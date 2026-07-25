@@ -45,11 +45,44 @@ import { normalizeSettings } from './settingsNormalize.js';
 const ledControl = computed(() => machine.value.capabilities.ledControl);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
 
+// Stable ids for the 10 top-level Settings cards driven by the collapse
+// openMap (PRO-572). Sunrise renders only when ledControl is available, so it
+// is included in the "all open" reckoning only when present. Plugin sub-cards
+// are NOT part of this map — they own independent local collapse state.
+const TOP_LEVEL_CARD_IDS = [
+  'temperature',
+  'userPreferences',
+  'webSettings',
+  'googleDriveBackup',
+  'systemPreferences',
+  'machineSettings',
+  'displaySettings',
+  'sunrise',
+  'plugins',
+  'remoteAccess',
+];
+
 export function Settings() {
   const apiService = useContext(ApiServiceContext);
   const [submitting, setSubmitting] = useState(false);
   const [gen, setGen] = useState(0);
   const [formData, setFormData] = useState({});
+  // Collapse state for the 10 top-level cards (PRO-572). Absent id => collapsed;
+  // resets to all-collapsed on every mount/navigation (no localStorage). Plugin
+  // sub-cards manage their own local state and are not tracked here.
+  const [openMap, setOpenMap] = useState({});
+  const toggleCard = id => setOpenMap(prev => ({ ...prev, [id]: !prev[id] }));
+  // Sunrise is only rendered when ledControl is available; exclude it from the
+  // "all open" reckoning when it is not present so Collapse All is reachable.
+  const knownCardIds = TOP_LEVEL_CARD_IDS.filter(id => id !== 'sunrise' || ledControl.value);
+  const allCardsOpen = knownCardIds.every(id => openMap[id]);
+  const toggleAllCards = () => {
+    const next = {};
+    if (!allCardsOpen) {
+      for (const id of knownCardIds) next[id] = true;
+    }
+    setOpenMap(next);
+  };
   const [currentTheme, setCurrentTheme] = useState('midnight');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
@@ -276,6 +309,22 @@ export function Settings() {
         });
 
         if (!response.ok) {
+          // A structured validation rejection returns 400 with a JSON body of the
+          // shape {error, field, detail}. Surface the offending field/detail so the
+          // user sees the real cause instead of the generic fallback message.
+          if (response.status === 400) {
+            let validationError = null;
+            try {
+              validationError = await response.clone().json();
+            } catch {
+              validationError = null;
+            }
+            if (validationError && validationError.field && validationError.detail) {
+              throw new Error(`${validationError.field}: ${validationError.detail}`, {
+                cause: 'validation',
+              });
+            }
+          }
           throw new Error(`Server error: ${response.status}`);
         }
 
@@ -305,7 +354,11 @@ export function Settings() {
         setFormData(updatedData);
       } catch (error) {
         console.error('Failed to save settings:', error);
-        alert('Failed to save settings. Please try again.');
+        if (error?.cause === 'validation') {
+          alert(`Failed to save settings: ${error.message}`);
+        } else {
+          alert('Failed to save settings. Please try again.');
+        }
       } finally {
         setSubmitting(false);
       }
@@ -376,6 +429,17 @@ export function Settings() {
         <div className='flex items-center gap-2'>
           <button
             type='button'
+            onClick={toggleAllCards}
+            className='nd-action-btn nd-action-btn--text'
+            title={allCardsOpen ? 'Collapse All' : 'Expand All'}
+            aria-label={
+              allCardsOpen ? 'Collapse all settings sections' : 'Expand all settings sections'
+            }
+          >
+            {allCardsOpen ? 'Collapse All' : 'Expand All'}
+          </button>
+          <button
+            type='button'
             onClick={onExport}
             className='nd-action-btn'
             title='Export Settings'
@@ -388,13 +452,24 @@ export function Settings() {
       </div>
 
       <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
-        <LocalAuthRecoveryCard />
+        <LocalAuthRecoveryCard
+          collapsible
+          open={openMap.localAuthRecovery ?? false}
+          onToggle={() => toggleCard('localAuthRecovery')}
+        />
       </div>
 
       <form key='settings' ref={formRef} method='post' action='/api/settings' onSubmit={onSubmit}>
         <div className='grid grid-cols-1 gap-4 lg:grid-cols-10'>
           {/* Temperature Settings */}
-          <Card sm={10} lg={5} title='Temperature Settings'>
+          <Card
+            sm={10}
+            lg={5}
+            title='Temperature Settings'
+            collapsible
+            open={openMap.temperature ?? false}
+            onToggle={() => toggleCard('temperature')}
+          >
             <div className='flex flex-col gap-5'>
               <div className='flex flex-col gap-2'>
                 <label
@@ -442,7 +517,14 @@ export function Settings() {
           </Card>
 
           {/* User Preferences */}
-          <Card sm={10} lg={5} title='User Preferences'>
+          <Card
+            sm={10}
+            lg={5}
+            title='User Preferences'
+            collapsible
+            open={openMap.userPreferences ?? false}
+            onToggle={() => toggleCard('userPreferences')}
+          >
             <div className='flex flex-col gap-5'>
               <div className='flex flex-col gap-2'>
                 <label
@@ -626,7 +708,14 @@ export function Settings() {
           </Card>
 
           {/* Web Settings */}
-          <Card sm={10} lg={5} title='Web Settings'>
+          <Card
+            sm={10}
+            lg={5}
+            title='Web Settings'
+            collapsible
+            open={openMap.webSettings ?? false}
+            onToggle={() => toggleCard('webSettings')}
+          >
             <div className='flex flex-col gap-5'>
               <div className='flex flex-col gap-2'>
                 <label
@@ -657,10 +746,20 @@ export function Settings() {
           <GoogleDriveBackupCard
             apiService={apiService}
             onRestoreComplete={() => setGen(prev => prev + 1)}
+            collapsible
+            open={openMap.googleDriveBackup ?? false}
+            onToggle={() => toggleCard('googleDriveBackup')}
           />
 
           {/* System Preferences */}
-          <Card sm={10} lg={5} title='System Preferences'>
+          <Card
+            sm={10}
+            lg={5}
+            title='System Preferences'
+            collapsible
+            open={openMap.systemPreferences ?? false}
+            onToggle={() => toggleCard('systemPreferences')}
+          >
             <div className='flex flex-col gap-5'>
               <div className='flex flex-col gap-2'>
                 <label
@@ -858,7 +957,14 @@ export function Settings() {
           </Card>
 
           {/* Machine Settings */}
-          <Card sm={10} lg={5} title='Machine Settings'>
+          <Card
+            sm={10}
+            lg={5}
+            title='Machine Settings'
+            collapsible
+            open={openMap.machineSettings ?? false}
+            onToggle={() => toggleCard('machineSettings')}
+          >
             <div className='flex flex-col gap-5'>
               <div className='flex flex-col gap-2'>
                 <label
@@ -1063,7 +1169,14 @@ export function Settings() {
           </Card>
 
           {/* Display Settings */}
-          <Card sm={10} lg={5} title='Display Settings'>
+          <Card
+            sm={10}
+            lg={5}
+            title='Display Settings'
+            collapsible
+            open={openMap.displaySettings ?? false}
+            onToggle={() => toggleCard('displaySettings')}
+          >
             <div className='flex flex-col gap-5'>
               <div className='flex flex-col gap-2'>
                 <label
@@ -1170,7 +1283,14 @@ export function Settings() {
 
           {/* Sunrise Settings */}
           {ledControl.value && (
-            <Card sm={10} lg={5} title='Sunrise Settings'>
+            <Card
+              sm={10}
+              lg={5}
+              title='Sunrise Settings'
+              collapsible
+              open={openMap.sunrise ?? false}
+              onToggle={() => toggleCard('sunrise')}
+            >
               <div className='flex flex-col gap-5'>
                 <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
                   Set the colors for the LEDs when in idle mode with no warnings.
@@ -1313,7 +1433,13 @@ export function Settings() {
             </Card>
           )}
 
-          <Card sm={10} title='Plugins'>
+          <Card
+            sm={10}
+            title='Plugins'
+            collapsible
+            open={openMap.plugins ?? false}
+            onToggle={() => toggleCard('plugins')}
+          >
             <PluginCard
               formData={formData}
               onChange={onChange}
@@ -1327,7 +1453,12 @@ export function Settings() {
         </div>
 
         {/* Remote Access */}
-        <RemoteAccessCard formData={formData} onChange={onChange} />
+        <RemoteAccessCard
+          formData={formData}
+          onChange={onChange}
+          open={openMap.remoteAccess ?? false}
+          onToggle={() => toggleCard('remoteAccess')}
+        />
 
         {/* Warning + Action buttons */}
         <div className='col-span-10 pt-6'>
@@ -1370,7 +1501,7 @@ export function Settings() {
   );
 }
 
-function RemoteAccessCard({ formData, onChange }) {
+function RemoteAccessCard({ formData, onChange, open, onToggle }) {
   const [copied, setCopied] = useState(false);
 
   const relayUrl = formData.cloudRelayUrl || '';
@@ -1400,7 +1531,7 @@ function RemoteAccessCard({ formData, onChange }) {
   }
 
   return (
-    <Card sm={10} lg={10} title='Remote Access'>
+    <Card sm={10} lg={10} title='Remote Access' collapsible open={open} onToggle={onToggle}>
       <div className='flex flex-col gap-5'>
         <p className='text-[14px] text-[var(--text-disabled,#666)]'>
           Deploy the relay server and enter its URL below to access your machine from anywhere.

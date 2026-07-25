@@ -25,7 +25,7 @@ const LOCAL_AUTH_NO_CONFIRM_ERROR =
 // no token is present, which is exactly the situation this card recovers from.
 // Motivating case: iOS "Add to Home Screen" apps get an isolated storage sandbox
 // (WebKit bug 181849) the handoff-link import path cannot reach.
-export function LocalAuthRecoveryCard() {
+export function LocalAuthRecoveryCard({ collapsible = false, open, onToggle }) {
   const apiService = useContext(ApiServiceContext);
   const [tokenInput, setTokenInput] = useState('');
   const [error, setError] = useState(null);
@@ -93,7 +93,14 @@ export function LocalAuthRecoveryCard() {
   };
 
   return (
-    <Card sm={10} lg={10} title='Local admin token'>
+    <Card
+      sm={10}
+      lg={10}
+      title='Local admin token'
+      collapsible={collapsible}
+      open={open}
+      onToggle={onToggle}
+    >
       <div className='flex flex-col gap-4'>
         <div className='font-nd-mono text-[13px] text-[var(--text-disabled,#666)]'>
           If Brew/Steam/Water or Save Settings fail because this browser has no saved admin token
