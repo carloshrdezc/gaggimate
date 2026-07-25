@@ -20,6 +20,9 @@
 #include <display/config/features.h>
 #include <display/core/EventIds.h>
 #include <display/core/GmHeapDiag.h> // PRO-566: gated internal-DRAM checkpoints (no-op unless -DGM_HEAP_DIAG_ENABLED)
+#ifndef GAGGIMATE_SIM
+#include <display/core/MbedtlsPsramAllocator.h> // PRO-569: route mbedTLS allocs to PSRAM (device-only)
+#endif
 #include <display/core/StandbyTransitionPolicy.h>
 #include <display/core/SteamButtonPolicy.h>
 #include <display/core/constants.h>
@@ -94,6 +97,16 @@ void Controller::setup() {
     if (processMutex == nullptr) {
         ESP_LOGE(LOG_TAG, "Failed to create process mutex");
     }
+
+#ifndef GAGGIMATE_SIM
+    // PRO-569 (Ref PRO-566): route all mbedTLS allocations to PSRAM before any
+    // TLS handshake runs (the periodic OTA check / channel-switch resolve fire
+    // far later). On this platform (IDF 4.4.7, CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y)
+    // mbedtls_ssl_setup() otherwise draws two ~16.3 KiB record buffers from
+    // internal DRAM — the contiguous allocation the PRO-554 48 KiB floor guards.
+    // Idempotent + fail-safe: no-ops (returns false) if PSRAM is absent.
+    installMbedtlsPsramAllocator();
+#endif
 
     // Web assets are served from this partition. LittleFS (not SPIFFS): SPIFFS
     // has no directory tree, so stat()/exists() is O(whole filesystem) and a
