@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { cleanup, fireEvent, render } from '@testing-library/preact';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 
 // Regression test for the PR #565 review nit (PRO-578, ref PRO-577): the
 // Settings onSubmit handler parses a 400 validation rejection of the shape
@@ -56,15 +56,15 @@ function renderSettings() {
   render(h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)));
 }
 
-// Submit the Save form and let the async onSubmit handler settle. onSubmit does
-// an awaited fetch, then (on the 400 branch) an awaited response.clone().json(),
-// so we drain a few microtask turns to let the promise chain complete.
+// Submit the Save form and wait for the async onSubmit handler to settle.
+// onSubmit does an awaited fetch, then (on the 400 branch) an awaited
+// response.clone().json(); every error path this suite exercises ends in an
+// alert() call, so we wait on alert having been called rather than draining a
+// fixed number of microtask turns.
 async function submitAndSettle() {
   const form = document.querySelector('form[action="/api/settings"]');
   fireEvent.submit(form);
-  for (let i = 0; i < 5; i += 1) {
-    await Promise.resolve();
-  }
+  await waitFor(() => expect(globalThis.alert).toHaveBeenCalled());
 }
 
 beforeEach(() => {
