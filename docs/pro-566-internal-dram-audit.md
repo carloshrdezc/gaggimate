@@ -195,3 +195,85 @@ Filed as separate PRO issues (each `Ref PRO-566`):
 - **PRO-569** — R3: Investigate making mbedTLS SSL content-length caps live on classic espressif32 (no `custom_sdkconfig`).
 
 This spike delivers findings + instrumentation only; the fixes are separate PRs.
+
+---
+
+## 6. PRO-569 addendum — R3 measurement + option verdict (mbedTLS TLS buffers)
+
+**Status:** measured (static, from the prebuilt lib) + fix landed via option (b). On-device
+48 KiB-floor confirmation is the operator's manual step (see §4 recipe, unchanged).
+
+### 6.1 Measured allocation size on THIS platform (IDF 4.4.7, not IDF 5.x)
+
+The IDF-5.x numbers do not transfer, so the OTA-check TLS handshake's transient
+allocation was re-derived from the **prebuilt mbedtls lib actually linked by this build**
+(`framework-arduinoespressif32/tools/sdk/esp32s3`, IDF 4.4.7 — verified via
+`esp_idf_version.h` = 4.4.7; the sibling `framework-arduinoespressif32-libs` = IDF 5.5.4 is
+the *unpinned* pioarduino platform and is **not** used by `espressif32@6.12.0`).
+
+`mbedtls_ssl_setup()` allocates two record buffers of `MBEDTLS_SSL_IN_BUFFER_LEN` /
+`MBEDTLS_SSL_OUT_BUFFER_LEN` via `mbedtls_calloc`. Computed from the confirmed sdkconfig +
+`ssl_internal.h` macros:
+
+| Quantity | Value (this build) | Source |
+|---|---|---|
+| `CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN` | 16384 | prebuilt `sdkconfig` |
+| `CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN` | **unset** → in == out | prebuilt `sdkconfig` |
+| payload overhead (compression 0 + IV 16 + MAC 32 + CBC pad 256 + CID 0) | 304 | `ssl_internal.h` |
+| header | 13 | `ssl_internal.h` |
+| **`MBEDTLS_SSL_IN_BUFFER_LEN`** | **16701 B (16.31 KiB)** — contiguous alloc #1 | 13 + 304 + 16384 |
+| **`MBEDTLS_SSL_OUT_BUFFER_LEN`** | **16701 B (16.31 KiB)** — contiguous alloc #2 | 13 + 304 + 16384 |
+
+So the transient contiguous need is **2 × 16.31 KiB internal-DRAM blocks** (plus the ECC /
+cert-parse scratch on top), matching the audit's "2 × 16.4 KB" estimate. A 4 KiB content-len
+cap would drop each to **4413 B (4.31 KiB)** — but see §6.2(a): that cap is inert here.
+
+**Root cause pinned:** `CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y` **and**
+`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` **unset** in the prebuilt `sdkconfig` → the port's default
+allocator `esp_mbedtls_mem_calloc` draws these blocks from `MALLOC_CAP_INTERNAL`. That is
+exactly the contiguous internal-DRAM allocation the PRO-554 `kOtaResolveInternalDramFloorBytes`
+guard protects.
+
+### 6.2 Option verdict
+
+- **(a) `sdkconfig.defaults` / menuconfig — INFEASIBLE.** The buffer size is a compile-time
+  `#define` baked into the **prebuilt** `libmbedtls.a` / `libmbedcrypto.a`. Classic
+  `espressif32@6.12.0` (Arduino 2.0.17) links these prebuilt artifacts and never runs
+  menuconfig or rebuilds IDF from source, and no `custom_sdkconfig` path exists on this
+  platform (confirmed in §1). A `sdkconfig.defaults` is silently ignored — same conclusion as
+  the audit's §2 row 5.
+
+- **(b) `mbedtls_platform_set_calloc_free` PSRAM hook — FEASIBLE, and the fix shipped.** The
+  ESP-IDF mbedtls port config (`esp_config.h`) `#define`s `MBEDTLS_PLATFORM_MEMORY` +
+  `MBEDTLS_PLATFORM_C` with **no** `MBEDTLS_PLATFORM_CALLOC_MACRO`, so `mbedtls_calloc` is a
+  **runtime function pointer** (defaulting to `esp_mbedtls_mem_calloc`), and `libmbedcrypto.a`
+  exports `mbedtls_platform_set_calloc_free` (verified with `nm`: all three symbols are `T`).
+  Installing a `heap_caps_calloc(…, MALLOC_CAP_SPIRAM)` calloc/free at boot (before any TLS
+  handshake) routes the two 16.31 KiB record buffers — and all other mbedtls scratch — into the
+  8 MB PSRAM. SSL record buffers are copied in software and never DMA'd, so non-DMA PSRAM is
+  correct (same rationale as PRO-568's log queue). **This is the runtime equivalent of the
+  unavailable `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`**, and it removes the internal-DRAM contiguous
+  requirement the 48 KiB floor guards — preferable to capping, because it moves the whole TLS
+  footprint off internal DRAM rather than just shrinking it.
+
+- **(c) reuse a single TLS buffer — NOT PURSUED.** Cannot shrink the baked-in `#define` size,
+  and does not reduce the peak contiguous need *within* a single handshake (both in+out buffers
+  are live simultaneously). Strictly worse than (b) for this floor. PRO-556 already added a
+  handshake-reuse path at a higher layer (reusing the periodic check's result), which is the
+  useful form of "reuse" here.
+
+### 6.3 Fix delivered (PRO-569)
+
+- `src/display/core/MbedtlsPsramAllocatorPolicy.h` — pure, host-tested `(n, size)` size /
+  zero-request / overflow policy with a `static_assert` truth table (native test
+  `test_mbedtls_psram_allocator_policy`).
+- `src/display/core/MbedtlsPsramAllocator.{h,cpp}` — `installMbedtlsPsramAllocator()`: idempotent,
+  fail-safe (no-op if PSRAM absent → PRO-554 guard still prevents an OOM panic), swaps the
+  mbedtls calloc/free to PSRAM. Device-only (excluded from native/sim).
+- Wired into `Controller::setup()` early, before any plugin/WiFi/TLS init.
+
+**Do NOT lower `kOtaResolveInternalDramFloorBytes`** (PRO-554 / PRO-364): the floor protects a
+real allocation; lowering it just moves the OOM into mbedtls. This fix keeps the floor and
+instead makes the allocation it guards no longer draw on internal DRAM. On-device confirmation
+that the largest free internal block after `after clientController.initClient` no longer
+collapses below 49152 (via `display-heapdiag`, §4 recipe) is the operator's manual step.
