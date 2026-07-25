@@ -37,7 +37,10 @@ bool installMbedtlsPsramAllocator() {
         return true; // idempotent: only swap the hook once
     }
 
-    if (!psramFound()) {
+    // shouldInstallPsramAllocator() (pure, host-tested in [env:native]) gates on
+    // PSRAM presence; the `installed` short-circuit above already handles the
+    // idempotency arm, so here it collapses to the psramFound() check.
+    if (!shouldInstallPsramAllocator(installed, psramFound())) {
         // No PSRAM on this board: leave mbedtls on its default internal-DRAM
         // allocator. The PRO-554 pre-flight guard still fails the OTA resolve
         // closed instead of panicking, so this degrades safely.
@@ -52,6 +55,14 @@ bool installMbedtlsPsramAllocator() {
     // PSRAM. Non-DMA PSRAM is correct: SSL record buffers are copied in software
     // and never DMA'd.
     const int rc = mbedtls_platform_set_calloc_free(mbedtlsPsramCalloc, mbedtlsPsramFree);
+    // NOTE: this rc != 0 branch is currently unreachable in practice. The shipped
+    // ESP-IDF mbedtls port (framework-espidf under espressif32@6.12.0) implements
+    // mbedtls_platform_set_calloc_free() in mbedtls/library/platform.c as an
+    // unconditional pointer swap that always `return 0;` — there is no failure path
+    // in the port as of this pin. Kept as defensive/future-proofing code in case
+    // that upstream contract ever changes (or MBEDTLS_PLATFORM_MEMORY stops being
+    // defined, which would drop the function entirely). Do not go hunting for a way
+    // to trigger it under the current toolchain — there isn't one.
     if (rc != 0) {
         ESP_LOGE(kMbedtlsPsramTag, "mbedtls_platform_set_calloc_free failed (rc=%d); staying on default allocator", rc);
         return false;
