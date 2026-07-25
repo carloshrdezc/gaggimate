@@ -2,35 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact';
 
-// Regression test for PRO-574 — a non-blocking, test-only follow-up to PR #562
-// (PRO-573). PR #562 made PluginSubCard initialise its internal `open` state
-// from `enabled` (instead of a hardcoded `false`), so an already-enabled plugin
-// starts expanded on mount. Its test (PluginCard.test.jsx) exercised PluginCard
-// in isolation via a synthetic harness whose formData is pre-populated with
-// `homekit: true` at the very first render — so the sub-card mounts with
-// enabled=true and the ONLY thing that can expand it is `useState(enabled)`.
+// Regression test for PRO-574 (test-only follow-up to PR #562).
 //
-// That component-level test does NOT cover the actual real-world trigger the
-// reviewer called out: a refetch-driven REMOUNT at the Settings-page level.
-// When a Google Drive restore completes, Settings' `onRestoreComplete` bumps
-// `gen`, which changes the `settings/${gen}` useQuery key -> isLoading flips
-// true (the whole form, including PluginCard/PluginSubCard, unmounts behind the
-// loading spinner) then false again -> the form remounts fresh and re-reads the
-// refetched settings. This test drives that end-to-end path and asserts the
-// user-observable outcome: a plugin that was already enabled stays expanded
-// after the restore, with no click into the sub-card.
+// What this guards: a Google Drive restore completes -> Settings'
+// `onRestoreComplete` bumps `gen` -> the `settings/${gen}` useQuery key changes
+// -> the form unmounts behind the loading spinner and then remounts fresh from
+// the refetched settings. This drives that end-to-end restore path and asserts
+// the user-observable outcome: a plugin that was already enabled stays expanded,
+// with no click into its sub-card.
 //
-// NOTE on what this locks vs. PluginCard.test.jsx: at the Settings level the
-// expansion is guarded by TWO cooperating mechanisms, not just `useState(open)`.
-// On remount, Settings' `[fetchedSettings]` effect briefly resets formData to
-// `{}` while the refetch is in flight, so PluginSubCard first sees enabled=false
-// and then enabled=true — which also trips the OFF->ON auto-expand useEffect.
-// So this test is a behavioural acceptance guard for the *restore path as a
-// whole* (the case the reviewer flagged as uncovered), whereas
-// PluginCard.test.jsx is the targeted unit guard for the `useState(enabled)`
-// initialiser in isolation. Together they cover both the line-level fix and the
-// real trigger that motivated it; if a future refactor leaves a plugin collapsed
-// after a Drive restore, this test fails.
+// Why it exists alongside PluginCard.test.jsx: that test unit-checks the
+// `useState(enabled)` initialiser on PluginSubCard in isolation. At the Settings
+// level, expansion instead relies on TWO cooperating mechanisms — the refetch
+// briefly resets formData to `{}`, so the sub-card sees enabled=false then true,
+// which also trips the OFF->ON auto-expand effect. This is the acceptance guard
+// for that whole remount path (the trigger the reviewer flagged as uncovered).
+//
+// Failure mode it catches: a plugin left collapsed after a Drive restore.
 
 const { authenticatedFetch, settingsWithHomekitEnabled } = vi.hoisted(() => ({
   authenticatedFetch: vi.fn(),
@@ -65,6 +53,9 @@ const queryController = vi.hoisted(() => {
       rerender = fn;
     },
     reset() {
+      // Called from beforeEach to isolate each scenario. If you add more it()
+      // blocks to this file, confirm this reset() still fully resets whatever
+      // state your new case touches so scenarios stay independent.
       loaded.clear();
       loaded.set('settings/0', true); // initial mount is already loaded
     },
