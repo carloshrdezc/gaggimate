@@ -87,4 +87,25 @@ static_assert(mbedtlsCallocSize(SIZE_MAX, 1u).bytes == SIZE_MAX, "PRO-569: SIZE_
 static_assert(!mbedtlsCallocSize(SIZE_MAX, 1u).overflow, "PRO-569: SIZE_MAX*1 does not overflow");
 static_assert(mbedtlsCallocShouldAllocate(SIZE_MAX, 1u), "PRO-569: SIZE_MAX*1 is a (huge) valid request");
 
+// --- Install gate (PRO-585) ------------------------------------------------
+//
+// PRO-585 (Ref PRO-569 / #574): the on-device installMbedtlsPsramAllocator()
+// early-returns when PSRAM is absent (psramFound()==false) so mbedTLS stays on
+// its default internal-DRAM allocator — degrading safely to pre-fix behaviour,
+// with the PRO-554 pre-flight guard still protecting against an OOM panic. That
+// psramFound() gate is device-only (Arduino.h), so the decision is extracted
+// here as a pure predicate to give the fail-safe path host-test coverage under
+// [env:native], mirroring the calloc size/overflow policy above.
+//
+// Returns true only when the caller should attempt to swap in the PSRAM-backed
+// calloc/free: not already installed AND PSRAM is present. The `alreadyInstalled`
+// short-circuit keeps installMbedtlsPsramAllocator() idempotent (only swap once).
+constexpr bool shouldInstallPsramAllocator(bool alreadyInstalled, bool psramFound) { return !alreadyInstalled && psramFound; }
+
+// Truth table pinning the fail-safe contract.
+static_assert(shouldInstallPsramAllocator(false, true), "PRO-585: fresh boot with PSRAM -> install");
+static_assert(!shouldInstallPsramAllocator(false, false), "PRO-585: PSRAM absent -> stay on internal-DRAM allocator");
+static_assert(!shouldInstallPsramAllocator(true, true), "PRO-585: already installed -> idempotent no-op");
+static_assert(!shouldInstallPsramAllocator(true, false), "PRO-585: already installed, no PSRAM -> no-op");
+
 #endif // MBEDTLSPSRAMALLOCATORPOLICY_H
