@@ -49,11 +49,14 @@ export function importButtonMock() {
 }
 
 // Render the Settings page inside the ApiServiceContext provider the component
-// requires. `Settings` is passed in by the caller so this module doesn't import
-// (and thus doesn't pull in) the real component before the caller's vi.mock
-// calls have been hoisted. Returns the render result so callers that need
-// `rerender` (e.g. the plugin remount suite) can use it.
-export function renderSettings(ApiServiceContext, Settings) {
+// requires. The `ApiServiceContext` and `Settings` component are INJECTED by
+// the caller (rather than imported here) on purpose: importing the real
+// component from this shared module would pull it in before the caller's
+// `vi.mock(...)` calls have been hoisted, defeating the mocks. The name spells
+// out that dependency injection so a call site is self-explanatory without
+// scrolling back to this comment. Returns the render result so callers that
+// need `rerender` (e.g. the plugin remount suite) can use it.
+export function renderSettingsWithInjectedComponent(ApiServiceContext, Settings) {
   return render(
     h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)),
   );

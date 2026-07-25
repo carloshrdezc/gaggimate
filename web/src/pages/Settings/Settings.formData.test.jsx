@@ -7,7 +7,7 @@ import {
   importButtonMock,
   installSettingsTestGlobals,
   localAuthFetchMock,
-  renderSettings as renderSettingsWith,
+  renderSettingsWithInjectedComponent,
   teardownSettingsTest,
 } from './Settings.testUtils.jsx';
 
@@ -53,7 +53,7 @@ import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Settings } from './index.jsx';
 
 function renderSettings() {
-  return renderSettingsWith(ApiServiceContext, Settings);
+  return renderSettingsWithInjectedComponent(ApiServiceContext, Settings);
 }
 
 beforeEach(() => {
