@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render } from '@testing-library/preact';
 
 // Regression test for the PR #565 review nit (PRO-578, ref PRO-577): the
 // Settings onSubmit handler parses a 400 validation rejection of the shape
