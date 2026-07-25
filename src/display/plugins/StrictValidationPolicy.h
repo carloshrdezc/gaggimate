@@ -172,7 +172,10 @@ inline bool validateSettings(const Fields &fields, Error &error) {
             if (!inRange(name, value, -30, 30, error))
                 return false;
         } else if (name == "pressureScaling") {
-            if (!numberInRange(name, value, 0, 10, error))
+            // Pressure sensor bar rating. Common espresso transducers are rated
+            // 12/16/20/30 bar; the firmware's own DEFAULT_PRESSURE_SCALING is 16.0
+            // (see constants.h), so the upper bound must cover it with headroom.
+            if (!numberInRange(name, value, 0, 30, error))
                 return false;
         } else if (name == "startupFillTime" || name == "steamFillTime" || name == "standbyTimeout" ||
                    name == "standbyBrightnessTimeout") {
