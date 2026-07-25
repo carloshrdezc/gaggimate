@@ -100,7 +100,7 @@ static_assert(mbedtlsCallocShouldAllocate(SIZE_MAX, 1u), "PRO-569: SIZE_MAX*1 is
 // Returns true only when the caller should attempt to swap in the PSRAM-backed
 // calloc/free: not already installed AND PSRAM is present. The `alreadyInstalled`
 // short-circuit keeps installMbedtlsPsramAllocator() idempotent (only swap once).
-constexpr bool shouldInstallPsramAllocator(bool alreadyInstalled, bool psramFound) { return !alreadyInstalled && psramFound; }
+constexpr bool shouldInstallPsramAllocator(bool alreadyInstalled, bool hasPsram) { return !alreadyInstalled && hasPsram; }
 
 // Truth table pinning the fail-safe contract.
 static_assert(shouldInstallPsramAllocator(false, true), "PRO-585: fresh boot with PSRAM -> install");
