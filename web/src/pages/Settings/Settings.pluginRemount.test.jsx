@@ -7,7 +7,7 @@ import {
   importButtonMock,
   installSettingsTestGlobals,
   localAuthFetchMock,
-  renderSettings as renderSettingsWith,
+  renderSettingsWithInjectedComponent,
   teardownSettingsTest,
 } from './Settings.testUtils.jsx';
 
@@ -128,7 +128,7 @@ function homekitBodyVisible() {
 }
 
 function renderSettings() {
-  return renderSettingsWith(ApiServiceContext, Settings);
+  return renderSettingsWithInjectedComponent(ApiServiceContext, Settings);
 }
 
 beforeEach(() => {
