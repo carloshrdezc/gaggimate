@@ -309,6 +309,22 @@ export function Settings() {
         });
 
         if (!response.ok) {
+          // A structured validation rejection returns 400 with a JSON body of the
+          // shape {error, field, detail}. Surface the offending field/detail so the
+          // user sees the real cause instead of the generic fallback message.
+          if (response.status === 400) {
+            let validationError = null;
+            try {
+              validationError = await response.clone().json();
+            } catch {
+              validationError = null;
+            }
+            if (validationError && validationError.field && validationError.detail) {
+              throw new Error(`${validationError.field}: ${validationError.detail}`, {
+                cause: 'validation',
+              });
+            }
+          }
           throw new Error(`Server error: ${response.status}`);
         }
 
@@ -338,7 +354,11 @@ export function Settings() {
         setFormData(updatedData);
       } catch (error) {
         console.error('Failed to save settings:', error);
-        alert('Failed to save settings. Please try again.');
+        if (error?.cause === 'validation') {
+          alert(`Failed to save settings: ${error.message}`);
+        } else {
+          alert('Failed to save settings. Please try again.');
+        }
       } finally {
         setSubmitting(false);
       }
