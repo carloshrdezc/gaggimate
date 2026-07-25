@@ -79,20 +79,20 @@ void test_max_times_one_is_exact_no_overflow(void) {
 
 // Fresh boot with PSRAM present: install the PSRAM-backed allocator.
 void test_install_when_psram_present(void) {
-    TEST_ASSERT_TRUE(shouldInstallPsramAllocator(/*alreadyInstalled=*/false, /*psramFound=*/true));
+    TEST_ASSERT_TRUE(shouldInstallPsramAllocator(/*alreadyInstalled=*/false, /*hasPsram=*/true));
 }
 
 // The fail-safe path: PSRAM absent -> DO NOT install, mbedTLS stays on its
 // internal-DRAM allocator (pre-fix behaviour; PRO-554 floor still guards OOM).
 // This is the psramFound()==false early return that is otherwise device-only.
 void test_no_install_when_psram_absent(void) {
-    TEST_ASSERT_FALSE(shouldInstallPsramAllocator(/*alreadyInstalled=*/false, /*psramFound=*/false));
+    TEST_ASSERT_FALSE(shouldInstallPsramAllocator(/*alreadyInstalled=*/false, /*hasPsram=*/false));
 }
 
 // Idempotency: once installed, never swap again regardless of psramFound().
 void test_idempotent_once_installed(void) {
-    TEST_ASSERT_FALSE(shouldInstallPsramAllocator(/*alreadyInstalled=*/true, /*psramFound=*/true));
-    TEST_ASSERT_FALSE(shouldInstallPsramAllocator(/*alreadyInstalled=*/true, /*psramFound=*/false));
+    TEST_ASSERT_FALSE(shouldInstallPsramAllocator(/*alreadyInstalled=*/true, /*hasPsram=*/true));
+    TEST_ASSERT_FALSE(shouldInstallPsramAllocator(/*alreadyInstalled=*/true, /*hasPsram=*/false));
 }
 
 static int runMbedtlsPsramAllocatorPolicyTests() {
