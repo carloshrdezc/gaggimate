@@ -85,9 +85,15 @@ describe('renderSettingsWithInjectedComponent', () => {
     const ApiServiceContext = createContext(null);
     const Settings = () => h('div', { 'data-testid': 'injected-settings' }, 'settings');
 
-    const { getByTestId } = renderSettingsWithInjectedComponent(ApiServiceContext, Settings);
+    const { getByTestId, rerender } = renderSettingsWithInjectedComponent(
+      ApiServiceContext,
+      Settings,
+    );
 
     expect(getByTestId('injected-settings').textContent).toBe('settings');
+    // The render result must expose a callable rerender (used downstream by
+    // Settings.pluginRemount.test.jsx) — guard against the factory dropping it.
+    expect(typeof rerender).toBe('function');
   });
 });
 
@@ -100,6 +106,7 @@ describe('installSettingsTestGlobals', () => {
     // alert is stubbed to a spy (callable, no window popup in jsdom).
     expect(() => alert('hi')).not.toThrow();
     expect(alert).toEqual(expect.any(Function));
+    expect(vi.isMockFunction(globalThis.alert)).toBe(true);
 
     // console.error is silenced via a spy.
     expect(vi.isMockFunction(console.error)).toBe(true);
