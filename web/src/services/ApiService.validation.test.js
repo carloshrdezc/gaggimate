@@ -16,4 +16,16 @@ describe('WebSocket request validation (PRO-521)', () => {
       futureField: 'ignored',
     });
   });
+
+  test('preserves the PRO-587 auto flag on an automatic standby-on-brew change-mode', () => {
+    // PRO-587: the standby-on-brew effect sends `req:change-mode` mode=STANDBY
+    // with `auto: true` so the firmware defers the stop through the settle
+    // window (like Auto-Steam). The validator must accept and preserve the flag;
+    // an explicit STANDBY sends no `auto` field and keeps instant-stop behavior.
+    expect(validateWebSocketRequest({ tp: 'req:change-mode', mode: 0, auto: true })).toEqual({
+      tp: 'req:change-mode',
+      mode: 0,
+      auto: true,
+    });
+  });
 });
