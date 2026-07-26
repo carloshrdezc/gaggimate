@@ -1309,9 +1309,16 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       // !autoSteamEnabled guard), so this only fires when auto-steam is off.
       // This is the FIRST change-mode of the transition (not a re-assert), so it
       // passes through StandbyReassertPolicy/ChangeModeDeferPolicy untouched.
+      // PRO-587: mark this transition `auto: true` so the firmware recognizes it
+      // as an AUTOMATIC post-shot standby (not an explicit human stop) and lets
+      // it ride the same settle window as auto-steam — the BLE scale stays
+      // connected until extended-recording closes so the final drips reach the
+      // recorded yield. An explicit STANDBY (physical button, web Standby button,
+      // HomeKit) sends a bare `req:change-mode` with no `auto` flag and keeps its
+      // instant-stop behavior (PRO-265).
       // Same exactly-once discipline as auto-steam: clear the refs so the effect
       // does not re-fire on subsequent inactive transitions of the same shot.
-      try { api.send({ tp: 'req:change-mode', mode: MODE_STANDBY }); } catch {}
+      try { api.send({ tp: 'req:change-mode', mode: MODE_STANDBY, auto: true }); } catch {}
       lastActiveWasBrewRef.current = false;
       lastProcessTypeRef.current = null;
     }

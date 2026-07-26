@@ -476,11 +476,15 @@ void WebUIPlugin::loop() {
     // applies once the settle window closes.
     if (pendingModeChange) {
         // "Still hold" is the same defer decision as the arming gate (PRO-267):
-        // a deferral is only ever armed for non-STANDBY targets, so
-        // shouldDeferModeChange(pendingModeChangeTarget, ...) reduces to the
-        // settle-window check here — sharing the predicate keeps the hold/apply
-        // decision in lock-step with the arming gate.
-        if (shouldDeferModeChange(pendingModeChangeTarget, ShotHistory.isExtendedRecording())) {
+        // a deferral is only ever armed for a target that defers — a non-STANDBY
+        // target (any settle window) or an AUTOMATIC standby-on-brew STANDBY
+        // (PRO-587). An EXPLICIT STANDBY never arms, so a STANDBY sitting in
+        // pendingModeChangeTarget is by construction automatic. Passing
+        // automatic=true here therefore keeps the hold/apply decision in
+        // lock-step with the arming gate for BOTH cases: it reduces to the pure
+        // settle-window check (isExtendedRecording) — hold while the window is
+        // open, apply the moment it closes — with no separate pending-auto flag.
+        if (shouldDeferModeChange(pendingModeChangeTarget, ShotHistory.isExtendedRecording(), /*automatic=*/true)) {
             // Settle still in progress: hold the mode, keep the BLE scale connected
             // and record() logging so post-stop drips land in the yield. Re-checked
             // next iteration (~2 ms) — no blocking wait, no delay() on this task.
@@ -1648,6 +1652,14 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:change-mode") {
         if (doc["mode"].is<uint8_t>()) {
             uint8_t newMode = doc["mode"].as<uint8_t>();
+            // PRO-587: an OPTIONAL `auto` flag distinguishes an AUTOMATIC,
+            // post-shot standby-on-brew transition (sent by the web dashboard's
+            // standby-on-brew effect) from an EXPLICIT user-initiated request.
+            // Absent/false (every physical button, web Standby button, HomeKit,
+            // and every non-standby request) = explicit — today's behavior is
+            // bit-for-bit unchanged. true = automatic — a STANDBY target then
+            // rides the settle window instead of stopping instantly.
+            bool automatic = doc["auto"].is<bool>() && doc["auto"].as<bool>();
             if (newMode == MODE_GRIND && !controller->isGrindAvailable())
                 return;
             if (newMode == MODE_MANUAL && !controller->isManualAvailable())
@@ -1683,14 +1695,21 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             // the window PRO-223/PRO-248 built. setMode() now would stop record().
             // A redundant/duplicate request while a window is already in flight just
             // re-posts the same target without collapsing it (no clear() runs).
-            // PRO-265: STANDBY is an explicit user stop and must NEVER defer — it
+            // PRO-265: an EXPLICIT STANDBY is a user stop and must NEVER defer — it
             // bypasses the settle window entirely and stops immediately, mirroring
             // Controller::activateStandby() and the physical STANDBY button (which
-            // are not gated). Only non-standby targets (auto-steam MODE_STEAM, grind,
-            // manual) keep PRO-261's settle behavior.
-            if (shouldDeferModeChange(newMode, ShotHistory.isExtendedRecording())) {
+            // are not gated). PRO-587: an AUTOMATIC STANDBY (standby-on-brew, the
+            // `auto` flag above) DOES defer — it rides the same settle window as
+            // auto-steam so post-shot drips reach the yield. Non-standby targets
+            // (auto-steam MODE_STEAM, grind, manual) keep PRO-261's settle behavior
+            // regardless of the flag.
+            if (shouldDeferModeChange(newMode, ShotHistory.isExtendedRecording(), automatic)) {
                 // Latch target before raising the flag so loop() never reads a stale
                 // target for a freshly-armed deferral (volatile handoff, see header).
+                // No pending-auto companion flag is needed: a STANDBY target only
+                // ever reaches here when automatic == true (an explicit STANDBY
+                // never defers), so loop()'s drain re-check treats any armed target
+                // as deferrable-while-recording (see WebUIPlugin::loop, PRO-587).
                 pendingModeChangeTarget = newMode;
                 pendingModeChange = true;
             } else {
@@ -1704,7 +1723,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 controller->clear();
                 controller->setMode(newMode);
                 // PRO-421: record when an explicit STANDBY landed so an immediate
-                // stale non-STANDBY re-assert (see the guard above) is rejected.
+                // stale non-STANDBY re-assert (see the guard above) is rejected. An
+                // AUTOMATIC standby-on-brew STANDBY never reaches this branch while a
+                // settle window is open (it defers); if it lands here (no window) it
+                // is still a genuine stop, so treat it as an explicit standby for
+                // the reassert guard — this preserves PRO-421 exactly.
                 if (newMode == MODE_STANDBY) {
                     lastExplicitStandbyMs = millis();
                     sawExplicitStandby = true;
