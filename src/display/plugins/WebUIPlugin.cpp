@@ -4,6 +4,7 @@
 #include "OtaResolveHeapPolicy.h"
 #include "OtaResolveReusePolicy.h"
 #include "OtaUpdateCheckPolicy.h"
+#include "RelayConnectionPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
@@ -50,61 +51,29 @@ static WebUIPlugin *g_webUIPlugin = nullptr;
 // used at every read/write site.
 static constexpr const char *kSecretSentinel = "---unchanged---";
 
+// PRO-596: thin Arduino-String adapter over the pure, host-tested
+// relay_connection_policy::relayTokenProtocol. The value logic lives in
+// RelayConnectionPolicy.h (unit-tested under [env:native]); this wrapper only
+// bridges Arduino `String` <-> `std::string` at the call boundary.
 static String relayTokenProtocol(const String &token) {
-    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    String encoded;
-    encoded.reserve(((token.length() + 2) / 3) * 4);
-    for (size_t index = 0; index < token.length(); index += 3) {
-        const uint32_t first = static_cast<uint8_t>(token[index]);
-        const uint32_t second = index + 1 < token.length() ? static_cast<uint8_t>(token[index + 1]) : 0;
-        const uint32_t third = index + 2 < token.length() ? static_cast<uint8_t>(token[index + 2]) : 0;
-        const uint32_t block = (first << 16) | (second << 8) | third;
-        encoded += alphabet[(block >> 18) & 0x3f];
-        encoded += alphabet[(block >> 12) & 0x3f];
-        if (index + 1 < token.length())
-            encoded += alphabet[(block >> 6) & 0x3f];
-        if (index + 2 < token.length())
-            encoded += alphabet[block & 0x3f];
-    }
-    return "gaggimate-token-" + encoded;
+    return String(relay_connection_policy::relayTokenProtocol(std::string(token.c_str())).c_str());
 }
 
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
+// PRO-596: thin Arduino-String adapter over the pure, host-tested
+// relay_connection_policy::parseRelayUrl. The out-param signature is preserved
+// so startRelay() is unchanged; only the parsing body moved to the header.
 static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_t &port, String &basePath) {
-    if (url.startsWith("wss://")) {
-        useSSL = true;
-        String rest = url.substring(6);
-        int slashIdx = rest.indexOf('/');
-        String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
-        basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
-        int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) {
-            host = hostPort;
-            port = 443;
-        } else {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
-        return true;
+    const relay_connection_policy::RelayUrlParts parts = relay_connection_policy::parseRelayUrl(std::string(url.c_str()));
+    if (!parts.valid) {
+        return false;
     }
-    if (url.startsWith("ws://")) {
-        useSSL = false;
-        String rest = url.substring(5);
-        int slashIdx = rest.indexOf('/');
-        String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
-        basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
-        int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) {
-            host = hostPort;
-            port = 80;
-        } else {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
-        return true;
-    }
-    return false;
+    useSSL = parts.useSSL;
+    host = String(parts.host.c_str());
+    port = parts.port;
+    basePath = String(parts.basePath.c_str());
+    return true;
 }
 
 void WebUIPlugin::addCorsHeaders(AsyncWebServerResponse *response) const {
@@ -1364,7 +1333,7 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?role=device" : basePath + "/connect?role=device";
+    String path = String(relay_connection_policy::resolveRelayConnectPath(std::string(basePath.c_str())).c_str());
     String relayProtocols = "Sec-WebSocket-Protocol: gaggimate-relay-v1, " + relayTokenProtocol(relayToken) + "\r\n";
     relayWs.setExtraHeaders(relayProtocols.c_str());
 
