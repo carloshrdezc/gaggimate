@@ -57,6 +57,31 @@ jobs:
           cd web
           npm test
 
+  relay-server:
+    name: Relay server tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: relay-server/package-lock.json
+      # PRO-592: the relay-server has a real test suite
+      # (`node --test src/*.test.js` over relay-auth.test.js + relay.test.js)
+      # and pins node>=22, but no workflow ever ran it, so relay regressions
+      # shipped unchecked. Mirror the `web` job wiring: install with the lockfile
+      # then run the suite. No continue-on-error — a relay-server test failure
+      # now fails the job and the PR.
+      - name: Install and test relay-server
+        run: |
+          cd relay-server
+          npm ci
+          npm test
+
   firmware:
     name: Firmware build (display)
     runs-on: ubuntu-latest
