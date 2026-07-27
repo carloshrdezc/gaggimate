@@ -1027,6 +1027,18 @@ components:
           mode:
             type: integer
             description: New machine mode (validated against grind/manual availability).
+          auto:
+            type: boolean
+            description: |
+              Optional. Distinguishes an AUTOMATIC standby-on-brew transition from
+              an EXPLICIT mode change. `true` (sent only by the web dashboard's
+              standby-on-brew effect) defers a STANDBY target through the post-shot
+              settle / extended-recording window so the final drips still land in
+              the recorded yield. Absent or `false` (every physical button, the web
+              Standby button, HomeKit, and every other `req:change-mode` caller)
+              applies the mode change instantly. Read as
+              `doc["auto"].is<bool>() && doc["auto"].as<bool>()`, so any
+              non-true/non-boolean value is treated as explicit.
         required: [tp]
     ChangeBrewTargetRequest:
       x-since-version: 'unknown'
