@@ -8,7 +8,7 @@ This file provides guidance to agents when working with code in this repository.
 
 GaggiMate is an ESP32-based smart controller for Gaggia espresso machines. It consists of three components:
 - **Firmware** (C++/Arduino) — display unit and controller board
-- **Web UI** (Preact + Vite) — embedded in ESP32 SPIFFS, served over Wi-Fi
+- **Web UI** (Preact + Vite) — embedded directly into the ESP32 app image, served over Wi-Fi
 - **Relay Server** (Node.js) — WebSocket relay for remote access, deployable to Cloudflare Workers
 
 ## Linear Workflow (Mandatory)
@@ -74,7 +74,7 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 **Dual-platform project**: ESP32 firmware (PlatformIO) + Preact web UI (Vite)
 - Firmware: `pio run -e display` (display with UI) or `pio run -e display-headless` (no UI)
 - Web UI is embedded into the display/headless app image: run `scripts/build_webui.sh` (it runs `npm ci && npm run build` in `web/`, then gzips + packs the bundle into `src/display/webassets/`) before `pio run -e display`. The pre-hook stubs an empty bundle so a bare `pio run -e display` still links without a web build.
-- The fresh-install filesystem image holds only seed profiles (`data/p`); the web UI no longer ships in `data/w`.
+- The fresh-install LittleFS filesystem image holds only seed profiles (`data/p`); the web UI is embedded in the app image (via `scripts/build_webui.sh` → `scripts/embed_webui.py`), not shipped on the filesystem.
 - Version auto-generated from git tags via `scripts/auto_firmware_version.py` into `src/version.h`
 
 ### Build / flash / monitor commands
@@ -89,7 +89,7 @@ pio run -e controller            # Controller board
 
 # Flash
 pio run -e display -t upload
-pio run -e display -t uploadfs   # Upload web assets to SPIFFS
+pio run -e display -t uploadfs   # Write the LittleFS seed-profile filesystem image (data/p); does NOT upload web assets
 
 # Monitor serial
 pio device monitor -e display
@@ -101,7 +101,7 @@ pio device monitor -e display
 cd web/
 npm install
 npm run dev      # Dev server at http://localhost:5173/
-npm run build    # Production build → dist/ (then copy to data/)
+npm run build    # Production build → dist/ (embedded into the app image by scripts/build_webui.sh)
 npm run lint     # ESLint auto-fix
 npm run format   # Prettier
 ```
@@ -198,7 +198,7 @@ Plugins implement the `Plugin.h` interface and are registered with `PluginManage
 | `src/display/ui/` | LVGL UI; edit via SquareLine Studio, not by hand |
 | `docs/websocket-api.yaml` | AsyncAPI 2.6.0 spec for the WebSocket protocol |
 | `scripts/auto_firmware_version.py` | Pre-build script that generates `version.h` from git tags |
-| `data/` | SPIFFS filesystem root — web build output goes here |
+| `data/` | LittleFS filesystem root — holds seed profiles (`data/p`) only; the web UI is embedded in the app image, not here |
 
 ### Development Notes
 
