@@ -498,6 +498,17 @@ void WebUIPlugin::loop() {
             // the deferred transition is the correct, display-matching behavior.
             if (controller->getMode() == MODE_BREW) {
                 controller->clear();
+                // PRO-589: intentionally does NOT set lastExplicitStandbyMs /
+                // sawExplicitStandby here, unlike the immediate-apply branch in the
+                // req:change-mode handler. Since PRO-587 a `target` of MODE_STANDBY
+                // CAN reach this drain path (an automatic standby-on-brew defers
+                // through the settle window), but it is always an *automatic*
+                // standby-on-brew — an explicit STANDBY never defers. Standby-on-brew
+                // and auto-steam are mutually exclusive in the UI, so there is no
+                // reflexive auto-steam STEAM re-fire to bounce off this STANDBY;
+                // PRO-421's reassert guard (which reads those two fields) therefore
+                // cannot be triggered via the deferred-apply path, and leaving it
+                // unarmed here is intentional and safe.
                 controller->setMode(target);
             }
         }
