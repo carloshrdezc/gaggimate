@@ -32,14 +32,18 @@ GaggiMate is a **mature, well-maintained** dual-platform project (ESP32 firmware
   extracted as testable seams (BLE, OTA, volumetric, standby, settings
   persistence, path traversal, WS reassembly, …).
 - **Dependencies are largely current** — `npm outdated` reports 20 web packages,
-  and 17 of them are in-range minor/patch bumps that `npm update` resolves within
-  the declared semver range (their `wanted` already equals `latest`). Three are
-  pinned behind a notable release that `wanted` will *not* auto-resolve: `eslint`
-  (9.39.4 → latest 10.8.0, a major behind), `jsdom` (29.1.1 → latest 30.0.0, a
-  major behind), and `prettier-plugin-tailwindcss` (0.6.14 → latest 0.8.1, a
-  minor-series behind). These are dev/tooling deps and nothing is unpatched for a
-  known security advisory — the gap is currency, not exposure — so a deliberate
-  version-bump PR (not urgent/blocking) is the right follow-up (see below).
+  and 17 of them are in-range minor/patch bumps that `npm update` resolves fully
+  to latest within the declared semver range (their `wanted` already equals
+  `latest`). The remaining three are dev/tooling deps that stay behind latest even
+  after `npm update`, in two distinct ways. `eslint` receives an in-range patch
+  bump (9.39.4 → 9.39.5) that `npm update` applies, but the declared range still
+  sits a full major behind latest (10.8.0), so the patch bump does not close the
+  gap. `jsdom` (29.1.1) and `prettier-plugin-tailwindcss` (0.6.14) are fully
+  stuck — `current` already equals `wanted`, so `npm update` produces zero
+  movement — and remain behind latest (jsdom 30.0.0, a major; the tailwind plugin
+  0.8.1, a minor-series). Nothing is unpatched for a known security advisory — the
+  gap is currency, not exposure — so a deliberate version-bump PR (not
+  urgent/blocking) is the right follow-up (see below).
 - **Recent security work landed** — local auth + narrow CORS (PRO-517), strict
   settings/WS validation (PRO-521), cloud-relay token transport hardening
   (PRO-518).
@@ -183,17 +187,21 @@ well-gated pipeline.
   - Action: add a scoped `dependabot.yml` for `web/npm`, `relay-server/npm`, and
     `github-actions`. Pinned pio/platform deps stay manual (intentional).
 
-- **[Low] Three web deps are behind a notable release (`wanted` won't
-  auto-resolve).** *(no issue filed here — candidate for a dependency-bump
+- **[Low] Three web deps stay behind latest after `npm update` (two distinct
+  patterns).** *(no issue filed here — candidate for a dependency-bump
   follow-up)*
-  - Evidence: `cd web && npm ci && npm outdated --json` — `eslint` (current
-    9.39.4 / latest 10.8.0, one major behind), `jsdom` (29.1.1 / latest 30.0.0,
-    one major behind), `prettier-plugin-tailwindcss` (0.6.14 / latest 0.8.1,
-    a minor-series behind). The other 17 outdated entries are in-range and clear
-    with `npm update`.
+  - Evidence: `cd web && npm ci && npm outdated --json`. `eslint` receives an
+    in-range patch bump (current 9.39.4 → wanted 9.39.5) that `npm update`
+    applies, but the declared range still sits a full major behind latest
+    (10.8.0), so the bump does not close the gap. `jsdom` (current == wanted ==
+    29.1.1, latest 30.0.0, one major behind) and `prettier-plugin-tailwindcss`
+    (current == wanted == 0.6.14, latest 0.8.1, a minor-series behind) are fully
+    stuck — `current` already equals `wanted`, so `npm update` produces zero
+    movement in-range. The other 17 outdated entries are in-range and clear fully
+    to latest with `npm update`.
   - Impact: documentation-accuracy / currency only — all three are dev/tooling
     deps with no known unpatched security advisory. Not blocking; just behind on
-    majors.
+    latest.
   - Action: schedule a deliberate version-bump PR (eslint 10 is a flat-config
     major; jsdom 30 and the tailwind plugin need a compatibility check against
     the current vitest/tailwind setup).
