@@ -31,9 +31,15 @@ GaggiMate is a **mature, well-maintained** dual-platform project (ESP32 firmware
 - **Firmware has a real host-test layer** — 40+ `test/test_*` policy suites
   extracted as testable seams (BLE, OTA, volumetric, standby, settings
   persistence, path traversal, WS reassembly, …).
-- **Dependencies are current** — `npm outdated` shows every web dependency's
-  declared range already tracks the latest published version; there is no stale
-  major sitting unpatched.
+- **Dependencies are largely current** — `npm outdated` reports 20 web packages,
+  and 17 of them are in-range minor/patch bumps that `npm update` resolves within
+  the declared semver range (their `wanted` already equals `latest`). Three are
+  pinned behind a notable release that `wanted` will *not* auto-resolve: `eslint`
+  (9.39.4 → latest 10.8.0, a major behind), `jsdom` (29.1.1 → latest 30.0.0, a
+  major behind), and `prettier-plugin-tailwindcss` (0.6.14 → latest 0.8.1, a
+  minor-series behind). These are dev/tooling deps and nothing is unpatched for a
+  known security advisory — the gap is currency, not exposure — so a deliberate
+  version-bump PR (not urgent/blocking) is the right follow-up (see below).
 - **Recent security work landed** — local auth + narrow CORS (PRO-517), strict
   settings/WS validation (PRO-521), cloud-relay token transport hardening
   (PRO-518).
@@ -170,12 +176,27 @@ well-gated pipeline.
   - Evidence: no `.github/dependabot.yml`, `renovate.json`, or
     `.github/renovate.json`. Dependency bumps are manual sweeps (e.g. PRO-254).
   - Impact: security patches and minor bumps rely on someone remembering to run
-    a sweep. Low priority given ranges currently track latest, but automating it
-    removes the manual-cadence dependency.
+    a sweep. In-range minors already lag (17 of 20 `npm outdated` entries), and
+    three deps sit behind a notable release (`eslint`, `jsdom`,
+    `prettier-plugin-tailwindcss` — see Executive summary); automating the cadence
+    removes the manual-sweep dependency.
   - Action: add a scoped `dependabot.yml` for `web/npm`, `relay-server/npm`, and
     `github-actions`. Pinned pio/platform deps stay manual (intentional).
 
-## Documentation
+- **[Low] Three web deps are behind a notable release (`wanted` won't
+  auto-resolve).** *(no issue filed here — candidate for a dependency-bump
+  follow-up)*
+  - Evidence: `cd web && npm ci && npm outdated --json` — `eslint` (current
+    9.39.4 / latest 10.8.0, one major behind), `jsdom` (29.1.1 / latest 30.0.0,
+    one major behind), `prettier-plugin-tailwindcss` (0.6.14 / latest 0.8.1,
+    a minor-series behind). The other 17 outdated entries are in-range and clear
+    with `npm update`.
+  - Impact: documentation-accuracy / currency only — all three are dev/tooling
+    deps with no known unpatched security advisory. Not blocking; just behind on
+    majors.
+  - Action: schedule a deliberate version-bump PR (eslint 10 is a flat-config
+    major; jsdom 30 and the tailwind plugin need a compatibility check against
+    the current vitest/tailwind setup).
 
 - **[Low] `AGENTS.md` and `CLAUDE.md` duplicate ~150 lines that will drift.**
   *(filed: PRO-595)*
