@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 
 // PRO-596: pure, host-testable extraction of the cloud-relay connection-parameter
@@ -51,28 +52,20 @@ struct RelayUrlParts {
     std::string basePath;
 };
 
-// Reproduce Arduino String::toInt() for the port substring: it parses an
-// optional leading sign then consecutive decimal digits, stopping at the first
-// non-digit, and yields 0 when there is no leading integer (e.g. an empty or
-// non-numeric port). The original code assigned the result to a uint16_t, so
-// we truncate identically via the (uint16_t) cast at the call site's semantics.
-inline long relayArduinoToInt(const std::string &s) {
-    long value = 0;
-    size_t i = 0;
-    bool negative = false;
-    if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
-        negative = (s[i] == '-');
-        ++i;
-    }
-    for (; i < s.size(); ++i) {
-        const char c = s[i];
-        if (c < '0' || c > '9') {
-            break;
-        }
-        value = value * 10 + (c - '0');
-    }
-    return negative ? -value : value;
-}
+// Reproduce Arduino String::toInt() for the port substring. On the ESP32
+// Arduino core String::toInt() delegates to `atol(buffer())`, i.e.
+// `strtol(buffer(), nullptr, 10)`, so its documented base-10 parse is:
+//   1. skip leading whitespace (per isspace()),
+//   2. an optional leading '+'/'-' sign,
+//   3. a run of decimal digits, stopping at the first non-digit,
+//   4. yield 0 when no digits follow (empty, all-whitespace, or non-numeric),
+//   5. clamp to LONG_MIN/LONG_MAX on overflow (strtol saturates rather than
+//      wrapping — this also avoids the signed-overflow UB of a hand-rolled
+//      `value * 10 + digit` accumulator for arbitrarily long digit runs).
+// We implement it directly in terms of std::strtol on the substring to match
+// those semantics exactly. The original inline code assigned this long result
+// to a uint16_t, so callers keep the identical (uint16_t) truncation.
+inline long relayArduinoToInt(const std::string &s) { return std::strtol(s.c_str(), nullptr, 10); }
 
 inline RelayUrlParts parseRelayUrl(const std::string &url) {
     RelayUrlParts parts{false, false, std::string(), 0, std::string()};

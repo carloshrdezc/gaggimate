@@ -109,6 +109,35 @@ void test_parse_non_numeric_port_yields_zero(void) {
     TEST_ASSERT_EQUAL_STRING("/path", p.basePath.c_str());
 }
 
+void test_parse_whitespace_prefixed_explicit_port(void) {
+    // Regression (PRO-596): a space after the colon must still yield the port.
+    // Arduino String::toInt() -> atol -> strtol skips leading whitespace, so
+    // " 8080" parses to 8080. The prior hand-rolled parser bailed on the space
+    // and returned 0, breaking this whitespace-prefixed explicit port.
+    const RelayUrlParts p = parseRelayUrl("ws://relay.example.com: 8080/path");
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_FALSE(p.useSSL);
+    TEST_ASSERT_EQUAL_STRING("relay.example.com", p.host.c_str());
+    TEST_ASSERT_EQUAL_UINT16(8080, p.port);
+    TEST_ASSERT_EQUAL_STRING("/path", p.basePath.c_str());
+}
+
+void test_parse_overflow_port_truncation_is_deterministic(void) {
+    // Documents (pins) the out-of-range truncation policy for a port digit run
+    // that overflows `long`. strtol saturates to LONG_MAX rather than wrapping,
+    // and the call site's (uint16_t) cast keeps the low 16 bits. On the LP64
+    // host LONG_MAX (0x7FFF'FFFF'FFFF'FFFF) truncates to 0xFFFF == 65535.
+    // This test does not assert 65535 is "correct" — it pins whatever the
+    // strtol-clamp + (uint16_t)-cast pipeline deterministically computes, and
+    // asserts relayArduinoToInt itself returns the clamped LONG_MAX.
+    TEST_ASSERT_EQUAL_INT64((long)0x7FFFFFFFFFFFFFFFLL, relayArduinoToInt("999999999999999999999"));
+    const RelayUrlParts p = parseRelayUrl("ws://host:999999999999999999999/path");
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_EQUAL_STRING("host", p.host.c_str());
+    TEST_ASSERT_EQUAL_UINT16(65535, p.port);
+    TEST_ASSERT_EQUAL_STRING("/path", p.basePath.c_str());
+}
+
 // ---------------------------------------------------------------------------
 // resolveRelayConnectPath
 // ---------------------------------------------------------------------------
@@ -170,6 +199,8 @@ static int runRelayConnectionPolicyTests() {
     RUN_TEST(test_arduino_to_int_parses_leading_integer);
     RUN_TEST(test_arduino_to_int_non_numeric_is_zero);
     RUN_TEST(test_parse_non_numeric_port_yields_zero);
+    RUN_TEST(test_parse_whitespace_prefixed_explicit_port);
+    RUN_TEST(test_parse_overflow_port_truncation_is_deterministic);
     RUN_TEST(test_resolve_connect_path_empty_base);
     RUN_TEST(test_resolve_connect_path_root_base);
     RUN_TEST(test_resolve_connect_path_nested_base);
