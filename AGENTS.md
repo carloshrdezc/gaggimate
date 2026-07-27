@@ -2,6 +2,15 @@
 
 This file provides guidance to agents when working with code in this repository.
 
+> **Canonical source.** This is the single canonical guidance file for coding agents in this repo. `CLAUDE.md` is a pointer to this file — do not duplicate content there. Keep all agent guidance here.
+
+## Project Overview
+
+GaggiMate is an ESP32-based smart controller for Gaggia espresso machines. It consists of three components:
+- **Firmware** (C++/Arduino) — display unit and controller board
+- **Web UI** (Preact + Vite) — embedded in ESP32 SPIFFS, served over Wi-Fi
+- **Relay Server** (Node.js) — WebSocket relay for remote access, deployable to Cloudflare Workers
+
 ## Linear Workflow (Mandatory)
 
 **Every task — feature, bug, refactor, chore, brainstorm, research, doc update, investigation — gets a Linear issue. No exceptions.** Use the Linear skill for all tooling decisions; this section defines project-specific rules.
@@ -13,7 +22,8 @@ This file provides guidance to agents when working with code in this repository.
   2. If no exact match, pick the closest existing project by name (e.g. `Gaggimate`, `gaggimate-firmware`).
   3. If still no match, **automatically create** a new project named after the GitHub repo (`gaggimate`) — do not ask first, do not block on linking it to an initiative. Link to an initiative later if needed.
 - **Labels**: required per Linear skill — exactly one type (`feature`/`bug`/`refactor`/`chore`/`spike`) plus 1-2 domain labels (`firmware`, `web`, `ble`, `infrastructure`, `docs`, etc.).
-- **Description**: always populate with what, why, and acceptance criteria — even when the user gave only a title.
+- **Description**: always populate with what, why, and acceptance criteria — even when the user gave only a title. Aim for: a **clear title** describing the outcome not the task (e.g. "BLE scale reconnects after display wake", not "fix ble"); a **goal/problem** statement (why it matters, what breaks today); **implementation notes** (relevant file paths, constraints, API details); and **acceptance criteria** as a checkbox list of concrete, verifiable conditions.
+- **Priority**: set honestly — `Urgent` for regressions/safety, `High` for user-facing breakage, `Medium` for planned features, `Low` for polish.
 
 ### Required State Transitions
 
@@ -67,6 +77,52 @@ These also get issues — use type label `spike`, leave in `Backlog` until inves
 - The fresh-install filesystem image holds only seed profiles (`data/p`); the web UI no longer ships in `data/w`.
 - Version auto-generated from git tags via `scripts/auto_firmware_version.py` into `src/version.h`
 
+### Build / flash / monitor commands
+
+**Firmware (PlatformIO)**
+
+```bash
+# Build
+pio run -e display               # LilyGo-T-RGB (main display board)
+pio run -e display-headless-8m   # Seeed XIAO ESP32-S3 (8MB)
+pio run -e controller            # Controller board
+
+# Flash
+pio run -e display -t upload
+pio run -e display -t uploadfs   # Upload web assets to SPIFFS
+
+# Monitor serial
+pio device monitor -e display
+```
+
+**Web UI**
+
+```bash
+cd web/
+npm install
+npm run dev      # Dev server at http://localhost:5173/
+npm run build    # Production build → dist/ (then copy to data/)
+npm run lint     # ESLint auto-fix
+npm run format   # Prettier
+```
+
+**Relay Server**
+
+```bash
+cd relay-server/
+npm install
+npm start          # Production
+npm run dev        # With auto-reload
+npm test           # Node.js native test runner
+npm run cf:deploy  # Deploy to Cloudflare Workers
+```
+
+**Building the embedded web UI**
+
+```bash
+bash scripts/build_webui.sh  # Builds web, gzips + packs the bundle into src/display/webassets/ for the firmware app image
+```
+
 ### CI gates (PRs to dev-master) — run these locally before pushing (CAR-341)
 
 `.github/workflows/ci.yml` runs on every PR to `dev-master`; reproduce it locally with:
@@ -93,6 +149,62 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 ## Code Formatting
 
 **C++ formatting excludes UI/driver code**: `scripts/format.sh` uses clang-format but explicitly excludes `src/display/ui/**` and `src/display/drivers/**` directories
+
+## Architecture (Structural)
+
+### Communication Layers
+
+```
+Web Browser ──WebSocket──► Display ESP32 ──BLE (NimBLE)──► Controller ESP32
+                            (AsyncWebServer /ws)              (pump, heater, valve)
+```
+
+- **Display ↔ Web**: JSON WebSocket messages with a `tp` field for message type. Spec at `docs/websocket-api.yaml`.
+- **Display ↔ Controller**: BLE GATT via NimBLE, implemented in `lib/NimBLEComm/`.
+- **External integrations**: MQTT, HomeKit, BLE scales — all as plugins.
+
+### Firmware Structure (`src/`)
+
+- `src/display/core/` — `Controller` (main orchestrator), `BeanManager`, `PluginManager`
+- `src/display/ui/` — LVGL screens and widgets, generated from SquareLine Studio (`ui/` project file)
+- `src/display/drivers/` — Display hardware abstraction (LilyGo-T-RGB, Amoled, Waveshare)
+- `src/display/plugins/` — Optional feature plugins (BLEScalePlugin, MQTTPlugin, HomekitPlugin, BoilerFillPlugin)
+- `src/display/models/` — Data models for settings and state
+- `src/controller/` — Controller board firmware (hardware I/O only)
+- `lib/GaggiMateController/` — Shared controller library (also used by display for BLE comm)
+
+### Process Model
+
+Brew/steam/grind operations inherit from `Process.h`. Active processes: `BrewProcess`, `SteamProcess`, `GrindProcess`, `PumpProcess`, `ManualProcess`. The `Controller` runs one active process at a time and drives the LVGL UI state machine.
+
+### Web UI Structure (`web/src/`)
+
+- `components/` — Preact UI components (with `__tests__/` subdirectories)
+- `hooks/` — Custom hooks for WebSocket communication and state
+- `pages/` — Page-level components
+
+The web UI communicates exclusively via WebSocket. There is no REST API.
+
+### Plugin System
+
+Plugins implement the `Plugin.h` interface and are registered with `PluginManager`. They receive lifecycle events and can publish/subscribe to machine state. Adding a feature without modifying core code is the intended pattern.
+
+### Key Files
+
+| File | Purpose |
+|---|---|
+| `platformio.ini` | All build environments and library dependencies |
+| `src/display/core/Controller.h/.cpp` | Central coordinator — owns process lifecycle, plugin manager, WebSocket handler |
+| `src/display/ui/` | LVGL UI; edit via SquareLine Studio, not by hand |
+| `docs/websocket-api.yaml` | AsyncAPI 2.6.0 spec for the WebSocket protocol |
+| `scripts/auto_firmware_version.py` | Pre-build script that generates `version.h` from git tags |
+| `data/` | SPIFFS filesystem root — web build output goes here |
+
+### Development Notes
+
+- The UI in `src/display/ui/` is generated by SquareLine Studio. Manual edits to generated files will be overwritten. Custom logic belongs in screen event handlers or separate files.
+- Multiple PlatformIO environments share source via `build_src_filter` in `platformio.ini`. Board-specific behavior is controlled by compile-time defines.
+- The relay server supports both local Node.js and Cloudflare Workers deployment from the same source.
 
 ## Architecture (Non-Obvious)
 
