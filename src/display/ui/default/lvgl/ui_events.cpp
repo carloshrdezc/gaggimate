@@ -85,6 +85,27 @@ void onMenuSteamTempRaise(lv_event_t *e) {
 int gmGetWaterTempSetting(void) { return controller.getSettings().getTargetWaterTemp(); }
 int gmGetSteamTempSetting(void) { return controller.getSettings().getTargetSteamTemp(); }
 
+// PRO-597: Quick-settings BRIGHTNESS toggle wiring. The MenuScreen switch was a
+// dead no-op (visual-only stub from CAR-279). Wire it to the real persisted
+// mainBrightness setting (range 1-16, see Settings / the web UI's "Main
+// Brightness (1-16)" field) as a full-vs-dimmed boost: ON = full (16),
+// OFF = dimmed (8, the standby-brightness default). Reading state treats the
+// upper range as "boosted". The setter persists via Settings::setMainBrightness
+// (Settings::save) AND applies live to the panel through DefaultUI::setBrightness
+// so the change is visible immediately, mirroring how DefaultUI seeds brightness
+// from getMainBrightness() on load.
+static constexpr int MENU_BRIGHTNESS_FULL = 16;
+static constexpr int MENU_BRIGHTNESS_DIM = 8;
+static constexpr int MENU_BRIGHTNESS_BOOST_THRESHOLD = 12;
+
+bool gmGetBrightnessBoost(void) { return controller.getSettings().getMainBrightness() >= MENU_BRIGHTNESS_BOOST_THRESHOLD; }
+
+void gmSetBrightnessBoost(bool on) {
+    const int level = on ? MENU_BRIGHTNESS_FULL : MENU_BRIGHTNESS_DIM;
+    controller.getSettings().setMainBrightness(level);
+    controller.getUI()->setBrightness(level);
+}
+
 bool gmCanRestartDisplay(void) {
     return controller.canRestartDisplay();
 }

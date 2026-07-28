@@ -973,6 +973,21 @@ void DefaultUI::setupReactive() {
                                   lv_label_set_text_fmt(ui_MenuScreen_steamTempValue, "%d",
                                                         controller->getSettings().getTargetSteamTemp());
                               }
+                              // PRO-597: seed the BRIGHTNESS switch from the real persisted
+                              // mainBrightness setting (full-vs-dimmed boost) so the toggle
+                              // reflects actual state on screen open — same pattern as the
+                              // temp readouts above. The value-changed handler
+                              // (ui_event_MenuScreen_brightness) writes back through
+                              // gmSetBrightnessBoost. Guard the update so re-seeding here
+                              // does not itself fire the handler (LVGL add/clear state does
+                              // not emit VALUE_CHANGED).
+                              if (lv_obj_is_valid(ui_MenuScreen_brightnessSwitch)) {
+                                  if (gmGetBrightnessBoost()) {
+                                      lv_obj_add_state(ui_MenuScreen_brightnessSwitch, LV_STATE_CHECKED);
+                                  } else {
+                                      lv_obj_clear_state(ui_MenuScreen_brightnessSwitch, LV_STATE_CHECKED);
+                                  }
+                              }
                           },
                           &targetTemp);
     // CAR-278: target temp surfaces on the status screen via the steam-mode

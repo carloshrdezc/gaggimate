@@ -121,6 +121,7 @@ channels:
           - $ref: '#/components/messages/AutosteamSetRequest'
           - $ref: '#/components/messages/StandbyOnBrewSetRequest'
           - $ref: '#/components/messages/DoseSetRequest'
+          - $ref: '#/components/messages/ManualGrindSetRequest'
           - $ref: '#/components/messages/BeansSelectRequest'
           - $ref: '#/components/messages/FlushStartRequest'
           - $ref: '#/components/messages/ProfilesListRequest'
@@ -228,6 +229,9 @@ components:
         dg:
           type: number
           description: Brew dose in grams (rounded to 1 decimal).
+        mg:
+          type: number
+          description: Manual grinder-dial setting (rounded to 1 decimal). PRO-603.
         gtd:
           type: number
           description: Target grind duration.
@@ -320,6 +324,26 @@ components:
           type: boolean
         controllerUpdateAvailable:
           type: boolean
+        displayFlashEligible:
+          type: boolean
+          description: >-
+            Device-authoritative per-component flag: whether the firmware will
+            actually flash the display when the Update button is pressed, as
+            decided by `decideOtaFlash()` / `otaComponentFlashEligible()`
+            (OtaChannelSwitchPolicy.h) — the same policy the OTA-start path
+            uses. Supersedes the client-side, semver-derived
+            `displayUpdateAvailable` for gating the Update button (which could
+            silently block flashing on a channel switch to an equal/lower
+            version). Optional; present when `updateOTAStatus` runs.
+        controllerFlashEligible:
+          type: boolean
+          description: >-
+            Device-authoritative per-component flag: whether the firmware will
+            actually flash the controller when the Update button is pressed, as
+            decided by `decideOtaFlash()` / `otaComponentFlashEligible()`
+            (OtaChannelSwitchPolicy.h). Supersedes the client-side,
+            semver-derived `controllerUpdateAvailable` for gating the Update
+            button. Optional; present when `updateOTAStatus` runs.
         channel:
           type: string
         updating:
@@ -1027,6 +1051,18 @@ components:
           mode:
             type: integer
             description: New machine mode (validated against grind/manual availability).
+          auto:
+            type: boolean
+            description: |
+              Optional. Distinguishes an AUTOMATIC standby-on-brew transition from
+              an EXPLICIT mode change. `true` (sent only by the web dashboard's
+              standby-on-brew effect) defers a STANDBY target through the post-shot
+              settle / extended-recording window so the final drips still land in
+              the recorded yield. Absent or `false` (every physical button, the web
+              Standby button, HomeKit, and every other `req:change-mode` caller)
+              applies the mode change instantly. Read as
+              `doc["auto"].is<bool>() && doc["auto"].as<bool>()`, so any
+              non-true/non-boolean value is treated as explicit.
         required: [tp]
     ChangeBrewTargetRequest:
       x-since-version: 'unknown'
@@ -1087,6 +1123,21 @@ components:
           grams:
             type: number
         required: [tp, grams]
+    ManualGrindSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Device-authoritative manual grinder-dial setting (PRO-603). Validated
+          (0 <= value <= 100) and rebroadcast as `mg` in `evt:status` so the
+          value stays in sync across connected browsers. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:manual-grind:set']
+          value:
+            type: number
+        required: [tp, value]
     BeansSelectRequest:
       x-since-version: 'unknown'
       payload:

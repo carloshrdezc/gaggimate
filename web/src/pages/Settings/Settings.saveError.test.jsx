@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { cleanup, fireEvent, render } from '@testing-library/preact';
+import { fireEvent, waitFor } from '@testing-library/preact';
+
+import {
+  fontAwesomeMock,
+  importButtonMock,
+  installSettingsTestGlobals,
+  localAuthFetchMock,
+  renderSettingsWithInjectedComponent,
+  teardownSettingsTest,
+} from './Settings.testUtils.jsx';
 
 // Regression test for the PR #565 review nit (PRO-578, ref PRO-577): the
 // Settings onSubmit handler parses a 400 validation rejection of the shape
@@ -30,59 +39,41 @@ vi.mock('preact-fetching', () => ({
   useQuery: () => queryState,
 }));
 
-vi.mock('../../services/localAuthFetch.js', () => ({
-  authenticatedFetch,
-  bootstrapLocalAuth: vi.fn(),
-  getLocalAuthToken: () => null,
-  isValidLocalAuthToken: token => /^[0-9a-f]{32}$/.test(String(token).trim()),
-  LOCAL_AUTH_TOKEN_ERROR: 'err',
-  localAuthDownloadUrl: url => url,
-  localAuthHandoffUrl: hostname => `http://${hostname}.local/#localAuthToken=t`,
-  bootstrapLocalAuthFromHash: vi.fn(),
-  MDNS_NAME_ERROR: 'mdns err',
-}));
+vi.mock('../../services/localAuthFetch.js', () => localAuthFetchMock(authenticatedFetch));
 
 vi.mock('./PluginCard.jsx', () => ({ PluginCard: () => h('div', {}, 'plugins-body') }));
 vi.mock('./GoogleDriveBackupCard.jsx', () => ({
   GoogleDriveBackupCard: () => h('div', {}, 'gdrive-body'),
 }));
-vi.mock('../../components/ImportButton.jsx', () => ({ ImportButton: () => null }));
-vi.mock('@fortawesome/react-fontawesome', () => ({ FontAwesomeIcon: () => null }));
+vi.mock('../../components/ImportButton.jsx', () => importButtonMock());
+vi.mock('@fortawesome/react-fontawesome', () => fontAwesomeMock());
 
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Settings } from './index.jsx';
 
 function renderSettings() {
-  render(h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)));
+  return renderSettingsWithInjectedComponent(ApiServiceContext, Settings);
 }
 
-// Submit the Save form and let the async onSubmit handler settle. onSubmit does
-// an awaited fetch, then (on the 400 branch) an awaited response.clone().json(),
-// so we drain a few microtask turns to let the promise chain complete.
+// Submit the Save form and wait for the async onSubmit handler to settle.
+// onSubmit does an awaited fetch, then (on the 400 branch) an awaited
+// response.clone().json(); every error path this suite exercises ends in an
+// alert() call, so we wait on alert having been called rather than draining a
+// fixed number of microtask turns.
 async function submitAndSettle() {
   const form = document.querySelector('form[action="/api/settings"]');
   fireEvent.submit(form);
-  for (let i = 0; i < 5; i += 1) {
-    await Promise.resolve();
-  }
+  await waitFor(() => expect(globalThis.alert).toHaveBeenCalled());
 }
 
 beforeEach(() => {
   queryState.isLoading = false;
   queryState.data = fetchedSettings;
-  vi.stubGlobal('alert', vi.fn());
-  vi.spyOn(console, 'error').mockImplementation(() => {});
-  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn() } });
-  machine.value = {
-    ...machine.value,
-    capabilities: { ...machine.value.capabilities, ledControl: true },
-  };
+  installSettingsTestGlobals(machine);
 });
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  teardownSettingsTest();
 });
 
 describe('Settings save error handling (PRO-578 / ref PRO-577)', () => {

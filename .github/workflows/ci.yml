@@ -37,6 +37,17 @@ jobs:
           cd web
           npm ci
           npm run build
+      # Gate the PR on web ESLint (PRO-591). ESLint is fully configured
+      # (web/eslint.config.js, flat config, ESLint 9) and web/package.json
+      # exposes `lint:check` ("eslint src"), but no workflow ran it, so lint
+      # violations accumulated silently. `npm ci` in the build step above already
+      # installed eslint from devDependencies. The tree is lint-clean today (0
+      # errors), so this is a hard gate — an ESLint error now fails the job.
+      # Mirrors PRO-229 wiring the existing web test gate into CI.
+      - name: Run web ESLint
+        run: |
+          cd web
+          npm run lint:check
       # Gate the PR on the web unit suite (CAR/PRO-229). `npm ci` above already
       # installed vitest from devDependencies, so this runs the converted
       # node:test->vitest logic suites plus the existing vitest specs. A failing
@@ -44,6 +55,31 @@ jobs:
       - name: Run web unit tests
         run: |
           cd web
+          npm test
+
+  relay-server:
+    name: Relay server tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: relay-server/package-lock.json
+      # PRO-592: the relay-server has a real test suite
+      # (`node --test src/*.test.js` over relay-auth.test.js + relay.test.js)
+      # and pins node>=22, but no workflow ever ran it, so relay regressions
+      # shipped unchecked. Mirror the `web` job wiring: install with the lockfile
+      # then run the suite. No continue-on-error — a relay-server test failure
+      # now fails the job and the PR.
+      - name: Install and test relay-server
+        run: |
+          cd relay-server
+          npm ci
           npm test
 
   firmware:

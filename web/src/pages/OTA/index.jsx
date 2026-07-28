@@ -8,7 +8,7 @@ import { authenticatedFetch } from '../../services/localAuthFetch.js';
 import { downloadJson } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
-import { updateOtaChannel, canFlashTaggedRelease, canUpdateOnAcknowledgedChannel, canSwitchChannel, otaChannelDiffersFromInstalled, otaActionLabel } from './otaLogic.js';
+import { updateOtaChannel, canFlashTaggedRelease, canUpdateOnAcknowledgedChannel, canSwitchChannel, otaChannelDiffersFromInstalled, otaActionLabel, componentFlashDisabled } from './otaLogic.js';
 
 // Constants
 const REBUILD_STATUS = {
@@ -404,6 +404,27 @@ const ActionButtonsSection = memo(
       displayDisabled = !formData.displayUpdateAvailable;
       controllerDisabled = !formData.controllerUpdateAvailable;
     }
+    // PRO-599: the four-way inference above is the FALLBACK. When the firmware
+    // reports its own authoritative per-component flash eligibility
+    // (`displayFlashEligible` / `controllerFlashEligible`), trust that instead —
+    // it correctly enables a channel switch to an equal/lower semver (which the
+    // inference's semver-gated `*UpdateAvailable` branch would reject) and works
+    // even when the device never persisted `installedChannel`. componentFlashDisabled
+    // keeps the same anti-stale-`_latest_url` guards (saved+acknowledged channel,
+    // status is a resolved version) and degrades to the inference on older
+    // firmware that omits the fields. See otaLogic.js.
+    displayDisabled = componentFlashDisabled({
+      formData,
+      pendingChannel,
+      eligibleKey: 'displayFlashEligible',
+      fallbackDisabled: displayDisabled,
+    });
+    controllerDisabled = componentFlashDisabled({
+      formData,
+      pendingChannel,
+      eligibleKey: 'controllerFlashEligible',
+      fallbackDisabled: controllerDisabled,
+    });
     // Contextual action verb: "Switch to <Channel>" / "Flash" / "Update".
     const actionLabel = otaActionLabel(formData, pendingChannel);
     const displayLabel = `${actionLabel} Display`;
@@ -458,6 +479,10 @@ const ActionButtonsSection = memo(
       prevProps.formData.status === nextProps.formData.status &&
       prevProps.formData.displayUpdateAvailable === nextProps.formData.displayUpdateAvailable &&
       prevProps.formData.controllerUpdateAvailable === nextProps.formData.controllerUpdateAvailable &&
+      // PRO-599: the device-authoritative flash-eligibility signals also drive
+      // the disable gate, so a change in either must re-render the buttons.
+      prevProps.formData.displayFlashEligible === nextProps.formData.displayFlashEligible &&
+      prevProps.formData.controllerFlashEligible === nextProps.formData.controllerFlashEligible &&
       prevProps.pendingChannel === nextProps.pendingChannel &&
       prevProps.rebuilding === nextProps.rebuilding &&
       prevProps.rebuilt === nextProps.rebuilt &&

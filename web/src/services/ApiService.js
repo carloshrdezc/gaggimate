@@ -30,6 +30,10 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 // Matches the firmware default (Settings.h: doseGrams = 18.0).
 const DEFAULT_DOSE_GRAMS = 18;
 
+// Default manual grinder-dial setting (PRO-603). Matches the firmware default
+// (Settings.h: manualGrindSetting = 0.0). 0 = "not set yet".
+const DEFAULT_MANUAL_GRIND_SETTING = 0;
+
 // If a socket errors before it ever opened, some browsers do NOT emit a
 // subsequent `close` event — so relying on `_onClose` to arm the reconnect can
 // stall forever. `_onError` arms this short fallback; if `_onClose` hasn't run
@@ -73,6 +77,9 @@ export function validateWebSocketRequest(data) {
   switch (data.tp) {
     case 'req:dose:set':
       numeric('grams', Number.EPSILON, 200);
+      break;
+    case 'req:manual-grind:set':
+      numeric('value', 0, 100);
       break;
     case 'req:change-brew-target':
       numeric('target', 0, 200);
@@ -558,6 +565,10 @@ export default class ApiService {
       // Legacy (pre-PRO-225) firmware doesn't send `dg`; emit null so the
       // consumer falls back to its localStorage cache instead of clobbering it.
       doseGrams: Number.isFinite(message.dg) ? message.dg : null,
+      // PRO-603: device-authoritative manual grinder-dial setting (mg). Legacy
+      // firmware doesn't send `mg`; emit null so the consumer falls back to its
+      // localStorage cache instead of clobbering it.
+      manualGrindSetting: Number.isFinite(message.mg) ? message.mg : null,
       volumetricAvailable: message.bta || false,
       grindTargetDuration: message.gtd || 0,
       grindTargetVolume: message.gtv || 0,
@@ -635,6 +646,7 @@ export const machine = signal({
     autoSteamEnabled: false,
     standbyOnBrewEnabled: false,
     doseGrams: DEFAULT_DOSE_GRAMS,
+    manualGrindSetting: DEFAULT_MANUAL_GRIND_SETTING,
     grindTargetDuration: 0,
     grindTargetVolume: 0,
     grindTarget: 0,

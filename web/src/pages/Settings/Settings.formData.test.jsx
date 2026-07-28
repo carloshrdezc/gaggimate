@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { fireEvent, screen } from '@testing-library/preact';
+
+import {
+  fontAwesomeMock,
+  importButtonMock,
+  installSettingsTestGlobals,
+  localAuthFetchMock,
+  renderSettingsWithInjectedComponent,
+  teardownSettingsTest,
+} from './Settings.testUtils.jsx';
 
 // Regression test for the PR #561 review blocker (PRO-572): collapsing a
 // top-level Settings card must NOT drop a field the user edited from the Save
@@ -29,17 +38,7 @@ vi.mock('preact-fetching', () => ({
   useQuery: () => queryState,
 }));
 
-vi.mock('../../services/localAuthFetch.js', () => ({
-  authenticatedFetch,
-  bootstrapLocalAuth: vi.fn(),
-  getLocalAuthToken: () => null,
-  isValidLocalAuthToken: token => /^[0-9a-f]{32}$/.test(String(token).trim()),
-  LOCAL_AUTH_TOKEN_ERROR: 'err',
-  localAuthDownloadUrl: url => url,
-  localAuthHandoffUrl: hostname => `http://${hostname}.local/#localAuthToken=t`,
-  bootstrapLocalAuthFromHash: vi.fn(),
-  MDNS_NAME_ERROR: 'mdns err',
-}));
+vi.mock('../../services/localAuthFetch.js', () => localAuthFetchMock(authenticatedFetch));
 
 // Keep the plugin/backup cards light — this test only exercises a top-level
 // non-plugin card (Temperature Settings) so we don't need their internals.
@@ -47,33 +46,25 @@ vi.mock('./PluginCard.jsx', () => ({ PluginCard: () => h('div', {}, 'plugins-bod
 vi.mock('./GoogleDriveBackupCard.jsx', () => ({
   GoogleDriveBackupCard: () => h('div', {}, 'gdrive-body'),
 }));
-vi.mock('../../components/ImportButton.jsx', () => ({ ImportButton: () => null }));
-vi.mock('@fortawesome/react-fontawesome', () => ({ FontAwesomeIcon: () => null }));
+vi.mock('../../components/ImportButton.jsx', () => importButtonMock());
+vi.mock('@fortawesome/react-fontawesome', () => fontAwesomeMock());
 
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Settings } from './index.jsx';
 
 function renderSettings() {
-  render(h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)));
+  return renderSettingsWithInjectedComponent(ApiServiceContext, Settings);
 }
 
 beforeEach(() => {
   queryState.isLoading = false;
   queryState.data = fetchedSettings;
   authenticatedFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-  vi.stubGlobal('alert', vi.fn());
-  vi.spyOn(console, 'error').mockImplementation(() => {});
-  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn() } });
-  machine.value = {
-    ...machine.value,
-    capabilities: { ...machine.value.capabilities, ledControl: true },
-  };
+  installSettingsTestGlobals(machine);
 });
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  teardownSettingsTest();
 });
 
 describe('Settings save payload survives card collapse (PRO-572 review blocker)', () => {

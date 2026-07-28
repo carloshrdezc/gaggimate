@@ -1,9 +1,10 @@
 // CAR-279: ui_MenuScreen rebuilt as the Nothing-theme Quick-settings list.
 // The mode-hub role moved to ui_ModeScreen (CAR-291). Layout: kicker on top,
 // settings rows (brightness toggle / brew-temp stepper / scale toggle), back
-// button -> mode hub via onBackToModeScreen. Backend wiring for brightness +
-// scale toggles is intentionally STUBBED for this PR (visual completeness
-// per the design); follow-up will hook them to the real state.
+// button -> mode hub via onBackToModeScreen. PRO-597: the BRIGHTNESS toggle is
+// now wired to the real persisted mainBrightness setting (full-vs-dimmed boost,
+// applied live); the SCALE toggle is HIDDEN because no runtime "scale enabled"
+// setting exists to bind it to (BLE scale connection is mode-driven/automatic).
 //
 // CAR-358: added WATER TEMP + STEAM TEMP stepper rows (mirroring BREW TEMP) and
 // an obvious full-width "DONE" exit button at the bottom. With 5 rows + an exit
@@ -113,12 +114,16 @@ static void ui_event_MenuScreen_steamTempRaise(lv_event_t *e) {
         lv_label_set_text_fmt(ui_MenuScreen_steamTempValue, "%d", gmGetSteamTempSetting());
 }
 
-// CAR-279 TODO: wire to real backlight setting. For now the toggle is
-// visual-only -- DefaultUI will not push state to it.
-static void ui_event_MenuScreen_brightness(lv_event_t *e) { (void)e; }
-
-// CAR-279 TODO: wire to BLEScales/scale-enabled state.
-static void ui_event_MenuScreen_scale(lv_event_t *e) { (void)e; }
+// PRO-597: wire the BRIGHTNESS switch to the real persisted mainBrightness
+// setting (full-vs-dimmed boost). Reads the toggle state and pushes it through
+// the C-linkage bridge (gmSetBrightnessBoost in ui_events.cpp), which persists
+// via Settings and applies the new level to the panel live. Was a visual-only
+// no-op stub (CAR-279).
+static void ui_event_MenuScreen_brightness(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+    lv_obj_t *sw = lv_event_get_target(e);
+    gmSetBrightnessBoost(lv_obj_has_state(sw, LV_STATE_CHECKED));
+}
 
 static void ui_event_MenuScreen_restart_close(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
@@ -348,13 +353,22 @@ void ui_MenuScreen_screen_init(void) {
                    ui_event_MenuScreen_steamTempLower, ui_event_MenuScreen_steamTempRaise,
                    &ui_MenuScreen_steamTempMinus, &ui_MenuScreen_steamTempValue, &ui_MenuScreen_steamTempPlus);
 
-    // Row 5: SCALE toggle
+    // Row 5: SCALE toggle — HIDDEN (PRO-597). There is no persisted "BLE scale
+    // enabled" runtime setting to bind to: the scale connects automatically by
+    // controller mode (BLEScaleScanPolicy::shouldScanForBleScaleMode over
+    // brew/grind/manual) and is only compiled in/out via the GAGGIMATE_ENABLE_
+    // BLE_SCALE build flag — there is no user-facing enable/disable flag. Rather
+    // than fabricate fake plumbing for a control that can't reflect real state,
+    // the row is hidden until a genuine runtime toggle concept exists. The
+    // switch object is still created + tracked (destroy/palette invariants) but
+    // the row is flagged LV_OBJ_FLAG_HIDDEN so flex layout skips it, and no
+    // value-changed handler is wired (no dead no-op callback).
     {
         lv_obj_t *row = qs_row(ui_MenuScreen_contentPanel, &gm_ic_scale, "SCALE");
         ui_MenuScreen_scaleSwitch = lv_switch_create(row);
         lv_obj_set_size(ui_MenuScreen_scaleSwitch, 56, 28);
         lv_obj_set_ext_click_area(ui_MenuScreen_scaleSwitch, 12);
-        lv_obj_add_event_cb(ui_MenuScreen_scaleSwitch, ui_event_MenuScreen_scale, LV_EVENT_VALUE_CHANGED, NULL);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
     }
 
     // Row 6: explicit confirmation is required; the dialog omits confirmation

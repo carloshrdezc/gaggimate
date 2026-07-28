@@ -51,6 +51,11 @@ void onMenuSteamTempRaise(lv_event_t *e);
 // CAR-358: C-callable getters for immediate Quick-settings label refresh.
 int gmGetWaterTempSetting(void);
 int gmGetSteamTempSetting(void);
+// PRO-597: Quick-settings BRIGHTNESS toggle. Reads/writes the real persisted
+// mainBrightness setting (range 1-16) and applies it live to the panel. The
+// switch is a full-vs-dimmed boost: ON = full brightness, OFF = dimmed.
+bool gmGetBrightnessBoost(void);
+void gmSetBrightnessBoost(bool on);
 // PRO-539: Controller owns synchronized authorization and restart handoff.
 bool gmCanRestartDisplay(void);
 void onRestartDisplayConfirm(lv_event_t *e);

@@ -46,6 +46,21 @@
 //     volume behind a per-volume mutex (no corruption); the only cost is bounded
 //     contention/latency. And because the feature is default-OFF, there is no
 //     impact at all unless a user explicitly enables diagnostics mid-shot.
+//   * Memory placement (PRO-568, follow-up from the PRO-566 internal-DRAM audit):
+//     when the tee arms, the ~16.6 KiB log queue (QUEUE_DEPTH * sizeof(DiagLogLine))
+//     is placed in external PSRAM via FreeRTOS static creation
+//     (xQueueCreateStatic with MALLOC_CAP_SPIRAM item + control-block buffers),
+//     so it no longer draws scarce internal DRAM. Non-DMA PSRAM is correct: queue
+//     items are copied by value in software and never ISR-/DMA-touched. The 16 KiB
+//     drain-task stack, however, STAYS in internal DRAM: on this platform
+//     (Arduino-ESP32 2.0.17 / IDF 4.4.7) the xtensa FreeRTOS port hard-codes
+//     portStackMemoryCaps = MALLOC_CAP_INTERNAL and CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
+//     is not enabled, because the ROM routines don't handle a stack in external
+//     RAM correctly — so a PSRAM task stack is unsupported here. Net: ~16.6 KiB of
+//     internal DRAM is reclaimed when the (default-OFF) tee installs; the stack's
+//     16 KiB is an unavoidable platform floor. Because the feature is default-OFF
+//     and armed only after an explicit Settings flip + WiFi link, the device pays
+//     zero internal-DRAM cost for diagnostics unless a user turns it on.
 
 #include "../core/Plugin.h"
 #include <FS.h>
@@ -119,8 +134,19 @@ class DiagnosticLogPlugin : public Plugin {
     void sdAppendLine(const char *text, size_t len);
     void sdRotate();
 
+    // Free the PSRAM buffers backing the static queue on the install rollback
+    // paths (PRO-568). See DiagnosticLogPlugin.cpp.
+    void freeQueueBuffers();
+
     Controller *controller = nullptr;
     QueueHandle_t queue = nullptr;
+    // PRO-568: caller-supplied backing store for the static (PSRAM-resident) log
+    // queue. Allocated from MALLOC_CAP_SPIRAM in tryInstall() and owned for the
+    // plugin's lifetime (it never tears down mid-run); freed only on the install
+    // OOM rollback via freeQueueBuffers(). queueStorage holds the item array,
+    // queueControlBlock holds the FreeRTOS StaticQueue_t control structure.
+    uint8_t *queueStorage = nullptr;
+    StaticQueue_t *queueControlBlock = nullptr;
     TaskHandle_t taskHandle = nullptr;
     WiFiUDP udp;
     bool installed = false;

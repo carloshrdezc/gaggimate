@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <cstdarg>
 #include <cstdio>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 
 static constexpr char LOG_TAG[] = "DiagnosticLogPlugin";
@@ -118,9 +119,24 @@ void DiagnosticLogPlugin::tryInstall() {
         return; // no STA link yet — try again next loop / next event
 
     GM_HEAP_DIAG("before DiagLog install (queue+task)"); // PRO-566
-    queue = xQueueCreate(QUEUE_DEPTH, sizeof(DiagLogLine));
+    // PRO-568: place the ~16.6 KiB log queue in external PSRAM (MALLOC_CAP_SPIRAM)
+    // via FreeRTOS static creation (xQueueCreateStatic), supplying both the
+    // item-storage array and the control block from PSRAM. The buffers are member
+    // fields owned for the plugin's lifetime; the OOM rollback below frees them if
+    // task creation fails. For the full PSRAM/stack-placement rationale (why the
+    // queue may live in non-DMA PSRAM but the drain-task stack cannot), see the
+    // class-doc comment in DiagnosticLogPlugin.h.
+    queueStorage = static_cast<uint8_t *>(heap_caps_malloc(QUEUE_DEPTH * sizeof(DiagLogLine), MALLOC_CAP_SPIRAM));
+    queueControlBlock = static_cast<StaticQueue_t *>(heap_caps_malloc(sizeof(StaticQueue_t), MALLOC_CAP_SPIRAM));
+    if (queueStorage == nullptr || queueControlBlock == nullptr) {
+        ESP_LOGE(LOG_TAG, "Failed to allocate log queue buffers (PSRAM OOM); tee not installed");
+        freeQueueBuffers();
+        return;
+    }
+    queue = xQueueCreateStatic(QUEUE_DEPTH, sizeof(DiagLogLine), queueStorage, queueControlBlock);
     if (queue == nullptr) {
-        ESP_LOGE(LOG_TAG, "Failed to allocate log queue (OOM); tee not installed");
+        ESP_LOGE(LOG_TAG, "Failed to create log queue; tee not installed");
+        freeQueueBuffers();
         return;
     }
 
@@ -138,11 +154,16 @@ void DiagnosticLogPlugin::tryInstall() {
     // Stack matches the WebUI relay task (WebUIPlugin.cpp, "WebUIRelay" = 16384):
     // both share the lwip UDP/socket send path, and a logger must never crash the
     // device on stack overflow.
+    // PRO-568: this 16 KiB stack stays in internal DRAM (it cannot be routed to
+    // PSRAM on this platform) — see the placement rationale in DiagnosticLogPlugin.h.
     BaseType_t created = xTaskCreatePinnedToCore(drainTask, "DiagLogUDP", 16384, this, 1, &taskHandle, 0);
     if (created != pdPASS) {
         ESP_LOGE(LOG_TAG, "Failed to create drain task (OOM); tee not installed");
+        // Static queue: vQueueDelete unregisters it but does NOT free our
+        // caller-supplied PSRAM buffers, so free those explicitly (PRO-568).
         vQueueDelete(queue);
         queue = nullptr;
+        freeQueueBuffers();
         return;
     }
 
@@ -171,6 +192,21 @@ void DiagnosticLogPlugin::tryInstall() {
     // "is the tee working?" verifiable immediately on an idle machine with
     // `nc -ul 9999`. The drain task picks it up and broadcasts it like any line.
     enqueueProofOfLife();
+}
+
+// Free the caller-supplied PSRAM buffers backing the static queue (PRO-568).
+// Called only on the install OOM/rollback paths — the queue itself is never
+// torn down once armed (the plugin is a long-lived singleton), so this only
+// runs before the tee is fully installed. Idempotent (nulls after freeing).
+void DiagnosticLogPlugin::freeQueueBuffers() {
+    if (queueStorage != nullptr) {
+        heap_caps_free(queueStorage);
+        queueStorage = nullptr;
+    }
+    if (queueControlBlock != nullptr) {
+        heap_caps_free(queueControlBlock);
+        queueControlBlock = nullptr;
+    }
 }
 
 // Push a one-time proof-of-life line straight into the drain queue. Same

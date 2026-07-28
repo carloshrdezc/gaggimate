@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { act, fireEvent, screen } from '@testing-library/preact';
+
+import {
+  fontAwesomeMock,
+  importButtonMock,
+  installSettingsTestGlobals,
+  localAuthFetchMock,
+  renderSettingsWithInjectedComponent,
+  teardownSettingsTest,
+} from './Settings.testUtils.jsx';
 
 // Regression test for PRO-574 (test-only follow-up to PR #562).
 //
@@ -84,21 +93,11 @@ vi.mock('preact-fetching', () => ({
   useQuery: key => queryController.read(key),
 }));
 
-vi.mock('../../services/localAuthFetch.js', () => ({
-  authenticatedFetch,
-  bootstrapLocalAuth: vi.fn(),
-  getLocalAuthToken: () => null,
-  isValidLocalAuthToken: token => /^[0-9a-f]{32}$/.test(String(token).trim()),
-  LOCAL_AUTH_TOKEN_ERROR: 'err',
-  localAuthDownloadUrl: url => url,
-  localAuthHandoffUrl: hostname => `http://${hostname}.local/#localAuthToken=t`,
-  bootstrapLocalAuthFromHash: vi.fn(),
-  MDNS_NAME_ERROR: 'mdns err',
-}));
+vi.mock('../../services/localAuthFetch.js', () => localAuthFetchMock(authenticatedFetch));
 
 // Use the REAL PluginCard (the component under test). Stub only the FontAwesome
 // icon and the homekit image asset it pulls in.
-vi.mock('@fortawesome/react-fontawesome', () => ({ FontAwesomeIcon: () => null }));
+vi.mock('@fortawesome/react-fontawesome', () => fontAwesomeMock());
 vi.mock('../../assets/homekit.png', () => ({ default: 'homekit.png' }));
 
 // Stub GoogleDriveBackupCard down to a single button that invokes the real
@@ -114,7 +113,7 @@ vi.mock('./GoogleDriveBackupCard.jsx', () => ({
     ),
 }));
 
-vi.mock('../../components/ImportButton.jsx', () => ({ ImportButton: () => null }));
+vi.mock('../../components/ImportButton.jsx', () => importButtonMock());
 
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Settings } from './index.jsx';
@@ -129,27 +128,17 @@ function homekitBodyVisible() {
 }
 
 function renderSettings() {
-  return render(
-    h(ApiServiceContext.Provider, { value: { authenticateLocal: vi.fn() } }, h(Settings)),
-  );
+  return renderSettingsWithInjectedComponent(ApiServiceContext, Settings);
 }
 
 beforeEach(() => {
   queryController.reset();
   authenticatedFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-  vi.stubGlobal('alert', vi.fn());
-  vi.spyOn(console, 'error').mockImplementation(() => {});
-  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn() } });
-  machine.value = {
-    ...machine.value,
-    capabilities: { ...machine.value.capabilities, ledControl: true },
-  };
+  installSettingsTestGlobals(machine);
 });
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  teardownSettingsTest();
 });
 
 describe('Settings PluginSubCard survives a Drive-restore remount expanded (PRO-574)', () => {

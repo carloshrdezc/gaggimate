@@ -1,0 +1,34 @@
+# Dependabot configuration for automated dependency updates (PRO-598).
+#
+# Scope: the two JavaScript/Node packages and the repo's GitHub Actions.
+# PlatformIO / firmware C++ dependencies (platformio.ini `lib_deps`) are
+# INTENTIONALLY excluded and stay manual — Dependabot has no PlatformIO
+# ecosystem support and firmware deps are pinned/vetted by hand per PRO-598.
+#
+# All update PRs target `dev-master` (the repo's integration branch), not
+# `master`, matching the project's PR workflow.
+version: 2
+updates:
+  # Web UI (Preact + Vite) npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    target-branch: "dev-master"
+    open-pull-requests-limit: 5
+
+  # Relay server (Node.js) npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/relay-server"
+    schedule:
+      interval: "weekly"
+    target-branch: "dev-master"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions used by the workflows in .github/workflows/
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "dev-master"
+    open-pull-requests-limit: 5

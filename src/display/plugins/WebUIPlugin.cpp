@@ -4,6 +4,7 @@
 #include "OtaResolveHeapPolicy.h"
 #include "OtaResolveReusePolicy.h"
 #include "OtaUpdateCheckPolicy.h"
+#include "RelayConnectionPolicy.h"
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
@@ -50,61 +51,29 @@ static WebUIPlugin *g_webUIPlugin = nullptr;
 // used at every read/write site.
 static constexpr const char *kSecretSentinel = "---unchanged---";
 
+// PRO-596: thin Arduino-String adapter over the pure, host-tested
+// relay_connection_policy::relayTokenProtocol. The value logic lives in
+// RelayConnectionPolicy.h (unit-tested under [env:native]); this wrapper only
+// bridges Arduino `String` <-> `std::string` at the call boundary.
 static String relayTokenProtocol(const String &token) {
-    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    String encoded;
-    encoded.reserve(((token.length() + 2) / 3) * 4);
-    for (size_t index = 0; index < token.length(); index += 3) {
-        const uint32_t first = static_cast<uint8_t>(token[index]);
-        const uint32_t second = index + 1 < token.length() ? static_cast<uint8_t>(token[index + 1]) : 0;
-        const uint32_t third = index + 2 < token.length() ? static_cast<uint8_t>(token[index + 2]) : 0;
-        const uint32_t block = (first << 16) | (second << 8) | third;
-        encoded += alphabet[(block >> 18) & 0x3f];
-        encoded += alphabet[(block >> 12) & 0x3f];
-        if (index + 1 < token.length())
-            encoded += alphabet[(block >> 6) & 0x3f];
-        if (index + 2 < token.length())
-            encoded += alphabet[block & 0x3f];
-    }
-    return "gaggimate-token-" + encoded;
+    return String(relay_connection_policy::relayTokenProtocol(std::string(token.c_str())).c_str());
 }
 
 WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
+// PRO-596: thin Arduino-String adapter over the pure, host-tested
+// relay_connection_policy::parseRelayUrl. The out-param signature is preserved
+// so startRelay() is unchanged; only the parsing body moved to the header.
 static bool parseRelayUrl(const String &url, bool &useSSL, String &host, uint16_t &port, String &basePath) {
-    if (url.startsWith("wss://")) {
-        useSSL = true;
-        String rest = url.substring(6);
-        int slashIdx = rest.indexOf('/');
-        String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
-        basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
-        int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) {
-            host = hostPort;
-            port = 443;
-        } else {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
-        return true;
+    const relay_connection_policy::RelayUrlParts parts = relay_connection_policy::parseRelayUrl(std::string(url.c_str()));
+    if (!parts.valid) {
+        return false;
     }
-    if (url.startsWith("ws://")) {
-        useSSL = false;
-        String rest = url.substring(5);
-        int slashIdx = rest.indexOf('/');
-        String hostPort = (slashIdx < 0) ? rest : rest.substring(0, slashIdx);
-        basePath = (slashIdx < 0) ? String("/") : rest.substring(slashIdx);
-        int colonIdx = hostPort.indexOf(':');
-        if (colonIdx < 0) {
-            host = hostPort;
-            port = 80;
-        } else {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
-        return true;
-    }
-    return false;
+    useSSL = parts.useSSL;
+    host = String(parts.host.c_str());
+    port = parts.port;
+    basePath = String(parts.basePath.c_str());
+    return true;
 }
 
 void WebUIPlugin::addCorsHeaders(AsyncWebServerResponse *response) const {
@@ -476,11 +445,15 @@ void WebUIPlugin::loop() {
     // applies once the settle window closes.
     if (pendingModeChange) {
         // "Still hold" is the same defer decision as the arming gate (PRO-267):
-        // a deferral is only ever armed for non-STANDBY targets, so
-        // shouldDeferModeChange(pendingModeChangeTarget, ...) reduces to the
-        // settle-window check here — sharing the predicate keeps the hold/apply
-        // decision in lock-step with the arming gate.
-        if (shouldDeferModeChange(pendingModeChangeTarget, ShotHistory.isExtendedRecording())) {
+        // a deferral is only ever armed for a target that defers — a non-STANDBY
+        // target (any settle window) or an AUTOMATIC standby-on-brew STANDBY
+        // (PRO-587). An EXPLICIT STANDBY never arms, so a STANDBY sitting in
+        // pendingModeChangeTarget is by construction automatic. Passing
+        // automatic=true here therefore keeps the hold/apply decision in
+        // lock-step with the arming gate for BOTH cases: it reduces to the pure
+        // settle-window check (isExtendedRecording) — hold while the window is
+        // open, apply the moment it closes — with no separate pending-auto flag.
+        if (shouldDeferModeChange(pendingModeChangeTarget, ShotHistory.isExtendedRecording(), /*automatic=*/true)) {
             // Settle still in progress: hold the mode, keep the BLE scale connected
             // and record() logging so post-stop drips land in the yield. Re-checked
             // next iteration (~2 ms) — no blocking wait, no delay() on this task.
@@ -494,6 +467,17 @@ void WebUIPlugin::loop() {
             // the deferred transition is the correct, display-matching behavior.
             if (controller->getMode() == MODE_BREW) {
                 controller->clear();
+                // PRO-589: intentionally does NOT set lastExplicitStandbyMs /
+                // sawExplicitStandby here, unlike the immediate-apply branch in the
+                // req:change-mode handler. Since PRO-587 a `target` of MODE_STANDBY
+                // CAN reach this drain path (an automatic standby-on-brew defers
+                // through the settle window), but it is always an *automatic*
+                // standby-on-brew — an explicit STANDBY never defers. Standby-on-brew
+                // and auto-steam are mutually exclusive in the UI, so there is no
+                // reflexive auto-steam STEAM re-fire to bounce off this STANDBY;
+                // PRO-421's reassert guard (which reads those two fields) therefore
+                // cannot be triggered via the deferred-apply path, and leaving it
+                // unarmed here is intentional and safe.
                 controller->setMode(target);
             }
         }
@@ -885,6 +869,9 @@ void WebUIPlugin::loop() {
         // Round dose grams to 1 decimal so the wire value matches the "float" web contract
         // (avoids noisy full-precision doubles; firmware keeps full precision internally).
         doc["dg"] = std::round(controller->getSettings().getDoseGrams() * 10.0) / 10.0;
+        // PRO-603: device-authoritative manual grinder-dial setting, rounded to
+        // 1 decimal like "dg". Kept in sync across browsers via req:manual-grind:set.
+        doc["mg"] = std::round(controller->getSettings().getManualGrindSetting() * 10.0) / 10.0;
         doc["led"] = controller->getSystemInfo().capabilities.ledControl;
         doc["gtd"] = controller->getTargetGrindDuration();
         doc["gtv"] = controller->getSettings().getTargetGrindVolume();
@@ -1349,7 +1336,7 @@ void WebUIPlugin::startRelay() {
         }
     }
 
-    String path = (basePath.isEmpty() || basePath == "/") ? "/connect?role=device" : basePath + "/connect?role=device";
+    String path = String(relay_connection_policy::resolveRelayConnectPath(std::string(basePath.c_str())).c_str());
     String relayProtocols = "Sec-WebSocket-Protocol: gaggimate-relay-v1, " + relayTokenProtocol(relayToken) + "\r\n";
     relayWs.setExtraHeaders(relayProtocols.c_str());
 
@@ -1552,20 +1539,23 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     // have the documented JSON scalar type/range before any dispatch side effect.
     // Unknown fields are deliberately ignored for forward compatibility.
     static const char *const commandFields[] = {"target", "grams",       "mode", "targetType", "pressure",
-                                                "flow",   "temperature", "time", "samples"};
+                                                "flow",   "temperature", "time", "samples",    "value"};
     strict_validation::Fields commandValues;
     for (const char *field : commandFields) {
         const bool applies = (msgType == "req:change-grind-target" && String(field) == "target") ||
                              (msgType == "req:change-mode" && String(field) == "mode") ||
                              (msgType == "req:change-brew-target" && String(field) == "target") ||
-                             (msgType == "req:dose:set" && String(field) == "grams") || (msgType == "req:manual:update") ||
+                             (msgType == "req:dose:set" && String(field) == "grams") ||
+                             (msgType == "req:manual-grind:set" && String(field) == "value") ||
+                             (msgType == "req:manual:update") ||
                              (msgType == "req:autotune-start" && (String(field) == "time" || String(field) == "samples"));
         if (!applies)
             continue;
         const bool required = (msgType == "req:change-grind-target" && String(field) == "target") ||
                               (msgType == "req:change-mode" && String(field) == "mode") ||
                               (msgType == "req:change-brew-target" && String(field) == "target") ||
-                              (msgType == "req:dose:set" && String(field) == "grams");
+                              (msgType == "req:dose:set" && String(field) == "grams") ||
+                              (msgType == "req:manual-grind:set" && String(field) == "value");
         JsonVariantConst value = doc[field];
         if (value.isNull()) {
             if (required)
@@ -1648,6 +1638,14 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:change-mode") {
         if (doc["mode"].is<uint8_t>()) {
             uint8_t newMode = doc["mode"].as<uint8_t>();
+            // PRO-587: an OPTIONAL `auto` flag distinguishes an AUTOMATIC,
+            // post-shot standby-on-brew transition (sent by the web dashboard's
+            // standby-on-brew effect) from an EXPLICIT user-initiated request.
+            // Absent/false (every physical button, web Standby button, HomeKit,
+            // and every non-standby request) = explicit — today's behavior is
+            // bit-for-bit unchanged. true = automatic — a STANDBY target then
+            // rides the settle window instead of stopping instantly.
+            bool automatic = doc["auto"].is<bool>() && doc["auto"].as<bool>();
             if (newMode == MODE_GRIND && !controller->isGrindAvailable())
                 return;
             if (newMode == MODE_MANUAL && !controller->isManualAvailable())
@@ -1683,14 +1681,21 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             // the window PRO-223/PRO-248 built. setMode() now would stop record().
             // A redundant/duplicate request while a window is already in flight just
             // re-posts the same target without collapsing it (no clear() runs).
-            // PRO-265: STANDBY is an explicit user stop and must NEVER defer — it
+            // PRO-265: an EXPLICIT STANDBY is a user stop and must NEVER defer — it
             // bypasses the settle window entirely and stops immediately, mirroring
             // Controller::activateStandby() and the physical STANDBY button (which
-            // are not gated). Only non-standby targets (auto-steam MODE_STEAM, grind,
-            // manual) keep PRO-261's settle behavior.
-            if (shouldDeferModeChange(newMode, ShotHistory.isExtendedRecording())) {
+            // are not gated). PRO-587: an AUTOMATIC STANDBY (standby-on-brew, the
+            // `auto` flag above) DOES defer — it rides the same settle window as
+            // auto-steam so post-shot drips reach the yield. Non-standby targets
+            // (auto-steam MODE_STEAM, grind, manual) keep PRO-261's settle behavior
+            // regardless of the flag.
+            if (shouldDeferModeChange(newMode, ShotHistory.isExtendedRecording(), automatic)) {
                 // Latch target before raising the flag so loop() never reads a stale
                 // target for a freshly-armed deferral (volatile handoff, see header).
+                // No pending-auto companion flag is needed: a STANDBY target only
+                // ever reaches here when automatic == true (an explicit STANDBY
+                // never defers), so loop()'s drain re-check treats any armed target
+                // as deferrable-while-recording (see WebUIPlugin::loop, PRO-587).
                 pendingModeChangeTarget = newMode;
                 pendingModeChange = true;
             } else {
@@ -1704,7 +1709,11 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 controller->clear();
                 controller->setMode(newMode);
                 // PRO-421: record when an explicit STANDBY landed so an immediate
-                // stale non-STANDBY re-assert (see the guard above) is rejected.
+                // stale non-STANDBY re-assert (see the guard above) is rejected. An
+                // AUTOMATIC standby-on-brew STANDBY never reaches this branch while a
+                // settle window is open (it defers); if it lands here (no window) it
+                // is still a genuine stop, so treat it as an explicit standby for
+                // the reassert guard — this preserves PRO-421 exactly.
                 if (newMode == MODE_STANDBY) {
                     lastExplicitStandbyMs = millis();
                     sawExplicitStandby = true;
@@ -1768,6 +1777,22 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             }
         } else {
             ESP_LOGW("WebUIPlugin", "req:dose:set ignored: missing or invalid 'grams'");
+        }
+    } else if (msgType == "req:manual-grind:set") {
+        // Device-authoritative manual grinder-dial setting (PRO-603). Validated
+        // and clamped by Settings::setManualGrindSetting, rebroadcast as "mg" in
+        // evt:status. Unlike dose, 0 is a valid value ("not set"), so accept
+        // [0, 100]; reject only non-finite or out-of-range.
+        JsonVariantConst gValue = doc["value"];
+        if (!gValue.isNull() && gValue.is<float>()) {
+            const double value = gValue.as<double>();
+            if (!std::isfinite(value) || value < 0.0 || value > 100.0) {
+                ESP_LOGW("WebUIPlugin", "req:manual-grind:set ignored: 'value' out of range");
+            } else {
+                controller->getSettings().setManualGrindSetting(value);
+            }
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:manual-grind:set ignored: missing or invalid 'value'");
         }
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
@@ -2628,6 +2653,30 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["latestVersion"] = ota->getCurrentVersion();
     doc["displayUpdateAvailable"] = ota->isUpdateAvailable(false);
     doc["controllerUpdateAvailable"] = ota->isUpdateAvailable(true);
+    // PRO-599: authoritative per-component flash eligibility. The web UI used to
+    // re-derive this from (channel, installedChannel, status, *UpdateAvailable)
+    // and semver ordering, which silently blocked the Update button on a channel
+    // switch to an equal/lower version (and whenever installedChannel was absent).
+    // The device is the authority on what it will actually flash, so it reports
+    // the decision directly here via the same policy the OTA-start path uses
+    // (decideOtaFlash / otaComponentFlashEligible in OtaChannelSwitchPolicy.h).
+    {
+        const String channelStr = settings.getOTAChannel();
+        const String installedStr = settings.getInstalledChannel();
+        const bool isTag = channelStr.startsWith("tag:");
+        // pinnedTag is the substring after "tag:"; ignored by the policy when !isTag.
+        const String pinnedTag = isTag ? channelStr.substring(4) : String("");
+        const bool selectedEqInstalled = channelStr == installedStr;
+        const bool installedEmpty = installedStr.isEmpty();
+        const String resolvedVersion = ota->getCurrentVersion();
+        const bool resolveFailed = ota->isUpdateCheckFailed();
+        doc["displayFlashEligible"] =
+            otaComponentFlashEligible(isTag, pinnedTag.c_str(), selectedEqInstalled, installedEmpty, resolvedVersion.c_str(),
+                                      resolveFailed, ota->isUpdateAvailable(false));
+        doc["controllerFlashEligible"] =
+            otaComponentFlashEligible(isTag, pinnedTag.c_str(), selectedEqInstalled, installedEmpty, resolvedVersion.c_str(),
+                                      resolveFailed, ota->isUpdateAvailable(true));
+    }
     doc["displayVersion"] = BUILD_GIT_VERSION;
     doc["controllerVersion"] = controller->getSystemInfo().version;
     doc["hardware"] = controller->getSystemInfo().hardware;
