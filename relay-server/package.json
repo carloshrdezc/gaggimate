@@ -11,7 +11,7 @@
     "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "wrangler": "^4.90.0"
