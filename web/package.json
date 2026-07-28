@@ -18,7 +18,7 @@
     "@floating-ui/dom": "^1.7.4",
     "@fortawesome/fontawesome-svg-core": "^7.0.0",
     "@fortawesome/free-brands-svg-icons": "^7.0.0",
-    "@fortawesome/free-solid-svg-icons": "^7.0.0",
+    "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.0.0",
     "@preact/signals": "^2.9.2",
     "chart.js": "^4.4.8",
