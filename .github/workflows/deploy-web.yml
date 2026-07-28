@@ -42,7 +42,7 @@ jobs:
       - name: Copy index.html to 404.html for SPA routing
         run: cp web/dist/index.html web/dist/404.html
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web/dist
 
