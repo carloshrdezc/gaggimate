@@ -154,3 +154,7 @@ Manual dial (not recommended): would require, at minimum —
 - **What worked:** confirmed the machine grind target is already device-authoritative + NVS-persisted, so mirroring the `grinderName` path is near-free; confirmed the manual dial is deliberately localStorage-only and would need a full new protocol to change.
 - **What didn't / caveat:** the naive reading of the issue ("stamp *the* grind setting") is ambiguous — there are two values. Stamping the machine target is right; stamping the dial number is not worth it. The doc resolves the ambiguity.
 - **Recommendation for the real build:** file the follow-up above; keep it ~S; do not touch the manual-dial protocol.
+
+---
+
+> **Update (PRO-603):** This spike recommended keeping the manual dial localStorage-only. That call was later superseded — PRO-603 shipped the previously-declined path, making the manual grind setting firmware-authoritative (NVS-persisted, broadcast as `mg` in `evt:status`, set via `req:manual-grind:set`) for cross-browser UX consistency with DOSE. The reasoning here (device "can't observe" the physical dial) still holds; PRO-603 accepts that the stored value is the last user-entered number, treated exactly like DOSE.

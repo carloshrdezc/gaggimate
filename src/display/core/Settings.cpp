@@ -97,6 +97,7 @@ void Settings::load() {
     autoSteamEnabled = preferences.getBool("autosteam", false);
     standbyOnBrewEnabled = preferences.getBool("sbonbrew", false);
     doseGrams = preferences.getDouble("dosegrams", 18.0);
+    manualGrindSetting = preferences.getDouble("mgrind", 0.0);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
     // PRO-400: EMPTY default so a device that never stored "ic" is detectable.
     installedChannel = preferences.getString("ic", "");
@@ -314,9 +315,7 @@ void Settings::save(bool noDelay) {
     }
 }
 
-SemaphoreHandle_t Settings::ensurePersistenceMutex() {
-    return persistenceMutex;
-}
+SemaphoreHandle_t Settings::ensurePersistenceMutex() { return persistenceMutex; }
 
 void Settings::setTargetSteamTemp(const int target_steam_temp) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
@@ -451,6 +450,14 @@ void Settings::setStandbyOnBrewEnabled(bool standby_on_brew_enabled) {
 void Settings::setDoseGrams(double dose_grams) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     this->doseGrams = std::clamp(dose_grams, 0.1, 200.0);
+    save();
+}
+
+void Settings::setManualGrindSetting(double manual_grind_setting) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+    // PRO-603: clamp to the Dashboard's manual-grind range [0, 100] (0 = "not
+    // set"). Distinct from doseGrams' [0.1, 200] since 0 is a valid grind value.
+    this->manualGrindSetting = std::clamp(manual_grind_setting, 0.0, 100.0);
     save();
 }
 
@@ -1040,6 +1047,7 @@ Settings::PersistenceSnapshot Settings::takePersistenceSnapshot() {
     snapshot.brewDelay = brewDelay;
     snapshot.grindDelay = grindDelay;
     snapshot.doseGrams = doseGrams;
+    snapshot.manualGrindSetting = manualGrindSetting;
     snapshot.delayAdjust = delayAdjust;
     snapshot.homekit = homekit;
     snapshot.volumetricTarget = volumetricTarget;
@@ -1128,6 +1136,7 @@ void Settings::doSave() {
     preferences.putBool("autosteam", snapshot.autoSteamEnabled);
     preferences.putBool("sbonbrew", snapshot.standbyOnBrewEnabled);
     preferences.putDouble("dosegrams", snapshot.doseGrams);
+    preferences.putDouble("mgrind", snapshot.manualGrindSetting);
     preferences.putString("oc", snapshot.otaChannel);
     preferences.putString("ic", snapshot.installedChannel);
     preferences.putString("ssc", snapshot.savedScale);

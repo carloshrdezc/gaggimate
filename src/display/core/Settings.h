@@ -106,6 +106,10 @@ class Settings {
     bool isAutoSteamEnabled() const { return autoSteamEnabled; }
     bool isStandbyOnBrewEnabled() const { return standbyOnBrewEnabled; }
     double getDoseGrams() const { return doseGrams; }
+    // PRO-603: device-authoritative manual grinder-dial setting. Persisted in
+    // NVS and broadcast as "mg" in evt:status so it stays in sync across
+    // browsers, mirroring doseGrams. Range [0, 100]; 0 means "not set".
+    double getManualGrindSetting() const { return manualGrindSetting; }
     String getOTAChannel() const;
     // PRO-400: the channel whose resolved head is believed to be flashed on the
     // device. Distinct from getOTAChannel() (the SELECTED channel) so a channel
@@ -206,6 +210,7 @@ class Settings {
     void setAutoSteamEnabled(bool auto_steam_enabled);
     void setStandbyOnBrewEnabled(bool standby_on_brew_enabled);
     void setDoseGrams(double dose_grams);
+    void setManualGrindSetting(double manual_grind_setting);
     void setOTAChannel(const String &otaChannel);
     void setInstalledChannel(const String &installedChannel);
     void setSavedScale(const String &savedScale);
@@ -260,9 +265,8 @@ class Settings {
         int manualTemperature, sunriseR, sunriseG, sunriseB, sunriseW, sunriseExtBrightness, emptyTankDistance;
         int fullTankDistance, altRelayFunction;
         float pressureScaling, steamPumpPercentage, steamPumpCutoff, manualPressure, manualFlow;
-        double targetGrindVolume, brewDelay, grindDelay, doseGrams;
-        bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, standbyOnBrewEnabled,
-            boilerFillActive;
+        double targetGrindVolume, brewDelay, grindDelay, doseGrams, manualGrindSetting;
+        bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, standbyOnBrewEnabled, boilerFillActive;
         bool smartGrindActive, diagnosticLogEnabled, smartGrindToggle, homeAssistant, momentaryButtons;
         bool clock24hFormat, autowakeupEnabled, altRelayConfigured, cloudRelayEnabled, localAuthProvisioned;
         String pid, pumpModelCoeffs, wifiSsid, wifiPassword, mdnsName, otaChannel, installedChannel, savedScale;
@@ -303,6 +307,7 @@ class Settings {
     bool autoSteamEnabled = false;
     bool standbyOnBrewEnabled = false;
     double doseGrams = 18.0;
+    double manualGrindSetting = 0.0;
     bool boilerFillActive = false;
     int startupFillTime = 0;
     int steamFillTime = 0;

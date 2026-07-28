@@ -48,6 +48,11 @@ void test_settings_validation_accepts_common_pressure_sensor_ratings() {
 void test_websocket_validation_rejects_invalid_command_values() {
     strict_validation::Error error;
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:dose:set", {{"grams", "nan", true}}, error));
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {{"value", "nan", true}}, error));
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {{"value", "150", true}}, error));
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {{"value", "-1", true}}, error));
+    TEST_ASSERT_TRUE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {{"value", "0", true}}, error));
+    TEST_ASSERT_TRUE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {{"value", "42.5", true}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:change-mode", {{"mode", "6", true}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual:update", {{"targetType", "wat"}}, error));
     TEST_ASSERT_TRUE(strict_validation::validateWebSocketRequest("req:manual:update", {{"targetType", "flow"}, {"pressure", "9.5", true}}, error));
@@ -59,6 +64,7 @@ void test_websocket_validation_rejects_numeric_strings() {
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:change-mode", {{"mode", "1"}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:change-brew-target", {{"target", "18"}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:dose:set", {{"grams", "18"}}, error));
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {{"value", "42"}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual:update", {{"pressure", "9"}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual:update", {{"flow", "9"}}, error));
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual:update", {{"temperature", "90"}}, error));
@@ -71,6 +77,8 @@ void test_websocket_validation_requires_command_fields() {
     strict_validation::Error error;
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:dose:set", {}, error));
     TEST_ASSERT_EQUAL_STRING("grams", error.field.c_str());
+    TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:manual-grind:set", {}, error));
+    TEST_ASSERT_EQUAL_STRING("value", error.field.c_str());
     TEST_ASSERT_FALSE(strict_validation::validateWebSocketRequest("req:change-mode", {}, error));
     TEST_ASSERT_EQUAL_STRING("mode", error.field.c_str());
     TEST_ASSERT_TRUE(strict_validation::validateWebSocketRequest("req:manual:update", {}, error));

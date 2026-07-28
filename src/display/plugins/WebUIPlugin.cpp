@@ -869,6 +869,9 @@ void WebUIPlugin::loop() {
         // Round dose grams to 1 decimal so the wire value matches the "float" web contract
         // (avoids noisy full-precision doubles; firmware keeps full precision internally).
         doc["dg"] = std::round(controller->getSettings().getDoseGrams() * 10.0) / 10.0;
+        // PRO-603: device-authoritative manual grinder-dial setting, rounded to
+        // 1 decimal like "dg". Kept in sync across browsers via req:manual-grind:set.
+        doc["mg"] = std::round(controller->getSettings().getManualGrindSetting() * 10.0) / 10.0;
         doc["led"] = controller->getSystemInfo().capabilities.ledControl;
         doc["gtd"] = controller->getTargetGrindDuration();
         doc["gtv"] = controller->getSettings().getTargetGrindVolume();
@@ -1536,20 +1539,23 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     // have the documented JSON scalar type/range before any dispatch side effect.
     // Unknown fields are deliberately ignored for forward compatibility.
     static const char *const commandFields[] = {"target", "grams",       "mode", "targetType", "pressure",
-                                                "flow",   "temperature", "time", "samples"};
+                                                "flow",   "temperature", "time", "samples",    "value"};
     strict_validation::Fields commandValues;
     for (const char *field : commandFields) {
         const bool applies = (msgType == "req:change-grind-target" && String(field) == "target") ||
                              (msgType == "req:change-mode" && String(field) == "mode") ||
                              (msgType == "req:change-brew-target" && String(field) == "target") ||
-                             (msgType == "req:dose:set" && String(field) == "grams") || (msgType == "req:manual:update") ||
+                             (msgType == "req:dose:set" && String(field) == "grams") ||
+                             (msgType == "req:manual-grind:set" && String(field) == "value") ||
+                             (msgType == "req:manual:update") ||
                              (msgType == "req:autotune-start" && (String(field) == "time" || String(field) == "samples"));
         if (!applies)
             continue;
         const bool required = (msgType == "req:change-grind-target" && String(field) == "target") ||
                               (msgType == "req:change-mode" && String(field) == "mode") ||
                               (msgType == "req:change-brew-target" && String(field) == "target") ||
-                              (msgType == "req:dose:set" && String(field) == "grams");
+                              (msgType == "req:dose:set" && String(field) == "grams") ||
+                              (msgType == "req:manual-grind:set" && String(field) == "value");
         JsonVariantConst value = doc[field];
         if (value.isNull()) {
             if (required)
@@ -1771,6 +1777,22 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             }
         } else {
             ESP_LOGW("WebUIPlugin", "req:dose:set ignored: missing or invalid 'grams'");
+        }
+    } else if (msgType == "req:manual-grind:set") {
+        // Device-authoritative manual grinder-dial setting (PRO-603). Validated
+        // and clamped by Settings::setManualGrindSetting, rebroadcast as "mg" in
+        // evt:status. Unlike dose, 0 is a valid value ("not set"), so accept
+        // [0, 100]; reject only non-finite or out-of-range.
+        JsonVariantConst gValue = doc["value"];
+        if (!gValue.isNull() && gValue.is<float>()) {
+            const double value = gValue.as<double>();
+            if (!std::isfinite(value) || value < 0.0 || value > 100.0) {
+                ESP_LOGW("WebUIPlugin", "req:manual-grind:set ignored: 'value' out of range");
+            } else {
+                controller->getSettings().setManualGrindSetting(value);
+            }
+        } else {
+            ESP_LOGW("WebUIPlugin", "req:manual-grind:set ignored: missing or invalid 'value'");
         }
     } else if (msgType == "req:beans:select") {
         String beanName = doc["name"].is<String>() ? doc["name"].as<String>() : String("");
