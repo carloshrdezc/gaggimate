@@ -508,4 +508,3 @@ test('componentFlashDisabled: malformed input is blocked', () => {
   expect(componentFlashDisabled()).toBe(true);
   expect(componentFlashDisabled({ formData: null, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible' })).toBe(true);
 });
-
