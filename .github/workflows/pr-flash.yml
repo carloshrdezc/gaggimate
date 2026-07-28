@@ -72,7 +72,7 @@ jobs:
         # Always available on the PR's checks page, including for fork PRs.
         # This is the firmware's home now that the gh-pages publish job is gone
         # (PRO-250).
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pr-${{ github.event.pull_request.number }}-firmware
           path: ./out
