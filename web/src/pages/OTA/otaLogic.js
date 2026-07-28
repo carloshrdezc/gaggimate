@@ -182,6 +182,47 @@ export function canSwitchChannel({ formData, pendingChannel } = {}) {
   return otaChannelDiffersFromInstalled({ selectedChannel: channel, installedChannel });
 }
 
+// PRO-599: prefer the device-authoritative per-component flash-eligibility
+// signal over the UI's fragile (channel, installedChannel, semver) inference.
+//
+// The firmware now computes eligibility with the same policy it uses to decide
+// the actual flash (decideOtaFlash / otaComponentFlashEligible in
+// src/display/plugins/OtaChannelSwitchPolicy.h) and reports it as
+// `displayFlashEligible` / `controllerFlashEligible` in res:ota-settings. That
+// signal correctly enables a channel switch to an equal/lower version (which
+// semver ordering alone rejects) and correctly handles devices that never
+// persisted `installedChannel`.
+//
+// We still enforce the UI-side anti-stale-`_latest_url` discipline the older
+// helpers used, because the firmware pushes an intermediate "Checking..." /
+// "Verifying release..." status (with the PREVIOUS channel's resolved head)
+// before the new channel is resolved:
+//   - `pendingChannel === formData.channel`  — the selection has been saved &
+//     acknowledged (no unsaved dropdown delta).
+//   - status is a real resolved version, not a resolve-in-flight/failure string.
+// When either guard fails, or the device did not report the field at all (older
+// firmware), fall back to `fallbackDisabled` — the caller's existing four-way
+// inference — so behavior degrades gracefully rather than trusting a stale or
+// absent signal.
+//
+// `eligibleKey` is 'displayFlashEligible' or 'controllerFlashEligible'.
+// Returns the button's `disabled` boolean.
+export function componentFlashDisabled({ formData, pendingChannel, eligibleKey, fallbackDisabled } = {}) {
+  if (!formData || typeof formData !== 'object') return true;
+  const eligible = formData[eligibleKey];
+  // Older firmware: field absent -> defer entirely to the legacy inference.
+  if (typeof eligible !== 'boolean') return fallbackDisabled;
+  const { channel, status } = formData;
+  // Unsaved dropdown delta -> the device signal describes the OLD channel; block.
+  if (typeof channel !== 'string' || channel.length === 0) return fallbackDisabled;
+  if (pendingChannel !== channel) return true;
+  // Resolve in flight / failed -> the signal is stale or negative; block.
+  if (typeof status !== 'string' || status.length === 0) return true;
+  if (isResolveInFlightOrFailed(status)) return true;
+  // Trust the device: enabled iff it says the flash is actionable.
+  return !eligible;
+}
+
 // Capitalize a channel name for display ("beta" -> "Beta"). Tag channels
 // (`tag:<semver>`) are passed through unchanged since they aren't a
 // human-friendly channel name.

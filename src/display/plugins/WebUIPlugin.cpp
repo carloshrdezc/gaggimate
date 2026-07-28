@@ -2631,6 +2631,30 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["latestVersion"] = ota->getCurrentVersion();
     doc["displayUpdateAvailable"] = ota->isUpdateAvailable(false);
     doc["controllerUpdateAvailable"] = ota->isUpdateAvailable(true);
+    // PRO-599: authoritative per-component flash eligibility. The web UI used to
+    // re-derive this from (channel, installedChannel, status, *UpdateAvailable)
+    // and semver ordering, which silently blocked the Update button on a channel
+    // switch to an equal/lower version (and whenever installedChannel was absent).
+    // The device is the authority on what it will actually flash, so it reports
+    // the decision directly here via the same policy the OTA-start path uses
+    // (decideOtaFlash / otaComponentFlashEligible in OtaChannelSwitchPolicy.h).
+    {
+        const String channelStr = settings.getOTAChannel();
+        const String installedStr = settings.getInstalledChannel();
+        const bool isTag = channelStr.startsWith("tag:");
+        // pinnedTag is the substring after "tag:"; ignored by the policy when !isTag.
+        const String pinnedTag = isTag ? channelStr.substring(4) : String("");
+        const bool selectedEqInstalled = channelStr == installedStr;
+        const bool installedEmpty = installedStr.isEmpty();
+        const String resolvedVersion = ota->getCurrentVersion();
+        const bool resolveFailed = ota->isUpdateCheckFailed();
+        doc["displayFlashEligible"] =
+            otaComponentFlashEligible(isTag, pinnedTag.c_str(), selectedEqInstalled, installedEmpty, resolvedVersion.c_str(),
+                                      resolveFailed, ota->isUpdateAvailable(false));
+        doc["controllerFlashEligible"] =
+            otaComponentFlashEligible(isTag, pinnedTag.c_str(), selectedEqInstalled, installedEmpty, resolvedVersion.c_str(),
+                                      resolveFailed, ota->isUpdateAvailable(true));
+    }
     doc["displayVersion"] = BUILD_GIT_VERSION;
     doc["controllerVersion"] = controller->getSystemInfo().version;
     doc["hardware"] = controller->getSystemInfo().hardware;
