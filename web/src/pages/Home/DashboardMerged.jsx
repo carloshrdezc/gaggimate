@@ -2304,9 +2304,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               borderBottom: '1px solid var(--dm-line)',
             }}
           >
-            {/* Manual grinder-dial setting (PRO-431). Edits exactly like DOSE
-                (tap → type → commit) but is per-browser localStorage only and is
-                never sent to the device. */}
+            {/* Manual grinder-dial setting (PRO-431, made device-authoritative in
+                PRO-603). Edits exactly like DOSE (tap → type → commit); every commit
+                fires req:manual-grind:set so the device persists it via NVS and
+                broadcasts it as `mg` in evt:status, keeping all browsers in sync.
+                localStorage is only an offline seed that primes the UI pre-connection. */}
             <EditableNumBlock
               label='GRIND'
               value={manualGrind}
