@@ -57,9 +57,11 @@ const DOSE_KEY = 'gaggimate-dose-grams';
 const DEFAULT_DOSE = 18.0;
 const DEFAULT_YIELD = 36.0;
 
-// Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history of
-// the physical grinder dial number; NEVER sent to the device (unlike DOSE_KEY,
-// which also fires req:dose:set). Default 0 = "not set yet".
+// Manual grinder-dial setting (PRO-431, made device-authoritative in PRO-603).
+// localStorage key holds the physical grinder dial number as an offline seed
+// only; the device now owns the value (broadcast as `mg` in evt:status, mapped
+// to s.manualGrindSetting) and every commit fires req:manual-grind:set so the
+// value stays in sync across browsers, matching DOSE. Default 0 = "not set yet".
 const DEFAULT_MANUAL_GRIND = 0;
 
 const PRESSURE_MAX = 12;
@@ -1440,26 +1442,33 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     }
   }, [api]);
 
-  // Manual grinder-dial setting (PRO-431). Per-browser localStorage UX history
-  // ONLY — seeded from localStorage like `cachedDose` above, but with NO device
-  // send: this is the physical dial number, not a machine parameter. Committing
-  // a value also records a per-profile manual-grind event so a later shot of the
-  // active profile pre-fills its Shot Notes grindSetting with it (taking
-  // precedence over the machine grind-TARGET label — see grinderManager.js).
-  const [manualGrind, setManualGrindState] = useState(() => {
+  // Manual grinder-dial setting — device-authoritative (PRO-603). The device
+  // broadcasts `mg` in evt:status (mapped to s.manualGrindSetting); localStorage
+  // is an offline-only seed that primes the UI pre-connection and is mirrored on
+  // every commit. When connected, the device value wins so browsers stay in sync.
+  const [cachedManualGrind, setCachedManualGrind] = useState(() => {
     try { return parseQuantity(localStorage.getItem(MANUAL_GRIND_SETTING_STORAGE_KEY)) ?? DEFAULT_MANUAL_GRIND; } catch { return DEFAULT_MANUAL_GRIND; }
   });
+  const manualGrind =
+    connected && Number.isFinite(s.manualGrindSetting) ? s.manualGrindSetting : cachedManualGrind;
   const recordActiveShotManualGrind = useActiveShotManualGrindRecorder(api);
   const setManualGrind = useCallback(val => {
     // Permissive range: grinder dials vary enormously (0–10 with decimals on a
     // Niche, 0–40+ clicks on a DF64, arbitrary worm-drive numbers), so clamp
     // only to a wide, neutral [0, 100] band rather than any grinder-specific
-    // scale. step=0.1 supports decimal dials.
+    // scale. step=0.1 supports decimal dials. Firmware re-validates/clamps.
     const v = Math.max(0, Math.min(100, val));
-    setManualGrindState(v);
+    setCachedManualGrind(v);
     try { localStorage.setItem(MANUAL_GRIND_SETTING_STORAGE_KEY, String(v)); } catch {}
-    // Record for Shot Notes pre-fill (per-profile, per-browser). Skip 0 — that
-    // is the "not set" sentinel and should not shadow the machine target label.
+    try {
+      // Fire-and-forget: device echoes the value back via evt:status `mg`.
+      api.send({ tp: 'req:manual-grind:set', value: v });
+    } catch (error) {
+      console.error('Failed to send manual grind:', error);
+    }
+    // Record for Shot Notes pre-fill (per-profile, per-browser; PRO-431/439).
+    // Separate concern from the cross-browser sync above — keep as-is. Skip 0 —
+    // that is the "not set" sentinel and should not shadow the machine target label.
     if (v > 0) {
       const st = machine.value.status;
       recordManualGrindSetting({
@@ -1469,7 +1478,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       });
       recordActiveShotManualGrind(String(v));
     }
-  }, [recordActiveShotManualGrind]);
+  }, [api, recordActiveShotManualGrind]);
 
   // Auto-attach dose, bean, and the manual grind value to shot notes as soon as
   // the shot becomes active. Dose/bean overwrite (read-merge-write); grind is

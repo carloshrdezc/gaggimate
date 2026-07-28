@@ -121,6 +121,7 @@ channels:
           - $ref: '#/components/messages/AutosteamSetRequest'
           - $ref: '#/components/messages/StandbyOnBrewSetRequest'
           - $ref: '#/components/messages/DoseSetRequest'
+          - $ref: '#/components/messages/ManualGrindSetRequest'
           - $ref: '#/components/messages/BeansSelectRequest'
           - $ref: '#/components/messages/FlushStartRequest'
           - $ref: '#/components/messages/ProfilesListRequest'
@@ -228,6 +229,9 @@ components:
         dg:
           type: number
           description: Brew dose in grams (rounded to 1 decimal).
+        mg:
+          type: number
+          description: Manual grinder-dial setting (rounded to 1 decimal). PRO-603.
         gtd:
           type: number
           description: Target grind duration.
@@ -1119,6 +1123,21 @@ components:
           grams:
             type: number
         required: [tp, grams]
+    ManualGrindSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Device-authoritative manual grinder-dial setting (PRO-603). Validated
+          (0 <= value <= 100) and rebroadcast as `mg` in `evt:status` so the
+          value stays in sync across connected browsers. No response is sent.
+        properties:
+          tp:
+            type: string
+            enum: ['req:manual-grind:set']
+          value:
+            type: number
+        required: [tp, value]
     BeansSelectRequest:
       x-since-version: 'unknown'
       payload:
