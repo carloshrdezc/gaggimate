@@ -106,6 +106,36 @@ void test_versions_equal_v_tolerant_helper(void) {
     TEST_ASSERT_TRUE(otaVersionsEqualVTolerant(nullptr, nullptr));
 }
 
+// PRO-599: otaComponentFlashEligible maps the flash decision + the semver-gated
+// per-component update-available flag to the authoritative eligibility bool the
+// firmware reports in res:ota-settings.
+void test_component_flash_eligible_force_ignores_semver_flag(void) {
+    // Confirmed channel switch (resolve OK) -> eligible even when the semver
+    // update-available flag is false (equal/lower version). This is the PRO-599 fix.
+    TEST_ASSERT_TRUE(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/false, "1.0.0", false, /*upd=*/false));
+    // Confirmed pinned tag -> eligible even when the semver flag is false.
+    TEST_ASSERT_TRUE(otaComponentFlashEligible(true, "2.0.8", false, false, "2.0.8", false, /*upd=*/false));
+}
+
+void test_component_flash_eligible_refuse_never_eligible(void) {
+    // Unconfirmed tag (resolved != pinned) -> Refuse -> not eligible even if a
+    // stale semver flag is true.
+    TEST_ASSERT_FALSE(otaComponentFlashEligible(true, "2.0.8", false, false, "1.9.9", false, /*upd=*/true));
+    // Channel switch with a failed resolve -> Refuse -> not eligible.
+    TEST_ASSERT_FALSE(otaComponentFlashEligible(false, "", false, false, "1.0.0", /*resolveFailed=*/true, /*upd=*/true));
+    // Channel switch with an empty resolve -> Refuse -> not eligible.
+    TEST_ASSERT_FALSE(otaComponentFlashEligible(false, "", false, false, "", false, /*upd=*/true));
+}
+
+void test_component_flash_eligible_upgrade_only_defers_to_flag(void) {
+    // Within-channel (selected == installed) -> UpgradeOnly -> mirrors the flag.
+    TEST_ASSERT_TRUE(otaComponentFlashEligible(false, "", /*selEq=*/true, false, "1.2.3", false, /*upd=*/true));
+    TEST_ASSERT_FALSE(otaComponentFlashEligible(false, "", /*selEq=*/true, false, "1.2.3", false, /*upd=*/false));
+    // Empty installedChannel is defensively upgrade-only -> mirrors the flag too.
+    TEST_ASSERT_TRUE(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/true, "1.2.3", false, /*upd=*/true));
+    TEST_ASSERT_FALSE(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/true, "1.2.3", false, /*upd=*/false));
+}
+
 static int runOtaChannelSwitchPolicyTests() {
     UNITY_BEGIN();
     RUN_TEST(test_within_channel_keeps_upgrade_only_guard);
@@ -115,6 +145,9 @@ static int runOtaChannelSwitchPolicyTests() {
     RUN_TEST(test_tag_match_forces_mismatch_refuses);
     RUN_TEST(test_tag_v_prefix_tolerance_both_directions);
     RUN_TEST(test_versions_equal_v_tolerant_helper);
+    RUN_TEST(test_component_flash_eligible_force_ignores_semver_flag);
+    RUN_TEST(test_component_flash_eligible_refuse_never_eligible);
+    RUN_TEST(test_component_flash_eligible_upgrade_only_defers_to_flag);
     return UNITY_END();
 }
 

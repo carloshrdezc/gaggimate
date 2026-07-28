@@ -320,6 +320,26 @@ components:
           type: boolean
         controllerUpdateAvailable:
           type: boolean
+        displayFlashEligible:
+          type: boolean
+          description: >-
+            Device-authoritative per-component flag: whether the firmware will
+            actually flash the display when the Update button is pressed, as
+            decided by `decideOtaFlash()` / `otaComponentFlashEligible()`
+            (OtaChannelSwitchPolicy.h) — the same policy the OTA-start path
+            uses. Supersedes the client-side, semver-derived
+            `displayUpdateAvailable` for gating the Update button (which could
+            silently block flashing on a channel switch to an equal/lower
+            version). Optional; present when `updateOTAStatus` runs.
+        controllerFlashEligible:
+          type: boolean
+          description: >-
+            Device-authoritative per-component flag: whether the firmware will
+            actually flash the controller when the Update button is pressed, as
+            decided by `decideOtaFlash()` / `otaComponentFlashEligible()`
+            (OtaChannelSwitchPolicy.h). Supersedes the client-side,
+            semver-derived `controllerUpdateAvailable` for gating the Update
+            button. Optional; present when `updateOTAStatus` runs.
         channel:
           type: string
         updating:

@@ -7,6 +7,7 @@ import {
   otaChannelDiffersFromInstalled,
   canSwitchChannel,
   otaActionLabel,
+  componentFlashDisabled,
 } from './otaLogic.js';
 
 test('updates OTA channel to nightly without changing other form fields', () => {
@@ -429,4 +430,81 @@ test('otaActionLabel: channel-switch takes precedence over pinned-tag state', ()
 test('otaActionLabel: "Update" for malformed input', () => {
   expect(otaActionLabel()).toBe('Update');
   expect(otaActionLabel(null, 'latest')).toBe('Update');
+});
+
+// ---------------------------------------------------------------------------
+// componentFlashDisabled — PRO-599 device-authoritative flash-eligibility gate.
+// The firmware reports `displayFlashEligible` / `controllerFlashEligible`; the
+// UI trusts them (with anti-stale guards) and falls back to the legacy
+// inference (`fallbackDisabled`) when the field is absent.
+
+test('componentFlashDisabled: trusts flashEligible=true on a saved, resolved channel switch (enabled despite semver)', () => {
+  // Channel switch to an equal semver: legacy inference (fallbackDisabled) would
+  // block on displayUpdateAvailable=false, but the device says it is eligible.
+  const formData = {
+    channel: 'beta',
+    installedChannel: 'latest',
+    status: '2.0.10',
+    displayFlashEligible: true,
+  };
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible', fallbackDisabled: true }),
+  ).toBe(false);
+});
+
+test('componentFlashDisabled: flashEligible=false blocks even if the legacy fallback would enable', () => {
+  const formData = { channel: 'latest', installedChannel: 'latest', status: '2.0.10', displayFlashEligible: false };
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'latest', eligibleKey: 'displayFlashEligible', fallbackDisabled: false }),
+  ).toBe(true);
+});
+
+test('componentFlashDisabled: unsaved dropdown change (pendingChannel !== channel) -> blocked', () => {
+  // The device signal describes the acknowledged channel; an unsaved delta must
+  // not enable a flash against the old channel's resolved head.
+  const formData = { channel: 'latest', installedChannel: 'latest', status: '2.0.10', displayFlashEligible: true };
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible', fallbackDisabled: false }),
+  ).toBe(true);
+});
+
+test('componentFlashDisabled: resolve-in-flight/failed status -> blocked even when flashEligible=true (anti-stale)', () => {
+  for (const status of ['Checking...', 'Verifying release...', 'Update failed', 'Update failed (tag not resolved)', 'Could not verify release beta — check network', '']) {
+    const formData = { channel: 'beta', installedChannel: 'latest', status, displayFlashEligible: true };
+    expect(
+      componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible', fallbackDisabled: false }),
+    ).toBe(true);
+  }
+});
+
+test('componentFlashDisabled: older firmware (field absent) falls back to the legacy inference', () => {
+  const formData = { channel: 'beta', installedChannel: 'latest', status: '2.0.10' }; // no displayFlashEligible
+  // fallbackDisabled is passed through unchanged in both directions.
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible', fallbackDisabled: false }),
+  ).toBe(false);
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible', fallbackDisabled: true }),
+  ).toBe(true);
+});
+
+test('componentFlashDisabled: per-component independence (display eligible, controller not)', () => {
+  const formData = {
+    channel: 'beta',
+    installedChannel: 'latest',
+    status: '2.0.10',
+    displayFlashEligible: true,
+    controllerFlashEligible: false,
+  };
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible', fallbackDisabled: true }),
+  ).toBe(false);
+  expect(
+    componentFlashDisabled({ formData, pendingChannel: 'beta', eligibleKey: 'controllerFlashEligible', fallbackDisabled: false }),
+  ).toBe(true);
+});
+
+test('componentFlashDisabled: malformed input is blocked', () => {
+  expect(componentFlashDisabled()).toBe(true);
+  expect(componentFlashDisabled({ formData: null, pendingChannel: 'beta', eligibleKey: 'displayFlashEligible' })).toBe(true);
 });

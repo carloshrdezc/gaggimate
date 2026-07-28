@@ -119,6 +119,45 @@ constexpr bool shouldForceFlashForChannelSwitch(bool selectedEqInstalled, bool i
                           resolveFailed) == OtaFlashDecision::ForceChannelSwitch;
 }
 
+// PRO-599: authoritative per-component "is a flash actionable right now?" signal.
+//
+// The web UI used to RE-DERIVE flash eligibility from (channel, installedChannel,
+// status, *UpdateAvailable) and semver ordering. That inference is fragile: it
+// silently blocks the Update button whenever `installedChannel` is absent
+// (older/unmigrated firmware) or whenever a channel switch resolves to an
+// equal/lower semver — even though the firmware's OWN flash decision
+// (decideOtaFlash) would happily force-flash it. The result was "Save & Refresh
+// accepts the channel but Update Display stays disabled" (PRO-599).
+//
+// Fix: the device is the authority on what it will actually flash, so it reports
+// the decision directly. This helper maps the flash decision to a per-component
+// eligibility bool the UI can trust verbatim:
+//   - a FORCE decision (confirmed pinned tag OR confirmed channel switch) is
+//     eligible regardless of semver direction — this is the exact case the AC
+//     calls out ("channel-switch eligibility even when semantic version ordering
+//     alone would normally reject it").
+//   - UpgradeOnly defers to the semver-gated per-component update-available flag
+//     (`componentUpdateAvailable` == ota->isUpdateAvailable(controller)).
+//   - Refuse (resolve failed / unconfirmed tag) is never eligible — never
+//     surface a flash we cannot confirm.
+//
+// `componentUpdateAvailable` is the caller's ota->isUpdateAvailable(controller)
+// for the specific component (display or controller); it already returns false
+// on a failed check, so the Refuse branch and this flag agree on failures.
+constexpr bool otaComponentFlashEligible(bool isTag, const char *pinnedTag, bool selectedEqInstalled, bool installedEmpty,
+                                         const char *resolvedVersion, bool resolveFailed, bool componentUpdateAvailable) {
+    const OtaFlashDecision decision =
+        decideOtaFlash(isTag, pinnedTag, selectedEqInstalled, installedEmpty, resolvedVersion, resolveFailed);
+    if (decision == OtaFlashDecision::Refuse) {
+        return false;
+    }
+    if (otaDecisionForces(decision)) {
+        return true;
+    }
+    // UpgradeOnly: the normal within-channel path — trust the semver-gated flag.
+    return componentUpdateAvailable;
+}
+
 // Compile-time truth table — pins the contract so a future edit to the predicate
 // fails the firmware compile rather than silently changing the flash decision.
 // (constexpr-evaluable cases only; the String/strcmp cases are covered by the
@@ -148,5 +187,26 @@ static_assert(otaDecisionForces(OtaFlashDecision::ForceMatchTag), "ForceMatchTag
 static_assert(otaDecisionForces(OtaFlashDecision::ForceChannelSwitch), "ForceChannelSwitch forces");
 static_assert(!otaDecisionForces(OtaFlashDecision::UpgradeOnly), "UpgradeOnly does not force");
 static_assert(!otaDecisionForces(OtaFlashDecision::Refuse), "Refuse does not force");
+
+// PRO-599 otaComponentFlashEligible truth table:
+// force decisions -> eligible regardless of the semver flag:
+static_assert(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/false, "1.0.0", false, /*upd=*/false),
+              "PRO-599: confirmed channel switch is flash-eligible even when semver flag is false");
+static_assert(otaComponentFlashEligible(true, "2.0.8", false, false, "2.0.8", false, /*upd=*/false),
+              "PRO-599: confirmed pinned tag is flash-eligible even when semver flag is false");
+// refuse -> never eligible even if the (stale) semver flag says true:
+static_assert(!otaComponentFlashEligible(true, "2.0.8", false, false, "1.9.9", false, /*upd=*/true),
+              "PRO-599: unconfirmed tag refuses regardless of stale semver flag");
+static_assert(!otaComponentFlashEligible(false, "", false, false, "1.0.0", /*resolveFailed=*/true, /*upd=*/true),
+              "PRO-599: failed channel-switch resolve refuses regardless of stale semver flag");
+// upgrade-only -> defers to the per-component semver flag:
+static_assert(otaComponentFlashEligible(false, "", /*selEq=*/true, false, "1.2.3", false, /*upd=*/true),
+              "PRO-599: within-channel eligible iff semver update-available flag is true");
+static_assert(!otaComponentFlashEligible(false, "", /*selEq=*/true, false, "1.2.3", false, /*upd=*/false),
+              "PRO-599: within-channel not eligible when semver update-available flag is false");
+// empty installedChannel (older firmware) defensively maps to upgrade-only, so a
+// device that never persisted `ic` still gets the semver-gated within-channel flag:
+static_assert(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/true, "1.2.3", false, /*upd=*/true),
+              "PRO-599: empty installedChannel defers to semver flag (upgrade-only)");
 
 #endif // OTACHANNELSWITCHPOLICY_H
