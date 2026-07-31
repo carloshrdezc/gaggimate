@@ -3,6 +3,8 @@
 # Runs the full local-equivalent check suite on every PR to dev-master:
 #   1. web        — cd web && npm ci && npm run build
 #   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
+#      plus the shipped controller/headless envs (PRO-611) and the
+#      flag-off / driver-family permutations
 #   3. native     — pio test -e native-sanitize (ASan/UBSan; findings fail CI)
 #   4. analysis   — pio check (cppcheck, GATING) + clang-tidy over in-scope logic
 #
@@ -212,6 +214,68 @@ jobs:
       # hand-run board-specific build; here it fails the PR. Relies on
       # embed_webui_pre.py's empty-bundle stub like the sibling display jobs.
       - name: Build display firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
+
+  firmware-shipped-envs:
+    name: Firmware build (controller + headless)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - controller
+          - display-headless
+          - display-headless-8m
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-611: platformio.ini defines 16 build envs but this workflow only
+      # gated 12 of them, and two of the uncovered ones — `controller` and
+      # `display-headless` — are SHIPPED release artifacts (build.yml,
+      # build-nightly.yml and build-beta.yml all build them post-merge). That
+      # meant a PR could break a released binary and still pass CI; the break
+      # only surfaced after merge, in the release workflow. pr-flash.yml does
+      # build controller + display for its preview artifact, but that job is
+      # `continue-on-error: true`, so it is NOT a gate and cannot be relied on
+      # (whether it should become one is a separate decision, out of scope here).
+      #   - controller           board Gaggimate-Controller, its own
+      #                          build_src_filter (+<controller/>) and lib_deps —
+      #                          nothing else in this workflow compiles that TU
+      #                          set, so display-side changes to shared
+      #                          lib/NimBLEComm code went unbuilt here.
+      #   - display-headless     -DGAGGIMATE_HEADLESS with drivers/ + ui/ dropped
+      #                          from build_src_filter; the `#ifdef`-stubbed
+      #                          no-LVGL path only links in this env.
+      #   - display-headless-8m  same sources on board seeed_xiao_esp32s3 (8 MB) —
+      #                          catches partition/flash-size regressions the
+      #                          16 MB LilyGo legs cannot.
+      # display-heapdiag is deliberately NOT included: it is a diagnostic-only
+      # env (PRO-566) that just adds -DGM_HEAP_DIAG_ENABLED=1 on top of
+      # [env:display], is never shipped as a release artifact, and is the slowest
+      # leg (~3 min), so gating on it would spend CI time re-compiling the
+      # already-gated `display` sources. The GM_HEAP_DIAG() macros compile to
+      # nothing in every other env, so it cannot break a shipped build.
+      # Like the sibling display legs, the headless envs rely on
+      # embed_webui_pre.py's empty-bundle stub — no web build is needed for a
+      # compile/link check.
+      # NOTE (PRO-607): these three matrix legs — "Firmware build (controller +
+      # headless) (controller)", "(display-headless)" and
+      # "(display-headless-8m)" — are candidates for the required-status-checks
+      # list on dev-master.
+      - name: Build firmware (${{ matrix.env }})
         run: pio run -e ${{ matrix.env }}
 
   native:
