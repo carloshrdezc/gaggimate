@@ -130,6 +130,9 @@ bash scripts/build_webui.sh  # Builds web, gzips + packs the bundle into src/dis
 ```sh
 cd web && npm ci && npm run build && cd ..          # web build
 pio run -e display                                  # firmware (-Wall -Wextra, no -Werror)
+pio run -e controller                               # shipped controller artifact (PRO-611)
+pio run -e display-headless                         # shipped headless artifact (PRO-611)
+pio run -e display-headless-8m                      # headless on Seeed XIAO ESP32-S3 8MB (PRO-611)
 pio test -e native                                  # host unit tests
 pio test -e native-sanitize                         # host tests under ASan + UBSan (findings fail CI)
 pio check -e display    --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"   # GATING cppcheck
@@ -140,6 +143,15 @@ python scripts/test_select_tidy_sources.py           # selector regression tests
 ```
 
 - cppcheck is GATING (the display step lost its old `continue-on-error`).
+- The `firmware-shipped-envs` job (PRO-611) builds the two **shipped release artifacts**
+  that had no PR gate — `controller` and `display-headless` — plus
+  `display-headless-8m` (same sources, Seeed XIAO ESP32-S3 8MB board), as a
+  `fail-fast: false` matrix alongside the existing `firmware-single-flag-off` and
+  `firmware-driver-family` legs. Before this, a PR could break a released binary
+  and still pass CI (`pr-flash.yml` builds `controller` but is
+  `continue-on-error: true`, so it is not a gate). `display-heapdiag` is
+  deliberately **excluded** — diagnostic-only (PRO-566), never shipped, and the
+  slowest leg; see the inline comment in `ci.yml`.
 - clang-tidy (`.clang-tidy`: `bugprone-*` + `cppcoreguidelines-*`) is scoped to
   hand-written logic via the **`[env:native-tidy]`** compile DB — an analysis-only
   host env (PRO-608) that compiles `src/display/core/**` plus the host-shimmable
