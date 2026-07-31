@@ -3,6 +3,8 @@
 # Runs the full local-equivalent check suite on every PR to dev-master:
 #   1. web        — cd web && npm ci && npm run build
 #   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
+#      plus the shipped controller/headless envs (PRO-611) and the
+#      flag-off / driver-family permutations
 #   3. native     — pio test -e native-sanitize (ASan/UBSan; findings fail CI)
 #   4. analysis   — pio check (cppcheck, GATING) + clang-tidy over in-scope logic
 #
@@ -248,7 +250,7 @@ jobs:
       # only surfaced after merge, in the release workflow. pr-flash.yml does
       # build controller + display for its preview artifact, but that job is
       # `continue-on-error: true`, so it is NOT a gate and cannot be relied on
-      # (making it one is a separate decision — see PRO-611).
+      # (whether it should become one is a separate decision, out of scope here).
       #   - controller           board Gaggimate-Controller, its own
       #                          build_src_filter (+<controller/>) and lib_deps —
       #                          nothing else in this workflow compiles that TU
