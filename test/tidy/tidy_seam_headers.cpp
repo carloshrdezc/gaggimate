@@ -22,9 +22,10 @@
 //
 // MAINTENANCE
 // scripts/test_select_tidy_sources.py::SeamHeaderCoverage asserts this file
-// includes EVERY `*Policy.h` in the tree. Add a policy header, add a line here —
-// the test tells you if you forget. Keep the list alphabetical within each
-// directory group.
+// includes EVERY `*Policy.h` under src/display/ (recursively), and that every
+// `*Policy.h` include here resolves to a file that exists. Add a policy header,
+// add a line here — the test tells you if you forget. Keep the list alphabetical
+// within each directory group.
 
 // src/display/core/
 #include <display/core/MbedtlsPsramAllocatorPolicy.h>

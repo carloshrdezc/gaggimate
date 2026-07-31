@@ -6,7 +6,7 @@ exactly that failure: the CI step ran, printed a file list, exited 0, and lint
 99% of `src/display/` was never analysed — because the compile DB fed to it only
 ever held three real sources. Nothing failed, so nothing was noticed for months.
 
-Two layers of defence, both here:
+Three layers of defence, all here:
   1. Unit tests over a synthetic compile DB — pin the filtering contract
      (what is in scope, what is out, path-shape handling).
   2. `test_real_compile_db_meets_minimum` — when a real compile_commands.json is
@@ -14,6 +14,12 @@ Two layers of defence, both here:
      firmware-logic sources. The CI step asserts a minimum count too (see the
      `Run clang-tidy over in-scope logic` step in .github/workflows/ci.yml);
      this test is the same guard reachable locally without CI.
+  3. `SeamHeaderCoverage` — the selector and the file count can both stay green
+     while a NEW header-only `*Policy.h` is added and never included by
+     test/tidy/tidy_seam_headers.cpp, so clang-tidy never sees it. This layer
+     inventories the `*Policy.h` files on disk and compares that set with the
+     seam TU's includes. Pure filesystem + text parsing: no compile DB needed,
+     so unlike layer 2 it always runs.
 
 Run with no dependencies (there is no pytest in this repo):
 
@@ -21,6 +27,7 @@ Run with no dependencies (there is no pytest in this repo):
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -49,6 +56,29 @@ REQUIRED_IN_REAL_DB = (
 # 12 leaves room to retire a plugin from the env without churn, while still failing
 # loudly on the PRO-608 regression shape (the old native DB selected 3).
 MIN_TIDY_FILES = 12
+
+# The aggregation TU whose only job is to pull the header-only seams into a
+# translation unit clang-tidy walks. See its header comment for the full why.
+SEAM_TU = "test/tidy/tidy_seam_headers.cpp"
+
+# Root under which a `*Policy.h` is expected to be listed in SEAM_TU, and the
+# include-path root it is resolved against by [env:native-tidy] (`-I src`), so
+# `src/display/core/X.h` on disk is `#include <display/core/X.h>` there.
+#
+# Walked RECURSIVELY rather than as the four literal directory groups SEAM_TU
+# documents (core/, core/process/, plugins/, ui/default/): a new subdirectory
+# under src/display/ would otherwise be a blind spot, which is the same shape of
+# silent shrinkage PRO-608 was. Scoped to src/display/ and not all of src/
+# because [env:native-tidy] compiles the display tree against the sim shims
+# only; a controller-side header has no TU here to belong to.
+SEAM_HEADER_ROOT = "src/display"
+SEAM_INCLUDE_ROOT = "src"
+
+# Angle-bracket form only: that is the convention throughout SEAM_TU, and the
+# form [env:native-tidy]'s `-I src` resolves. A quoted include would show up as
+# a "missing from the seam TU" failure naming the header, which points at the
+# right file and whose fix (match the file's convention) is the desired one.
+_INCLUDE_RE = re.compile(r"^\s*#\s*include\s+<([^>]+)>", re.MULTILINE)
 
 
 def db(*files, directory="/repo"):
@@ -163,6 +193,75 @@ class RealCompileDb(unittest.TestCase):
     def test_real_compile_db_has_no_vendored_or_generated_files(self):
         bad = [f for f in self.rel if f.startswith(".pio/") or "/display/ui/" in f or "/display/drivers/" in f]
         self.assertFalse(bad, f"vendored/generated files leaked into the clang-tidy set: {bad[:10]}")
+
+
+class SeamHeaderCoverage(unittest.TestCase):
+    """Pins test/tidy/tidy_seam_headers.cpp to the *Policy.h files on disk.
+
+    THE GAP THIS CLOSES (HermesReviewer, PR #608): every other guard in this file
+    is about the compile DB — which sources the selector picks, how many there
+    are. None of them look at what SEAM_TU actually *includes*. So adding a new
+    header-only `FooPolicy.h` and forgetting to add a line to SEAM_TU leaves the
+    selected-file count and all REQUIRED_IN_REAL_DB assertions green, while
+    clang-tidy never sees FooPolicy.h — precisely the silent coverage shrinkage
+    PRO-608 exists to prevent, just one level up.
+
+    Deliberately no compile_commands.json dependency (unlike RealCompileDb):
+    filesystem walk + include parsing only, so it always runs.
+    """
+
+    def setUp(self):
+        self.tu_path = os.path.join(PROJECT_ROOT, *SEAM_TU.split("/"))
+        self.assertTrue(
+            os.path.isfile(self.tu_path),
+            f"{SEAM_TU} is missing; the seam aggregation TU is load-bearing (PRO-608)",
+        )
+        with open(self.tu_path, encoding="utf-8") as fh:
+            source = fh.read()
+        # Include paths as written in the TU, resolved back to project-relative
+        # paths so they compare against the on-disk inventory.
+        self.included = {f"{SEAM_INCLUDE_ROOT}/{inc}" for inc in _INCLUDE_RE.findall(source) if inc.endswith("Policy.h")}
+
+        root = os.path.join(PROJECT_ROOT, *SEAM_HEADER_ROOT.split("/"))
+        self.assertTrue(os.path.isdir(root), f"{SEAM_HEADER_ROOT} is missing")
+        self.on_disk = set()
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for name in filenames:
+                if not name.endswith("Policy.h"):
+                    continue
+                rel = os.path.relpath(os.path.join(dirpath, name), PROJECT_ROOT)
+                self.on_disk.add(rel.replace("\\", "/"))
+
+    def test_seam_tu_includes_every_policy_header(self):
+        # A found-on-disk header absent from the TU is a NEW policy seam that
+        # clang-tidy will silently skip. Add a line to SEAM_TU.
+        missing = sorted(self.on_disk - self.included)
+        self.assertFalse(
+            missing,
+            f"{len(missing)} *Policy.h header(s) under {SEAM_HEADER_ROOT}/ are not #included by {SEAM_TU}, "
+            f"so clang-tidy never analyses them (PRO-608): {missing}. "
+            f"Add `#include <{{path-without-'{SEAM_INCLUDE_ROOT}/'}}>` for each, alphabetically within its directory group.",
+        )
+
+    def test_seam_tu_has_no_stale_policy_includes(self):
+        # The other direction: an include with no file behind it means a header
+        # was renamed/deleted without updating the TU. It would break the
+        # native-tidy build, but fail here first with a name.
+        stale = sorted(self.included - self.on_disk)
+        self.assertFalse(
+            stale,
+            f"{SEAM_TU} #includes *Policy.h header(s) that do not exist on disk: {stale}. "
+            "They were renamed or deleted — update or drop the include.",
+        )
+
+    def test_policy_header_inventory_is_not_empty(self):
+        # Guards the guard: a broken walk root or suffix would make both
+        # set-difference assertions vacuously pass.
+        self.assertGreater(
+            len(self.on_disk),
+            20,
+            f"expected many *Policy.h seams under {SEAM_HEADER_ROOT}/, found {len(self.on_disk)}",
+        )
 
 
 if __name__ == "__main__":
