@@ -140,6 +140,8 @@ pio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>
 pio run -e native-tidy -t compiledb                  # host analysis compile DB for clang-tidy (PRO-608)
 clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 python scripts/test_select_tidy_sources.py           # selector regression tests + scope-minimum guard
+python3 scripts/check_ws_api_spec_drift.py           # docs/websocket-api.yaml vs firmware/web drift (PRO-610)
+python3 scripts/test_check_ws_api_spec_drift.py      # that gate's own regression tests
 ```
 
 - cppcheck is GATING (the display step lost its old `continue-on-error`).
@@ -164,6 +166,16 @@ python scripts/test_select_tidy_sources.py           # selector regression tests
   excluded. The CI step asserts a minimum selected-file count so a future
   shrinkage fails loudly instead of passing quietly.
 - `[env:native-sanitize]` mirrors `[env:native]` plus `-fsanitize=address,undefined`.
+- **`docs/websocket-api.yaml` is a gated contract (PRO-610).** Adding or removing a
+  `req:*` handler in `src/display/plugins/*.cpp` now requires the matching spec
+  entry, or the `web` job fails. Remember the reply: `handleProfileRequest` /
+  `handleBeanRequest` / `handleGrinderRequest` / `ShotHistoryPlugin::handleRequest`
+  build the tp as `String("res:") + type.substring(4)`, so a new `req:x` also emits
+  `res:x` and both need documenting (a `<Name>Request` + `<Name>Response` message
+  plus their `channels['/ws'].publish` / `.subscribe` `$ref`s). Handlers that
+  deliberately have no web caller go in the `PRO-610-ALLOWLIST` block in
+  `web/src/services/ApiService.contract.test.js` — the single canonical allow-list,
+  which `scripts/check_ws_api_spec_drift.py` parses rather than duplicating.
 - C++ standard stays at **gnu++17** (CAR-340 / `docs/cpp-standard-spike.md`) — do not change it.
 - See `CONTRIBUTING.md` "Continuous Integration & Local Checks" for full details.
 

@@ -87,6 +87,7 @@ channels:
           - $ref: '#/components/messages/BeansDeleteResponse'
           - $ref: '#/components/messages/GrindersListResponse'
           - $ref: '#/components/messages/GrindersSaveResponse'
+          - $ref: '#/components/messages/GrindersSelectResponse'
           - $ref: '#/components/messages/HistoryListResponse'
           - $ref: '#/components/messages/HistoryGetResponse'
           - $ref: '#/components/messages/HistoryDeleteResponse'
@@ -138,6 +139,7 @@ channels:
           - $ref: '#/components/messages/BeansDeleteRequest'
           - $ref: '#/components/messages/GrindersListRequest'
           - $ref: '#/components/messages/GrindersSaveRequest'
+          - $ref: '#/components/messages/GrindersSelectRequest'
           - $ref: '#/components/messages/HistoryListRequest'
           - $ref: '#/components/messages/HistoryGetRequest'
           - $ref: '#/components/messages/HistoryDeleteRequest'
@@ -188,6 +190,9 @@ components:
         bn:
           type: string
           description: Selected bean name
+        gr:
+          type: string
+          description: Selected grinder name (PRO-424; '' when no grinder is selected)
         cp:
           type: boolean
           description: Pressure capability
@@ -713,6 +718,26 @@ components:
             description: Canonical grinder list after the device-authoritative merge/dedup/cap.
           error:
             type: string
+        required: [tp]
+    GrindersSelectResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Acknowledges `req:grinders:select` by echoing the grinder name the
+          device persisted. Unlike `req:beans:select` (which is handled inline
+          and sends no reply), the grinder handler runs in
+          `WebUIPlugin::handleGrinderRequest`, whose `res:*` tp is derived from
+          the request tp, so a reply is always sent.
+        properties:
+          tp:
+            type: string
+            enum: ['res:grinders:select']
+          rid:
+            type: string
+          name:
+            type: string
+            description: The selected grinder name as persisted ('' clears the selection).
         required: [tp]
     # ---- History responses ---------------------------------------------
     HistoryListResponse:
@@ -1352,6 +1377,24 @@ components:
             type: array
             items:
               type: string
+        required: [tp]
+    GrindersSelectRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Select the active grinder by name (PRO-424). Firmware-authoritative:
+          the name is persisted to NVS and rebroadcast as `gr` in `evt:status`
+          so every connected client converges. An empty or missing `name`
+          clears the selection. Replies with `res:grinders:select`.
+        properties:
+          tp:
+            type: string
+            enum: ['req:grinders:select']
+          rid:
+            type: string
+          name:
+            type: string
         required: [tp]
     # ---- History requests ----------------------------------------------
     HistoryListRequest:
