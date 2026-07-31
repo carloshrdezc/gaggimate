@@ -134,14 +134,23 @@ pio test -e native                                  # host unit tests
 pio test -e native-sanitize                         # host tests under ASan + UBSan (findings fail CI)
 pio check -e display    --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"   # GATING cppcheck
 pio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"                       # GATING cppcheck
-pio run -e native -t compiledb                       # compile DB for clang-tidy
+pio run -e native-tidy -t compiledb                  # host analysis compile DB for clang-tidy (PRO-608)
 clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
+python scripts/test_select_tidy_sources.py           # selector regression tests + scope-minimum guard
 ```
 
 - cppcheck is GATING (the display step lost its old `continue-on-error`).
 - clang-tidy (`.clang-tidy`: `bugprone-*` + `cppcoreguidelines-*`) is scoped to
-  hand-written logic via the native compile DB; generated UI (`src/display/ui/**`)
-  and vendored drivers (`src/display/drivers/**`) are excluded.
+  hand-written logic via the **`[env:native-tidy]`** compile DB — an analysis-only
+  host env (PRO-608) that compiles `src/display/core/**` plus the host-shimmable
+  `src/display/plugins/**` against the desktop-simulator shim tree, plus
+  `test/tidy/tidy_seam_headers.cpp` so the header-only `*Policy.h` seams get a
+  translation unit. **Do not generate the DB from `[env:native]`** — that env is
+  the unit-test runner and its `build_src_filter` allow-lists 3 files, which is
+  how clang-tidy silently analysed almost nothing before PRO-608. Generated UI
+  (`src/display/ui/**`) and vendored drivers (`src/display/drivers/**`) are
+  excluded. The CI step asserts a minimum selected-file count so a future
+  shrinkage fails loudly instead of passing quietly.
 - `[env:native-sanitize]` mirrors `[env:native]` plus `-fsanitize=address,undefined`.
 - C++ standard stays at **gnu++17** (CAR-340 / `docs/cpp-standard-spike.md`) — do not change it.
 - See `CONTRIBUTING.md` "Continuous Integration & Local Checks" for full details.

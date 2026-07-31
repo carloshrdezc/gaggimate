@@ -132,7 +132,7 @@ bool BeanManager::saveBean(BeanEntry &bean) {
     // Use NTP-derived Unix seconds (matches ShotHistoryPlugin convention).
     // If NTP has not synced yet, leave timestamps at 0; the next save will
     // backfill via the existing `bean.createdAt == 0` guard.
-    time_t now;
+    time_t now = 0;
     time(&now);
     struct tm timeinfo;
     localtime_r(&now, &timeinfo);

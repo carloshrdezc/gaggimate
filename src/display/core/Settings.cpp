@@ -18,6 +18,13 @@ class ScopedRecursiveSemaphore {
             xSemaphoreGiveRecursive(semaphore);
         }
     }
+    // PRO-608: scope-bound lock guard — copying or moving it would give the
+    // recursive semaphore back twice (or from the wrong scope). Never stored,
+    // never returned; deleting all four satisfies the rule-of-5.
+    ScopedRecursiveSemaphore(const ScopedRecursiveSemaphore &) = delete;
+    ScopedRecursiveSemaphore &operator=(const ScopedRecursiveSemaphore &) = delete;
+    ScopedRecursiveSemaphore(ScopedRecursiveSemaphore &&) = delete;
+    ScopedRecursiveSemaphore &operator=(ScopedRecursiveSemaphore &&) = delete;
 
   private:
     SemaphoreHandle_t semaphore;

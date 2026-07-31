@@ -34,7 +34,7 @@
 // memory-constrained ESP32-S3 and there is no legitimate multi-MiB message on
 // this surface. A message exceeding this is a protocol violation / abuse and is
 // dropped (buffer cleared, client closed) rather than accumulated.
-constexpr size_t kWsMaxReassemblyBytes = 256 * 1024;
+constexpr size_t kWsMaxReassemblyBytes = size_t{256} * 1024;
 
 // Pure predicate: would appending `incomingLen` bytes to a buffer that already
 // holds `currentBufBytes` bytes exceed `cap`? Also catches a declared total

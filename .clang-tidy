@@ -1,16 +1,32 @@
 # clang-tidy configuration for GaggiMate hand-written firmware logic.
 #
-# Scope (CAR-341): this config governs the platform-independent firmware *logic*
-# that the host (`native`) test environment compiles — primarily
-# src/display/core/** plus the small host shims. CI runs clang-tidy against the
-# native env's compile database (see .github/workflows/ci.yml), which is the
-# only compile DB we can reliably generate without the full xtensa ESP32
-# toolchain. Generated LVGL UI (src/display/ui/**) and vendored drivers
-# (src/display/drivers/**) are intentionally NOT analysed — see the CI step's
-# path filter and the HeaderFilterRegex below.
+# Scope: this config governs the platform-independent firmware *logic* under
+# src/display/{core,plugins,models}. CI runs clang-tidy against the compile
+# database of [env:native-tidy] (PRO-608) — a host, analysis-only PlatformIO env
+# that compiles that logic against the desktop-simulator shim tree (sim/platform,
+# sim/web, sim/comms) plus test/tidy/tidy_seam_headers.cpp, the TU that exists
+# purely to pull the header-only *Policy.h seams into an analysable translation
+# unit. See the [env:native-tidy] block comment in platformio.ini for exactly
+# which sources are in and which are deliberately out, and .github/workflows/ci.yml
+# for the CI wiring (including the minimum-file-count assertion that keeps the
+# scope from silently shrinking again).
 #
-# Checks: bugprone-* and cppcoreguidelines-* per the issue, with a handful of
-# noisy / firmware-inappropriate checks disabled with justification:
+# History: before PRO-608 CI generated the DB from [env:native], whose
+# build_src_filter allow-lists three files, so clang-tidy analysed
+# PluginManager.cpp and two vendored semver sources and nothing else — despite
+# this file and ci.yml both claiming coverage of src/display/core/**.
+#
+# Generated LVGL UI (src/display/ui/**) and vendored panel drivers
+# (src/display/drivers/**) are intentionally NOT analysed — see
+# scripts/select_tidy_sources.py's exclusion list and HeaderFilterRegex below.
+#
+# Checks: bugprone-* and cppcoreguidelines-*, minus checks that are either
+# actively wrong for embedded Arduino/ESP-IDF code or that fire overwhelmingly on
+# a single unavoidable idiom. Every exclusion below is justified; counts are the
+# real finding counts measured over the PRO-608 scope (1,079 findings total, of
+# which these account for 992).
+#
+#   Pre-existing exclusions (CAR-341):
 #   - cppcoreguidelines-avoid-magic-numbers: embedded code is full of
 #       intentional hardware constants; too noisy.
 #   - cppcoreguidelines-pro-type-vararg: ESP_LOG*/printf-style logging is
@@ -24,6 +40,57 @@
 #       plugin/event structs deliberately expose public data members.
 #   - cppcoreguidelines-owning-memory: no gsl::owner in this codebase.
 #   - bugprone-easily-swappable-parameters: high-noise, low-signal here.
+#
+#   Added with PRO-608, when real coverage first made these measurable:
+#   - cppcoreguidelines-avoid-do-while (178 findings): ALL 178 come from
+#       macro expansion, not source — ESP-IDF's ESP_LOG* macros wrap their body
+#       in `do { ... } while (0)`, the standard way to make a statement macro
+#       safe. Zero are in code we wrote. Verified by checking every finding for
+#       an "expanded from macro" note.
+#   - cppcoreguidelines-pro-bounds-avoid-unchecked-container-access (478):
+#       431 are ArduinoJson's `obj["key"]` string-subscript, which is the
+#       library's documented API and has no bounds to check. Rewriting them
+#       would mean abandoning ArduinoJson's idiom across the whole codebase.
+#   - cppcoreguidelines-macro-usage (101) / -macro-to-enum (76): 164 of the 177
+#       are src/display/core/constants.h, a deliberate `#define` block of tuning
+#       constants shared with C translation units. Converting it is a real change
+#       with real risk and belongs in its own issue, not in a CI-scope fix.
+#   - cppcoreguidelines-avoid-c-arrays (29): `char buf[N]` and `PROGMEM` tables
+#       are the required shape against the ESP-IDF C APIs (zones.h, snprintf
+#       buffers, Settings' `bool days[7]`).
+#   - cppcoreguidelines-pro-type-reinterpret-cast (30): binary struct <-> byte
+#       buffer I/O (`file.write(reinterpret_cast<const uint8_t *>(&header), ...)`)
+#       is how ShotHistoryPlugin's on-disk shot-log format is read and written,
+#       and how Arduino's F() PROGMEM macro expands.
+#   - cppcoreguidelines-pro-bounds-constant-array-index (23): fixed-size arrays
+#       with loop indices already bounded by the array extent; the check wants
+#       gsl::at(), which this codebase does not use.
+#   - cppcoreguidelines-pro-type-static-cast-downcast (16): all 16 are
+#       Controller.cpp downcasting its own `Process *` to the concrete process
+#       type after switching on the mode that produced it — the codebase's
+#       deliberate alternative to dynamic_cast (RTTI is off on the device).
+#   - bugprone-throwing-static-initialization (12): Arduino `String` / IPAddress
+#       globals (LOG_TAG, WIFI_AP_IP). Arduino's String uses a no-throw
+#       allocation model, so the diagnosed exception cannot occur.
+#   - bugprone-narrowing-conversions / cppcoreguidelines-narrowing-conversions
+#       (49): int-typed setpoints assigned to float temperature/volume fields.
+#       Values are small and exactly representable; auditing each is a separate,
+#       genuinely useful piece of work — tracked in PRO-612.
+#
+# After the whole-check exclusions above, 48 findings remained over the PRO-608
+# scope. Those were triaged INDIVIDUALLY, not silenced in bulk: 40 were fixed for
+# real (13 cppcoreguidelines-init-variables, 11 implicit-widening-of-multiplication-
+# result, 4 special-member-functions, 4 prefer-member-initializer, 5 pointer/handle
+# pro-type-member-init, 1 pro-type-cstyle-cast, 1 explicit-virtual-functions,
+# 1 bugprone-branch-clone) and the remaining 8 carry an inline
+# `// NOLINTNEXTLINE(<check>)` with a written rationale at the site
+# (virtual-class-destructor on the Controller global, avoid-const-or-ref-data-members
+# x2, pro-type-member-init on 3 JSON/staging aggregates, incorrect-roundings on the
+# toFixed(1)-matching grind-target format). Each is referenced from PRO-612.
+#
+# The step is non-gating (see ci.yml), so it is currently CLEAN rather than noisy.
+# Do NOT add blanket suppressions to make future output quiet — a new finding here
+# is signal. Fix it, or NOLINT it at the site with a rationale.
 #
 # This is intentionally NOT WarningsAsErrors at the config level; the CI step
 # decides whether tidy findings gate (see ci.yml). Individual findings can be
@@ -39,12 +106,25 @@ Checks: >
   -cppcoreguidelines-avoid-non-const-global-variables,
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -cppcoreguidelines-owning-memory,
-  -bugprone-easily-swappable-parameters
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-macro-to-enum,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-type-static-cast-downcast,
+  -bugprone-throwing-static-initialization,
+  -bugprone-narrowing-conversions,
+  -cppcoreguidelines-narrowing-conversions
 
 # Only diagnose headers that live under src/display/{core,plugins,models}; never
 # warn on system, framework, or third-party library headers pulled in
-# transitively. The CI step additionally restricts the *source files* passed to
-# tidy to the in-scope logic, so generated UI / vendored drivers are excluded.
+# transitively — including the sim/* host shims [env:native-tidy] compiles
+# against. The CI step additionally restricts the *source files* passed to tidy
+# to the in-scope logic (scripts/select_tidy_sources.py), so generated UI /
+# vendored drivers / .pio libdeps are excluded there too.
 HeaderFilterRegex: 'src/display/(core|plugins|models)/'
 
 WarningsAsErrors: ''

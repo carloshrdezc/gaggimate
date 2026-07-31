@@ -258,6 +258,11 @@ class Settings {
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
 
   private:
+    // PRO-608: write-only staging aggregate. Every one of its ~53 fields is assigned from the live
+    // Settings members immediately before the snapshot is used (single construction site in
+    // Settings.cpp), so default-initialising them all would be dead stores on a hot persistence
+    // path. Tracked in PRO-612.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     struct PersistenceSnapshot {
         int startupMode, targetSteamTemp, targetWaterTemp, targetGrindDuration, temperatureOffset, standbyTimeout;
         int startupFillTime, steamFillTime, smartGrindMode, homeAssistantPort, mainBrightness, standbyBrightness;

@@ -83,18 +83,19 @@ static_assert(shouldLatchMqttConnect(/*clientConnected=*/false), "PRO-348: not c
 static_assert(!shouldLatchMqttConnect(/*clientConnected=*/true), "PRO-348: already connected -> skip (idempotency guard)");
 
 // loop() state machine (maxAttempts = 5 mirrors MQTT_CONNECTION_RETRIES):
-static_assert(mqttLoopAction(/*want=*/false, /*conn=*/false, 0, 5) == MqttLoopAction::None, "PRO-348: no latch -> no work");
-static_assert(mqttLoopAction(/*want=*/false, /*conn=*/true, 0, 5) == MqttLoopAction::None,
+static_assert(mqttLoopAction(/*wantConnect=*/false, /*clientConnected=*/false, 0, 5) == MqttLoopAction::None,
+              "PRO-348: no latch -> no work");
+static_assert(mqttLoopAction(/*wantConnect=*/false, /*clientConnected=*/true, 0, 5) == MqttLoopAction::None,
               "PRO-348: no latch -> no work even if connected");
-static_assert(mqttLoopAction(/*want=*/true, /*conn=*/true, 0, 5) == MqttLoopAction::PublishDiscoveryAndClear,
+static_assert(mqttLoopAction(/*wantConnect=*/true, /*clientConnected=*/true, 0, 5) == MqttLoopAction::PublishDiscoveryAndClear,
               "PRO-348: latched + connected -> publish discovery once and clear");
-static_assert(mqttLoopAction(/*want=*/true, /*conn=*/true, 3, 5) == MqttLoopAction::PublishDiscoveryAndClear,
+static_assert(mqttLoopAction(/*wantConnect=*/true, /*clientConnected=*/true, 3, 5) == MqttLoopAction::PublishDiscoveryAndClear,
               "PRO-348: connected wins over remaining budget");
-static_assert(mqttLoopAction(/*want=*/true, /*conn=*/false, 0, 5) == MqttLoopAction::AttemptConnect,
+static_assert(mqttLoopAction(/*wantConnect=*/true, /*clientConnected=*/false, 0, 5) == MqttLoopAction::AttemptConnect,
               "PRO-348: latched + not connected + budget -> single non-blocking attempt");
-static_assert(mqttLoopAction(/*want=*/true, /*conn=*/false, 4, 5) == MqttLoopAction::AttemptConnect,
+static_assert(mqttLoopAction(/*wantConnect=*/true, /*clientConnected=*/false, 4, 5) == MqttLoopAction::AttemptConnect,
               "PRO-348: last attempt still within budget");
-static_assert(mqttLoopAction(/*want=*/true, /*conn=*/false, 5, 5) == MqttLoopAction::GiveUpAndClear,
+static_assert(mqttLoopAction(/*wantConnect=*/true, /*clientConnected=*/false, 5, 5) == MqttLoopAction::GiveUpAndClear,
               "PRO-348: budget exhausted -> give up and clear (re-fire re-latches)");
 
 #endif // MQTTCONNECTPOLICY_H

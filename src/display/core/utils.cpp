@@ -22,7 +22,7 @@ String generateShortID(uint8_t length) {
 
 std::vector<String> explode(const String &input, char delim) {
     std::vector<String> strings;
-    size_t start;
+    size_t start = 0;
     size_t end = 0;
     std::string str = std::string(input.c_str());
     while ((start = str.find_first_not_of(delim, end)) != std::string::npos) {

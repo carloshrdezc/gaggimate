@@ -14,7 +14,7 @@
 #include <freertos/semphr.h>
 
 constexpr size_t SHOT_HISTORY_INTERVAL = 100;
-constexpr size_t MIN_FREE_SPACE_BYTES = 500 * 1024; // 500 KB reserved free space
+constexpr size_t MIN_FREE_SPACE_BYTES = size_t{500} * 1024; // 500 KB reserved free space
 // PRO-248: hard cap for the post-stop extended-recording / weight-settle window.
 // Defined as POST_STOP_GRACE_DURATION_MS (single source of truth) so this window
 // and BLEScalePlugin's scale-alive grace cap share one constant. The meaningful
@@ -125,7 +125,7 @@ class ShotHistoryPlugin : public Plugin {
     File currentFile;
     ShotLogHeader header{};
     uint32_t sampleCount = 0;
-    uint8_t ioBuffer[4096];
+    uint8_t ioBuffer[4096]{};
     size_t ioBufferPos = 0; // bytes used
 
     // Set from the controller task (core 1, via startRecording()/endRecording() under stateMutex) and
@@ -176,7 +176,7 @@ class ShotHistoryPlugin : public Plugin {
     // Async rebuild state
     bool rebuildInProgress = false;
 
-    xTaskHandle taskHandle;
+    xTaskHandle taskHandle = nullptr;
     SemaphoreHandle_t stateMutex = nullptr;     // Protects shared state accessed by record()
     SemaphoreHandle_t recordingMutex = nullptr; // Prevents a start while an ended file is closing.
     // Serializes notes filesystem read/merge/write operations without blocking

@@ -15,10 +15,8 @@ class ManualProcess : public Process {
     ProcessPhase processPhase = ProcessPhase::RUNNING;
 
     ManualProcess(int targetType, float pressure, float flow, int temperature)
-        : targetType(targetType == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE), pressure(pressure),
-          flow(flow), temperature(temperature) {
-        started = millis();
-    }
+        : started(millis()), targetType(targetType == MANUAL_TARGET_FLOW ? MANUAL_TARGET_FLOW : MANUAL_TARGET_PRESSURE),
+          pressure(pressure), flow(flow), temperature(temperature) {}
 
     bool isRelayActive() override { return active(); }
     bool isAltRelayActive() override { return false; }
