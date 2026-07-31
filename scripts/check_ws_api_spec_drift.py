@@ -39,6 +39,7 @@ Usage:
 import os
 import re
 import sys
+import textwrap
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -66,10 +67,31 @@ _ALLOWLIST_ENTRY_RE = re.compile(r"`(req:[a-z0-9:.-]+)`")
 # test (`msgType != "req:beans:select"`) are not handler declarations.
 _HANDLER_RE = re.compile(r'==\s*"(req:[^"]+)"')
 
-# Start of a top-level `Type Class::method(` definition — used to split a .cpp
-# into per-function blocks so a handler can be attributed to the function it
-# lives in (see derived_response_types).
-_FUNCTION_START_RE = re.compile(r"^[A-Za-z_][^\n(]*\b\w+::\w+\s*\(", re.M)
+# Candidate start of a top-level function DEFINITION — the boundary used to
+# split a .cpp into per-function blocks so a handler can be attributed to the
+# function it lives in (see derived_response_types). Every shape that appears in
+# FIRMWARE_DIR/*.cpp has to be recognised, not just member definitions: the four
+# _DYNAMIC_RESPONSE_TP sites live in `Class::method` definitions today, but a
+# free or `static` free function holding the same idiom (or any function defined
+# before the first `Class::method` in a file) has to bound its own block too, or
+# its `req:*` branches get folded into a neighbour and the derived `res:*` reply
+# is silently missed.
+#
+#   void WebUIPlugin::handleGrinderRequest(...) { ... }   member definition
+#   bool stampNoteIfAbsent(...) noexcept { ... }          free function (anonymous namespace)
+#   static String relayTokenProtocol(...) { ... }         static free function
+#   WebUIPlugin::WebUIPlugin() : server(80) { ... }       ctor with an init list
+#
+# Column 0 only, deliberately: clang-format puts every top-level definition —
+# including the ones inside `namespace { ... }` — flush left, while everything
+# nested in a function body (calls, `if (...) {`, the lambdas passed to
+# `server.on(...)`) is indented. Anchoring here is what stops a *call* or a
+# lambda from being read as a boundary and cutting a real handler in half.
+# Excluding `;(){}=` before the parameter list drops `struct X {`, `namespace {`
+# and initialised globals; _opens_a_body() then requires the parameter list to be
+# followed by `{` rather than `;`, which drops forward declarations (real
+# example: `static String resolveReleaseUrl(const String &channel);`).
+_FUNCTION_START_RE = re.compile(r"^[A-Za-z_][^\n;(){}=]*\(", re.M)
 
 # The dynamic reply-tp idiom: every `req:x` branch in a function containing this
 # line answers with `res:x`.
@@ -148,6 +170,41 @@ def handler_types(source):
     return set(_HANDLER_RE.findall(source))
 
 
+def _opens_a_body(source, paren_index):
+    """True when the parameter list at `paren_index` is followed by a `{` body.
+
+    Balances the parameter list (it can span lines, e.g.
+    ShotHistoryPlugin::handleCompletedShot) and then requires the next `;`/`{`
+    to be a `{`: a definition opens a body, a declaration ends in `;`. Anything
+    in between — `const`, `noexcept`, `override`, a constructor init list — is
+    skipped, which is why the `[^;{}]*` step allows parens of its own.
+    """
+    depth = 0
+    for index in range(paren_index, len(source)):
+        char = source[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return re.match(r"[^;{}]*\{", source[index + 1 :]) is not None
+    return False
+
+
+def _function_blocks(source):
+    """Yield the text of each top-level function definition in `source`.
+
+    Text before the first definition (includes, globals, forward declarations)
+    belongs to no function and is intentionally dropped. The source is dedented
+    first so the column-0 anchor also holds for uniformly-indented snippets (a
+    real .cpp always has flush-left lines, so this is a no-op there).
+    """
+    source = textwrap.dedent(source)
+    starts = [m.start() for m in _FUNCTION_START_RE.finditer(source) if _opens_a_body(source, m.end() - 1)]
+    for start, end in zip(starts, starts[1:] + [len(source)]):
+        yield source[start:end]
+
+
 def derived_response_types(source):
     """The `res:*` types a firmware translation unit can emit.
 
@@ -158,9 +215,7 @@ def derived_response_types(source):
     "res:grinders:select" appearing anywhere in the firmware or the spec.
     """
     out = set(_LITERAL_RESPONSE_RE.findall(source))
-    bounds = [m.start() for m in _FUNCTION_START_RE.finditer(source)] + [len(source)]
-    for start, end in zip(bounds, bounds[1:]):
-        block = source[start:end]
+    for block in _function_blocks(source):
         if _DYNAMIC_RESPONSE_TP not in block:
             continue
         for req in _HANDLER_RE.findall(block):

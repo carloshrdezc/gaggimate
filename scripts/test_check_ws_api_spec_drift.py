@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_ws_api_spec_drift import (  # noqa: E402
     CONTRACT_TEST,
     SPEC,
+    _function_blocks,
     check,
     client_request_types,
     clientless_handlers,
@@ -216,6 +217,99 @@ class Parsing(unittest.TestCase):
         self.assertEqual(client_request_types([("a.js", "x.startsWith('req:')")]), set())
 
 
+class FunctionBoundaries(unittest.TestCase):
+    """Attribution must work for every function-definition shape, not just members.
+
+    The first cut of the block splitter only recognised `Class::method(`
+    definitions, so a handler living in a free (or `static` free) function — or
+    in anything defined before the first member definition in the file — was
+    folded into a neighbouring block. When such a function held the dynamic
+    `String("res:") + type.substring(4)` reply, `derived_response_types()`
+    returned an EMPTY set for it and the gate missed the undocumented `res:*`
+    reply entirely. These are the regressions for that.
+    """
+
+    # The reviewer's verbatim repro: a free function, no `::` anywhere, no
+    # member definition in the file at all. Used to yield set().
+    FREE_FUNCTION = """
+void helper() {
+    String type = request["tp"].as<String>();
+    response["tp"] = String("res:") + type.substring(4);
+    if (type == "req:free:op") {
+        // ...
+    }
+}
+"""
+
+    def test_free_function_with_the_dynamic_idiom_is_attributed(self):
+        self.assertEqual(derived_response_types(self.FREE_FUNCTION), {"res:free:op"})
+
+    def test_static_free_function_with_the_dynamic_idiom_is_attributed(self):
+        # WebUIPlugin.cpp really defines `static String relayTokenProtocol(...)`
+        # and friends at file scope; the shape has to be a boundary too.
+        src = self.FREE_FUNCTION.replace("void helper()", "static void helper()")
+        self.assertEqual(derived_response_types(src), {"res:free:op"})
+
+    def test_free_function_before_the_first_member_definition_is_attributed(self):
+        # The precise failure mode: the free handler precedes every
+        # `Class::method(` in the translation unit, so a member-only boundary
+        # regex started its first block AFTER it and dropped it on the floor.
+        src = self.FREE_FUNCTION + FIRMWARE
+        derived = derived_response_types(src)
+        self.assertIn("res:free:op", derived)
+        # ...and the member functions keep their own attribution.
+        self.assertEqual(
+            derived,
+            {"res:free:op", "res:grinders:list", "res:grinders:select", "res:flush:start"},
+        )
+
+    def test_free_function_without_the_idiom_does_not_leak_replies(self):
+        # The boundary must isolate in both directions: a free function whose
+        # branches answer literally must not inherit a neighbour's dynamic idiom.
+        src = (
+            'void plain(int x) {\n    if (type == "req:plain:op") {\n        // ...\n    }\n}\n'
+            + self.FREE_FUNCTION
+        )
+        self.assertEqual(derived_response_types(src), {"res:free:op"})
+
+    def test_forward_declarations_and_calls_are_not_boundaries(self):
+        # A declaration ends in `;` (WebUIPlugin.cpp really forward-declares
+        # `static String resolveReleaseUrl(const String &channel);`) and an
+        # indented call/lambda is inside a body — treating either as a boundary
+        # would cut a handler away from its dynamic reply line.
+        src = (
+            "static String resolveReleaseUrl(const String &channel);\n"
+            "void WebUIPlugin::handleThing(uint32_t clientId, JsonDocument &request) {\n"
+            '    auto type = request["tp"].as<String>();\n'
+            '    response["tp"] = String("res:") + type.substring(4);\n'
+            "    server.on(\"/x\", HTTP_GET, [this](AsyncWebServerRequest *request) {\n"
+            "        serveWebAsset(request);\n"
+            "    });\n"
+            '    if (type == "req:thing:go") {\n'
+            "        // ...\n"
+            "    }\n"
+            "}\n"
+        )
+        self.assertEqual(derived_response_types(src), {"res:thing:go"})
+        # One function in, one block out — the lambda and the declaration must
+        # not have produced extra blocks.
+        self.assertEqual(len(list(_function_blocks(src))), 1)
+
+    def test_multiline_parameter_lists_stay_one_block(self):
+        # ShotHistoryPlugin::handleCompletedShot really wraps its parameter list;
+        # the `{`-vs-`;` test has to balance parens across the newline.
+        src = (
+            "void Plugin::handleWrapped(uint32_t clientId, JsonDocument &request,\n"
+            "                           const String &beanName) {\n"
+            '    response["tp"] = String("res:") + type.substring(4);\n'
+            '    if (type == "req:wrapped:op") {\n'
+            "    }\n"
+            "}\n"
+        )
+        self.assertEqual(derived_response_types(src), {"res:wrapped:op"})
+        self.assertEqual(len(list(_function_blocks(src))), 1)
+
+
 class DriftDetection(unittest.TestCase):
     def test_synthetic_in_sync_fixture_is_green(self):
         # Guards the guard: if this fixture ever failed, the negative cases below
@@ -270,6 +364,17 @@ class DriftDetection(unittest.TestCase):
         # hiding nothing and should shrink.
         problems = check(sets_from(), allow_clientless=frozenset({"req:history:retired"}))
         self.assertIn("req:history:retired", " ".join(problems))
+
+    def test_undocumented_reply_from_a_free_function_handler_fails_the_gate(self):
+        # End-to-end form of the boundary bug: the new handler is a FREE function
+        # (the shape the old member-only regex could not see) and neither its
+        # request nor its dynamically-derived reply is documented. Both must be
+        # named. Before the fix the res:* half of this was invisible.
+        firmware = FunctionBoundaries.FREE_FUNCTION + FIRMWARE
+        client = CLIENT + "api.send({ tp: 'req:free:op' });\n"
+        joined = " ".join(check(sets_from(firmware=firmware, client=client), allow_clientless=frozenset()))
+        self.assertIn("req:free:op", joined)
+        self.assertIn("res:free:op", joined)
 
 
 class ChannelRefs(unittest.TestCase):
