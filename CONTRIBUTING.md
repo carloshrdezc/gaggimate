@@ -128,6 +128,13 @@ clang-tidy -p . \
 # 4c. Regression tests for the source selector, plus a minimum-scope assertion
 #     against the DB generated above (guards the PRO-608 silent-shrinkage failure).
 python scripts/test_select_tidy_sources.py
+
+# 5. WebSocket API contract drift (PRO-610). docs/websocket-api.yaml is the
+#    AsyncAPI 2.6.0 spec for /ws; this compares it against the firmware's req:*
+#    handlers, their derived res:* replies, and the web client's callers, in both
+#    directions. It runs in the `web` CI job (pure python3, no deps).
+python3 scripts/check_ws_api_spec_drift.py
+python3 scripts/test_check_ws_api_spec_drift.py
 ```
 
 Notes:

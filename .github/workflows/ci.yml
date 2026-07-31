@@ -1,7 +1,8 @@
 # CAR-341: Unified CI gate for pull requests targeting dev-master or master.
 #
 # Runs the full local-equivalent check suite on every PR to dev-master:
-#   1. web        — cd web && npm ci && npm run build
+#   1. web        — cd web && npm ci && npm run build, ESLint, vitest, plus the
+#      WebSocket API spec-drift gate (PRO-610)
 #   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
 #      plus the shipped controller/headless envs (PRO-611) and the
 #      flag-off / driver-family permutations
@@ -58,6 +59,20 @@ jobs:
         run: |
           cd web
           npm test
+      # PRO-610: gate the PR on docs/websocket-api.yaml matching the firmware.
+      # `req:grinders:select` shipped in PRO-424 with a live web caller and was
+      # never documented — and because replies are built as
+      # `String("res:") + type.substring(4)`, its `res:grinders:select` was
+      # undocumented too. Nothing compared the spec to the code, so the drift was
+      # invisible. This step diffs firmware handlers <-> spec operations <-> web
+      # callers in both directions and fails on any asymmetry that isn't in the
+      # allow-list block in web/src/services/ApiService.contract.test.js.
+      # Lives in the `web` job because it reads web/src (the client-caller side)
+      # and needs no PlatformIO toolchain — pure python3 + stdlib, so it adds ~1s.
+      - name: Check WebSocket API spec drift
+        run: python3 scripts/check_ws_api_spec_drift.py
+      - name: Test the WebSocket API spec drift gate
+        run: python3 scripts/test_check_ws_api_spec_drift.py
 
   relay-server:
     name: Relay server tests
