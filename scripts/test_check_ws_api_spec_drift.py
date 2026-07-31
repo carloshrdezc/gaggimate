@@ -26,16 +26,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from check_ws_api_spec_drift import (  # noqa: E402
     CONTRACT_TEST,
+    SPEC,
     check,
     client_request_types,
     clientless_handlers,
     collect,
     derived_response_types,
     handler_types,
-    spec_operations,
+    spec_channel_refs,
+    spec_message_operations,
+    spec_sets,
 )
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_spec():
+    with open(os.path.join(PROJECT_ROOT, *SPEC.split("/")), encoding="utf-8") as fh:
+        return fh.read()
+
 
 # A miniature WebUIPlugin.cpp: one dispatch router plus a sub-handler that builds
 # its reply tp dynamically, which is the idiom that hid res:grinders:select.
@@ -65,16 +74,38 @@ void WebUIPlugin::sendFlushResponse(uint32_t clientId) {
 }
 """
 
-# The matching spec: every operation above documented.
+# The matching spec: every operation above documented as a components.messages
+# entry AND exposed by a channels['/ws'] $ref in the right direction. Both halves
+# matter — see ChannelRefs below.
 SPEC_IN_SYNC = """
 channels:
   '/ws':
+    description: All messages share the same WebSocket channel.
     subscribe:
       message:
         oneOf:
+          - $ref: '#/components/messages/StatusEvent'
+          - $ref: '#/components/messages/GrindersListResponse'
           - $ref: '#/components/messages/GrindersSelectResponse'
+          - $ref: '#/components/messages/FlushStartResponse'
+    publish:
+      message:
+        oneOf:
+          - $ref: '#/components/messages/BeansSelectRequest'
+          - $ref: '#/components/messages/GrindersListRequest'
+          - $ref: '#/components/messages/GrindersSelectRequest'
 components:
+  schemas:
+    StatusPayload:
+      type: object
+      properties:
+        tp:
+          type: string
+          enum: ['evt:status']
   messages:
+    StatusEvent:
+      payload:
+        $ref: '#/components/schemas/StatusPayload'
     BeansSelectRequest:
       payload:
         properties:
@@ -115,13 +146,11 @@ api.send({ tp: 'req:beans:select', name: bean.name });
 
 
 def sets_from(firmware=FIRMWARE, spec=SPEC_IN_SYNC, client=CLIENT):
-    spec_req, spec_res = spec_operations(spec)
     return {
         "handlers": handler_types(firmware),
         "responses": derived_response_types(firmware),
-        "spec_req": spec_req,
-        "spec_res": spec_res,
         "client": client_request_types([("client.jsx", client)]),
+        **spec_sets(spec),
     }
 
 
@@ -155,12 +184,31 @@ class Parsing(unittest.TestCase):
         # has no dynamic reply tp, so it must NOT imply a res:beans:select.
         self.assertNotIn("res:beans:select", derived_response_types(FIRMWARE))
 
-    def test_spec_operations_splits_requests_and_responses(self):
-        spec_req, spec_res = spec_operations(SPEC_IN_SYNC)
-        self.assertIn("req:grinders:select", spec_req)
-        self.assertIn("res:grinders:select", spec_res)
-        self.assertTrue(all(op.startswith("req:") for op in spec_req))
-        self.assertTrue(all(op.startswith("res:") for op in spec_res))
+    def test_spec_sets_splits_requests_and_responses(self):
+        sets = spec_sets(SPEC_IN_SYNC)
+        self.assertIn("req:grinders:select", sets["spec_req"])
+        self.assertIn("res:grinders:select", sets["spec_res"])
+        self.assertTrue(all(op.startswith("req:") for op in sets["spec_req"]))
+        self.assertTrue(all(op.startswith("res:") for op in sets["spec_res"]))
+        # evt:* is parsed (so it is not a dangling subscribe $ref) but is not a
+        # req/res operation, so it must stay out of both firmware-compared sets.
+        self.assertNotIn("evt:status", sets["spec_req"] | sets["spec_res"])
+
+    def test_spec_message_operations_maps_names_to_tp_including_schema_payloads(self):
+        operations = spec_message_operations(SPEC_IN_SYNC)
+        self.assertEqual(operations["GrindersSelectRequest"], "req:grinders:select")
+        self.assertEqual(operations["GrindersSelectResponse"], "res:grinders:select")
+        # StatusEvent keeps its tp enum one hop away, in the schema its payload
+        # $refs — six real messages are shaped like that, and a mapper that only
+        # looked inline would call every one of them a dangling subscribe $ref.
+        self.assertEqual(operations["StatusEvent"], "evt:status")
+
+    def test_spec_channel_refs_separates_publish_from_subscribe(self):
+        publish, subscribe = spec_channel_refs(SPEC_IN_SYNC)
+        self.assertIn("GrindersSelectRequest", publish)
+        self.assertNotIn("GrindersSelectRequest", subscribe)
+        self.assertIn("GrindersSelectResponse", subscribe)
+        self.assertNotIn("GrindersSelectResponse", publish)
 
     def test_client_request_types_drops_the_bare_prefix_literal(self):
         # ApiService.js contains `data.tp.startsWith('req:')`, which is not a
@@ -224,6 +272,92 @@ class DriftDetection(unittest.TestCase):
         self.assertIn("req:history:retired", " ".join(problems))
 
 
+class ChannelRefs(unittest.TestCase):
+    """A component enum alone is not documentation — the channel must expose it.
+
+    The first cut of this gate scanned for `enum: ['req:...']` anywhere in the
+    file, so deleting the `channels['/ws']` $refs added for req/res
+    `grinders:select` left it green while the AsyncAPI-published message surface
+    no longer mentioned the operation at all. These are the regressions for that.
+    """
+
+    @staticmethod
+    def _joined(spec):
+        return " ".join(check(sets_from(spec=spec), allow_clientless=frozenset()))
+
+    def test_request_component_without_a_publish_ref_fails_the_gate(self):
+        spec = SPEC_IN_SYNC.replace("          - $ref: '#/components/messages/GrindersSelectRequest'\n", "")
+        joined = self._joined(spec)
+        self.assertIn("req:grinders:select (GrindersSelectRequest)", joined)
+        self.assertIn("not exposed on the channel", joined)
+
+    def test_response_component_without_a_subscribe_ref_fails_the_gate(self):
+        spec = SPEC_IN_SYNC.replace("          - $ref: '#/components/messages/GrindersSelectResponse'\n", "")
+        joined = self._joined(spec)
+        self.assertIn("res:grinders:select (GrindersSelectResponse)", joined)
+        self.assertIn("not exposed on the channel", joined)
+
+    def test_dropping_both_refs_flags_both_directions(self):
+        # The exact PRO-610 bounce scenario: the two new $refs are deleted, the
+        # component enums stay. Must fail, naming both.
+        spec = SPEC_IN_SYNC.replace(
+            "          - $ref: '#/components/messages/GrindersSelectRequest'\n", ""
+        ).replace("          - $ref: '#/components/messages/GrindersSelectResponse'\n", "")
+        joined = self._joined(spec)
+        self.assertIn("req:grinders:select (GrindersSelectRequest)", joined)
+        self.assertIn("res:grinders:select (GrindersSelectResponse)", joined)
+
+    def test_publish_ref_to_a_nonexistent_component_fails_the_gate(self):
+        spec = SPEC_IN_SYNC.replace(
+            "          - $ref: '#/components/messages/GrindersSelectRequest'",
+            "          - $ref: '#/components/messages/GrindersSelectRequest'\n"
+            "          - $ref: '#/components/messages/GrindersTypoRequest'",
+        )
+        joined = self._joined(spec)
+        self.assertIn("GrindersTypoRequest -> no tp enum", joined)
+        self.assertIn("channels['/ws'].publish $ref(s)", joined)
+
+    def test_subscribe_ref_to_a_component_without_a_tp_enum_fails_the_gate(self):
+        flush_with_tp = (
+            "    FlushStartResponse:\n      payload:\n        properties:\n"
+            "          tp:\n            enum: ['res:flush:start']\n"
+        )
+        flush_without_tp = "    FlushStartResponse:\n      payload:\n        properties:\n          ok:\n            type: boolean\n"
+        spec = SPEC_IN_SYNC.replace(flush_with_tp, flush_without_tp)
+        joined = self._joined(spec)
+        self.assertIn("FlushStartResponse -> no tp enum", joined)
+        self.assertIn("channels['/ws'].subscribe $ref(s)", joined)
+
+    def test_ref_under_the_wrong_channel_section_fails_the_gate(self):
+        # Moving the request $ref into `subscribe` satisfies "a $ref exists
+        # somewhere" but documents the wrong direction: publish is client->device.
+        spec = SPEC_IN_SYNC.replace(
+            "          - $ref: '#/components/messages/GrindersSelectRequest'\n", ""
+        ).replace(
+            "          - $ref: '#/components/messages/GrindersSelectResponse'",
+            "          - $ref: '#/components/messages/GrindersSelectResponse'\n"
+            "          - $ref: '#/components/messages/GrindersSelectRequest'",
+        )
+        joined = self._joined(spec)
+        self.assertIn("req:grinders:select (GrindersSelectRequest)", joined)
+        self.assertIn("GrindersSelectRequest -> req:grinders:select", joined)
+
+    def test_event_messages_are_legitimate_subscribe_refs(self):
+        # evt:* messages have no req/res counterpart in the firmware sets, so a
+        # correctly-wired one must be neither "unwired" nor a dangling $ref.
+        sets = sets_from()
+        self.assertEqual(sets["spec_dangling_subscribe"], [])
+        self.assertEqual([p for p in sets["spec_unwired"] if "Status" in p], [])
+
+    def test_event_component_without_a_subscribe_ref_fails_the_gate(self):
+        # Events are server->client too: dropping the $ref un-publishes evt:status
+        # from the channel just as surely as it would a res:*.
+        spec = SPEC_IN_SYNC.replace("          - $ref: '#/components/messages/StatusEvent'\n", "")
+        joined = self._joined(spec)
+        self.assertIn("evt:status (StatusEvent)", joined)
+        self.assertIn("not exposed on the channel", joined)
+
+
 class RealTree(unittest.TestCase):
     """The gate must be green on the working tree, on the real sets."""
 
@@ -240,6 +374,23 @@ class RealTree(unittest.TestCase):
         self.assertIn("res:grinders:select", self.sets["spec_res"])
         self.assertIn("req:grinders:select", self.sets["handlers"])
         self.assertIn("res:grinders:select", self.sets["responses"])
+
+    def test_real_spec_channel_refs_cover_every_documented_operation(self):
+        # The reviewer's finding, asserted against real data: every req:*/res:*
+        # component in docs/websocket-api.yaml is $ref'd from the matching
+        # channel section, and every channel $ref resolves to one.
+        self.assertEqual(self.sets["spec_unwired"], [])
+        self.assertEqual(self.sets["spec_dangling_publish"], [])
+        self.assertEqual(self.sets["spec_dangling_subscribe"], [])
+
+    def test_real_spec_channel_ref_lists_are_not_vacuously_empty(self):
+        # Guards the guard: a slicing bug that returned no $refs at all would
+        # make the cross-check above pass while checking nothing.
+        publish, subscribe = spec_channel_refs(_read_spec())
+        self.assertGreater(len(publish), 40)
+        self.assertGreater(len(subscribe), 20)
+        self.assertIn("GrindersSelectRequest", publish)
+        self.assertIn("GrindersSelectResponse", subscribe)
 
     def test_inventories_are_not_vacuously_empty(self):
         # Guards the guard: a broken walk root or regex would make every

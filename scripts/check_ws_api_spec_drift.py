@@ -16,6 +16,11 @@ It compares, in both directions:
      (both the literal `"res:x"` assignments and the ones derived from the
      `String("res:") + type.substring(4)` handlers)
   3. web-client `req:*` senders <->  firmware `req:*` handlers
+  4. spec `components.messages` <->  the `channels['/ws']` message surface
+     (a documented operation nobody `$ref`s from `publish`/`subscribe` is not
+     actually part of the published API, and a `$ref` to a message that
+     documents no operation — or documents one for the other direction — is a
+     dangling entry)
 
 Direction 3 has an ALLOW-LIST: three firmware handlers are deliberate
 legacy/HTTP-superseded orphans with no web caller. It is NOT duplicated here —
@@ -23,9 +28,10 @@ it is parsed out of the marker block in
 ``web/src/services/ApiService.contract.test.js``, which already recorded those
 three in its PRO-16 audit note, so there is exactly one list to maintain.
 
-No third-party dependencies on purpose (no PyYAML): the spec is parsed for the
-`enum: ['req:...']` / `enum: ['res:...']` operation markers with a regex, so this
-runs anywhere python3 does, including as a cheap first step in CI.
+No third-party dependencies on purpose (no PyYAML): the spec is sliced into its
+`components.messages`, `components.schemas` and `channels['/ws']` blocks by
+indentation and then scanned with regexes, so this runs anywhere python3 does,
+including as a cheap first step in CI.
 
 Usage:
     python3 scripts/check_ws_api_spec_drift.py          # exit 1 on any drift
@@ -72,8 +78,21 @@ _DYNAMIC_RESPONSE_TP = 'String("res:") + type.substring(4)'
 # Literal reply assignments, e.g. `response["tp"] = "res:auth";`.
 _LITERAL_RESPONSE_RE = re.compile(r'\["tp"\]\s*=\s*"(res:[^"]+)"')
 
-# AsyncAPI operation markers: `enum: ['req:grinders:select']`.
-_SPEC_OPERATION_RE = re.compile(r"enum:\s*\['((?:req|res):[^']+)'\]")
+# AsyncAPI operation markers: `enum: ['req:grinders:select']`. `evt:*` is matched
+# too: an event message documents no req/res operation but is still a legitimate
+# `subscribe` $ref target, so the channel cross-check must not call it dangling.
+_SPEC_OPERATION_RE = re.compile(r"enum:\s*\['((?:req|res|evt):[^']+)'\]")
+
+# A `components.messages.<Name>` / `components.schemas.<Name>` entry header.
+_SPEC_COMPONENT_RE = re.compile(r"^    ([A-Za-z0-9_]+):[^\n]*$", re.M)
+
+# Indirect payloads: `payload: {$ref: '#/components/schemas/OtaSettingsPayload'}`
+# — six of the real messages keep their `tp` enum in the shared schema instead of
+# inline, so the message -> operation map has to follow one hop.
+_SPEC_SCHEMA_REF_RE = re.compile(r"\$ref:\s*'#/components/schemas/([A-Za-z0-9_]+)'")
+
+# A channel message reference: `- $ref: '#/components/messages/AuthRequest'`.
+_SPEC_MESSAGE_REF_RE = re.compile(r"\$ref:\s*'#/components/messages/([A-Za-z0-9_]+)'")
 
 # `tp` string literals in the web client.
 _CLIENT_TP_RE = re.compile(r"""['"](req:[a-z0-9:.-]+)['"]""")
@@ -97,6 +116,31 @@ def _sources(rel_dir, suffixes, skip_tests=False):
             rel = os.path.relpath(path, PROJECT_ROOT).replace("\\", "/")
             with open(path, encoding="utf-8") as fh:
                 yield rel, fh.read()
+
+
+def _yaml_block(text, key, indent=""):
+    """The lines nested under `<indent><key>:`, exclusive of the key line itself.
+
+    Ends at the first non-blank line indented at or below `indent`. The spec is
+    machine-uniform 2-space YAML with no block scalars at these levels, so
+    indentation slicing is enough — and it keeps the no-PyYAML constraint.
+    """
+    match = re.search(rf"^{re.escape(indent)}{re.escape(key)}:[^\n]*\n", text, re.M)
+    if match is None:
+        return ""
+    kept = []
+    for line in text[match.end() :].splitlines(keepends=True):
+        if line.strip() and not line.startswith(indent + " "):
+            break
+        kept.append(line)
+    return "".join(kept)
+
+
+def _components(block):
+    """Split a `components.*` block into {EntryName: entry text}."""
+    marks = [(m.group(1), m.start()) for m in _SPEC_COMPONENT_RE.finditer(block)]
+    bounds = [start for _name, start in marks] + [len(block)]
+    return {name: block[start:end] for (name, start), end in zip(marks, bounds[1:])}
 
 
 def handler_types(source):
@@ -124,10 +168,72 @@ def derived_response_types(source):
     return out
 
 
-def spec_operations(spec_text):
-    """The documented operations, split into ({req:*}, {res:*})."""
-    found = set(_SPEC_OPERATION_RE.findall(spec_text))
-    return {op for op in found if op.startswith("req:")}, {op for op in found if op.startswith("res:")}
+def spec_message_operations(spec_text):
+    """Map every `components.messages.<Name>` to the `tp` it documents.
+
+    The value is the `req:*`/`res:*`/`evt:*` operation the message pins, or None
+    when the message documents no `tp` at all (a `$ref` target like that is
+    dangling, not an operation).
+    """
+    components = _yaml_block(spec_text, "components")
+    schema_ops = {}
+    for name, body in _components(_yaml_block(components, "schemas", "  ")).items():
+        found = _SPEC_OPERATION_RE.search(body)
+        schema_ops[name] = found.group(1) if found else None
+    operations = {}
+    for name, body in _components(_yaml_block(components, "messages", "  ")).items():
+        inline = _SPEC_OPERATION_RE.search(body)
+        if inline:
+            operations[name] = inline.group(1)
+            continue
+        # Indirect: the tp enum lives in the schema the payload $refs.
+        operations[name] = next(
+            (schema_ops[ref] for ref in _SPEC_SCHEMA_REF_RE.findall(body) if schema_ops.get(ref)),
+            None,
+        )
+    return operations
+
+
+def spec_channel_refs(spec_text):
+    """The messages `$ref`d under `channels['/ws']`, as (publish, subscribe)."""
+    ws = _yaml_block(_yaml_block(spec_text, "channels"), "'/ws'", "  ")
+    return (
+        set(_SPEC_MESSAGE_REF_RE.findall(_yaml_block(ws, "publish", "    "))),
+        set(_SPEC_MESSAGE_REF_RE.findall(_yaml_block(ws, "subscribe", "    "))),
+    )
+
+
+def spec_sets(spec_text):
+    """The spec side of the gate: documented operations AND their channel wiring.
+
+    A message only counts as documenting an operation when BOTH halves line up:
+    the component pins the `tp` enum *and* the component is `$ref`d from the
+    matching channel section (`publish` for `req:*`, `subscribe` for `res:*`).
+    Reporting the two halves separately is what makes a deleted `$ref` fail here
+    instead of sliding through as a still-present component enum.
+    """
+    operations = spec_message_operations(spec_text)
+    publish, subscribe = spec_channel_refs(spec_text)
+    wired = {"req:": publish, "res:": subscribe, "evt:": subscribe}
+    return {
+        "spec_req": {op for op in operations.values() if op and op.startswith("req:")},
+        "spec_res": {op for op in operations.values() if op and op.startswith("res:")},
+        # Component pins the operation, but no channel $ref exposes it.
+        "spec_unwired": sorted(
+            f"{op} ({name})" for name, op in operations.items() if op and name not in wired[op[:4]]
+        ),
+        # Channel $ref with nothing (or the wrong direction) behind it.
+        "spec_dangling_publish": sorted(
+            f"{name} -> {operations.get(name) or 'no tp enum'}"
+            for name in publish
+            if not (operations.get(name) or "").startswith("req:")
+        ),
+        "spec_dangling_subscribe": sorted(
+            f"{name} -> {operations.get(name) or 'no tp enum'}"
+            for name in subscribe
+            if not (operations.get(name) or "").startswith(("res:", "evt:"))
+        ),
+    }
 
 
 def client_request_types(files):
@@ -171,14 +277,12 @@ def collect():
     for _rel, text in firmware:
         handlers |= handler_types(text)
         responses |= derived_response_types(text)
-    spec_req, spec_res = spec_operations(_read(SPEC))
     client = client_request_types(_sources(WEB_SRC, (".js", ".jsx"), skip_tests=True))
     return {
         "handlers": handlers,
         "responses": responses,
-        "spec_req": spec_req,
-        "spec_res": spec_res,
         "client": client,
+        **spec_sets(_read(SPEC)),
     }
 
 
@@ -238,6 +342,23 @@ def check(sets, allow_clientless):
             f"the {_ALLOWLIST_BEGIN} allow-list lists req:* type(s) that no longer have a firmware handler: "
             f"{stale_allow}. Remove them from the block in {CONTRACT_TEST}."
         )
+
+    if sets["spec_unwired"]:
+        problems.append(
+            f"{len(sets['spec_unwired'])} operation(s) documented as a components.messages entry in {SPEC} "
+            f"are not exposed on the channel: {sets['spec_unwired']}. Add the missing "
+            f"$ref: '#/components/messages/<Name>' under channels['/ws'].publish (req:*) or "
+            f".subscribe (res:*) — a component nobody references documents nothing."
+        )
+
+    for section, key in (("publish", "spec_dangling_publish"), ("subscribe", "spec_dangling_subscribe")):
+        if sets[key]:
+            expected = "req:*" if section == "publish" else "res:*/evt:*"
+            problems.append(
+                f"{len(sets[key])} channels['/ws'].{section} $ref(s) in {SPEC} do not resolve to a "
+                f"{expected} components.messages entry: {sets[key]}. Fix the $ref name, or give the "
+                f"message a tp enum in the right direction."
+            )
 
     return problems
 
