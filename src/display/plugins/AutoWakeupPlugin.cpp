@@ -74,7 +74,7 @@ void AutoWakeupPlugin::checkAutoWakeup() {
 
 bool AutoWakeupPlugin::isTimeValid() {
     // Check if we have a valid time (year > 2020 means NTP has synced)
-    time_t now;
+    time_t now = 0;
     struct tm timeinfo;
     time(&now);
     localtime_r(&now, &timeinfo);
@@ -83,7 +83,7 @@ bool AutoWakeupPlugin::isTimeValid() {
 }
 
 String AutoWakeupPlugin::getCurrentTimeString() {
-    time_t now;
+    time_t now = 0;
     struct tm timeinfo;
     time(&now);
     localtime_r(&now, &timeinfo);
@@ -96,7 +96,7 @@ String AutoWakeupPlugin::getCurrentTimeString() {
 }
 
 int AutoWakeupPlugin::getCurrentDayOfWeek() {
-    time_t now;
+    time_t now = 0;
     struct tm timeinfo;
     time(&now);
     localtime_r(&now, &timeinfo);

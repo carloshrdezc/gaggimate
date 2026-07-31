@@ -51,7 +51,7 @@
 // handshake requirement so the check is a genuine "there is safe room" gate,
 // not a "we are already on the edge" gate that still lets a marginal handshake
 // slip through and panic.
-static constexpr size_t kOtaResolveInternalDramFloorBytes = 48u * 1024u;
+static constexpr size_t kOtaResolveInternalDramFloorBytes = size_t{48} * 1024u;
 
 // True when the largest contiguous free internal-DRAM block is at or above the
 // floor, i.e. it is safe to attempt the fresh TLS handshake. False means the
@@ -72,10 +72,10 @@ static_assert(kOtaResolveInternalDramFloorBytes == 49152u, "PRO-554: internal-DR
 
 static_assert(otaResolveHeapSufficient(49152u), "PRO-554: exactly the floor is sufficient (inclusive boundary)");
 static_assert(otaResolveHeapSufficient(49153u), "PRO-554: one byte above the floor is sufficient");
-static_assert(otaResolveHeapSufficient(1024u * 1024u), "PRO-554: a large free block is sufficient");
+static_assert(otaResolveHeapSufficient(size_t{1024} * 1024u), "PRO-554: a large free block is sufficient");
 static_assert(!otaResolveHeapSufficient(49151u), "PRO-554: one byte below the floor is insufficient");
 static_assert(!otaResolveHeapSufficient(0u), "PRO-554: zero free internal DRAM is insufficient");
-static_assert(!otaResolveHeapSufficient(16u * 1024u), "PRO-554: a fragmented 16 KiB block is insufficient");
+static_assert(!otaResolveHeapSufficient(size_t{16} * 1024u), "PRO-554: a fragmented 16 KiB block is insufficient");
 
 // Explicit-floor overload behavior (used by the on-device caller only via the
 // default, but pinned so the parameter cannot silently be dropped/reordered).

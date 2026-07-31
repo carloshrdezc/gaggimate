@@ -11,9 +11,7 @@ class SteamProcess : public Process {
     unsigned long started;
 
     explicit SteamProcess(int duration = STEAM_SAFETY_DURATION_MS, float pumpValue = 4.f)
-        : pumpValue(pumpValue), duration(duration) {
-        started = millis();
-    }
+        : pumpValue(pumpValue), duration(duration), started(millis()) {}
 
     bool isRelayActive() override { return false; };
 

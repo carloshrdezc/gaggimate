@@ -14,9 +14,9 @@ class AutoWakeupPlugin : public Plugin {
     void loop() override;
 
   private:
-    Controller *controller;
-    PluginManager *pluginManager;
-    Settings *settings;
+    Controller *controller = nullptr;
+    PluginManager *pluginManager = nullptr;
+    Settings *settings = nullptr;
 
     unsigned long lastAutoWakeupCheck = 0;
     String lastCheckedTime = "";

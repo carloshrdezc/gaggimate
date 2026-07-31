@@ -289,7 +289,7 @@ void WebUIPlugin::otaResolveTask(void *arg) {
         params->resolveChannel.c_str(), params->periodicResolvedAtMs, static_cast<uint32_t>(millis()));
 
     String resolved;
-    bool resolveFailed;
+    bool resolveFailed = false;
     if (canReusePeriodic) {
         ESP_LOGI("WebUIPlugin",
                  "Reusing fresh periodic OTA check result for channel '%s' (head '%s') — skipping redundant TLS handshake",
@@ -384,6 +384,10 @@ struct SemaphoreGuard {
     }
     SemaphoreGuard(const SemaphoreGuard &) = delete;
     SemaphoreGuard &operator=(const SemaphoreGuard &) = delete;
+    // PRO-608: same reason as the copy members — a moved-from guard would still
+    // run its destructor and give the semaphore back a second time.
+    SemaphoreGuard(SemaphoreGuard &&) = delete;
+    SemaphoreGuard &operator=(SemaphoreGuard &&) = delete;
 };
 } // namespace
 
@@ -1292,9 +1296,9 @@ void WebUIPlugin::startRelay() {
     if (relayUrl.isEmpty() || relayToken.isEmpty() || !controller->getSettings().isCloudRelayEnabled())
         return;
 
-    bool useSSL;
+    bool useSSL = false;
     String host, basePath;
-    uint16_t port;
+    uint16_t port = 0;
     if (!parseRelayUrl(relayUrl, useSSL, host, port, basePath)) {
         ESP_LOGW("WebUIPlugin", "Invalid relay URL: %s", relayUrl.c_str());
         return;
@@ -1351,7 +1355,7 @@ void WebUIPlugin::startRelay() {
             ESP_LOGI("WebUIPlugin", "Disconnected from cloud relay");
             break;
         case WStype_TEXT: {
-            String msg = String((char *)payload, length);
+            String msg = String(reinterpret_cast<const char *>(payload), length);
             processWebSocketMessage(RELAY_CLIENT_ID, msg);
             break;
         }
@@ -1824,7 +1828,7 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     if (info->index == 0) {
         auto &buf = rxBuffers[cid];
         buf.clear();
-        if (info->len <= 64 * 1024) {
+        if (info->len <= uint64_t{64} * 1024) {
             buf.reserve(info->len);
         }
     }
@@ -2750,7 +2754,7 @@ void WebUIPlugin::handleFlushStart(uint32_t clientId, JsonDocument &request) {
 
 void WebUIPlugin::handleCoreDumpDownload(AsyncWebServerRequest *request) {
     // Check if core dump is available
-    size_t coreAddr, coreSize;
+    size_t coreAddr = 0, coreSize = 0;
     if (esp_core_dump_image_get(&coreAddr, &coreSize) != ESP_OK || coreSize == 0) {
         request->send(404, "text/plain", "No core dump available");
         return;

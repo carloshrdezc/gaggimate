@@ -709,8 +709,12 @@ float Controller::getTargetTemp() const {
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         // If we can't get mutex, return safe default based on mode
         switch (mode) {
+        // PRO-608: STANDBY and BREW share this fallback deliberately. The
+        // locked path below differs (BREW prefers the running BrewProcess's
+        // temperature), but without the mutex we may not touch currentProcess,
+        // so both degrade to the selected profile's temperature. Merged into one
+        // label rather than duplicated — identical behaviour, no branch clone.
         case MODE_STANDBY:
-            return profileManager->getSelectedProfile().temperature;
         case MODE_BREW:
             return profileManager->getSelectedProfile().temperature;
         case MODE_STEAM:

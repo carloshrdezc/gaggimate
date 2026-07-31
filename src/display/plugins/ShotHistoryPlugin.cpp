@@ -176,6 +176,10 @@ class IndexLockGuard {
     }
     IndexLockGuard(const IndexLockGuard &) = delete;
     IndexLockGuard &operator=(const IndexLockGuard &) = delete;
+    // PRO-608: moving would leave two guards believing they hold the mutex (or
+    // one giving it back for a scope that no longer owns it). Scope-bound only.
+    IndexLockGuard(IndexLockGuard &&) = delete;
+    IndexLockGuard &operator=(IndexLockGuard &&) = delete;
 
   private:
     SemaphoreHandle_t mutex_;
@@ -537,13 +541,16 @@ void ShotHistoryPlugin::handleCompletedShot(const String &id, const String &bean
             // time format "%lds" simply ignores the trailing fractional arg (valid in C). Collapsing
             // to one snprintf (vs one per branch) trims the last bytes for the 2 MB partition.
             char gt[16];
-            long whole;
+            long whole = 0;
             long frac = 0;
-            const char *fmt;
+            const char *fmt = nullptr;
             if (startedVolumetric) {
                 // Tenths of a gram. tgv is entered in 0.1g steps and is positive here (guarded by
                 // hasGrindTarget), so (long)(v*10 + 0.5) is round-half-up == JS toFixed(1) across the
                 // reachable value domain, and avoids pulling lround (this feature is its only user).
+                // PRO-608: this is why the NOLINT below is deliberate, not deferred — lround() is
+                // half-away-from-zero, which would NOT match the UI. Tracked in PRO-612.
+                // NOLINTNEXTLINE(bugprone-incorrect-roundings)
                 long tenths = static_cast<long>(grindTargetVolume * 10.0 + 0.5);
                 whole = tenths / 10;
                 frac = tenths % 10;
@@ -855,7 +862,7 @@ void ShotHistoryPlugin::startRecording() {
 }
 
 unsigned long ShotHistoryPlugin::getTime() {
-    time_t now;
+    time_t now = 0;
     time(&now);
     return now;
 }

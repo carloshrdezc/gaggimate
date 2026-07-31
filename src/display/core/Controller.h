@@ -65,6 +65,11 @@ const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https:
 // Chosen to prevent UI freezes while allowing reasonable wait for mutex
 constexpr TickType_t UI_MUTEX_TIMEOUT_MS = 100;
 
+// PRO-608: Controller is a single non-polymorphic global. It has no base and no subclass, is
+// never deleted through a base pointer, and is never destroyed at all on the device (it lives for
+// the lifetime of the process). Adding a virtual destructor would put a vtable on the largest
+// object in the firmware for zero benefit. Tracked in PRO-612.
+// NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class Controller {
   public:
     Controller() = default;
@@ -292,7 +297,7 @@ class Controller {
     static const unsigned long BLUETOOTH_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
     static const unsigned long CONTROLLER_WAITING_TIMEOUT_MS = 10000;
 
-    xTaskHandle taskHandle;
+    xTaskHandle taskHandle = nullptr;
 
     static void loopTask(void *arg);
 };

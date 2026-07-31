@@ -28,6 +28,10 @@ class ProfileManager {
   private:
     Profile selectedProfile{};
     PluginManager *_plugin_manager;
+    // PRO-608: ProfileManager is constructed with the single global Settings and is neither copied
+    // nor reassigned. Switching to a pointer would only trade a compile-time non-null guarantee for
+    // a runtime one. Tracked in PRO-612.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     Settings &_settings;
     fs::FS *_fs;
     String _dir;

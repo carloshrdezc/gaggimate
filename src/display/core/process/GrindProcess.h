@@ -19,9 +19,7 @@ class GrindProcess : public Process {
     VolumetricRateCalculator volumetricRateCalculator{static_cast<double>(PREDICTIVE_TIME)};
 
     explicit GrindProcess(ProcessTarget target = ProcessTarget::TIME, int time = 0, double volume = 0, double grindDelay = 0.0)
-        : target(target), time(time), grindVolume(volume), grindDelay(grindDelay) {
-        started = millis();
-    }
+        : target(target), time(time), grindVolume(volume), grindDelay(grindDelay), started(millis()) {}
 
     void updateVolume(double volume) override {
         currentVolume = volume;

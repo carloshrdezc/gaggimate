@@ -9,7 +9,7 @@ class PumpProcess : public Process {
     int duration;
     unsigned long started;
 
-    explicit PumpProcess(int duration = HOT_WATER_SAFETY_DURATION_MS) : duration(duration) { started = millis(); }
+    explicit PumpProcess(int duration = HOT_WATER_SAFETY_DURATION_MS) : duration(duration), started(millis()) {}
 
     bool isRelayActive() override { return false; };
 
