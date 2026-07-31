@@ -193,8 +193,17 @@ inline bool validateSettings(const Fields &fields, Error &error) {
         } else if (name == "brewDelay" || name == "grindDelay") {
             if (!numberInRange(name, value, 0, 4000, error))
                 return false;
-        } else if (name == "mainBrightness" || name == "standbyBrightness" || name == "sunriseR" || name == "sunriseG" ||
-                   name == "sunriseB" || name == "sunriseW" || name == "sunriseExtBrightness") {
+        } else if (name == "mainBrightness" || name == "standbyBrightness") {
+            // PRO-609: backlight *level*, not an 8-bit duty. Every panel family caps at 16
+            // (LilyGo `if (value > 16) value = 16;`, Waveshare `constrain(.., WS_BACKLIGHT_MAX)`,
+            // Amoled scales a 0..16 level by 16), and the setters below never clamp — so a
+            // wider bound here lets NVS keep a value no driver honors. The UI agrees (0..16).
+            if (!inRange(name, value, 0, 16, error))
+                return false;
+        } else if (name == "sunriseR" || name == "sunriseG" || name == "sunriseB" || name == "sunriseW" ||
+                   name == "sunriseExtBrightness") {
+            // Deliberately 8-bit, unlike the backlight above: LedControlPlugin forwards these
+            // verbatim as uint8_t over BLE (and sends ext as `255 - ext`); defaults are 255.
             if (!inRange(name, value, 0, 255, error))
                 return false;
         } else if (name == "steamPumpPercentage" || name == "steamPumpCutoff") {
