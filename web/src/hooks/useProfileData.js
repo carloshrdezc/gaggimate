@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 
 /**
  * Custom hook to fetch the list of available profiles
@@ -65,9 +65,13 @@ function useSelectedProfile(api, selectedProfileId) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [retryToken, setRetryToken] = useState(0);
+  const previousProfileId = useRef(selectedProfileId);
   const retry = useCallback(() => setRetryToken(token => token + 1), []);
 
   useEffect(() => {
+    const profileChanged = previousProfileId.current !== selectedProfileId;
+    previousProfileId.current = selectedProfileId;
+
     if (!api || !selectedProfileId) {
       setData(null);
       setLoading(false);
@@ -75,6 +79,9 @@ function useSelectedProfile(api, selectedProfileId) {
       return;
     }
 
+    if (profileChanged) {
+      setData(null);
+    }
     let cancelled = false;
 
     const execute = async () => {
@@ -91,6 +98,7 @@ function useSelectedProfile(api, selectedProfileId) {
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to load profile data:', err);
+        setData(null);
         setError(err);
       } finally {
         if (!cancelled) {
