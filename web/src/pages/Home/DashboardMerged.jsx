@@ -514,7 +514,7 @@ ManualSlider.propTypes = {
   onEditingChange: PropTypes.func,
 };
 
-function ManualConsole({
+export function ManualConsole({
   active,
   finished,
   draft,
@@ -536,6 +536,7 @@ function ManualConsole({
   primaryActionLabel,
   onBeanClick,
   onBeanSelect,
+  onBeanRetry,
   onBeanDropdownClose,
   onDoseCommit,
   onEditingChange,
@@ -641,6 +642,7 @@ function ManualConsole({
               onSelect={onBeanSelect}
               loading={loadingBeans}
               error={beanError}
+              onRetry={onBeanRetry}
               onClose={onBeanDropdownClose}
             />
           )}
@@ -778,6 +780,7 @@ ManualConsole.propTypes = {
   primaryActionLabel: PropTypes.string,
   onBeanClick: PropTypes.func,
   onBeanSelect: PropTypes.func,
+  onBeanRetry: PropTypes.func,
   onBeanDropdownClose: PropTypes.func,
   onDoseCommit: PropTypes.func,
   onEditingChange: PropTypes.func,
@@ -2192,6 +2195,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               primaryActionLabel={primaryActionLabel}
               onBeanClick={openBeanDropdown}
               onBeanSelect={handleBeanSelect}
+              onBeanRetry={loadBeans}
               onBeanDropdownClose={() => setActiveDropdown(null)}
               onDoseCommit={setDose}
               onEditingChange={setIsManualEditing}
