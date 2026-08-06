@@ -40,6 +40,8 @@ import {
   clampManualPressure,
   clampManualTemperature,
   computeYieldEditable,
+  getReadinessSummary,
+  getYieldLockReason,
   getAvailableModeOptions,
   getBoilerHeatingState,
   getManualControlLabels,
@@ -310,7 +312,7 @@ TargetBar.propTypes = {
 // setting are NOT duplicated here: the recipe row already renders them as
 // editable dropdowns in all modes (incl. standby). Every field degrades to a
 // themed empty-state string (never NaN / "undefined" / broken UI).
-function StandbyBlock({ profileName, curve }) {
+export function StandbyBlock({ profileName, curve, profileError, onRetryProfile }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {/* Selected-profile mini-curve. */}
@@ -423,7 +425,12 @@ function StandbyBlock({ profileName, curve }) {
                 borderRadius: 8,
               }}
             >
-              {profileName ? 'NO CURVE DATA' : 'NO PROFILE SELECTED'}
+              {profileError ? (
+                <span role='status' aria-live='polite' style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  PROFILE CURVE FAILED TO LOAD
+                  <button type='button' onClick={onRetryProfile} style={retryButtonStyle}>RETRY</button>
+                </span>
+              ) : profileName ? 'PROFILE TYPE HAS NO CURVE' : 'NO PROFILE SELECTED'}
             </div>
           )}
         </div>
@@ -434,6 +441,8 @@ function StandbyBlock({ profileName, curve }) {
 
 StandbyBlock.propTypes = {
   profileName: PropTypes.string,
+  profileError: PropTypes.any,
+  onRetryProfile: PropTypes.func,
   curve: PropTypes.shape({
     pressure: PropTypes.string,
     flow: PropTypes.string,
@@ -505,7 +514,7 @@ ManualSlider.propTypes = {
   onEditingChange: PropTypes.func,
 };
 
-function ManualConsole({
+export function ManualConsole({
   active,
   finished,
   draft,
@@ -527,6 +536,7 @@ function ManualConsole({
   primaryActionLabel,
   onBeanClick,
   onBeanSelect,
+  onBeanRetry,
   onBeanDropdownClose,
   onDoseCommit,
   onEditingChange,
@@ -632,6 +642,7 @@ function ManualConsole({
               onSelect={onBeanSelect}
               loading={loadingBeans}
               error={beanError}
+              onRetry={onBeanRetry}
               onClose={onBeanDropdownClose}
             />
           )}
@@ -769,6 +780,7 @@ ManualConsole.propTypes = {
   primaryActionLabel: PropTypes.string,
   onBeanClick: PropTypes.func,
   onBeanSelect: PropTypes.func,
+  onBeanRetry: PropTypes.func,
   onBeanDropdownClose: PropTypes.func,
   onDoseCommit: PropTypes.func,
   onEditingChange: PropTypes.func,
@@ -983,6 +995,18 @@ const stepperBtnStyle = {
   lineHeight: 1,
 };
 
+const retryButtonStyle = {
+  background: 'transparent',
+  border: '1px solid var(--dm-line-strong)',
+  borderRadius: 4,
+  color: 'var(--dm-fg)',
+  cursor: 'pointer',
+  fontFamily: 'var(--dm-font-mono)',
+  fontSize: 9,
+  letterSpacing: '0.12em',
+  padding: '4px 6px',
+};
+
 EditableNumBlock.propTypes = {
   label: PropTypes.string,
   value: PropTypes.number,
@@ -1010,7 +1034,7 @@ function formatGrindTarget(grindTarget, grindTargetVolume, grindTargetDuration) 
 }
 
 // Inline dropdown for profile / bean selection
-function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loading, error, onClose }) {
+function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loading, error, onRetry, onClose }) {
   return (
     <div
       style={{
@@ -1086,7 +1110,8 @@ function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loadi
               color: 'var(--dm-accent)',
             }}
           >
-            {error.toUpperCase()}
+            <div role='status' aria-live='polite'>FAILED TO LOAD {label}</div>
+            <button type='button' onClick={onRetry} style={{ ...retryButtonStyle, marginTop: 8 }}>RETRY</button>
           </div>
         ) : options.length === 0 ? (
           <div
@@ -1141,6 +1166,7 @@ SelectDropdown.propTypes = {
   onSelect: PropTypes.func,
   loading: PropTypes.bool,
   error: PropTypes.string,
+  onRetry: PropTypes.func,
   onClose: PropTypes.func,
 };
 
@@ -1405,7 +1431,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // card can render the selected-profile mini-curve. The `brew` gate here drives
   // the profiles-LIST fetch; the selected profile itself is fetched off
   // selectedProfileId regardless of mode.
-  const { profileData } = useProfileData(
+  const { profileData, error: profileDataError, retry: retryProfileData } = useProfileData(
     api,
     brew || s.mode === MODE_STANDBY,
     s.selectedProfileId
@@ -1494,6 +1520,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // keep the disabled/locked treatment regardless of the override setting,
   // because Controller::setBrewTarget() ignores a brew target for them.
   const yieldEditable = computeYieldEditable({
+    allowYieldOverride: s.allowYieldOverride,
+    brewTarget: s.brewTarget,
+    bluetoothConnected: s.bluetoothConnected,
+  });
+  const yieldLockReason = getYieldLockReason({
     allowYieldOverride: s.allowYieldOverride,
     brewTarget: s.brewTarget,
     bluetoothConnected: s.bluetoothConnected,
@@ -1736,9 +1767,16 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const steamStatusLabel = targetTemp > 0 && tempVal < targetTemp
     ? `PREHEATING · TGT ${fmt(targetTemp)}°`
     : `STEAM · TGT ${fmt(targetTemp)}°`;
-  const primaryActionState = getPrimaryActionState({ active, finished, mode, isGrindAvailable, isManualAvailable });
+  const primaryActionState = getPrimaryActionState({ active, finished, mode, connected, isGrindAvailable, isManualAvailable });
   const primaryActionLabel = primaryActionState.label;
   const primaryActionAccent = primaryActionState.accent;
+  const readinessSummary = getReadinessSummary({
+    mode,
+    connected,
+    bluetoothConnected: s.bluetoothConnected,
+    selectedProfile: s.selectedProfile,
+    wakeAvailable: primaryActionLabel === 'WAKE' && connected,
+  });
   const primaryAction = () => {
     if (Object.prototype.hasOwnProperty.call(primaryActionState, 'processKind')) {
       lastProcessTypeRef.current = primaryActionState.processKind;
@@ -1838,6 +1876,9 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       </div>
 
       {/* Sub-header: mode rail + status pills + phase strip */}
+      <div role='status' aria-live='polite' style={{ padding: '8px 16px', fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-dim)' }}>
+        {readinessSummary}
+      </div>
       <div
         style={{
           display: 'flex',
@@ -2154,6 +2195,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               primaryActionLabel={primaryActionLabel}
               onBeanClick={openBeanDropdown}
               onBeanSelect={handleBeanSelect}
+              onBeanRetry={loadBeans}
               onBeanDropdownClose={() => setActiveDropdown(null)}
               onDoseCommit={setDose}
               onEditingChange={setIsManualEditing}
@@ -2261,6 +2303,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleBeanSelect}
                 loading={loadingBeans}
                 error={beanError}
+                onRetry={loadBeans}
                 onClose={() => setActiveDropdown(null)}
               />
             )}
@@ -2274,6 +2317,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleProfileSelect}
                 loading={loadingProfiles}
                 error={profileError}
+                onRetry={loadProfiles}
                 onClose={() => setActiveDropdown(null)}
               />
             )}
@@ -2287,6 +2331,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleGrinderSelect}
                 loading={loadingGrinders}
                 error={grinderError}
+                onRetry={loadGrinders}
                 onClose={() => setActiveDropdown(null)}
               />
             )}
@@ -2343,7 +2388,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               max={120}
               onCommit={setYield}
               disabled={!yieldEditable}
-              lockedHint='YIELD · LOCKED'
+              lockedHint={yieldLockReason}
             />
             <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <div>
@@ -2420,6 +2465,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               <StandbyBlock
                 profileName={s.selectedProfile}
                 curve={standbyCurve}
+                profileError={profileDataError.profile}
+                onRetryProfile={retryProfileData.profile}
               />
             ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2482,6 +2529,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
             >
               {primaryActionLabel}
             </button>
+            {primaryActionLabel === 'WAKE' && (
+              <span role='status' aria-live='polite' style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-dim)' }}>
+                Wake, then tap again to start.
+              </span>
+            )}
           </div>
             </>
           )}
