@@ -312,7 +312,7 @@ TargetBar.propTypes = {
 // setting are NOT duplicated here: the recipe row already renders them as
 // editable dropdowns in all modes (incl. standby). Every field degrades to a
 // themed empty-state string (never NaN / "undefined" / broken UI).
-function StandbyBlock({ profileName, curve, profileError, onRetryProfile }) {
+export function StandbyBlock({ profileName, curve, profileError, onRetryProfile }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {/* Selected-profile mini-curve. */}
@@ -426,7 +426,7 @@ function StandbyBlock({ profileName, curve, profileError, onRetryProfile }) {
               }}
             >
               {profileError ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span role='status' aria-live='polite' style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   PROFILE CURVE FAILED TO LOAD
                   <button type='button' onClick={onRetryProfile} style={retryButtonStyle}>RETRY</button>
                 </span>
