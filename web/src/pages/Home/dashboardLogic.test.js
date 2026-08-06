@@ -292,6 +292,30 @@ test('standby primary action wakes the machine into brew', () => {
   expect(state.processKind).toBe(null);
 });
 
+test('standby primary action is unavailable while the controller is disconnected', () => {
+  const connected = false;
+  const state = getPrimaryActionState({
+    active: false,
+    finished: false,
+    mode: MODE_STANDBY,
+    connected,
+  });
+
+  expect(state.label).toBe('WAKE UNAVAILABLE');
+  expect(state.action).toBe('noop');
+  expect(state.accent).toBe('var(--dm-fg-dim)');
+  expect(state.processKind).toBe(null);
+  expect(
+    getReadinessSummary({
+      mode: MODE_STANDBY,
+      connected,
+      bluetoothConnected: false,
+      selectedProfile: 'Morning espresso',
+      wakeAvailable: state.label === 'WAKE' && connected,
+    })
+  ).not.toContain('Wake available');
+});
+
 test('yield is editable when override is on, the profile is volumetric, and the scale is connected', () => {
   expect(
     computeYieldEditable({ allowYieldOverride: true, brewTarget: true, bluetoothConnected: true })

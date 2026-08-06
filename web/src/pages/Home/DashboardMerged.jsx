@@ -1764,7 +1764,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const steamStatusLabel = targetTemp > 0 && tempVal < targetTemp
     ? `PREHEATING · TGT ${fmt(targetTemp)}°`
     : `STEAM · TGT ${fmt(targetTemp)}°`;
-  const primaryActionState = getPrimaryActionState({ active, finished, mode, isGrindAvailable, isManualAvailable });
+  const primaryActionState = getPrimaryActionState({ active, finished, mode, connected, isGrindAvailable, isManualAvailable });
   const primaryActionLabel = primaryActionState.label;
   const primaryActionAccent = primaryActionState.accent;
   const readinessSummary = getReadinessSummary({
@@ -1772,7 +1772,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     connected,
     bluetoothConnected: s.bluetoothConnected,
     selectedProfile: s.selectedProfile,
-    wakeAvailable: primaryActionLabel === 'WAKE',
+    wakeAvailable: primaryActionLabel === 'WAKE' && connected,
   });
   const primaryAction = () => {
     if (Object.prototype.hasOwnProperty.call(primaryActionState, 'processKind')) {

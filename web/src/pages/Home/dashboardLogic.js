@@ -138,7 +138,7 @@ export function getProcessKindForMode(mode, isGrindAvailable = true, isManualAva
   return null;
 }
 
-export function getPrimaryActionState({ active, finished, mode, isGrindAvailable = true, isManualAvailable = true }) {
+export function getPrimaryActionState({ active, finished, mode, connected = true, isGrindAvailable = true, isManualAvailable = true }) {
   const isSteamMode = mode === MODE_STEAM;
   const isManualMode = mode === MODE_MANUAL;
 
@@ -196,6 +196,15 @@ export function getPrimaryActionState({ active, finished, mode, isGrindAvailable
   }
 
   if (mode === MODE_STANDBY) {
+    if (!connected) {
+      return {
+        label: 'WAKE UNAVAILABLE',
+        accent: 'var(--dm-fg-dim)',
+        action: 'noop',
+        processKind: null,
+      };
+    }
+
     // Wakes the machine into BREW (mirrors the physical brew button's first
     // press). Firmware maps req:process:activate in MODE_STANDBY to
     // deactivateStandby(). A second tap then starts the shot.
