@@ -102,6 +102,25 @@ export function computeYieldEditable({ allowYieldOverride, brewTarget, bluetooth
   return !!allowYieldOverride && !!brewTarget && !!bluetoothConnected;
 }
 
+export function getYieldLockReason({ allowYieldOverride, brewTarget, bluetoothConnected }) {
+  const missingPrerequisites = [];
+  if (!allowYieldOverride) missingPrerequisites.push('ENABLE YIELD OVERRIDE');
+  if (!brewTarget) missingPrerequisites.push('VOLUMETRIC PROFILE REQUIRED');
+  if (!bluetoothConnected) missingPrerequisites.push('SCALE NOT CONNECTED');
+  return missingPrerequisites.length > 0 ? `YIELD LOCKED · ${missingPrerequisites.join(' · ')}` : null;
+}
+
+export function getReadinessSummary({ mode, connected, bluetoothConnected, selectedProfile, wakeAvailable }) {
+  const signals = [
+    mode === MODE_STANDBY ? 'Machine in standby' : 'Machine not in standby',
+    connected ? 'Controller connected' : 'Controller offline',
+    bluetoothConnected ? 'Scale connected' : 'Scale not connected',
+    selectedProfile ? `Profile ${selectedProfile} selected` : 'No profile selected',
+  ];
+  if (wakeAvailable) signals.push('Wake available');
+  return signals.join('. ');
+}
+
 export function getAvailableModeOptions(isGrindAvailable = true, isManualAvailable = true) {
   return MODE_OPTIONS.filter(option => {
     if (option.id === MODE_GRIND) return isGrindAvailable;
