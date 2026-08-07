@@ -70,7 +70,7 @@ bean's UUID.
 |---|---|---|
 | bean `name` / `roaster` / `roastDate` / `notes` | `name` / `roaster` / `roastingDate` / `note` | |
 | bean `roastLevel` | `roast` (+ `roast_custom`) | matched against upstream `ROASTS_ENUM`; unrecognised text becomes `CUSTOM_ROAST` |
-| bean `quantity` (remaining g) | `weight` (bag mass) | **approximation** — closest available field |
+| bean `quantity` (remaining g) | `weight` (bag total) = `quantity` + this archive's accounted consumption | see **Bean inventory** below |
 | bean `archived` | `finished` | |
 | bean `origin` / `process` | `bean_information[0].country` / `.processing` | |
 | shot note `doseIn` | `grind_weight` | |
@@ -83,6 +83,49 @@ bean's UUID.
 Shots whose bean or grinder cannot be resolved get **one shared deterministic
 placeholder record** each, because a brew with a dangling UUID reference is not
 importable.
+
+### Bean inventory (PRO-632)
+
+Beanconqueror has **no stored "consumed" field** — there is no `weight_used`
+anywhere in upstream at the pinned commit (`grep -rn weight_used src/` → 0 hits;
+`src/classes/bean/bean.ts` declares only `weight` and `finished`). A bean carries
+just `weight`, the **bag total**, and the app derives the rest from the brews
+that reference it:
+
+```
+consumed  = SUM(brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight)
+available = bean.weight - consumed
+```
+
+That derivation is `getUsedWeightCount()`, duplicated across
+`bean-information.component.ts`, `dashboard.page.ts`,
+`bean-sort-filter-helper.service.ts`, `bean-popover-freeze.component.ts` and
+`uiBrewHelper.ts`; it is rendered by `bean-information.component.html` as
+`{{gramUsed}}g of {{gramTotal}}g ({{leftOver}}g)` with
+`leftOver: bean.weight - uiUsedWeightCount`.
+
+GaggiMate's `bean.quantity` is **remaining** grams (`beanManager.js`
+`syncBeanUsageFromNotes` decrements it by each shot's `doseIn`). Mapping it
+straight onto `weight` put remaining into the bag-total slot, so Beanconqueror
+subtracted the exported doses from it a *second* time — displaying consumption as
+availability and going **negative** once the exported doses exceeded what was
+left in the bag.
+
+Because GaggiMate keeps no purchase mass and no consumption history, the only
+self-consistent representation is to solve the upstream relation for the one
+quantity we know:
+
+```
+weight = quantity + consumed      (consumed = doses of the brews IN THIS ARCHIVE)
+```
+
+Nothing is invented — the consumption term is summed from the doses those brews
+already carry, using upstream's own `bean_weight_in > 0 ? bean_weight_in :
+grind_weight` precedence. A **beans-only** export has no brews, so the sum is `0`
+and it degenerates to `weight = quantity`, consumed `0`. Available weight
+therefore always equals GaggiMate's remaining quantity and can never be
+negative — including for the shared placeholder bean, which has no GaggiMate
+quantity but still owns real brew doses.
 
 ### Never emitted
 

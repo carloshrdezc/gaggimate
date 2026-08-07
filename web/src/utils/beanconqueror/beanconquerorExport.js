@@ -159,8 +159,10 @@ function toBeanRecord(bean, fallbackTimestamp) {
   record.note = text(bean.notes);
   record.roast = roast;
   record.roast_custom = roastCustom;
-  // GaggiMate tracks REMAINING grams; Beanconqueror's `weight` is the bag mass.
-  // Closest available mapping — documented as an approximation.
+  // GaggiMate tracks REMAINING grams. Beanconqueror's `weight` is the BAG TOTAL
+  // and it derives consumption from the archive's own brews, so the remaining
+  // quantity is only half of the pair — `applyBagTotals` adds this archive's
+  // accounted consumption once the brews are known (PRO-632).
   record.weight = numberOr(bean.quantity, 0);
   // Beanconqueror's archive flag is `finished`.
   record.finished = !!bean.archived;
@@ -228,6 +230,61 @@ function toBrewRecord(shot, { beanUuidRef, millUuidRef, preparationUuidRef }, fa
   record.tds = numberOr(notes.tds ?? shot.tds, 0);
 
   return record;
+}
+
+/**
+ * Turns each bean's REMAINING grams into the bag total Beanconqueror expects.
+ *
+ * Beanconqueror has no stored "consumed" field (there is no `weight_used`
+ * anywhere upstream at the pinned commit b713c3e). A bean carries only
+ * `weight`, the BAG TOTAL, and the app derives the rest from the brews that
+ * reference the bean:
+ *
+ *   consumed  = SUM(brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight)
+ *   available = bean.weight - consumed
+ *
+ * (`getUsedWeightCount()` in `bean-information.component.ts`, duplicated in
+ * `dashboard.page.ts`, `bean-sort-filter-helper.service.ts` and
+ * `uiBrewHelper.ts`; rendered as `{{gramUsed}}g of {{gramTotal}}g ({{leftOver}}g)`.)
+ *
+ * GaggiMate stores only the current remaining quantity — never the purchase mass
+ * and never a consumption history — so `weight = quantity` put REMAINING into the
+ * BAG-TOTAL slot and Beanconqueror subtracted the exported doses from it a second
+ * time, showing consumption as availability and going negative once the exported
+ * doses exceeded what was left.
+ *
+ * Solving `available = weight - consumed` for the one quantity we actually know
+ * gives `weight = quantity + consumed`. Nothing is invented: `consumed` is the
+ * sum of the doses the brews in THIS archive already carry, summed with
+ * upstream's own precedence. A beans-only export sums to 0 and degenerates to
+ * `weight = quantity`, consumed 0.
+ *
+ * @param {Map<string, object>} beanRecords bean records keyed by uuid, mutated in place
+ * @param {object[]} brewRecords brews already referencing those uuids
+ */
+function applyBagTotals(beanRecords, brewRecords) {
+  const consumedByBean = new Map();
+
+  for (const brew of brewRecords) {
+    // Upstream precedence: `bean_weight_in` wins when set, else `grind_weight`.
+    const dose = brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight;
+    if (!(dose > 0)) continue;
+    consumedByBean.set(brew.bean, (consumedByBean.get(brew.bean) ?? 0) + dose);
+  }
+
+  for (const [uuid, record] of beanRecords) {
+    const consumed = consumedByBean.get(uuid) ?? 0;
+    if (consumed <= 0) continue;
+    const total = record.weight + consumed;
+    // Round the bag total to 2dp so the app shows a clean gram figure — but only
+    // when rounding does not dip BELOW the consumption Beanconqueror recomputes.
+    // Summing float doses leaves binary dust (1 + 1.03 === 2.0300000000000002),
+    // and rounding down past it would resurface negative availability at the
+    // 1e-16 scale. Keeping the exact sum in that case makes `weight - consumed`
+    // cancel to precisely the remaining quantity.
+    const rounded = Math.round(total * 100) / 100;
+    record.weight = rounded >= consumed ? rounded : total;
+  }
 }
 
 /**
@@ -322,6 +379,10 @@ export function toBeanconquerorBackup(data = {}) {
       fallbackTimestamp,
     ),
   );
+
+  // Only now are the brews (and therefore each bean's accounted consumption)
+  // known, so the remaining-quantity -> bag-total conversion happens last.
+  applyBagTotals(beanRecords, brewRecords);
 
   return {
     BEANS: [...beanRecords.values()],
