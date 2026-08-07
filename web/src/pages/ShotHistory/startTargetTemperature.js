@@ -12,13 +12,9 @@
 // brew target and is treated as missing rather than displayed.
 const MAX_PLAUSIBLE_TARGET_C = 200;
 
+// Number.isFinite never coerces, so this also rejects undefined/null/strings.
 function isPlausibleTarget(value) {
-  return (
-    typeof value === 'number' &&
-    Number.isFinite(value) &&
-    value > 0 &&
-    value <= MAX_PLAUSIBLE_TARGET_C
-  );
+  return Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_TARGET_C;
 }
 
 /**
