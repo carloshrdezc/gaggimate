@@ -14,6 +14,13 @@ void test_profile_switch_clears_override_and_uses_new_profile_root() {
     TEST_ASSERT_EQUAL_FLOAT(91.0f, effectiveBrewTemperature(91.0f, state, "profile-b"));
 }
 
+// PRO-629: saving an unrelated profile must not route through selection. Only
+// a transition to a different profile is allowed to clear the override.
+void test_saving_unrelated_profile_does_not_clear_override() {
+    TEST_ASSERT_FALSE(shouldClearBrewTemperatureOverrideOnProfileSelection("profile-a", "profile-a"));
+    TEST_ASSERT_TRUE(shouldClearBrewTemperatureOverrideOnProfileSelection("profile-a", "profile-b"));
+}
+
 void test_override_only_replaces_positive_root_temperature() {
     BrewTemperatureOverrideState state{"profile-a", 96.0f, true};
     TEST_ASSERT_EQUAL_FLOAT(96.0f, effectiveBrewTemperature(0.0f, state, "profile-a"));
@@ -46,6 +53,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_override_is_explicit_even_when_equal_to_profile_temperature);
     RUN_TEST(test_profile_switch_clears_override_and_uses_new_profile_root);
+    RUN_TEST(test_saving_unrelated_profile_does_not_clear_override);
     RUN_TEST(test_override_only_replaces_positive_root_temperature);
     RUN_TEST(test_idle_brew_output_target_uses_selected_profile_override);
     RUN_TEST(test_brew_temperature_request_validation);

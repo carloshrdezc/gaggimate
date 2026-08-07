@@ -19,6 +19,11 @@ struct BrewTemperatureOverrideState {
 
 enum class BrewTemperatureTargetUpdate { PASSIVE_REASSERT, EXPLICIT_EDIT };
 
+inline bool shouldClearBrewTemperatureOverrideOnProfileSelection(const std::string &currentProfileId,
+                                                                 const std::string &requestedProfileId) {
+    return currentProfileId != requestedProfileId;
+}
+
 constexpr bool shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate update) {
     return update == BrewTemperatureTargetUpdate::EXPLICIT_EDIT;
 }

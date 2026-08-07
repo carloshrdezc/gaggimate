@@ -1,4 +1,5 @@
 #include "ProfileManager.h"
+#include "BrewTemperatureOverridePolicy.h"
 #include <ArduinoJson.h>
 #include <display/core/EventIds.h>
 
@@ -429,7 +430,6 @@ bool ProfileManager::saveProfile(Profile &profile) {
         selectedProfile = Profile{};
         loadSelectedProfile(selectedProfile);
     }
-    selectProfile(_settings.getSelectedProfile());
     _plugin_manager->trigger(EventIds::PROFILES_PROFILE_SAVE, "id", profile.id);
     if (isNew) {
         addFavoritedProfile(profile.id);
@@ -466,9 +466,13 @@ bool ProfileManager::profileExists(const String &uuid) { return _fs->exists(prof
 
 void ProfileManager::selectProfile(const String &uuid) {
     ESP_LOGI("ProfileManager", "Selecting profile %s", uuid.c_str());
-    _settings.batchUpdate([&uuid](Settings *settings) {
+    const bool profileChanged =
+        shouldClearBrewTemperatureOverrideOnProfileSelection(_settings.getSelectedProfile().c_str(), uuid.c_str());
+    _settings.batchUpdate([&uuid, profileChanged](Settings *settings) {
         settings->setSelectedProfile(uuid);
-        settings->clearBrewTemperatureOverride();
+        if (profileChanged) {
+            settings->clearBrewTemperatureOverride();
+        }
     });
     selectedProfile = Profile{};
     loadSelectedProfile(selectedProfile);
