@@ -895,6 +895,7 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
         <input
           ref={inputRef}
           type='text'
+          aria-label={`Edit ${label}`}
           inputMode='decimal'
           defaultValue={value.toFixed(1)}
           onBlur={e => commit(e.target.value)}

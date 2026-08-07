@@ -56,4 +56,9 @@ test('gives numeric edit buttons an accessible name that identifies their field'
   const editButton = screen.getByRole('button', { name: 'Edit GRIND' });
   editButton.focus();
   expect(document.activeElement).toBe(editButton);
+
+  fireEvent.click(editButton);
+  const input = screen.getByRole('textbox', { name: 'Edit GRIND' });
+  input.focus();
+  expect(document.activeElement).toBe(input);
 });
