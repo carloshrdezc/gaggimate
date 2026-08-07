@@ -17,17 +17,36 @@ function isPlausibleTarget(value) {
   return Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_TARGET_C;
 }
 
+// Manual shots have no profile-requested target: the firmware's createSample()
+// stamps `sample.tt` from the live controller target for EVERY shot regardless of
+// mode (ShotHistoryPlugin.cpp), so a manual shot pulled at a real non-zero
+// setpoint carries plausible `tt` samples that must NOT be reported as a profile
+// start target. The only mode marker in the shot log is the header's profileId,
+// which initializeHeader() sets to the literal "manual".
+//
+// Same convention as HistoryCard.jsx (isManualShot): literal "manual", plus a
+// blank/absent profileId, which is how a shot with no profile identity reaches
+// the UI.
+function isManualShot(shot) {
+  const profileId = shot?.profileId;
+  return !profileId || String(profileId).trim() === '' || profileId === 'manual';
+}
+
 /**
  * First valid target temperature of a shot, i.e. the target that was requested
  * at brew start. Phase-changing profiles are not misrepresented: this is only
  * the *start* target, later phases may request something else.
  *
- * @param {{ samples?: Array<{ tt?: number }> }} shot parsed shot (device, browser or imported)
+ * @param {{ profileId?: string, samples?: Array<{ tt?: number }> }} shot parsed
+ *   shot (device, browser or imported)
  * @returns {number|null} target in °C rounded to 0.1, or null when the shot log
- *   carries no usable `tt` (manual shots, logs predating the TT field, zeroed or
- *   malformed samples, shots stored without their sample trace).
+ *   carries no usable `tt` (logs predating the TT field, zeroed or malformed
+ *   samples, shots stored without their sample trace) or when the shot was a
+ *   manual shot, whose `tt` samples do not represent a requested brew target.
  */
 export function deriveStartTargetTemperature(shot) {
+  if (isManualShot(shot)) return null;
+
   const samples = shot?.samples;
   if (!Array.isArray(samples)) return null;
 

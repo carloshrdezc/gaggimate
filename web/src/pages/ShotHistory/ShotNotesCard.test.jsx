@@ -29,7 +29,9 @@ import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import ShotNotesCard from './ShotNotesCard.jsx';
 
 function renderCard(shotOverrides = {}) {
-  const shot = { id: 'shot-1', source: 'gaggimate', ...shotOverrides };
+  // profileId mirrors what the firmware stamps into the shot header for a
+  // profile-based shot; a manual shot carries the literal 'manual' instead.
+  const shot = { id: 'shot-1', source: 'gaggimate', profileId: 'profile-1', ...shotOverrides };
   return render(h(ApiServiceContext.Provider, { value: {} }, h(ShotNotesCard, { shot })));
 }
 
@@ -66,6 +68,32 @@ describe('ShotNotesCard — start target temperature', () => {
 
     await waitFor(() => expect(screen.getByText('Start Target Temperature')).toBeTruthy());
     expect(screen.getByText('N/A')).toBeTruthy();
+  });
+
+  // The firmware writes sample.tt for manual shots too, so a manual shot pulled
+  // at a real setpoint has plausible tt samples. It must still show N/A: there
+  // was no profile-requested start target.
+  test('manual shot shows N/A even though its samples carry a plausible target', async () => {
+    renderCard({
+      profileId: 'manual',
+      profile: 'Manual',
+      samples: [
+        { t: 0, tt: 93.5, ct: 92.1 },
+        { t: 250, tt: 93.5, ct: 92.4 },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText('Start Target Temperature')).toBeTruthy());
+    expect(screen.getByText('N/A')).toBeTruthy();
+    expect(screen.queryByText('93.5 °C')).toBeNull();
+  });
+
+  test('shot with no profile identity is treated as manual and shows N/A', async () => {
+    renderCard({ profileId: '', samples: [{ t: 0, tt: 93.5 }] });
+
+    await waitFor(() => expect(screen.getByText('Start Target Temperature')).toBeTruthy());
+    expect(screen.getByText('N/A')).toBeTruthy();
+    expect(screen.queryByText('93.5 °C')).toBeNull();
   });
 
   test('shows only the START target for a phase-changing profile', async () => {
