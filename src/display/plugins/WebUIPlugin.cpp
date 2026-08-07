@@ -839,6 +839,8 @@ void WebUIPlugin::loop() {
         doc["tp"] = "evt:status";
         doc["ct"] = controller->getCurrentTemp();
         doc["tt"] = controller->getTargetTemp();
+        doc["bto"] = controller->getBrewTemperatureOverrideTarget();
+        doc["bte"] = controller->isBrewTemperatureOverrideEnabled() ? 1 : 0;
         doc["pr"] = controller->getCurrentPressure();
         doc["fl"] = controller->getCurrentPumpFlow();
         // Send null (not 0) when no target is applicable in the current mode —
@@ -1551,6 +1553,7 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                              (msgType == "req:change-brew-target" && String(field) == "target") ||
                              (msgType == "req:dose:set" && String(field) == "grams") ||
                              (msgType == "req:manual-grind:set" && String(field) == "value") ||
+                             (msgType == "req:brew-temperature:set" && String(field) == "temperature") ||
                              (msgType == "req:manual:update") ||
                              (msgType == "req:autotune-start" && (String(field) == "time" || String(field) == "samples"));
         if (!applies)
@@ -1559,7 +1562,8 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                               (msgType == "req:change-mode" && String(field) == "mode") ||
                               (msgType == "req:change-brew-target" && String(field) == "target") ||
                               (msgType == "req:dose:set" && String(field) == "grams") ||
-                              (msgType == "req:manual-grind:set" && String(field) == "value");
+                              (msgType == "req:manual-grind:set" && String(field) == "value") ||
+                              (msgType == "req:brew-temperature:set" && String(field) == "temperature");
         JsonVariantConst value = doc[field];
         if (value.isNull()) {
             if (required)
@@ -1614,6 +1618,17 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         controller->raiseTemp();
     } else if (msgType == "req:lower-temp") {
         controller->lowerTemp();
+    } else if (msgType == "req:brew-temperature:set") {
+        JsonDocument response;
+        response["tp"] = "res:brew-temperature:set";
+        response["rid"] = doc["rid"].as<String>();
+        const JsonVariantConst temperature = doc["temperature"];
+        response["ok"] = temperature.is<float>() || temperature.is<int>()
+                             ? controller->setBrewTemperatureOverride(temperature.as<float>())
+                             : false;
+        response["temperature"] = controller->getBrewTemperatureOverrideTarget();
+        response["override"] = controller->isBrewTemperatureOverrideEnabled();
+        sendResponse(clientId, response);
     } else if (msgType == "req:raise-grind-target") {
         controller->raiseGrindTarget();
     } else if (msgType == "req:lower-grind-target") {

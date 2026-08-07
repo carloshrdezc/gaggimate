@@ -81,6 +81,7 @@ class Controller {
 
     void setMode(int newMode);
     void setTargetTemp(float temperature);
+    bool setBrewTemperatureOverride(float temperature);
     void setPressureScale();
     void setPumpModelCoeffs();
     void setTargetGrindDuration(int duration);
@@ -90,6 +91,8 @@ class Controller {
     int getMode() const;
 
     float getTargetTemp() const;
+    float getBrewTemperatureOverrideTarget() const;
+    bool isBrewTemperatureOverrideEnabled() const;
     int getTargetGrindDuration() const;
     int getManualTargetType() const { return settings.getManualTargetType(); }
     float getManualPressure() const { return settings.getManualPressure(); }

@@ -140,6 +140,14 @@ void Settings::load() {
     timezone = preferences.getString("tz", DEFAULT_TIMEZONE);
     clock24hFormat = preferences.getBool("clk_24h", true);
     selectedProfile = preferences.getString("sp", "");
+    brewTemperatureOverrideEnabled = preferences.getBool("bto_en", false);
+    brewTemperatureOverride = preferences.getFloat("bto", 0.0f);
+    brewTemperatureOverrideProfile = preferences.getString("bto_p", "");
+    if (!brewTemperatureOverrideEnabled || brewTemperatureOverrideProfile.isEmpty()) {
+        brewTemperatureOverrideEnabled = false;
+        brewTemperatureOverride = 0.0f;
+        brewTemperatureOverrideProfile = "";
+    }
     selectedBean = preferences.getString("sb", "");
     selectedGrinder = preferences.getString("sg", "");
     favoritedProfiles = cleanProfileIds(explode(preferences.getString("fp", ""), ','), "favoritedProfiles");
@@ -588,6 +596,24 @@ void Settings::setClockFormat(bool clock_24h_format) {
 void Settings::setSelectedProfile(String selected_profile) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
     assignUnderSelectedNameLock(this->selectedProfile, std::move(selected_profile));
+    save();
+}
+
+String Settings::getBrewTemperatureOverrideProfile() const { return copyUnderSelectedNameLock(brewTemperatureOverrideProfile); }
+
+void Settings::setBrewTemperatureOverride(const String &profileId, const float temperature) {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+    brewTemperatureOverrideEnabled = true;
+    brewTemperatureOverride = temperature;
+    assignUnderSelectedNameLock(brewTemperatureOverrideProfile, String(profileId));
+    save();
+}
+
+void Settings::clearBrewTemperatureOverride() {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+    brewTemperatureOverrideEnabled = false;
+    brewTemperatureOverride = 0.0f;
+    assignUnderSelectedNameLock(brewTemperatureOverrideProfile, String(""));
     save();
 }
 
@@ -1072,6 +1098,8 @@ Settings::PersistenceSnapshot Settings::takePersistenceSnapshot() {
     snapshot.altRelayConfigured = altRelayConfigured;
     snapshot.cloudRelayEnabled = cloudRelayEnabled;
     snapshot.localAuthProvisioned = localAuthProvisioned;
+    snapshot.brewTemperatureOverrideEnabled = brewTemperatureOverrideEnabled;
+    snapshot.brewTemperatureOverride = brewTemperatureOverride;
     SemaphoreHandle_t stringLock = ensureSelectedNameMutex();
     if (stringLock != nullptr)
         xSemaphoreTake(stringLock, portMAX_DELAY);
@@ -1090,6 +1118,7 @@ Settings::PersistenceSnapshot Settings::takePersistenceSnapshot() {
     snapshot.homeAssistantPassword = homeAssistantPassword;
     snapshot.timezone = timezone;
     snapshot.selectedProfile = selectedProfile;
+    snapshot.brewTemperatureOverrideProfile = brewTemperatureOverrideProfile;
     snapshot.selectedBean = selectedBean;
     snapshot.selectedGrinder = selectedGrinder;
     snapshot.cloudRelayUrl = cloudRelayUrl;
@@ -1164,6 +1193,9 @@ void Settings::doSave() {
     preferences.putString("tz", snapshot.timezone);
     preferences.putBool("clk_24h", snapshot.clock24hFormat);
     preferences.putString("sp", snapshot.selectedProfile);
+    preferences.putBool("bto_en", snapshot.brewTemperatureOverrideEnabled);
+    preferences.putFloat("bto", snapshot.brewTemperatureOverride);
+    preferences.putString("bto_p", snapshot.brewTemperatureOverrideProfile);
     preferences.putString("sb", snapshot.selectedBean);
     preferences.putString("sg", snapshot.selectedGrinder);
     preferences.putInt("sbt", snapshot.standbyTimeout);

@@ -466,7 +466,10 @@ bool ProfileManager::profileExists(const String &uuid) { return _fs->exists(prof
 
 void ProfileManager::selectProfile(const String &uuid) {
     ESP_LOGI("ProfileManager", "Selecting profile %s", uuid.c_str());
-    _settings.setSelectedProfile(uuid);
+    _settings.batchUpdate([&uuid](Settings *settings) {
+        settings->setSelectedProfile(uuid);
+        settings->clearBrewTemperatureOverride();
+    });
     selectedProfile = Profile{};
     loadSelectedProfile(selectedProfile);
     _plugin_manager->trigger(EventIds::PROFILES_PROFILE_SELECT, "id", uuid);

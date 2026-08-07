@@ -97,6 +97,7 @@ channels:
           - $ref: '#/components/messages/HistoryRebuildResponse'
           - $ref: '#/components/messages/FlushStartResponse'
           - $ref: '#/components/messages/AuthResponse'
+          - $ref: '#/components/messages/BrewTemperatureSetResponse'
     publish:
       description: Messages sent from the client to the server.
       message:
@@ -123,6 +124,7 @@ channels:
           - $ref: '#/components/messages/StandbyOnBrewSetRequest'
           - $ref: '#/components/messages/DoseSetRequest'
           - $ref: '#/components/messages/ManualGrindSetRequest'
+          - $ref: '#/components/messages/BrewTemperatureSetRequest'
           - $ref: '#/components/messages/BeansSelectRequest'
           - $ref: '#/components/messages/FlushStartRequest'
           - $ref: '#/components/messages/ProfilesListRequest'
@@ -166,6 +168,13 @@ components:
         tt:
           type: number
           description: Target temperature
+        bto:
+          type: number
+          description: Canonical selected-profile brew root temperature after applying the device-authoritative override when enabled.
+        bte:
+          type: integer
+          enum: [0, 1]
+          description: Selected-profile brew-temperature override provenance; 1 when bto is an explicit persisted override, including when it equals the profile root temperature.
         pr:
           type: number
           description: Current pressure
@@ -1163,6 +1172,41 @@ components:
           value:
             type: number
         required: [tp, value]
+    BrewTemperatureSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Set the persisted device-authoritative recipe-temperature override for
+          the selected profile root (0 <= temperature <= 160). The request is
+          rejected while a brew process is active. It never mutates profile JSON,
+          manual, steam, or water temperatures. A profile selection clears it.
+        properties:
+          tp:
+            type: string
+            enum: ['req:brew-temperature:set']
+          rid:
+            type: string
+          temperature:
+            type: number
+        required: [tp, temperature]
+    BrewTemperatureSetResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:brew-temperature:set']
+          rid:
+            type: string
+          ok:
+            type: boolean
+          temperature:
+            type: number
+          override:
+            type: boolean
+        required: [tp, ok, temperature, override]
     BeansSelectRequest:
       x-since-version: 'unknown'
       payload:

@@ -716,7 +716,7 @@ float Controller::getTargetTemp() const {
         // label rather than duplicated — identical behaviour, no branch clone.
         case MODE_STANDBY:
         case MODE_BREW:
-            return profileManager->getSelectedProfile().temperature;
+            return getBrewTemperatureOverrideTarget();
         case MODE_STEAM:
             return settings.getTargetSteamTemp();
         case MODE_WATER:
@@ -733,14 +733,14 @@ float Controller::getTargetTemp() const {
 
     switch (mode) {
     case MODE_STANDBY:
-        result = profileManager->getSelectedProfile().temperature;
+        result = getBrewTemperatureOverrideTarget();
         break;
     case MODE_BREW:
         if (proc != nullptr && proc->isActive() && proc->getType() == MODE_BREW) {
             auto brewProcess = static_cast<BrewProcess *>(proc);
             result = brewProcess->getTemperature();
         } else {
-            result = profileManager->getSelectedProfile().temperature;
+            result = getBrewTemperatureOverrideTarget();
         }
         break;
     case MODE_STEAM:
@@ -882,11 +882,26 @@ bool Controller::hasTargetFlow() const {
     return hasPumpTarget();
 }
 
+float Controller::getBrewTemperatureOverrideTarget() const {
+    const Profile &profile = profileManager->getSelectedProfile();
+    return settings.isBrewTemperatureOverrideEnabled() && settings.getBrewTemperatureOverrideProfile() == profile.id
+               ? settings.getBrewTemperatureOverride()
+               : profile.temperature;
+}
+
+bool Controller::isBrewTemperatureOverrideEnabled() const {
+    return settings.isBrewTemperatureOverrideEnabled() &&
+           settings.getBrewTemperatureOverrideProfile() == profileManager->getSelectedProfile().id;
+}
+
 void Controller::setTargetTemp(float temperature) {
+    if (mode == MODE_BREW) {
+        setBrewTemperatureOverride(temperature);
+        return;
+    }
     pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", temperature);
     switch (mode) {
     case MODE_BREW:
-        profileManager->getSelectedProfile().temperature = temperature;
         break;
     case MODE_STEAM:
         settings.setTargetSteamTemp(static_cast<int>(temperature));
@@ -902,6 +917,16 @@ void Controller::setTargetTemp(float temperature) {
     default:;
     }
     updateLastAction();
+}
+
+bool Controller::setBrewTemperatureOverride(const float temperature) {
+    if (mode != MODE_BREW || isActiveSafe() || temperature < MIN_TEMP || temperature > MAX_TEMP) {
+        return false;
+    }
+    settings.setBrewTemperatureOverride(profileManager->getSelectedProfile().id, temperature);
+    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", temperature);
+    updateLastAction();
+    return true;
 }
 
 void Controller::setPressureScale(void) {
@@ -1209,13 +1234,14 @@ void Controller::activate() {
         vTaskDelay(pdMS_TO_TICKS(200));
     }
     switch (mode) {
-    case MODE_BREW:
-        startProcess(new BrewProcess(profileManager->getSelectedProfile(),
-                                     profileManager->getSelectedProfile().isVolumetric() && isVolumetricAvailable()
-                                         ? ProcessTarget::VOLUMETRIC
-                                         : ProcessTarget::TIME,
-                                     settings.getBrewDelay()));
+    case MODE_BREW: {
+        Profile brewProfile = profileManager->getSelectedProfile();
+        brewProfile.temperature = getBrewTemperatureOverrideTarget();
+        startProcess(new BrewProcess(
+            brewProfile, brewProfile.isVolumetric() && isVolumetricAvailable() ? ProcessTarget::VOLUMETRIC : ProcessTarget::TIME,
+            settings.getBrewDelay()));
         break;
+    }
     case MODE_STEAM:
         startProcess(new SteamProcess(STEAM_SAFETY_DURATION_MS, settings.getSteamPumpPercentage()));
         break;
