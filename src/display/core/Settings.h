@@ -50,6 +50,12 @@ struct AutoWakeupSchedule {
 class Settings;
 using SettingsCallback = std::function<void(Settings *)>;
 
+struct BrewTemperatureOverrideSnapshot {
+    bool enabled = false;
+    float temperature = 0.0f;
+    String profileId;
+};
+
 class Settings {
   public:
     Settings();
@@ -180,6 +186,9 @@ class Settings {
     float getManualPressure() const { return manualPressure; }
     float getManualFlow() const { return manualFlow; }
     int getManualTemperature() const { return manualTemperature; }
+    // PRO-629: the AsyncTCP and control tasks must observe these persisted
+    // fields together, never as a mixed override tuple.
+    BrewTemperatureOverrideSnapshot getBrewTemperatureOverrideSnapshot() const;
     void setFlushDuration(int flush_duration);
     void setCloudRelayUrl(const String &url);
     void setCloudRelayToken(const String &token);
@@ -231,6 +240,8 @@ class Settings {
     void setTimezone(String timezone);
     void setClockFormat(bool format_24h);
     void setSelectedProfile(String selected_profile);
+    void setBrewTemperatureOverride(const String &profileId, float temperature);
+    void clearBrewTemperatureOverride();
     void setSelectedBean(String selected_bean);
     void setSelectedGrinder(String selected_grinder);
     void setFavoritedProfiles(std::vector<String> favorited_profiles);
@@ -269,14 +280,16 @@ class Settings {
         int standbyBrightnessTimeout, wifiApTimeout, themeMode, historyIndex, flushDuration, manualTargetType;
         int manualTemperature, sunriseR, sunriseG, sunriseB, sunriseW, sunriseExtBrightness, emptyTankDistance;
         int fullTankDistance, altRelayFunction;
-        float pressureScaling, steamPumpPercentage, steamPumpCutoff, manualPressure, manualFlow;
+        float pressureScaling, steamPumpPercentage, steamPumpCutoff, manualPressure, manualFlow, brewTemperatureOverride;
         double targetGrindVolume, brewDelay, grindDelay, doseGrams, manualGrindSetting;
         bool delayAdjust, homekit, volumetricTarget, allowYieldOverride, autoSteamEnabled, standbyOnBrewEnabled, boilerFillActive;
         bool smartGrindActive, diagnosticLogEnabled, smartGrindToggle, homeAssistant, momentaryButtons;
-        bool clock24hFormat, autowakeupEnabled, altRelayConfigured, cloudRelayEnabled, localAuthProvisioned;
+        bool clock24hFormat, autowakeupEnabled, altRelayConfigured, cloudRelayEnabled, localAuthProvisioned,
+            brewTemperatureOverrideEnabled;
         String pid, pumpModelCoeffs, wifiSsid, wifiPassword, mdnsName, otaChannel, installedChannel, savedScale;
         String smartGrindIp, homeAssistantIP, homeAssistantTopic, homeAssistantUser, homeAssistantPassword, timezone;
-        String selectedProfile, selectedBean, selectedGrinder, favoritedProfiles, profileOrder, cloudRelayUrl, cloudRelayToken;
+        String selectedProfile, selectedBean, selectedGrinder, favoritedProfiles, profileOrder, cloudRelayUrl, cloudRelayToken,
+            brewTemperatureOverrideProfile;
         String localAdminToken;
         std::vector<AutoWakeupSchedule> autowakeupSchedules;
     };
@@ -287,6 +300,11 @@ class Settings {
     SemaphoreHandle_t persistenceMutex = nullptr;
 
     String selectedProfile;
+    // PRO-629: device-authoritative recipe-temperature edit. The explicit flag
+    // distinguishes an override equal to the profile root from no override.
+    bool brewTemperatureOverrideEnabled = false;
+    float brewTemperatureOverride = 0.0f;
+    String brewTemperatureOverrideProfile;
     int targetSteamTemp = 155;
     int targetWaterTemp = 80;
     int temperatureOffset = DEFAULT_TEMPERATURE_OFFSET;
@@ -398,7 +416,7 @@ class Settings {
 
     void doSave();
     PersistenceSnapshot takePersistenceSnapshot();
-    SemaphoreHandle_t ensurePersistenceMutex();
+    SemaphoreHandle_t ensurePersistenceMutex() const;
     // PRO-427: lazily create selectedNameMutex on first use and return it (may be
     // null if creation fails, in which case callers degrade to lock-free access).
     // const because the const selected-name getters need to lock; the handle is

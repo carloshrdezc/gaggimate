@@ -28,6 +28,7 @@
 //   `req:beans:load`     — the client reads whole beans from the req:beans:list payload
 //   `req:history:list`   — superseded by HTTP GET /api/history/index.bin
 //   `req:history:get`    — replies "use HTTP /api/history?id=<id>" (see /api/history/<id>.slog)
+//   `req:brew-temperature:set` — firmware contract for the forthcoming Dashboard control (PRO-630)
 // PRO-610-ALLOWLIST-END
 //
 // Since there was nothing to fix, this test locks the audited *client-side*

@@ -512,7 +512,7 @@ class RealTree(unittest.TestCase):
         # (b) those are exactly the handlers with no web caller today, so the
         # block cannot silently over- or under-cover.
         allow = clientless_handlers()
-        self.assertEqual(allow, frozenset({"req:beans:load", "req:history:list", "req:history:get"}))
+        self.assertEqual(allow, frozenset({"req:beans:load", "req:history:list", "req:history:get", "req:brew-temperature:set"}))
         self.assertEqual(self.sets["handlers"] - self.sets["client"], set(allow))
 
     def test_missing_allow_list_block_is_a_loud_error(self):
