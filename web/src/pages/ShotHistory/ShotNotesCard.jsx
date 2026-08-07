@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useCallback } from 'preact/hooks';
+import { useState, useEffect, useContext, useCallback, useMemo } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
 import { Spinner } from '../../components/Spinner.jsx';
@@ -10,6 +10,10 @@ import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { listBeans } from '../../utils/beanManager.js';
 import { listGrinders, recordGrinder, resolveGrinderPrefill } from '../../utils/grinderManager.js';
 import { formatTenPointRating } from '../../utils/ratings.js';
+import {
+  deriveStartTargetTemperature,
+  formatStartTargetTemperature,
+} from './startTargetTemperature.js';
 
 export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
   const apiService = useContext(ApiServiceContext);
@@ -49,6 +53,10 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
     }
     return '';
   }, []);
+
+  // PRO-631: read-only, derived from the shot's own log samples on every render —
+  // never persisted into the mutable notes blob, so it stays historically correct.
+  const startTargetTemperature = useMemo(() => deriveStartTargetTemperature(shot), [shot]);
 
   // Load notes ONLY on component mount
   useEffect(() => {
@@ -511,6 +519,21 @@ export default function ShotNotesCard({ shot, onNotesUpdate, onNotesLoaded }) {
               {notes.balanceTaste}
             </div>
           )}
+        </div>
+
+        {/* Start target temperature (PRO-631) — derived from the shot log's first
+            valid target sample, never editable and never saved into the notes blob.
+            "Start" is literal: later phases may request a different target. */}
+        <div className='flex flex-col gap-2'>
+          <label className='font-nd-mono text-[11px] uppercase tracking-[0.08em] text-[var(--text-secondary,#999)]'>
+            Start Target Temperature
+          </label>
+          <div
+            className='nd-input bg-[var(--home-surface-muted,rgba(5,5,5,0.95))] cursor-default'
+            aria-label={`Start target temperature: ${formatStartTargetTemperature(startTargetTemperature)}`}
+          >
+            {formatStartTargetTemperature(startTargetTemperature)}
+          </div>
         </div>
       </div>
 
