@@ -63,6 +63,24 @@ test('gives numeric edit buttons an accessible name that identifies their field'
   expect(document.activeElement).toBe(input);
 });
 
+test('does not suppress the focus-visible outline while editing a numeric value', () => {
+  render(h(EditableNumBlock, {
+    label: 'GRIND',
+    value: 18,
+    unit: 'g',
+    step: 0.1,
+    min: 0,
+    max: 30,
+    onCommit: vi.fn(),
+  }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit GRIND' }));
+  const input = screen.getByRole('textbox', { name: 'Edit GRIND' });
+  input.focus();
+
+  expect(input.style.outline).not.toBe('none');
+});
+
 test('returns focus to the numeric edit trigger after confirming with Enter', () => {
   render(h(EditableNumBlock, {
     label: 'GRIND',

@@ -933,7 +933,6 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
             border: '1px solid var(--dm-accent)',
             borderRadius: 4,
             padding: '4px 6px',
-            outline: 'none',
             lineHeight: 1,
           }}
         />
