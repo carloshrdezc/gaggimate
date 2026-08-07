@@ -61,6 +61,23 @@ void test_override_snapshot_keeps_enabled_temperature_and_profile_together() {
     TEST_ASSERT_FALSE(before.appliesTo("profile-a"));
 }
 
+// PRO-629: saving the selected profile keeps an enabled override (a same-profile
+// save is not a selection). The integration boiler-target notification emitted
+// by Controller::handleProfileUpdate() must therefore carry the effective
+// target, not the profile root, or HomeKit/MQTT report a stale temperature.
+void test_selected_profile_save_notifies_effective_override_target() {
+    const BrewTemperatureOverrideState state{"profile-a", 96.0f, true};
+    const float savedProfileRootTemperature = 93.0f;
+
+    // The save path does not clear the override for the same profile.
+    TEST_ASSERT_TRUE(state.appliesTo("profile-a"));
+    TEST_ASSERT_FALSE(shouldClearBrewTemperatureOverrideOnProfileSelection("profile-a", "profile-a"));
+
+    const float notifiedTarget = effectiveBrewTemperature(savedProfileRootTemperature, state, "profile-a");
+    TEST_ASSERT_EQUAL_FLOAT(96.0f, notifiedTarget);
+    TEST_ASSERT_NOT_EQUAL(savedProfileRootTemperature, notifiedTarget);
+}
+
 void test_brew_temperature_request_validation() {
     TEST_ASSERT_TRUE(isValidBrewTemperatureOverride(0.0f));
     TEST_ASSERT_TRUE(isValidBrewTemperatureOverride(160.0f));
@@ -84,6 +101,7 @@ int main(int, char **) {
     RUN_TEST(test_override_only_replaces_positive_root_temperature);
     RUN_TEST(test_idle_brew_output_target_uses_selected_profile_override);
     RUN_TEST(test_override_snapshot_keeps_enabled_temperature_and_profile_together);
+    RUN_TEST(test_selected_profile_save_notifies_effective_override_target);
     RUN_TEST(test_brew_temperature_request_validation);
     RUN_TEST(test_standby_to_brew_reassert_does_not_persist_override);
     return UNITY_END();

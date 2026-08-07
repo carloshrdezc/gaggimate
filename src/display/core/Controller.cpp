@@ -1765,7 +1765,12 @@ void Controller::handleSteamButton(int steamButtonStatus) {
 }
 
 void Controller::handleProfileUpdate() {
-    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", profileManager->getSelectedProfile().temperature);
+    // PRO-629: the boiler-target notification must carry the same effective
+    // target that boiler control, WebSocket status, and the next shot use. A
+    // selected profile can be saved while its override stays enabled (a
+    // same-profile save deliberately no longer clears it), so emitting the
+    // profile root here would report a stale target to HomeKit/MQTT/the UI.
+    pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", getBrewTemperatureOverrideTarget());
     pluginManager->trigger(EventIds::CONTROLLER_TARGET_DURATION_CHANGE, "value",
                            profileManager->getSelectedProfile().getTotalDuration());
     pluginManager->trigger(EventIds::CONTROLLER_TARGET_VOLUME_CHANGE, "value",
