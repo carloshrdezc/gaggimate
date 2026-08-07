@@ -1137,7 +1137,9 @@ void Controller::updateControl() {
     if (targetTemp == 0.0f) {
         switch (mode) {
         case MODE_BREW:
-            targetTemp = profileManager->getSelectedProfile().temperature;
+            // Keep the idle-Brew output-control fallback aligned with
+            // getTargetTemp(): no BrewProcess exists yet to provide a target.
+            targetTemp = getBrewTemperatureOverrideTarget();
             break;
         case MODE_STEAM:
             targetTemp = settings.getTargetSteamTemp();
