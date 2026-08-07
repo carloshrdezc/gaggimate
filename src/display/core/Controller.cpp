@@ -1605,10 +1605,17 @@ void Controller::onOTAUpdate() {
 void Controller::onProfileSave() const { profileManager->saveProfile(profileManager->getSelectedProfile()); }
 
 void Controller::onProfileSaveAsNew() {
+    String oldSelectedId = profileManager->getSelectedProfile().id;
     Profile &profile = profileManager->getSelectedProfile();
     profile.label = "Copy of " + profileManager->getSelectedProfile().label;
     profile.id = generateShortID();
-    settings.setSelectedProfile(profile.id);
+    const bool profileChanged = shouldClearBrewTemperatureOverrideOnProfileSelection(oldSelectedId.c_str(), profile.id.c_str());
+    settings.batchUpdate([&profile, profileChanged](Settings *settings) {
+        settings->setSelectedProfile(profile.id);
+        if (profileChanged) {
+            settings->clearBrewTemperatureOverride();
+        }
+    });
     profileManager->saveProfile(profileManager->getSelectedProfile());
     profileManager->addFavoritedProfile(profile.id);
 }
