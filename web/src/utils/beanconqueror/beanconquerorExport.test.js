@@ -253,6 +253,74 @@ describe('toBeanconquerorBackup — shot mapping', () => {
   });
 });
 
+describe('toBeanconquerorBackup — grinder (MILL) resolution precedence', () => {
+  // Mirrors the shot-note contract in utils/grinderManager.js (inferGrinderForShot):
+  // notes.grinderName -> shot.grinderName -> notes.grinder -> shot.grinder,
+  // then the placeholder. The device stamps the authoritative grinder under
+  // `grinderName` (PRO-428), so it must outrank the user-entered `grinder`.
+  function millNamesFor(shot) {
+    return toBeanconquerorBackup({ beans: [BEAN], shots: [shot] }).MILL.map(mill => mill.name);
+  }
+
+  test('uses the device-recorded notes.grinderName when no other grinder field exists', () => {
+    expect(
+      millNamesFor({ ...SHOT, notes: { beanId: 'bean-house', grinderName: 'Niche Zero' } }),
+    ).toEqual(['Niche Zero']);
+  });
+
+  test('uses a top-level hoisted shot.grinderName', () => {
+    expect(millNamesFor({ ...SHOT, notes: { beanId: 'bean-house' }, grinderName: 'DF64' })).toEqual(
+      ['DF64'],
+    );
+  });
+
+  test('device-recorded notes.grinderName outranks user-entered notes.grinder', () => {
+    expect(
+      millNamesFor({
+        ...SHOT,
+        notes: { ...SHOT.notes, grinder: 'Old Guess', grinderName: 'Niche Zero' },
+      }),
+    ).toEqual(['Niche Zero']);
+  });
+
+  test('hoisted shot.grinderName outranks user-entered notes.grinder', () => {
+    expect(
+      millNamesFor({
+        ...SHOT,
+        notes: { ...SHOT.notes, grinder: 'Old Guess' },
+        grinderName: 'DF64',
+      }),
+    ).toEqual(['DF64']);
+  });
+
+  test('still falls back to the user-entered notes.grinder', () => {
+    expect(millNamesFor({ ...SHOT, notes: { ...SHOT.notes, grinder: 'Niche Zero' } })).toEqual([
+      'Niche Zero',
+    ]);
+  });
+
+  test('still falls back to a top-level shot.grinder', () => {
+    expect(millNamesFor({ ...SHOT, notes: { beanId: 'bean-house' }, grinder: 'DF64' })).toEqual([
+      'DF64',
+    ]);
+  });
+
+  test('falls back to the placeholder mill when no grinder is recorded anywhere', () => {
+    expect(millNamesFor({ ...SHOT, notes: { beanId: 'bean-house' } })).toEqual([
+      'GaggiMate (unknown grinder)',
+    ]);
+  });
+
+  test('a blank device-recorded grinderName falls through to the next source', () => {
+    expect(
+      millNamesFor({
+        ...SHOT,
+        notes: { ...SHOT.notes, grinderName: '   ', grinder: 'Niche Zero' },
+      }),
+    ).toEqual(['Niche Zero']);
+  });
+});
+
 describe('toBeanconquerorBackup — deterministic ids', () => {
   test('two runs over the same input produce byte-identical output', () => {
     expect(JSON.stringify(backupOf())).toBe(JSON.stringify(backupOf()));

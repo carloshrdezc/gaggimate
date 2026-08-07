@@ -293,7 +293,17 @@ export function toBeanconquerorBackup(data = {}) {
   }
 
   function resolveMillUuid(shot) {
-    const name = text(shot?.notes?.grinder || shot?.grinder) || PLACEHOLDER_MILL_NAME;
+    // Same shot-note precedence as grinderManager's inferGrinderForShot: the
+    // DEVICE-RECORDED grinder (`grinderName`, PRO-428 firmware contract) is
+    // authoritative and outranks the user-entered `grinder` field. No
+    // localStorage selection-log fallback here — this serializer stays pure, so
+    // an unresolved grinder falls through to the placeholder mill instead.
+    const name =
+      text(shot?.notes?.grinderName) ||
+      text(shot?.grinderName) ||
+      text(shot?.notes?.grinder) ||
+      text(shot?.grinder) ||
+      PLACEHOLDER_MILL_NAME;
     const uuid = millUuid(name);
     if (!millRecords.has(uuid)) {
       millRecords.set(uuid, toMillRecord(name, uuid, fallbackTimestamp));
