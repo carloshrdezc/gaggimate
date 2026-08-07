@@ -4,7 +4,7 @@ import { h } from 'preact';
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 
-import { ModeRail, getRecipeGridStyle, graphLegendRowStyle } from './DashboardMerged.jsx';
+import { EditableNumBlock, ModeRail, getRecipeGridStyle, graphLegendRowStyle } from './DashboardMerged.jsx';
 
 afterEach(cleanup);
 
@@ -40,4 +40,20 @@ test('allows the live extraction legend to wrap instead of clipping at narrow wi
 test('gives dashboard controls a visible focus indicator', () => {
   const stylesheet = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8');
   expect(stylesheet).toMatch(/\.dm-shell :is\(button, input, select, a\):focus-visible/);
+});
+
+test('gives numeric edit buttons an accessible name that identifies their field', () => {
+  render(h(EditableNumBlock, {
+    label: 'GRIND',
+    value: 18,
+    unit: 'g',
+    step: 0.1,
+    min: 0,
+    max: 30,
+    onCommit: vi.fn(),
+  }));
+
+  const editButton = screen.getByRole('button', { name: 'Edit GRIND' });
+  editButton.focus();
+  expect(document.activeElement).toBe(editButton);
 });

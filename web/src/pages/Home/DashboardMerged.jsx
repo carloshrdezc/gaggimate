@@ -830,7 +830,7 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
+export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
 
@@ -926,6 +926,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
             type='button'
+            aria-label={`Edit ${label}`}
             onClick={() => {
               // PRO-503: fire onTap BEFORE entering edit mode so a tap-away
               // without typing/Enter still records a fresh "confirmed" event
