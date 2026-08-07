@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { h } from 'preact';
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
@@ -33,4 +35,9 @@ test('uses a stacked recipe layout at mobile widths while preserving control ord
 
 test('allows the live extraction legend to wrap instead of clipping at narrow widths', () => {
   expect(graphLegendRowStyle.flexWrap).toBe('wrap');
+});
+
+test('gives dashboard controls a visible focus indicator', () => {
+  const stylesheet = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8');
+  expect(stylesheet).toMatch(/\.dm-shell :is\(button, input, select, a\):focus-visible/);
 });
