@@ -17,6 +17,12 @@ struct BrewTemperatureOverrideState {
     }
 };
 
+enum class BrewTemperatureTargetUpdate { PASSIVE_REASSERT, EXPLICIT_EDIT };
+
+constexpr bool shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate update) {
+    return update == BrewTemperatureTargetUpdate::EXPLICIT_EDIT;
+}
+
 inline float effectiveBrewTemperature(float profileTemperature, const BrewTemperatureOverrideState &overrideState,
                                       const std::string &selectedProfileId) {
     return overrideState.appliesTo(selectedProfileId) ? overrideState.temperature : profileTemperature;

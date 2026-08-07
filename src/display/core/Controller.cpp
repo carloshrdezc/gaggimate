@@ -18,6 +18,7 @@
 #include <ctime>
 #include <display/config.h>
 #include <display/config/features.h>
+#include <display/core/BrewTemperatureOverridePolicy.h>
 #include <display/core/EventIds.h>
 #include <display/core/GmHeapDiag.h> // PRO-566: gated internal-DRAM checkpoints (no-op unless -DGM_HEAP_DIAG_ENABLED)
 #ifndef GAGGIMATE_SIM
@@ -76,6 +77,9 @@
 #endif
 
 const String LOG_TAG = F("Controller");
+
+static_assert(!shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate::PASSIVE_REASSERT),
+              "setMode target reassertions must not persist brew overrides");
 
 void Controller::setup() {
     GM_HEAP_DIAG("setup() begin"); // PRO-566
@@ -895,10 +899,6 @@ bool Controller::isBrewTemperatureOverrideEnabled() const {
 }
 
 void Controller::setTargetTemp(float temperature) {
-    if (mode == MODE_BREW) {
-        setBrewTemperatureOverride(temperature);
-        return;
-    }
     pluginManager->trigger(EventIds::BOILER_TARGET_TEMPERATURE_CHANGE, "value", temperature);
     switch (mode) {
     case MODE_BREW:
@@ -984,13 +984,21 @@ void Controller::updateManualTargets(int targetType, float pressure, float flow,
 void Controller::raiseTemp() {
     float temp = getTargetTemp();
     temp = constrain(temp + 1.0f, MIN_TEMP, MAX_TEMP);
-    setTargetTemp(temp);
+    if (mode == MODE_BREW) {
+        setBrewTemperatureOverride(temp);
+    } else {
+        setTargetTemp(temp);
+    }
 }
 
 void Controller::lowerTemp() {
     float temp = getTargetTemp();
     temp = constrain(temp - 1.0f, MIN_TEMP, MAX_TEMP);
-    setTargetTemp(temp);
+    if (mode == MODE_BREW) {
+        setBrewTemperatureOverride(temp);
+    } else {
+        setTargetTemp(temp);
+    }
 }
 
 void Controller::raiseBrewTarget() {

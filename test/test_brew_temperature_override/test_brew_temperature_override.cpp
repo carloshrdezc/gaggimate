@@ -27,11 +27,20 @@ void test_brew_temperature_request_validation() {
     TEST_ASSERT_FALSE(isValidBrewTemperatureOverride(160.1f));
 }
 
+// PRO-629: setMode() reasserts the effective target after a standby -> brew
+// transition. That passive reassertion must not create an explicit override;
+// only a user/API temperature edit is allowed to persist one.
+void test_standby_to_brew_reassert_does_not_persist_override() {
+    TEST_ASSERT_FALSE(shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate::PASSIVE_REASSERT));
+    TEST_ASSERT_TRUE(shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate::EXPLICIT_EDIT));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_override_is_explicit_even_when_equal_to_profile_temperature);
     RUN_TEST(test_profile_switch_clears_override_and_uses_new_profile_root);
     RUN_TEST(test_override_only_replaces_positive_root_temperature);
     RUN_TEST(test_brew_temperature_request_validation);
+    RUN_TEST(test_standby_to_brew_reassert_does_not_persist_override);
     return UNITY_END();
 }
