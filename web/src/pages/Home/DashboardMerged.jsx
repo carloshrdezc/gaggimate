@@ -24,6 +24,9 @@ import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
 import PropTypes from 'prop-types';
 import {
+  BREW_TEMPERATURE_PLACEHOLDER,
+  BREW_TEMPERATURE_UI_MAX,
+  BREW_TEMPERATURE_UI_MIN,
   MANUAL_FLOW_MAX,
   MANUAL_FLOW_MIN,
   MANUAL_PRESSURE_MAX,
@@ -36,10 +39,14 @@ import {
   MODE_STANDBY,
   MODE_STEAM,
   buildStandbyProfileCurve,
+  clampBrewTemperature,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
+  computeBrewTemperatureEditable,
   computeYieldEditable,
+  getBrewTemperatureHint,
+  getBrewTemperatureLockReason,
   getReadinessSummary,
   getYieldLockReason,
   getAvailableModeOptions,
@@ -49,6 +56,7 @@ import {
   getPrimaryActionState,
   getTemperatureRingMetrics,
   computeStandbyOnBrewButtonState,
+  resolveBrewTemperatureValue,
   shouldFireAutoSteamOnStop,
   shouldFireStandbyOnStop,
   shouldKeepManualDraftDirty,
@@ -830,7 +838,7 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
+export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint, disabledTitle }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
   const triggerRef = useRef(null);
@@ -888,7 +896,7 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span
             aria-disabled='true'
-            title="Turn on 'Allow yield override' in Settings to edit per shot"
+            title={disabledTitle ?? "Turn on 'Allow yield override' in Settings to edit per shot"}
             style={{
               fontFamily: 'var(--dm-font-display)',
               fontSize: 28,
@@ -1030,7 +1038,9 @@ const retryButtonStyle = {
 
 EditableNumBlock.propTypes = {
   label: PropTypes.string,
-  value: PropTypes.number,
+  // A string is allowed for the read-only/placeholder case (PRO-630): when the
+  // device has published no value there is no truthful number to render.
+  value: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   unit: PropTypes.string,
   hint: PropTypes.string,
   accent: PropTypes.string,
@@ -1041,6 +1051,7 @@ EditableNumBlock.propTypes = {
   onTap: PropTypes.func,
   disabled: PropTypes.bool,
   lockedHint: PropTypes.string,
+  disabledTitle: PropTypes.string,
 };
 
 // Format the current grind target for display. Mirrors ProcessControls'
@@ -1228,7 +1239,10 @@ GraphLegend.propTypes = {
 export function getRecipeGridStyle(isMobile) {
   return {
     display: 'grid',
-    gridTemplateColumns: isMobile ? '1fr' : '1fr auto 1fr auto 1fr auto 1fr',
+    // PRO-630: five fields (Grind · Dose › Temp › Yield › Scales) with four
+    // separators between them. Mobile stays a single stacked column so the extra
+    // field can't clip or overlap at narrow widths.
+    gridTemplateColumns: isMobile ? '1fr' : '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
     gap: 10,
     alignItems: 'center',
     padding: '12px 0',
@@ -1588,6 +1602,83 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     setYieldTargetState(v);
     try { api.send({ tp: 'req:change-brew-target', target: v }); } catch {}
   }, [api, yieldEditable]);
+
+  // Selected-profile brew temperature — device-authoritative (PRO-630/PRO-629).
+  //
+  // The device publishes the effective target as `bto` and its provenance as
+  // `bte` in every evt:status; that is the ONLY source of the displayed number.
+  // Unlike DOSE/GRIND there is deliberately no localStorage seed: a cached guess
+  // could replay a stale edit onto another profile, and legacy firmware that
+  // sends no `bto` must degrade to a read-only placeholder rather than claim a
+  // fabricated default. This is a separate concern from the manual-mode
+  // TEMPERATURE SETPOINT slider (req:manual:update) — the two never cross-write.
+  const brewTemperatureTarget = s.brewTemperatureOverrideTarget;
+  const brewTemperatureEditable = computeBrewTemperatureEditable({
+    connected,
+    mode,
+    active,
+    target: brewTemperatureTarget,
+  });
+  const brewTemperatureLockReason = getBrewTemperatureLockReason({
+    connected,
+    mode,
+    active,
+    target: brewTemperatureTarget,
+  });
+  // Optimistic value for an in-flight write only. It is replaced by the device's
+  // own echo on the response and dropped as soon as a status broadcast (or a
+  // profile switch) lands, so a local edit can never outlive the next
+  // evt:status — every browser converges on `bto`. Losing editability (brew
+  // starts, mode changes, socket drops) also drops it: a locked field must show
+  // the device's truth, never a value the device may have refused.
+  const [pendingBrewTemperature, setPendingBrewTemperature] = useState(null);
+  useEffect(() => {
+    setPendingBrewTemperature(null);
+  }, [
+    brewTemperatureTarget,
+    s.brewTemperatureOverrideEnabled,
+    s.selectedProfileId,
+    brewTemperatureEditable,
+  ]);
+
+  const brewTemperature = resolveBrewTemperatureValue({
+    connected,
+    target: brewTemperatureTarget,
+    pending: pendingBrewTemperature,
+  });
+  const brewTemperatureHint = getBrewTemperatureHint({
+    connected,
+    target: brewTemperatureTarget,
+    overrideEnabled: s.brewTemperatureOverrideEnabled,
+  });
+
+  const setBrewTemperature = useCallback(
+    async val => {
+      if (!brewTemperatureEditable) return;
+      const v = clampBrewTemperature(val);
+      setPendingBrewTemperature(v);
+      try {
+        const response = await api.request({ tp: 'req:brew-temperature:set', temperature: v });
+        if (response?.ok) {
+          // Show the device's echoed temperature (not our request value) so the
+          // number on screen is always one the device confirmed.
+          setPendingBrewTemperature(
+            Number.isFinite(response.temperature) ? response.temperature : v
+          );
+        } else {
+          // Device-authoritative reject — e.g. a brew started between the click
+          // and the response, or the mode changed. Never render a false success:
+          // drop the optimistic value and fall back to the broadcast `bto`.
+          setPendingBrewTemperature(null);
+        }
+      } catch (error) {
+        setPendingBrewTemperature(null);
+        console.error('Failed to set brew temperature:', error);
+      }
+    },
+    [api, brewTemperatureEditable]
+  );
+
   // Profile dropdown
   const [activeDropdown, setActiveDropdown] = useState(null); // 'profile' | 'bean' | null
   const [profileOptions, setProfileOptions] = useState([]);
@@ -2377,7 +2468,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
             )}
           </div>
 
-          {/* Grind → Dose → Yield → Scales */}
+          {/* Grind → Dose → Temp → Yield → Scales */}
           <div
             style={getRecipeGridStyle(isMobile)}
           >
@@ -2408,6 +2499,28 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               min={0.1}
               max={200}
               onCommit={setDose}
+            />
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            {/* Selected-profile brew temperature (PRO-630). Device-authoritative:
+                the value comes from evt:status `bto` and every commit fires
+                req:brew-temperature:set, whose res: reply the device may reject
+                (brew started, wrong mode) — a reject resyncs to the next status
+                instead of showing a false success. Locked while a brew is active
+                and outside Brew mode; read-only with a placeholder on firmware
+                that doesn't publish `bto`. Scope is the profile root/default
+                target — per-phase temperature curves stay firmware-owned. */}
+            <EditableNumBlock
+              label='TEMP'
+              value={brewTemperature ?? BREW_TEMPERATURE_PLACEHOLDER}
+              unit='°C'
+              hint={brewTemperatureHint}
+              step={0.5}
+              min={BREW_TEMPERATURE_UI_MIN}
+              max={BREW_TEMPERATURE_UI_MAX}
+              onCommit={setBrewTemperature}
+              disabled={!brewTemperatureEditable}
+              lockedHint={brewTemperatureLockReason}
+              disabledTitle='The machine owns this target: it can only be changed in Brew mode while no shot is running'
             />
             <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <EditableNumBlock

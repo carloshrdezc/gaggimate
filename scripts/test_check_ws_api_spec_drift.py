@@ -511,8 +511,12 @@ class RealTree(unittest.TestCase):
         # second copy; assert that (a) it parses to the three recorded orphans and
         # (b) those are exactly the handlers with no web caller today, so the
         # block cannot silently over- or under-cover.
+        #
+        # PRO-630 shrank the list back to three: `req:brew-temperature:set` was
+        # allow-listed while only the firmware side existed (PRO-629); the
+        # Dashboard TEMP control now calls it, so it is a normally-wired handler.
         allow = clientless_handlers()
-        self.assertEqual(allow, frozenset({"req:beans:load", "req:history:list", "req:history:get", "req:brew-temperature:set"}))
+        self.assertEqual(allow, frozenset({"req:beans:load", "req:history:list", "req:history:get"}))
         self.assertEqual(self.sets["handlers"] - self.sets["client"], set(allow))
 
     def test_missing_allow_list_block_is_a_loud_error(self):

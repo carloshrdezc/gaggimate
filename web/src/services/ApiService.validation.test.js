@@ -48,4 +48,26 @@ describe('WebSocket request validation (PRO-521)', () => {
       auto: true,
     });
   });
+
+  test('validates the PRO-630 brew-temperature:set payload against the firmware range', () => {
+    // Mirrors StrictValidationPolicy.h: `temperature` is required, must be a
+    // JSON number, and must sit in [0, 160] (constants.h MIN_TEMP/MAX_TEMP).
+    expect(validateWebSocketRequest({ tp: 'req:brew-temperature:set', temperature: 93.5 })).toEqual({
+      tp: 'req:brew-temperature:set',
+      temperature: 93.5,
+    });
+    expect(() => validateWebSocketRequest({ tp: 'req:brew-temperature:set' })).toThrow('temperature');
+    expect(() =>
+      validateWebSocketRequest({ tp: 'req:brew-temperature:set', temperature: '93' }),
+    ).toThrow('temperature');
+    expect(() =>
+      validateWebSocketRequest({ tp: 'req:brew-temperature:set', temperature: Number.NaN }),
+    ).toThrow('temperature');
+    expect(() =>
+      validateWebSocketRequest({ tp: 'req:brew-temperature:set', temperature: 161 }),
+    ).toThrow('temperature');
+    expect(() =>
+      validateWebSocketRequest({ tp: 'req:brew-temperature:set', temperature: -1 }),
+    ).toThrow('temperature');
+  });
 });
