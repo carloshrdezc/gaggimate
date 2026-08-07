@@ -1656,9 +1656,23 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     async val => {
       if (!brewTemperatureEditable) return;
       const v = clampBrewTemperature(val);
+      // Which profile this write belongs to. Read from the status signal (the
+      // same pattern setManualGrind/handleGrinderSelect use) rather than the
+      // render-time closure so it is the profile that is selected at the moment
+      // the request actually leaves, not whatever was selected when this
+      // callback was memoized.
+      const requestProfileId = machine.value.status.selectedProfileId;
       setPendingBrewTemperature(v);
       try {
         const response = await api.request({ tp: 'req:brew-temperature:set', temperature: v });
+        // Another client may have switched the selected profile while this write
+        // was in flight. The profile-change effect above has already dropped the
+        // pending value so the field shows the NEW profile's device-authoritative
+        // `bto`; writing this response's echo would put profile A's temperature
+        // on screen while profile B is selected until the next status frame
+        // happened to land. Drop the answer instead — it is about a profile the
+        // user is no longer looking at.
+        if (machine.value.status.selectedProfileId !== requestProfileId) return;
         if (response?.ok) {
           // Show the device's echoed temperature (not our request value) so the
           // number on screen is always one the device confirmed.
