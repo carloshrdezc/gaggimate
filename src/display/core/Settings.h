@@ -50,6 +50,12 @@ struct AutoWakeupSchedule {
 class Settings;
 using SettingsCallback = std::function<void(Settings *)>;
 
+struct BrewTemperatureOverrideSnapshot {
+    bool enabled = false;
+    float temperature = 0.0f;
+    String profileId;
+};
+
 class Settings {
   public:
     Settings();
@@ -180,9 +186,9 @@ class Settings {
     float getManualPressure() const { return manualPressure; }
     float getManualFlow() const { return manualFlow; }
     int getManualTemperature() const { return manualTemperature; }
-    bool isBrewTemperatureOverrideEnabled() const { return brewTemperatureOverrideEnabled; }
-    float getBrewTemperatureOverride() const { return brewTemperatureOverride; }
-    String getBrewTemperatureOverrideProfile() const;
+    // PRO-629: the AsyncTCP and control tasks must observe these persisted
+    // fields together, never as a mixed override tuple.
+    BrewTemperatureOverrideSnapshot getBrewTemperatureOverrideSnapshot() const;
     void setFlushDuration(int flush_duration);
     void setCloudRelayUrl(const String &url);
     void setCloudRelayToken(const String &token);
@@ -410,7 +416,7 @@ class Settings {
 
     void doSave();
     PersistenceSnapshot takePersistenceSnapshot();
-    SemaphoreHandle_t ensurePersistenceMutex();
+    SemaphoreHandle_t ensurePersistenceMutex() const;
     // PRO-427: lazily create selectedNameMutex on first use and return it (may be
     // null if creation fails, in which case callers degrade to lock-free access).
     // const because the const selected-name getters need to lock; the handle is

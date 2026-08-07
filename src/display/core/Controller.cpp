@@ -886,16 +886,15 @@ bool Controller::hasTargetFlow() const {
     return hasPumpTarget();
 }
 
-float Controller::getBrewTemperatureOverrideTarget() const {
-    const Profile &profile = profileManager->getSelectedProfile();
-    return settings.isBrewTemperatureOverrideEnabled() && settings.getBrewTemperatureOverrideProfile() == profile.id
-               ? settings.getBrewTemperatureOverride()
-               : profile.temperature;
-}
+float Controller::getBrewTemperatureOverrideTarget() const { return getEffectiveBrewTemperatureOverride().temperature; }
 
-bool Controller::isBrewTemperatureOverrideEnabled() const {
-    return settings.isBrewTemperatureOverrideEnabled() &&
-           settings.getBrewTemperatureOverrideProfile() == profileManager->getSelectedProfile().id;
+bool Controller::isBrewTemperatureOverrideEnabled() const { return getEffectiveBrewTemperatureOverride().enabled; }
+
+EffectiveBrewTemperatureOverride Controller::getEffectiveBrewTemperatureOverride() const {
+    const Profile &profile = profileManager->getSelectedProfile();
+    const BrewTemperatureOverrideSnapshot override = settings.getBrewTemperatureOverrideSnapshot();
+    const bool enabled = override.enabled && override.profileId == profile.id;
+    return {enabled ? override.temperature : profile.temperature, enabled};
 }
 
 void Controller::setTargetTemp(float temperature) {

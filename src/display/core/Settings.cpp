@@ -330,7 +330,7 @@ void Settings::save(bool noDelay) {
     }
 }
 
-SemaphoreHandle_t Settings::ensurePersistenceMutex() { return persistenceMutex; }
+SemaphoreHandle_t Settings::ensurePersistenceMutex() const { return persistenceMutex; }
 
 void Settings::setTargetSteamTemp(const int target_steam_temp) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
@@ -599,7 +599,10 @@ void Settings::setSelectedProfile(String selected_profile) {
     save();
 }
 
-String Settings::getBrewTemperatureOverrideProfile() const { return copyUnderSelectedNameLock(brewTemperatureOverrideProfile); }
+BrewTemperatureOverrideSnapshot Settings::getBrewTemperatureOverrideSnapshot() const {
+    ScopedRecursiveSemaphore lock(ensurePersistenceMutex());
+    return {brewTemperatureOverrideEnabled, brewTemperatureOverride, brewTemperatureOverrideProfile};
+}
 
 void Settings::setBrewTemperatureOverride(const String &profileId, const float temperature) {
     ScopedRecursiveSemaphore lock(ensurePersistenceMutex());

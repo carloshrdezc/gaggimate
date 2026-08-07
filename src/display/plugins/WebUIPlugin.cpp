@@ -839,8 +839,9 @@ void WebUIPlugin::loop() {
         doc["tp"] = "evt:status";
         doc["ct"] = controller->getCurrentTemp();
         doc["tt"] = controller->getTargetTemp();
-        doc["bto"] = controller->getBrewTemperatureOverrideTarget();
-        doc["bte"] = controller->isBrewTemperatureOverrideEnabled() ? 1 : 0;
+        const EffectiveBrewTemperatureOverride brewTemperatureOverride = controller->getEffectiveBrewTemperatureOverride();
+        doc["bto"] = brewTemperatureOverride.temperature;
+        doc["bte"] = brewTemperatureOverride.enabled ? 1 : 0;
         doc["pr"] = controller->getCurrentPressure();
         doc["fl"] = controller->getCurrentPumpFlow();
         // Send null (not 0) when no target is applicable in the current mode —
@@ -1626,8 +1627,9 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
         response["ok"] = temperature.is<float>() || temperature.is<int>()
                              ? controller->setBrewTemperatureOverride(temperature.as<float>())
                              : false;
-        response["temperature"] = controller->getBrewTemperatureOverrideTarget();
-        response["override"] = controller->isBrewTemperatureOverrideEnabled();
+        const EffectiveBrewTemperatureOverride brewTemperatureOverride = controller->getEffectiveBrewTemperatureOverride();
+        response["temperature"] = brewTemperatureOverride.temperature;
+        response["override"] = brewTemperatureOverride.enabled;
         sendResponse(clientId, response);
     } else if (msgType == "req:raise-grind-target") {
         controller->raiseGrindTarget();

@@ -53,6 +53,11 @@ struct ProcessSnapshot {
     float manualFlow = 0.0f;
     int manualTemperature = DEFAULT_MANUAL_TEMPERATURE;
 };
+
+struct EffectiveBrewTemperatureOverride {
+    float temperature = 0.0f;
+    bool enabled = false;
+};
 #ifndef GAGGIMATE_HEADLESS
 #include <display/drivers/Driver.h>
 #include <display/ui/default/DefaultUI.h>
@@ -93,6 +98,7 @@ class Controller {
     float getTargetTemp() const;
     float getBrewTemperatureOverrideTarget() const;
     bool isBrewTemperatureOverrideEnabled() const;
+    EffectiveBrewTemperatureOverride getEffectiveBrewTemperatureOverride() const;
     int getTargetGrindDuration() const;
     int getManualTargetType() const { return settings.getManualTargetType(); }
     float getManualPressure() const { return settings.getManualPressure(); }

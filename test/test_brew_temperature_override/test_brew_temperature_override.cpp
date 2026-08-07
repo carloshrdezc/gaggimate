@@ -47,6 +47,20 @@ void test_idle_brew_output_target_uses_selected_profile_override() {
     TEST_ASSERT_EQUAL_FLOAT(96.0f, effectiveBrewTemperature(92.0f, state, "profile-a"));
 }
 
+// PRO-629: the control task and WebSocket task must observe the three
+// persisted fields as one tuple. A mixed observation could apply a stale
+// temperature to the selected profile or report explicit provenance for it.
+void test_override_snapshot_keeps_enabled_temperature_and_profile_together() {
+    const BrewTemperatureOverrideState before{"profile-a", 92.0f, false};
+    const BrewTemperatureOverrideState after{"profile-b", 96.0f, true};
+    const BrewTemperatureOverrideState observed = after;
+
+    TEST_ASSERT_FALSE(observed.appliesTo("profile-a"));
+    TEST_ASSERT_TRUE(observed.appliesTo("profile-b"));
+    TEST_ASSERT_EQUAL_FLOAT(96.0f, effectiveBrewTemperature(92.0f, observed, "profile-b"));
+    TEST_ASSERT_FALSE(before.appliesTo("profile-a"));
+}
+
 void test_brew_temperature_request_validation() {
     TEST_ASSERT_TRUE(isValidBrewTemperatureOverride(0.0f));
     TEST_ASSERT_TRUE(isValidBrewTemperatureOverride(160.0f));
@@ -69,6 +83,7 @@ int main(int, char **) {
     RUN_TEST(test_save_as_new_profile_switch_clears_persisted_override_before_reboot);
     RUN_TEST(test_override_only_replaces_positive_root_temperature);
     RUN_TEST(test_idle_brew_output_target_uses_selected_profile_override);
+    RUN_TEST(test_override_snapshot_keeps_enabled_temperature_and_profile_together);
     RUN_TEST(test_brew_temperature_request_validation);
     RUN_TEST(test_standby_to_brew_reassert_does_not_persist_override);
     return UNITY_END();
