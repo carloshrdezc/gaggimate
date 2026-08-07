@@ -32,6 +32,7 @@ import { indexedDBService } from '../ShotAnalyzer/services/IndexedDBService.js';
 import { notesService } from '../ShotAnalyzer/services/NotesService.js';
 import { buildShotHistoryArchive, importShotHistoryArchive } from './historyArchive.js';
 import { exportShotsAsCsv } from './historyExport.js';
+import { downloadBeanconquerorBackup } from '../../utils/beanconqueror/beanconquerorDownload.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSearch } from '@fortawesome/free-solid-svg-icons/faSearch';
@@ -39,6 +40,7 @@ import { faSort } from '@fortawesome/free-solid-svg-icons/faSort';
 import { faFilter } from '@fortawesome/free-solid-svg-icons/faFilter';
 import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
 import { faFileCsv } from '@fortawesome/free-solid-svg-icons/faFileCsv';
+import { faFileZipper } from '@fortawesome/free-solid-svg-icons/faFileZipper';
 import { faFileImport } from '@fortawesome/free-solid-svg-icons/faFileImport';
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons/faChevronRight';
@@ -176,6 +178,7 @@ export function ShotHistory() {
   const [loading, setLoading] = useState(true);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
+  const [beanconquerorBusy, setBeanconquerorBusy] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('date');
   const [sortOrder, setSortOrder] = useState('desc');
@@ -593,6 +596,35 @@ export function ShotHistory() {
     }
   }, [filteredHistory]);
 
+  // PRO-632: Beanconqueror restores a backup by REPLACING its top-level storage,
+  // so this archive is only safe to import into a fresh profile/installation.
+  // The confirm below is the user-facing copy for that limitation.
+  const handleExportBeanconqueror = useCallback(async () => {
+    const confirmed = window.confirm(
+      'Export a Beanconqueror backup?\n\n' +
+        'Importing this file into Beanconqueror REPLACES its beans and brews. ' +
+        'Only import it into a fresh Beanconqueror installation or profile, ' +
+        'never over a library you want to keep.',
+    );
+    if (!confirmed) return;
+
+    const download = prepareDownload('Beanconqueror.zip');
+    setBeanconquerorBusy(true);
+    try {
+      const shots = [];
+      for (const shot of filteredHistory) {
+        shots.push(await buildExportShot(shot));
+      }
+      await downloadBeanconquerorBackup({ beans: allBeans, shots }, download);
+    } catch (error) {
+      console.error('Failed to export Beanconqueror backup:', error);
+      download.fail(error);
+      alert(`Beanconqueror export failed: ${error.message}`);
+    } finally {
+      setBeanconquerorBusy(false);
+    }
+  }, [allBeans, buildExportShot, filteredHistory]);
+
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
@@ -684,6 +716,15 @@ export function ShotHistory() {
             aria-label='Export CSV'
           >
             <FontAwesomeIcon icon={faFileCsv} />
+          </button>
+          <button
+            onClick={handleExportBeanconqueror}
+            className='nd-action-btn'
+            disabled={beanconquerorBusy || totalFilteredItems === 0}
+            title='Export Beanconqueror Backup'
+            aria-label='Export Beanconqueror Backup'
+          >
+            <FontAwesomeIcon icon={faFileZipper} />
           </button>
           <button
             onClick={handleExportAll}
