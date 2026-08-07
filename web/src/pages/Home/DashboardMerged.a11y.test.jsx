@@ -1,0 +1,36 @@
+import { h } from 'preact';
+import { afterEach, expect, test, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+
+import { ModeRail, getRecipeGridStyle, graphLegendRowStyle } from './DashboardMerged.jsx';
+
+afterEach(cleanup);
+
+test('exposes the active dashboard mode as a pressed control', () => {
+  const onSelect = vi.fn();
+
+  render(h(ModeRail, {
+    active: 1,
+    modes: [
+      { id: 0, name: 'Brew' },
+      { id: 1, name: 'Steam' },
+    ],
+    onSelect,
+  }));
+
+  expect(screen.getByRole('button', { name: 'Brew' }).getAttribute('aria-pressed')).toBe('false');
+  const steam = screen.getByRole('button', { name: 'Steam' });
+  expect(steam.getAttribute('aria-pressed')).toBe('true');
+
+  fireEvent.click(steam);
+  expect(onSelect).toHaveBeenCalledWith(1);
+});
+
+test('uses a stacked recipe layout at mobile widths while preserving control order', () => {
+  expect(getRecipeGridStyle(true).gridTemplateColumns).toBe('1fr');
+  expect(getRecipeGridStyle(false).gridTemplateColumns).toBe('1fr auto 1fr auto 1fr auto 1fr');
+});
+
+test('allows the live extraction legend to wrap instead of clipping at narrow widths', () => {
+  expect(graphLegendRowStyle.flexWrap).toBe('wrap');
+});
