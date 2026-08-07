@@ -1,15 +1,22 @@
 import { test, expect } from 'vitest';
 
 import {
+  BREW_TEMPERATURE_UI_MAX,
+  BREW_TEMPERATURE_UI_MIN,
+  MODE_BREW,
   MODE_GRIND,
   MODE_MANUAL,
   MODE_STANDBY,
   MODE_STEAM,
   buildStandbyProfileCurve,
+  clampBrewTemperature,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
+  computeBrewTemperatureEditable,
   computeYieldEditable,
+  getBrewTemperatureHint,
+  getBrewTemperatureLockReason,
   getReadinessSummary,
   getYieldLockReason,
   getAvailableModeOptions,
@@ -19,6 +26,7 @@ import {
   getProcessKindForMode,
   getTemperatureRingMetrics,
   computeStandbyOnBrewButtonState,
+  resolveBrewTemperatureValue,
   shouldFireAutoSteamOnStop,
   shouldFireStandbyOnStop,
   shouldKeepManualDraftDirty,
@@ -508,5 +516,99 @@ test('standby curve omits the temperature line when no temperature data exists',
   expect(curve.temperature).toBe('');
   expect(curve.pressure).not.toBe('');
   expect(curve.flow).not.toBe('');
+});
+
+// ── PRO-630: selected-profile brew temperature ──────────────────────────────
+
+const brewTempState = (overrides = {}) => ({
+  connected: true,
+  mode: MODE_BREW,
+  active: false,
+  target: 93,
+  ...overrides,
+});
+
+test('brew temperature is editable only in Brew mode with a published target and no active shot', () => {
+  expect(computeBrewTemperatureEditable(brewTempState())).toBe(true);
+  // Mirrors Controller::setBrewTemperatureOverride's own guards.
+  expect(computeBrewTemperatureEditable(brewTempState({ active: true }))).toBe(false);
+  expect(computeBrewTemperatureEditable(brewTempState({ mode: MODE_STEAM }))).toBe(false);
+  expect(computeBrewTemperatureEditable(brewTempState({ mode: MODE_STANDBY }))).toBe(false);
+  expect(computeBrewTemperatureEditable(brewTempState({ connected: false }))).toBe(false);
+  // Older firmware publishes no `bto` at all -> read-only, not editable.
+  expect(computeBrewTemperatureEditable(brewTempState({ target: null }))).toBe(false);
+});
+
+test('brew temperature lock reason explains the most specific blocking prerequisite', () => {
+  expect(getBrewTemperatureLockReason(brewTempState())).toBe(null);
+  expect(getBrewTemperatureLockReason(brewTempState({ connected: false }))).toBe(
+    'TEMP LOCKED · CONTROLLER OFFLINE',
+  );
+  expect(getBrewTemperatureLockReason(brewTempState({ target: null }))).toBe(
+    'TEMP LOCKED · FIRMWARE TOO OLD',
+  );
+  // A brew that starts between the click and the response locks the field. Mode
+  // stays BREW for the whole of a real shot, so this is the reason a user sees.
+  expect(getBrewTemperatureLockReason(brewTempState({ active: true }))).toBe(
+    'TEMP LOCKED · BREW ACTIVE',
+  );
+  expect(getBrewTemperatureLockReason(brewTempState({ mode: MODE_MANUAL }))).toBe(
+    'TEMP LOCKED · BREW MODE ONLY',
+  );
+  // An active session in another mode reports the mode, not a bogus "BREW ACTIVE".
+  expect(getBrewTemperatureLockReason(brewTempState({ mode: MODE_STEAM, active: true }))).toBe(
+    'TEMP LOCKED · BREW MODE ONLY',
+  );
+});
+
+test('brew temperature renders firmware status as authority, never a fabricated default', () => {
+  // Status wins whenever it is present.
+  expect(resolveBrewTemperatureValue({ connected: true, target: 94.5, pending: null })).toBe(94.5);
+  // Disconnected and older-firmware states resolve to null -> the caller renders
+  // a placeholder. Notably NOT 93 (the acceptance criterion's example of a
+  // fabricated default).
+  expect(resolveBrewTemperatureValue({ connected: false, target: 94.5, pending: null })).toBe(null);
+  expect(resolveBrewTemperatureValue({ connected: true, target: null, pending: null })).toBe(null);
+  expect(resolveBrewTemperatureValue({ connected: true, target: undefined, pending: null })).toBe(
+    null,
+  );
+});
+
+test('an in-flight brew temperature edit shows optimistically but yields to the next status', () => {
+  // While a write is in flight the pending value shows...
+  expect(resolveBrewTemperatureValue({ connected: true, target: 93, pending: 95 })).toBe(95);
+  // ...and once the caller clears it (on response or on the next evt:status) the
+  // device's broadcast target is authoritative again — a rejected write can
+  // never leave a false "success" number on screen.
+  expect(resolveBrewTemperatureValue({ connected: true, target: 93, pending: null })).toBe(93);
+});
+
+test('brew temperature hint states its profile-root scope without implying per-phase control', () => {
+  const overridden = getBrewTemperatureHint({ connected: true, target: 95, overrideEnabled: true });
+  const rootDefault = getBrewTemperatureHint({
+    connected: true,
+    target: 93,
+    overrideEnabled: false,
+  });
+  expect(overridden).toBe('PROFILE TARGET · OVERRIDE');
+  expect(rootDefault).toBe('PROFILE TARGET · DEFAULT');
+  expect(getBrewTemperatureHint({ connected: true, target: null, overrideEnabled: false })).toBe(
+    'PROFILE TARGET UNAVAILABLE',
+  );
+  // Per-phase temperature curves stay firmware-owned; the hint must not claim them.
+  for (const hint of [overridden, rootDefault]) {
+    expect(hint.toLowerCase()).not.toContain('phase');
+  }
+});
+
+test('brew temperature commits clamp into the UI band the firmware also accepts', () => {
+  expect(clampBrewTemperature(1000)).toBe(BREW_TEMPERATURE_UI_MAX);
+  expect(clampBrewTemperature(-5)).toBe(BREW_TEMPERATURE_UI_MIN);
+  expect(clampBrewTemperature(93.5)).toBe(93.5);
+  expect(clampBrewTemperature('nope')).toBe(BREW_TEMPERATURE_UI_MIN);
+  // The UI band must sit inside the firmware's [0, 160] accepted range so a
+  // clamped commit is never rejected for being out of range.
+  expect(BREW_TEMPERATURE_UI_MIN).toBeGreaterThanOrEqual(0);
+  expect(BREW_TEMPERATURE_UI_MAX).toBeLessThanOrEqual(160);
 });
 

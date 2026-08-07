@@ -28,8 +28,12 @@
 //   `req:beans:load`     — the client reads whole beans from the req:beans:list payload
 //   `req:history:list`   — superseded by HTTP GET /api/history/index.bin
 //   `req:history:get`    — replies "use HTTP /api/history?id=<id>" (see /api/history/<id>.slog)
-//   `req:brew-temperature:set` — firmware contract for the forthcoming Dashboard control (PRO-630)
 // PRO-610-ALLOWLIST-END
+//
+// PRO-630 removed `req:brew-temperature:set` from the list above: the Dashboard
+// TEMP control now calls it, so it is no longer a client-less handler and must
+// stay OUT of the allow-list — otherwise the gate's stale-entry check can't tell
+// a real orphan from a documented one.
 //
 // Since there was nothing to fix, this test locks the audited *client-side*
 // dispatch/correlation contract so a future regression is caught mechanically.

@@ -84,6 +84,13 @@ export function validateWebSocketRequest(data) {
     case 'req:change-brew-target':
       numeric('target', 0, 200);
       break;
+    case 'req:brew-temperature:set':
+      // PRO-630: same bound as the server (StrictValidationPolicy.h and
+      // constants.h MIN_TEMP/MAX_TEMP = [0, 160]) so a value the firmware would
+      // accept is never blocked client-side. The dashboard control clamps to a
+      // narrower, espresso-appropriate UI band before it gets here.
+      numeric('temperature', 0, 160);
+      break;
     case 'req:change-grind-target':
       numeric('target', 0, 1);
       if (!Number.isInteger(data.target)) throw new TypeError('target must be 0 or 1');
@@ -569,6 +576,14 @@ export default class ApiService {
       // firmware doesn't send `mg`; emit null so the consumer falls back to its
       // localStorage cache instead of clobbering it.
       manualGrindSetting: Number.isFinite(message.mg) ? message.mg : null,
+      // PRO-630: device-authoritative selected-profile brew-temperature target
+      // (`bto`) and its provenance (`bte`, 1 when an explicit override is
+      // persisted for the selected profile). Firmware older than PRO-629 sends
+      // neither; emit null / false rather than a fabricated default (e.g. 93) so
+      // the dashboard control degrades to a read-only placeholder instead of
+      // claiming a target the device never reported.
+      brewTemperatureOverrideTarget: Number.isFinite(message.bto) ? message.bto : null,
+      brewTemperatureOverrideEnabled: message.bte === 1 || message.bte === true,
       volumetricAvailable: message.bta || false,
       grindTargetDuration: message.gtd || 0,
       grindTargetVolume: message.gtv || 0,
@@ -647,6 +662,12 @@ export const machine = signal({
     standbyOnBrewEnabled: false,
     doseGrams: DEFAULT_DOSE_GRAMS,
     manualGrindSetting: DEFAULT_MANUAL_GRIND_SETTING,
+    // PRO-630: no pre-connection default on purpose. The selected-profile brew
+    // temperature is device-authoritative; until an evt:status carrying `bto`
+    // arrives there is nothing truthful to show, so the dashboard renders a
+    // read-only placeholder rather than a fabricated 93 °C.
+    brewTemperatureOverrideTarget: null,
+    brewTemperatureOverrideEnabled: false,
     grindTargetDuration: 0,
     grindTargetVolume: 0,
     grindTarget: 0,

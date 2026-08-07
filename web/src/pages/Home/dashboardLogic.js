@@ -110,6 +110,68 @@ export function getYieldLockReason({ allowYieldOverride, brewTarget, bluetoothCo
   return missingPrerequisites.length > 0 ? `YIELD LOCKED · ${missingPrerequisites.join(' · ')}` : null;
 }
 
+// PRO-630: selected-profile brew-temperature control.
+//
+// The device owns this value: it publishes the effective target as `bto` and its
+// provenance as `bte` in every evt:status, and validates a write in
+// Controller::setBrewTemperatureOverride() (Brew mode only, no active process,
+// [MIN_TEMP, MAX_TEMP] = [0, 160]). The browser is a renderer of that state — it
+// never seeds a numeric guess from localStorage and never fabricates a default.
+//
+// The stepper/typing band below is deliberately NARROWER than the firmware's
+// accepted range: it mirrors the existing manual temperature control's band
+// rather than inventing a new scale, so the arrows land on plausible espresso
+// targets. The firmware re-validates every write regardless.
+export const BREW_TEMPERATURE_UI_MIN = 80;
+export const BREW_TEMPERATURE_UI_MAX = 105;
+// Rendered instead of a number when the device has not published a target
+// (disconnected, or firmware older than the `bto`/`bte` contract). Never a
+// fabricated numeric default such as 93.
+export const BREW_TEMPERATURE_PLACEHOLDER = '—';
+
+export function clampBrewTemperature(value) {
+  return clampNumber(value, BREW_TEMPERATURE_UI_MIN, BREW_TEMPERATURE_UI_MAX);
+}
+
+// Editable only when the device would actually accept the write: connected, in
+// Brew mode, no active process, and a published target to edit from. This
+// mirrors the firmware guard so the UI does not offer an edit the device is
+// certain to reject.
+export function computeBrewTemperatureEditable({ connected, mode, active, target }) {
+  return Boolean(connected) && mode === MODE_BREW && !active && Number.isFinite(target);
+}
+
+// Single reason string shown in place of the field label while locked, so the
+// user learns WHY it is read-only. Ordered from "we know nothing" to the most
+// specific prerequisite; the mode check precedes the active check so an active
+// STEAM session reads "BREW MODE ONLY" rather than the misleading "BREW ACTIVE"
+// (the firmware keeps mode == BREW for the whole of an actual brew, so a running
+// shot still resolves to "BREW ACTIVE").
+export function getBrewTemperatureLockReason({ connected, mode, active, target }) {
+  if (!connected) return 'TEMP LOCKED · CONTROLLER OFFLINE';
+  if (!Number.isFinite(target)) return 'TEMP LOCKED · FIRMWARE TOO OLD';
+  if (mode !== MODE_BREW) return 'TEMP LOCKED · BREW MODE ONLY';
+  if (active) return 'TEMP LOCKED · BREW ACTIVE';
+  return null;
+}
+
+// The number to render, or null when there is nothing authoritative to show.
+// `pending` is the short-lived optimistic value of an in-flight write; it is
+// dropped as soon as the device answers or publishes a new status, so it can
+// never outlive one broadcast.
+export function resolveBrewTemperatureValue({ connected, target, pending }) {
+  if (Number.isFinite(pending)) return pending;
+  return connected && Number.isFinite(target) ? target : null;
+}
+
+// Scope hint. Deliberately says "PROFILE TARGET", never anything per-phase:
+// per-phase temperature curves stay firmware-owned runtime behaviour and are
+// not touched by this control.
+export function getBrewTemperatureHint({ connected, target, overrideEnabled }) {
+  if (!connected || !Number.isFinite(target)) return 'PROFILE TARGET UNAVAILABLE';
+  return overrideEnabled ? 'PROFILE TARGET · OVERRIDE' : 'PROFILE TARGET · DEFAULT';
+}
+
 export function getReadinessSummary({ mode, connected, bluetoothConnected, selectedProfile, wakeAvailable }) {
   const signals = [
     mode === MODE_STANDBY ? 'Machine in standby' : 'Machine not in standby',

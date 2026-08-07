@@ -5,6 +5,11 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 
 import { EditableNumBlock, ModeRail, getRecipeGridStyle, graphLegendRowStyle } from './DashboardMerged.jsx';
+import {
+  BREW_TEMPERATURE_PLACEHOLDER,
+  BREW_TEMPERATURE_UI_MAX,
+  BREW_TEMPERATURE_UI_MIN,
+} from './dashboardLogic.js';
 
 afterEach(cleanup);
 
@@ -30,7 +35,13 @@ test('exposes the active dashboard mode as a pressed control', () => {
 
 test('uses a stacked recipe layout at mobile widths while preserving control order', () => {
   expect(getRecipeGridStyle(true).gridTemplateColumns).toBe('1fr');
-  expect(getRecipeGridStyle(false).gridTemplateColumns).toBe('1fr auto 1fr auto 1fr auto 1fr');
+  // PRO-630 added TEMP between DOSE and YIELD: 5 fields + 4 separators.
+  expect(getRecipeGridStyle(false).gridTemplateColumns).toBe(
+    '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
+  );
+  const columns = getRecipeGridStyle(false).gridTemplateColumns.split(' ');
+  expect(columns.filter(c => c === '1fr')).toHaveLength(5);
+  expect(columns.filter(c => c === 'auto')).toHaveLength(4);
 });
 
 test('allows the live extraction legend to wrap instead of clipping at narrow widths', () => {
@@ -117,4 +128,66 @@ test('returns focus to the numeric edit trigger after cancelling with Escape', (
   fireEvent.keyDown(input, { key: 'Escape' });
 
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit GRIND' }));
+});
+
+// ── PRO-630: the TEMP recipe field ──────────────────────────────────────────
+
+test('names the brew temperature field so its edit control is identifiable', () => {
+  const onCommit = vi.fn();
+  render(h(EditableNumBlock, {
+    label: 'TEMP',
+    value: 93,
+    unit: '°C',
+    hint: 'PROFILE TARGET · DEFAULT',
+    step: 0.5,
+    min: BREW_TEMPERATURE_UI_MIN,
+    max: BREW_TEMPERATURE_UI_MAX,
+    onCommit,
+  }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit TEMP' }));
+  const input = screen.getByRole('textbox', { name: 'Edit TEMP' });
+  fireEvent.keyDown(input, { key: 'Enter', target: { value: '95' } });
+  expect(onCommit).toHaveBeenCalledWith(95);
+});
+
+test('exposes the locked brew temperature state and its reason without an edit control', () => {
+  render(h(EditableNumBlock, {
+    label: 'TEMP',
+    value: 93,
+    unit: '°C',
+    step: 0.5,
+    min: BREW_TEMPERATURE_UI_MIN,
+    max: BREW_TEMPERATURE_UI_MAX,
+    onCommit: vi.fn(),
+    disabled: true,
+    lockedHint: 'TEMP LOCKED · BREW ACTIVE',
+    disabledTitle: 'The machine owns this target',
+  }));
+
+  // No edit affordance at all while locked.
+  expect(screen.queryByRole('button', { name: 'Edit TEMP' })).toBeNull();
+  // The reason replaces the label, and the value is marked non-interactive.
+  expect(screen.getByText('TEMP LOCKED · BREW ACTIVE')).toBeTruthy();
+  const value = screen.getByTitle('The machine owns this target');
+  expect(value.getAttribute('aria-disabled')).toBe('true');
+});
+
+test('renders the brew temperature placeholder rather than a fabricated default on older firmware', () => {
+  render(h(EditableNumBlock, {
+    label: 'TEMP',
+    // resolveBrewTemperatureValue -> null, so the dashboard passes the placeholder.
+    value: BREW_TEMPERATURE_PLACEHOLDER,
+    unit: '°C',
+    hint: 'PROFILE TARGET UNAVAILABLE',
+    step: 0.5,
+    min: BREW_TEMPERATURE_UI_MIN,
+    max: BREW_TEMPERATURE_UI_MAX,
+    onCommit: vi.fn(),
+    disabled: true,
+    lockedHint: 'TEMP LOCKED · FIRMWARE TOO OLD',
+  }));
+
+  expect(screen.getByText(BREW_TEMPERATURE_PLACEHOLDER)).toBeTruthy();
+  expect(screen.queryByText('93.0')).toBeNull();
 });
