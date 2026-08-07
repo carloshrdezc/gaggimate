@@ -316,6 +316,11 @@ body.nav-drawer-open {
   isolation: isolate;
 }
 
+.dm-shell :is(button, input, select, a):focus-visible {
+  outline: 3px solid var(--dm-accent);
+  outline-offset: 3px;
+}
+
 #app::before {
   content: '';
   position: fixed;

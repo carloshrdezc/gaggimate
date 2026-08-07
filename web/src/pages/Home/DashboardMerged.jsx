@@ -158,7 +158,7 @@ function getPrimaryActionButtonStyle({ active, finished, accent }) {
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
-function ModeRail({ active, modes, onSelect }) {
+export function ModeRail({ active, modes, onSelect }) {
   return (
     <div style={{ display: 'flex', gap: 5 }}>
       {modes.map(({ id, name }) => (
@@ -166,12 +166,13 @@ function ModeRail({ active, modes, onSelect }) {
           key={name}
           type='button'
           onClick={() => onSelect(id)}
+          aria-pressed={id === active}
           style={{
             padding: '5px 9px',
             borderRadius: 6,
             cursor: 'pointer',
             fontFamily: 'var(--dm-font-mono)',
-            fontSize: 9,
+            fontSize: 12,
             letterSpacing: '0.22em',
             textTransform: 'uppercase',
             border: `1px solid ${id === active ? 'color-mix(in srgb, var(--dm-accent) 60%, transparent)' : 'var(--dm-line)'}`,
@@ -829,9 +830,11 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
+export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
+  const triggerRef = useRef(null);
+  const restoreTriggerFocusRef = useRef(false);
 
   const commit = useCallback(
     raw => {
@@ -854,6 +857,18 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
   useEffect(() => {
     if (editing && inputRef.current) inputRef.current.select();
   }, [editing]);
+
+  useEffect(() => {
+    if (!editing && restoreTriggerFocusRef.current) {
+      restoreTriggerFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [editing]);
+
+  const finishKeyboardEdit = useCallback(() => {
+    restoreTriggerFocusRef.current = true;
+    setEditing(false);
+  }, []);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -894,14 +909,15 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
         <input
           ref={inputRef}
           type='text'
+          aria-label={`Edit ${label}`}
           inputMode='decimal'
           defaultValue={value.toFixed(1)}
           onBlur={e => commit(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Enter') commit(e.target.value);
-            if (e.key === 'Escape') setEditing(false);
-            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); setEditing(false); }
-            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); setEditing(false); }
+            if (e.key === 'Enter') { restoreTriggerFocusRef.current = true; commit(e.target.value); }
+            if (e.key === 'Escape') finishKeyboardEdit();
+            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); finishKeyboardEdit(); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); finishKeyboardEdit(); }
           }}
           style={{
             display: 'block',
@@ -917,13 +933,15 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             border: '1px solid var(--dm-accent)',
             borderRadius: 4,
             padding: '4px 6px',
-            outline: 'none',
             lineHeight: 1,
           }}
         />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span
+          <button
+            ref={triggerRef}
+            type='button'
+            aria-label={`Edit ${label}`}
             onClick={() => {
               // PRO-503: fire onTap BEFORE entering edit mode so a tap-away
               // without typing/Enter still records a fresh "confirmed" event
@@ -941,11 +959,14 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
               fontVariantNumeric: 'tabular-nums',
               lineHeight: 1,
               cursor: 'text',
+              border: 'none',
               borderBottom: '1px dashed rgba(232,232,232,0.2)',
+              background: 'transparent',
+              padding: 0,
             }}
           >
             {typeof value === 'number' ? value.toFixed(1) : value}
-          </span>
+          </button>
           <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 10, color: 'var(--dm-fg-dim)' }}>
             {unit}
           </span>
@@ -983,14 +1004,14 @@ const stepperBtnStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 16,
-  height: 11,
+  width: 24,
+  height: 24,
   padding: 0,
   background: 'var(--dm-bg-3)',
   border: '1px solid var(--dm-line)',
   borderRadius: 2,
   color: 'var(--dm-fg-dim)',
-  fontSize: 7,
+  fontSize: 10,
   cursor: 'pointer',
   lineHeight: 1,
 };
@@ -1178,7 +1199,7 @@ function GraphLegend({ color, label, value, dashed }) {
         alignItems: 'center',
         gap: 5,
         fontFamily: 'var(--dm-font-mono)',
-        fontSize: 9,
+        fontSize: 11,
         letterSpacing: '0.10em',
       }}
     >
@@ -1202,6 +1223,25 @@ GraphLegend.propTypes = {
   label: PropTypes.string,
   value: PropTypes.string,
   dashed: PropTypes.bool,
+};
+
+export function getRecipeGridStyle(isMobile) {
+  return {
+    display: 'grid',
+    gridTemplateColumns: isMobile ? '1fr' : '1fr auto 1fr auto 1fr auto 1fr',
+    gap: 10,
+    alignItems: 'center',
+    padding: '12px 0',
+    borderTop: '1px solid var(--dm-line)',
+    borderBottom: '1px solid var(--dm-line)',
+  };
+}
+
+export const graphLegendRowStyle = {
+  display: 'flex',
+  gap: 16,
+  alignItems: 'center',
+  flexWrap: 'wrap',
 };
 
 // ── Graph SVG ───────────────────────────────────────────────────────────────
@@ -2339,15 +2379,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
 
           {/* Grind → Dose → Yield → Scales */}
           <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr auto 1fr auto 1fr auto 1fr',
-              gap: 10,
-              alignItems: 'center',
-              padding: '12px 0',
-              borderTop: '1px solid var(--dm-line)',
-              borderBottom: '1px solid var(--dm-line)',
-            }}
+            style={getRecipeGridStyle(isMobile)}
           >
             {/* Manual grinder-dial setting (PRO-431, made device-authoritative in
                 PRO-603). Edits exactly like DOSE (tap → type → commit); every commit
@@ -2367,7 +2399,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               // recordManualGrindSetting event (mobile onBlur is unreliable).
               onTap={() => setManualGrind(manualGrind)}
             />
-            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
             <EditableNumBlock
               label='DOSE'
               value={dose}
@@ -2377,7 +2409,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               max={200}
               onCommit={setDose}
             />
-            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <EditableNumBlock
               label='YIELD'
               value={targetWeight}
@@ -2390,7 +2422,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               disabled={!yieldEditable}
               lockedHint={yieldLockReason}
             />
-            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <div>
               <div style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, letterSpacing: '0.18em', color: 'var(--dm-fg-dim)', marginBottom: 3 }}>
                 SCALES
@@ -2569,7 +2601,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
           >
             LIVE EXTRACTION
           </span>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          <div style={graphLegendRowStyle}>
             <GraphLegend color='var(--dm-accent)' label='TEMP'     value={`${fmt(tempVal)}°C`} />
             <GraphLegend color='var(--dm-good)'   label='PRESSURE' value={`${fmt(pressure)} bar`} />
             <GraphLegend color='var(--dm-warn)'   label='FLOW'     value={`${fmt(flowVal)} g/s`} />
