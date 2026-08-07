@@ -833,6 +833,8 @@ RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value
 export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
+  const triggerRef = useRef(null);
+  const restoreTriggerFocusRef = useRef(false);
 
   const commit = useCallback(
     raw => {
@@ -855,6 +857,18 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
   useEffect(() => {
     if (editing && inputRef.current) inputRef.current.select();
   }, [editing]);
+
+  useEffect(() => {
+    if (!editing && restoreTriggerFocusRef.current) {
+      restoreTriggerFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [editing]);
+
+  const finishKeyboardEdit = useCallback(() => {
+    restoreTriggerFocusRef.current = true;
+    setEditing(false);
+  }, []);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -900,10 +914,10 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
           defaultValue={value.toFixed(1)}
           onBlur={e => commit(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Enter') commit(e.target.value);
-            if (e.key === 'Escape') setEditing(false);
-            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); setEditing(false); }
-            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); setEditing(false); }
+            if (e.key === 'Enter') { restoreTriggerFocusRef.current = true; commit(e.target.value); }
+            if (e.key === 'Escape') finishKeyboardEdit();
+            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); finishKeyboardEdit(); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); finishKeyboardEdit(); }
           }}
           style={{
             display: 'block',
@@ -926,6 +940,7 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
+            ref={triggerRef}
             type='button'
             aria-label={`Edit ${label}`}
             onClick={() => {

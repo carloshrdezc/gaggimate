@@ -62,3 +62,41 @@ test('gives numeric edit buttons an accessible name that identifies their field'
   input.focus();
   expect(document.activeElement).toBe(input);
 });
+
+test('returns focus to the numeric edit trigger after confirming with Enter', () => {
+  render(h(EditableNumBlock, {
+    label: 'GRIND',
+    value: 18,
+    unit: 'g',
+    step: 0.1,
+    min: 0,
+    max: 30,
+    onCommit: vi.fn(),
+  }));
+
+  const editButton = screen.getByRole('button', { name: 'Edit GRIND' });
+  fireEvent.click(editButton);
+  const input = screen.getByRole('textbox', { name: 'Edit GRIND' });
+  fireEvent.keyDown(input, { key: 'Enter' });
+
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit GRIND' }));
+});
+
+test('returns focus to the numeric edit trigger after cancelling with Escape', () => {
+  render(h(EditableNumBlock, {
+    label: 'GRIND',
+    value: 18,
+    unit: 'g',
+    step: 0.1,
+    min: 0,
+    max: 30,
+    onCommit: vi.fn(),
+  }));
+
+  const editButton = screen.getByRole('button', { name: 'Edit GRIND' });
+  fireEvent.click(editButton);
+  const input = screen.getByRole('textbox', { name: 'Edit GRIND' });
+  fireEvent.keyDown(input, { key: 'Escape' });
+
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit GRIND' }));
+});
