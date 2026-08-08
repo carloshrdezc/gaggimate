@@ -350,6 +350,72 @@ describe('toBeanconquerorBackup — bean inventory (PRO-632 regression)', () => 
   });
 });
 
+describe('non-finite derived numbers (PRO-632 regression)', () => {
+  // `numberOr` clears every value it touches as finite and non-negative, but the
+  // bag total is DERIVED after that gate (`quantity + consumed`), so two
+  // individually-valid operands can still sum past Number.MAX_VALUE. Infinity is
+  // not a Beanconqueror numeric field: JSON.stringify writes it as `null`, and
+  // the importer would read a bean with no weight at all.
+  //
+  // No finite bag total satisfies `available = weight - consumed` for such
+  // operands (MAX_VALUE - 1e308 is not 1e308), so clamping would silently invent
+  // or destroy coffee and break the documented available=quantity invariant.
+  // The archive is therefore unrepresentable and must be refused.
+  const HUGE = 1e308;
+
+  function overflowingBackup() {
+    return toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: HUGE }],
+      shots: [{ ...SHOT, id: 'overflow', notes: { ...SHOT.notes, doseIn: String(HUGE) } }],
+    });
+  }
+
+  test('validation rejects a bean whose bag total overflowed to Infinity', () => {
+    const result = validateBeanconquerorBackup(overflowingBackup());
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/BEANS\[0\]\.weight.*finite/i);
+  });
+
+  test('the export path refuses instead of writing a JSON null bean weight', async () => {
+    await expect(buildBeanconquerorZip(overflowingBackup())).rejects.toThrow(/finite/i);
+  });
+
+  test('a representable huge quantity still exports a finite bean weight', async () => {
+    // Guard against over-rejecting: 1e308 + an 18.2 g dose is still finite, so
+    // this archive must keep exporting.
+    const backup = toBeanconquerorBackup({ beans: [{ ...BEAN, quantity: HUGE }], shots: [SHOT] });
+    expect(validateBeanconquerorBackup(backup)).toEqual({ valid: true, errors: [] });
+
+    const { entries } = await buildBeanconquerorZip(backup);
+    const [bean] = JSON.parse(entries['Beanconqueror.json']).BEANS;
+
+    expect(bean.weight).toBe(HUGE);
+    expect(Number.isFinite(bean.weight)).toBe(true);
+  });
+
+  test('no exported record may carry a non-finite number in any numeric field', () => {
+    // Class-level guard: any derived numeric field, not just the bag total.
+    const backup = backupOf();
+    backup.BREWS[0].grind_weight = Number.NaN;
+
+    const result = validateBeanconquerorBackup(backup);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/BREWS\[0\]\.grind_weight.*finite/i);
+  });
+
+  test('a normal export serializes no non-finite number and no null weight', async () => {
+    const { entries } = await buildBeanconquerorZip(backupOf());
+
+    for (const body of Object.values(entries)) {
+      expect(body).not.toMatch(/\bInfinity\b|\bNaN\b/);
+    }
+    const [bean] = JSON.parse(entries['Beanconqueror.json']).BEANS;
+    expect(bean.weight).not.toBeNull();
+    expect(Number.isFinite(bean.weight)).toBe(true);
+  });
+});
+
 describe('toBeanconquerorBackup — shot mapping', () => {
   test('maps espresso output to brew_beverage_quantity with type GR', () => {
     const [brew] = backupOf().BREWS;

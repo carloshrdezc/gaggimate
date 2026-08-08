@@ -95,6 +95,32 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+/** Collects every non-finite number reachable from `value` into `errors`, as
+ * `<path> is not a finite number`. `numberOr` gates each mapped INPUT, but
+ * derived values are computed after that gate (`applyBagTotals` adds two
+ * individually-finite operands, which can overflow to Infinity), so finiteness
+ * has to be re-checked on the finished record. JSON.stringify writes Infinity
+ * and NaN as `null`, and a `null` where Beanconqueror expects a number is a
+ * silently corrupt archive — the validator therefore refuses it outright rather
+ * than clamping, because no finite bag total satisfies
+ * `available = weight - consumed` once the true sum is unrepresentable. Nulls,
+ * strings and booleans are left alone (upstream `coordinates` is all nulls). */
+function collectNonFiniteNumbers(value, path, errors) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) errors.push(`${path} is not a finite number.`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => collectNonFiniteNumbers(entry, `${path}[${index}]`, errors));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      collectNonFiniteNumbers(entry, `${path}.${key}`, errors);
+    }
+  }
+}
+
 /** Unix SECONDS. GaggiMate beans already store seconds (beanManager's
  * normalizeBeanTimestamp) and device shots store seconds in the binary index,
  * but a 0 sentinel (pre-NTP firmware) must not become a 1970 record. */
@@ -285,7 +311,11 @@ function applyBagTotals(beanRecords, brewRecords) {
     // (float dose sums also leave binary dust: 1 + 1.03 === 2.0300000000000002).
     // Because float addition is correctly rounded and monotonic for non-negative
     // operands, `(quantity + consumed) - consumed` cancels back to the remaining
-    // quantity and can never go negative.
+    // quantity and can never go negative. The one case it cannot represent is an
+    // overflow to Infinity (two finite operands whose true sum exceeds
+    // Number.MAX_VALUE); no finite bag total satisfies the upstream relation
+    // there, so `validateBeanconquerorBackup` refuses the archive instead of
+    // clamping and breaking the available=quantity invariant.
     record.weight = record.weight + consumed;
   }
 }
@@ -480,6 +510,15 @@ export function validateBeanconquerorBackup(backup) {
       errors.push(`BREWS[${index}] carries a reference_flow_profile but no file is exported.`);
     }
   });
+
+  // Every emitted number must survive JSON.stringify as a number. Infinity/NaN
+  // become `null`, which Beanconqueror would read as a missing numeric field —
+  // most importantly a bean with no bag weight. See `collectNonFiniteNumbers`.
+  for (const key of TOP_LEVEL_KEYS) {
+    backup[key].forEach((record, index) => {
+      collectNonFiniteNumbers(record, `${key}[${index}]`, errors);
+    });
+  }
 
   return { valid: errors.length === 0, errors };
 }

@@ -127,11 +127,23 @@ therefore always equals GaggiMate's remaining quantity and can never be
 negative — including for the shared placeholder bean, which has no GaggiMate
 quantity but still owns real brew doses.
 
+The one input the bag total cannot represent is a sum that **overflows** to
+`Infinity` (each operand finite, `quantity + consumed` past `Number.MAX_VALUE`).
+`JSON.stringify` writes `Infinity` and `NaN` as `null`, so such an archive would
+hand Beanconqueror a bean with no weight at all. Clamping is not an option — no
+finite bag total satisfies `available = weight - consumed` there, so it would
+break the invariant above. The validator instead **rejects** any record carrying
+a non-finite number (reported as `BEANS[0].weight is not a finite number.`) and
+`buildBeanconquerorZip` refuses to build, surfacing as the usual "Beanconqueror
+export failed" alert rather than a silently corrupt file.
+
 ### Never emitted
 
 Attachment paths, `flow_profile` and `reference_flow_profile` are deliberately
 left empty and the validator **rejects** a backup that carries any of them —
-they would reference files this exporter does not ship inside the archive.
+they would reference files this exporter does not ship inside the archive. The
+validator likewise rejects any non-finite number anywhere in a record, so the
+archive can never contain a JSON `null` in place of a number.
 
 ## Verification status
 
