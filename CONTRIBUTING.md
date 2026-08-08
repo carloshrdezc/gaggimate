@@ -135,6 +135,10 @@ python scripts/test_select_tidy_sources.py
 #    directions. It runs in the `web` CI job (pure python3, no deps).
 python3 scripts/check_ws_api_spec_drift.py
 python3 scripts/test_check_ws_api_spec_drift.py
+
+# 6. Regression tests for the dev-master -> master promotion PR body generator
+#    (PRO-644). Also runs in the `web` CI job; pure python3, no deps.
+python3 scripts/test_generate_promotion_pr_body.py
 ```
 
 Notes:
@@ -154,6 +158,11 @@ Notes:
 - Keep PRs focused and describe the motivation behind your change.
 - Include screenshots when modifying the UI.
 - Ensure all formatting and checks pass before opening the PR.
+- PRs target `dev-master`, not `master`.
+- `master` is updated from `dev-master` by a periodic **promotion PR**. Generate
+  its body with `python3 scripts/generate_promotion_pr_body.py --fetch` and pass
+  it via `gh pr create --body-file` — these PRs bundle dozens of commits and were
+  shipping with an empty body (PRO-644). See `scripts/README.md`.
 
 ## Reporting Issues
 

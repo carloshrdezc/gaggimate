@@ -4,7 +4,7 @@ import { h } from 'preact';
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 
-import { EditableNumBlock, ModeRail, getRecipeGridStyle, graphLegendRowStyle } from './DashboardMerged.jsx';
+import { EditableNumBlock, ModeRail, getRecipeGridStyle, getRecipeScalesCellStyle, graphLegendRowStyle } from './DashboardMerged.jsx';
 import {
   BREW_TEMPERATURE_PLACEHOLDER,
   BREW_TEMPERATURE_UI_MAX,
@@ -33,12 +33,17 @@ test('exposes the active dashboard mode as a pressed control', () => {
   expect(onSelect).toHaveBeenCalledWith(1);
 });
 
-test('uses a stacked recipe layout at mobile widths while preserving control order', () => {
-  expect(getRecipeGridStyle(true).gridTemplateColumns).toBe('1fr');
+test('uses a two-column recipe layout at mobile widths while preserving control order', () => {
+  // PRO-640: mobile is a 2-column grid (GRIND|DOSE, TEMP|YIELD, SCALES full-width),
+  // not one field per row.
+  expect(getRecipeGridStyle(true).gridTemplateColumns).toBe('1fr 1fr');
+  expect(getRecipeScalesCellStyle(true).gridColumn).toBe('1 / -1');
   // PRO-630 added TEMP between DOSE and YIELD: 5 fields + 4 separators.
   expect(getRecipeGridStyle(false).gridTemplateColumns).toBe(
     '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
   );
+  // PRO-640: desktop keeps the single-row layout — no explicit placement.
+  expect(getRecipeScalesCellStyle(false)).toEqual({});
   const columns = getRecipeGridStyle(false).gridTemplateColumns.split(' ');
   expect(columns.filter(c => c === '1fr')).toHaveLength(5);
   expect(columns.filter(c => c === 'auto')).toHaveLength(4);

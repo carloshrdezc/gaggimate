@@ -17,7 +17,7 @@ import {
   computeYieldEditable,
   getBrewTemperatureHint,
   getBrewTemperatureLockReason,
-  getReadinessSummary,
+  getReadinessSignals,
   getYieldLockReason,
   getAvailableModeOptions,
   getBoilerHeatingState,
@@ -314,14 +314,14 @@ test('standby primary action is unavailable while the controller is disconnected
   expect(state.accent).toBe('var(--dm-fg-dim)');
   expect(state.processKind).toBe(null);
   expect(
-    getReadinessSummary({
+    getReadinessSignals({
       mode: MODE_STANDBY,
       connected,
       bluetoothConnected: false,
       selectedProfile: 'Morning espresso',
       wakeAvailable: state.label === 'WAKE' && connected,
-    })
-  ).not.toContain('Wake available');
+    }).wake
+  ).toBeUndefined();
 });
 
 test('yield is editable when override is on, the profile is volumetric, and the scale is connected', () => {
@@ -366,18 +366,24 @@ test('yield lock reason is null when yield is editable', () => {
   ).toBeNull();
 });
 
-test('readiness summary combines only the available operator signals', () => {
+test('readiness signals still capture the available operator state', () => {
+  // PRO-640: the concatenated sentence is gone as a rendered artifact; the
+  // per-axis signals are what feed the on-change aria-live announcement.
   expect(
-    getReadinessSummary({
+    getReadinessSignals({
       mode: MODE_STANDBY,
       connected: true,
       bluetoothConnected: false,
       selectedProfile: 'Morning espresso',
       wakeAvailable: true,
     })
-  ).toBe(
-    'Machine in standby. Controller connected. Scale not connected. Profile Morning espresso selected. Wake available'
-  );
+  ).toEqual({
+    machine: 'Machine in standby',
+    controller: 'Controller connected',
+    scale: 'Scale not connected',
+    profile: 'Profile Morning espresso selected',
+    wake: 'Wake available',
+  });
 });
 
 // PRO-426: standby profile mini-curve builder.

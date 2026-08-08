@@ -73,6 +73,15 @@ jobs:
         run: python3 scripts/check_ws_api_spec_drift.py
       - name: Test the WebSocket API spec drift gate
         run: python3 scripts/test_check_ws_api_spec_drift.py
+      # PRO-644: the promotion-PR body generator. Not a gate on this PR's content
+      # — it only runs when a human opens a dev-master -> master promotion PR — so
+      # only its own tests run here. Without this step the parsing would silently
+      # rot until the next promotion, and the failure mode is a body that looks
+      # plausible (right commit count, empty issue list), which is the same
+      # silent-nothing shape as the empty bodies PRO-644 fixed. Same home as the
+      # step above for the same reason: python3 + stdlib only, no toolchain.
+      - name: Test the promotion PR body generator
+        run: python3 scripts/test_generate_promotion_pr_body.py
 
   relay-server:
     name: Relay server tests
