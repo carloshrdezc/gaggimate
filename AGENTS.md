@@ -130,19 +130,52 @@ bash scripts/build_webui.sh  # Builds web, gzips + packs the bundle into src/dis
 ```sh
 cd web && npm ci && npm run build && cd ..          # web build
 pio run -e display                                  # firmware (-Wall -Wextra, no -Werror)
+pio run -e controller                               # shipped controller artifact (PRO-611)
+pio run -e display-headless                         # shipped headless artifact (PRO-611)
+pio run -e display-headless-8m                      # headless on Seeed XIAO ESP32-S3 8MB (PRO-611)
 pio test -e native                                  # host unit tests
 pio test -e native-sanitize                         # host tests under ASan + UBSan (findings fail CI)
 pio check -e display    --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"   # GATING cppcheck
 pio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"                       # GATING cppcheck
-pio run -e native -t compiledb                       # compile DB for clang-tidy
+pio run -e native-tidy -t compiledb                  # host analysis compile DB for clang-tidy (PRO-608)
 clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
+python scripts/test_select_tidy_sources.py           # selector regression tests + scope-minimum guard
+python3 scripts/check_ws_api_spec_drift.py           # docs/websocket-api.yaml vs firmware/web drift (PRO-610)
+python3 scripts/test_check_ws_api_spec_drift.py      # that gate's own regression tests
 ```
 
 - cppcheck is GATING (the display step lost its old `continue-on-error`).
+- The `firmware-shipped-envs` job (PRO-611) builds the two **shipped release artifacts**
+  that had no PR gate — `controller` and `display-headless` — plus
+  `display-headless-8m` (same sources, Seeed XIAO ESP32-S3 8MB board), as a
+  `fail-fast: false` matrix alongside the existing `firmware-single-flag-off` and
+  `firmware-driver-family` legs. Before this, a PR could break a released binary
+  and still pass CI (`pr-flash.yml` builds `controller` but is
+  `continue-on-error: true`, so it is not a gate). `display-heapdiag` is
+  deliberately **excluded** — diagnostic-only (PRO-566), never shipped, and the
+  slowest leg; see the inline comment in `ci.yml`.
 - clang-tidy (`.clang-tidy`: `bugprone-*` + `cppcoreguidelines-*`) is scoped to
-  hand-written logic via the native compile DB; generated UI (`src/display/ui/**`)
-  and vendored drivers (`src/display/drivers/**`) are excluded.
+  hand-written logic via the **`[env:native-tidy]`** compile DB — an analysis-only
+  host env (PRO-608) that compiles `src/display/core/**` plus the host-shimmable
+  `src/display/plugins/**` against the desktop-simulator shim tree, plus
+  `test/tidy/tidy_seam_headers.cpp` so the header-only `*Policy.h` seams get a
+  translation unit. **Do not generate the DB from `[env:native]`** — that env is
+  the unit-test runner and its `build_src_filter` allow-lists 3 files, which is
+  how clang-tidy silently analysed almost nothing before PRO-608. Generated UI
+  (`src/display/ui/**`) and vendored drivers (`src/display/drivers/**`) are
+  excluded. The CI step asserts a minimum selected-file count so a future
+  shrinkage fails loudly instead of passing quietly.
 - `[env:native-sanitize]` mirrors `[env:native]` plus `-fsanitize=address,undefined`.
+- **`docs/websocket-api.yaml` is a gated contract (PRO-610).** Adding or removing a
+  `req:*` handler in `src/display/plugins/*.cpp` now requires the matching spec
+  entry, or the `web` job fails. Remember the reply: `handleProfileRequest` /
+  `handleBeanRequest` / `handleGrinderRequest` / `ShotHistoryPlugin::handleRequest`
+  build the tp as `String("res:") + type.substring(4)`, so a new `req:x` also emits
+  `res:x` and both need documenting (a `<Name>Request` + `<Name>Response` message
+  plus their `channels['/ws'].publish` / `.subscribe` `$ref`s). Handlers that
+  deliberately have no web caller go in the `PRO-610-ALLOWLIST` block in
+  `web/src/services/ApiService.contract.test.js` — the single canonical allow-list,
+  which `scripts/check_ws_api_spec_drift.py` parses rather than duplicating.
 - C++ standard stays at **gnu++17** (CAR-340 / `docs/cpp-standard-spike.md`) — do not change it.
 - See `CONTRIBUTING.md` "Continuous Integration & Local Checks" for full details.
 

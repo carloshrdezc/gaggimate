@@ -116,16 +116,34 @@ pio check -e display     --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" 
 pio check -e controller  --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"
 
 # 4b. clang-tidy over the platform-independent logic (bugprone-* + cppcoreguidelines-*,
-#     config in .clang-tidy). It runs against the native env's compile database,
-#     which is the only one buildable without the xtensa ESP32 toolchain.
-pio run -e native -t compiledb
+#     config in .clang-tidy). It runs against the compile database of
+#     [env:native-tidy] — an analysis-only host env (it never links) that compiles
+#     src/display/core/** plus the host-shimmable src/display/plugins/** against the
+#     desktop-simulator shim tree. NOT [env:native]: that is the unit-test runner and
+#     its build_src_filter allow-lists 3 files (see PRO-608).
+pio run -e native-tidy -t compiledb
 clang-tidy -p . \
   $(python scripts/select_tidy_sources.py compile_commands.json)
+
+# 4c. Regression tests for the source selector, plus a minimum-scope assertion
+#     against the DB generated above (guards the PRO-608 silent-shrinkage failure).
+python scripts/test_select_tidy_sources.py
+
+# 5. WebSocket API contract drift (PRO-610). docs/websocket-api.yaml is the
+#    AsyncAPI 2.6.0 spec for /ws; this compares it against the firmware's req:*
+#    handlers, their derived res:* replies, and the web client's callers, in both
+#    directions. It runs in the `web` CI job (pure python3, no deps).
+python3 scripts/check_ws_api_spec_drift.py
+python3 scripts/test_check_ws_api_spec_drift.py
 ```
 
 Notes:
 - `clang-tidy` is scoped to hand-written firmware logic; generated LVGL UI
   (`src/display/ui/**`) and vendored drivers (`src/display/drivers/**`) are excluded.
+- The clang-tidy compile DB **must** come from `[env:native-tidy]`. Generating it
+  from `[env:native]` reduces the analysed set to 3 translation units while still
+  exiting 0 — the exact failure PRO-608 fixed. Both the CI step and
+  `scripts/test_select_tidy_sources.py` assert a minimum selected-file count.
 - The sanitizer build lives in the `[env:native-sanitize]` environment, which
   mirrors `[env:native]` and adds `-fsanitize=address,undefined`.
 - A working host C/C++ toolchain is required for `pio test -e native*` and the

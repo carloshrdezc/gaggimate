@@ -1,8 +1,10 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileExport } from '@fortawesome/free-solid-svg-icons/faFileExport';
+import { faFileZipper } from '@fortawesome/free-solid-svg-icons/faFileZipper';
 import { faLeaf } from '@fortawesome/free-solid-svg-icons/faLeaf';
 import { ApiServiceContext } from '../../services/ApiService.js';
+import { downloadBeanconquerorBackup } from '../../utils/beanconqueror/beanconquerorDownload.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
 import {
   exportBeanData,
@@ -176,6 +178,35 @@ export function BeansPage() {
     }
   }, [apiService]);
 
+  // PRO-632: the Bean Library page has no access to shot history, so this
+  // archive is deliberately BEANS-ONLY — the confirm copy says so, and the
+  // Shot History page owns the beans-plus-brews export. Beanconqueror restores
+  // a backup by REPLACING its top-level storage, hence the fresh-profile
+  // warning here too.
+  const onExportBeanconqueror = useCallback(async () => {
+    const confirmed = window.confirm(
+      'Export a Beanconqueror backup of your bean library?\n\n' +
+        'This archive carries your beans only — no shots. Export from Shot History ' +
+        'instead if you want your brews included.\n\n' +
+        'Importing this file into Beanconqueror REPLACES its beans and brews. ' +
+        'Only import it into a fresh Beanconqueror installation or profile, ' +
+        'never over a library you want to keep.',
+    );
+    if (!confirmed) return;
+
+    const download = prepareDownload('Beanconqueror.zip');
+    setBusy(true);
+    try {
+      await downloadBeanconquerorBackup({ beans, shots: [] }, download);
+    } catch (error) {
+      console.error('Failed to export Beanconqueror backup:', error);
+      download.fail(error);
+      alert(`Beanconqueror export failed: ${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [beans]);
+
   const onImport = useCallback(
     async event => {
       const [file] = Array.from(event.target.files || []);
@@ -228,6 +259,15 @@ export function BeansPage() {
             aria-label='Export Beans'
           >
             <FontAwesomeIcon icon={faFileExport} />
+          </button>
+          <button
+            className='nd-action-btn'
+            onClick={onExportBeanconqueror}
+            disabled={busy || beans.length === 0}
+            title='Export Beanconqueror Backup (beans only)'
+            aria-label='Export Beanconqueror Backup (beans only)'
+          >
+            <FontAwesomeIcon icon={faFileZipper} />
           </button>
           <ImportButton onChange={onImport} title='Import Beans' disabled={busy} />
         </div>

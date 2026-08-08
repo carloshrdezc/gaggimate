@@ -24,6 +24,9 @@ import { faGithub } from '@fortawesome/free-brands-svg-icons/faGithub';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons/faDiscord';
 import PropTypes from 'prop-types';
 import {
+  BREW_TEMPERATURE_PLACEHOLDER,
+  BREW_TEMPERATURE_UI_MAX,
+  BREW_TEMPERATURE_UI_MIN,
   MANUAL_FLOW_MAX,
   MANUAL_FLOW_MIN,
   MANUAL_PRESSURE_MAX,
@@ -36,10 +39,16 @@ import {
   MODE_STANDBY,
   MODE_STEAM,
   buildStandbyProfileCurve,
+  clampBrewTemperature,
   clampManualFlow,
   clampManualPressure,
   clampManualTemperature,
+  computeBrewTemperatureEditable,
   computeYieldEditable,
+  getBrewTemperatureHint,
+  getBrewTemperatureLockReason,
+  getReadinessSummary,
+  getYieldLockReason,
   getAvailableModeOptions,
   getBoilerHeatingState,
   getManualControlLabels,
@@ -47,6 +56,7 @@ import {
   getPrimaryActionState,
   getTemperatureRingMetrics,
   computeStandbyOnBrewButtonState,
+  resolveBrewTemperatureValue,
   shouldFireAutoSteamOnStop,
   shouldFireStandbyOnStop,
   shouldKeepManualDraftDirty,
@@ -156,7 +166,7 @@ function getPrimaryActionButtonStyle({ active, finished, accent }) {
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
-function ModeRail({ active, modes, onSelect }) {
+export function ModeRail({ active, modes, onSelect }) {
   return (
     <div style={{ display: 'flex', gap: 5 }}>
       {modes.map(({ id, name }) => (
@@ -164,12 +174,13 @@ function ModeRail({ active, modes, onSelect }) {
           key={name}
           type='button'
           onClick={() => onSelect(id)}
+          aria-pressed={id === active}
           style={{
             padding: '5px 9px',
             borderRadius: 6,
             cursor: 'pointer',
             fontFamily: 'var(--dm-font-mono)',
-            fontSize: 9,
+            fontSize: 12,
             letterSpacing: '0.22em',
             textTransform: 'uppercase',
             border: `1px solid ${id === active ? 'color-mix(in srgb, var(--dm-accent) 60%, transparent)' : 'var(--dm-line)'}`,
@@ -310,7 +321,7 @@ TargetBar.propTypes = {
 // setting are NOT duplicated here: the recipe row already renders them as
 // editable dropdowns in all modes (incl. standby). Every field degrades to a
 // themed empty-state string (never NaN / "undefined" / broken UI).
-function StandbyBlock({ profileName, curve }) {
+export function StandbyBlock({ profileName, curve, profileError, onRetryProfile }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {/* Selected-profile mini-curve. */}
@@ -423,7 +434,12 @@ function StandbyBlock({ profileName, curve }) {
                 borderRadius: 8,
               }}
             >
-              {profileName ? 'NO CURVE DATA' : 'NO PROFILE SELECTED'}
+              {profileError ? (
+                <span role='status' aria-live='polite' style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  PROFILE CURVE FAILED TO LOAD
+                  <button type='button' onClick={onRetryProfile} style={retryButtonStyle}>RETRY</button>
+                </span>
+              ) : profileName ? 'PROFILE TYPE HAS NO CURVE' : 'NO PROFILE SELECTED'}
             </div>
           )}
         </div>
@@ -434,6 +450,8 @@ function StandbyBlock({ profileName, curve }) {
 
 StandbyBlock.propTypes = {
   profileName: PropTypes.string,
+  profileError: PropTypes.any,
+  onRetryProfile: PropTypes.func,
   curve: PropTypes.shape({
     pressure: PropTypes.string,
     flow: PropTypes.string,
@@ -505,7 +523,7 @@ ManualSlider.propTypes = {
   onEditingChange: PropTypes.func,
 };
 
-function ManualConsole({
+export function ManualConsole({
   active,
   finished,
   draft,
@@ -527,6 +545,7 @@ function ManualConsole({
   primaryActionLabel,
   onBeanClick,
   onBeanSelect,
+  onBeanRetry,
   onBeanDropdownClose,
   onDoseCommit,
   onEditingChange,
@@ -632,6 +651,7 @@ function ManualConsole({
               onSelect={onBeanSelect}
               loading={loadingBeans}
               error={beanError}
+              onRetry={onBeanRetry}
               onClose={onBeanDropdownClose}
             />
           )}
@@ -769,6 +789,7 @@ ManualConsole.propTypes = {
   primaryActionLabel: PropTypes.string,
   onBeanClick: PropTypes.func,
   onBeanSelect: PropTypes.func,
+  onBeanRetry: PropTypes.func,
   onBeanDropdownClose: PropTypes.func,
   onDoseCommit: PropTypes.func,
   onEditingChange: PropTypes.func,
@@ -817,9 +838,11 @@ function RingLegend({ color, label, value }) {
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
-function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint }) {
+export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint, disabledTitle }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef(null);
+  const triggerRef = useRef(null);
+  const restoreTriggerFocusRef = useRef(false);
 
   const commit = useCallback(
     raw => {
@@ -843,6 +866,18 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
     if (editing && inputRef.current) inputRef.current.select();
   }, [editing]);
 
+  useEffect(() => {
+    if (!editing && restoreTriggerFocusRef.current) {
+      restoreTriggerFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [editing]);
+
+  const finishKeyboardEdit = useCallback(() => {
+    restoreTriggerFocusRef.current = true;
+    setEditing(false);
+  }, []);
+
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -861,7 +896,7 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span
             aria-disabled='true'
-            title="Turn on 'Allow yield override' in Settings to edit per shot"
+            title={disabledTitle ?? "Turn on 'Allow yield override' in Settings to edit per shot"}
             style={{
               fontFamily: 'var(--dm-font-display)',
               fontSize: 28,
@@ -882,14 +917,15 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
         <input
           ref={inputRef}
           type='text'
+          aria-label={`Edit ${label}`}
           inputMode='decimal'
           defaultValue={value.toFixed(1)}
           onBlur={e => commit(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Enter') commit(e.target.value);
-            if (e.key === 'Escape') setEditing(false);
-            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); setEditing(false); }
-            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); setEditing(false); }
+            if (e.key === 'Enter') { restoreTriggerFocusRef.current = true; commit(e.target.value); }
+            if (e.key === 'Escape') finishKeyboardEdit();
+            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); finishKeyboardEdit(); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); finishKeyboardEdit(); }
           }}
           style={{
             display: 'block',
@@ -905,13 +941,15 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
             border: '1px solid var(--dm-accent)',
             borderRadius: 4,
             padding: '4px 6px',
-            outline: 'none',
             lineHeight: 1,
           }}
         />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span
+          <button
+            ref={triggerRef}
+            type='button'
+            aria-label={`Edit ${label}`}
             onClick={() => {
               // PRO-503: fire onTap BEFORE entering edit mode so a tap-away
               // without typing/Enter still records a fresh "confirmed" event
@@ -929,11 +967,14 @@ function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, on
               fontVariantNumeric: 'tabular-nums',
               lineHeight: 1,
               cursor: 'text',
+              border: 'none',
               borderBottom: '1px dashed rgba(232,232,232,0.2)',
+              background: 'transparent',
+              padding: 0,
             }}
           >
             {typeof value === 'number' ? value.toFixed(1) : value}
-          </span>
+          </button>
           <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 10, color: 'var(--dm-fg-dim)' }}>
             {unit}
           </span>
@@ -971,21 +1012,35 @@ const stepperBtnStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 16,
-  height: 11,
+  width: 24,
+  height: 24,
   padding: 0,
   background: 'var(--dm-bg-3)',
   border: '1px solid var(--dm-line)',
   borderRadius: 2,
   color: 'var(--dm-fg-dim)',
-  fontSize: 7,
+  fontSize: 10,
   cursor: 'pointer',
   lineHeight: 1,
 };
 
+const retryButtonStyle = {
+  background: 'transparent',
+  border: '1px solid var(--dm-line-strong)',
+  borderRadius: 4,
+  color: 'var(--dm-fg)',
+  cursor: 'pointer',
+  fontFamily: 'var(--dm-font-mono)',
+  fontSize: 9,
+  letterSpacing: '0.12em',
+  padding: '4px 6px',
+};
+
 EditableNumBlock.propTypes = {
   label: PropTypes.string,
-  value: PropTypes.number,
+  // A string is allowed for the read-only/placeholder case (PRO-630): when the
+  // device has published no value there is no truthful number to render.
+  value: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   unit: PropTypes.string,
   hint: PropTypes.string,
   accent: PropTypes.string,
@@ -996,6 +1051,7 @@ EditableNumBlock.propTypes = {
   onTap: PropTypes.func,
   disabled: PropTypes.bool,
   lockedHint: PropTypes.string,
+  disabledTitle: PropTypes.string,
 };
 
 // Format the current grind target for display. Mirrors ProcessControls'
@@ -1010,7 +1066,7 @@ function formatGrindTarget(grindTarget, grindTargetVolume, grindTargetDuration) 
 }
 
 // Inline dropdown for profile / bean selection
-function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loading, error, onClose }) {
+function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loading, error, onRetry, onClose }) {
   return (
     <div
       style={{
@@ -1086,7 +1142,8 @@ function SelectDropdown({ label, options, activeId, activeLabel, onSelect, loadi
               color: 'var(--dm-accent)',
             }}
           >
-            {error.toUpperCase()}
+            <div role='status' aria-live='polite'>FAILED TO LOAD {label}</div>
+            <button type='button' onClick={onRetry} style={{ ...retryButtonStyle, marginTop: 8 }}>RETRY</button>
           </div>
         ) : options.length === 0 ? (
           <div
@@ -1141,6 +1198,7 @@ SelectDropdown.propTypes = {
   onSelect: PropTypes.func,
   loading: PropTypes.bool,
   error: PropTypes.string,
+  onRetry: PropTypes.func,
   onClose: PropTypes.func,
 };
 
@@ -1152,7 +1210,7 @@ function GraphLegend({ color, label, value, dashed }) {
         alignItems: 'center',
         gap: 5,
         fontFamily: 'var(--dm-font-mono)',
-        fontSize: 9,
+        fontSize: 11,
         letterSpacing: '0.10em',
       }}
     >
@@ -1176,6 +1234,28 @@ GraphLegend.propTypes = {
   label: PropTypes.string,
   value: PropTypes.string,
   dashed: PropTypes.bool,
+};
+
+export function getRecipeGridStyle(isMobile) {
+  return {
+    display: 'grid',
+    // PRO-630: five fields (Grind · Dose › Temp › Yield › Scales) with four
+    // separators between them. Mobile stays a single stacked column so the extra
+    // field can't clip or overlap at narrow widths.
+    gridTemplateColumns: isMobile ? '1fr' : '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
+    gap: 10,
+    alignItems: 'center',
+    padding: '12px 0',
+    borderTop: '1px solid var(--dm-line)',
+    borderBottom: '1px solid var(--dm-line)',
+  };
+}
+
+export const graphLegendRowStyle = {
+  display: 'flex',
+  gap: 16,
+  alignItems: 'center',
+  flexWrap: 'wrap',
 };
 
 // ── Graph SVG ───────────────────────────────────────────────────────────────
@@ -1405,7 +1485,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   // card can render the selected-profile mini-curve. The `brew` gate here drives
   // the profiles-LIST fetch; the selected profile itself is fetched off
   // selectedProfileId regardless of mode.
-  const { profileData } = useProfileData(
+  const { profileData, error: profileDataError, retry: retryProfileData } = useProfileData(
     api,
     brew || s.mode === MODE_STANDBY,
     s.selectedProfileId
@@ -1498,6 +1578,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     brewTarget: s.brewTarget,
     bluetoothConnected: s.bluetoothConnected,
   });
+  const yieldLockReason = getYieldLockReason({
+    allowYieldOverride: s.allowYieldOverride,
+    brewTarget: s.brewTarget,
+    bluetoothConnected: s.bluetoothConnected,
+  });
   const [yieldTarget, setYieldTargetState] = useState(() => s.brewTargetVolume || DEFAULT_YIELD);
 
   // Reseed to the active profile's target on profile change (and whenever the
@@ -1517,6 +1602,97 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     setYieldTargetState(v);
     try { api.send({ tp: 'req:change-brew-target', target: v }); } catch {}
   }, [api, yieldEditable]);
+
+  // Selected-profile brew temperature — device-authoritative (PRO-630/PRO-629).
+  //
+  // The device publishes the effective target as `bto` and its provenance as
+  // `bte` in every evt:status; that is the ONLY source of the displayed number.
+  // Unlike DOSE/GRIND there is deliberately no localStorage seed: a cached guess
+  // could replay a stale edit onto another profile, and legacy firmware that
+  // sends no `bto` must degrade to a read-only placeholder rather than claim a
+  // fabricated default. This is a separate concern from the manual-mode
+  // TEMPERATURE SETPOINT slider (req:manual:update) — the two never cross-write.
+  const brewTemperatureTarget = s.brewTemperatureOverrideTarget;
+  const brewTemperatureEditable = computeBrewTemperatureEditable({
+    connected,
+    mode,
+    active,
+    target: brewTemperatureTarget,
+  });
+  const brewTemperatureLockReason = getBrewTemperatureLockReason({
+    connected,
+    mode,
+    active,
+    target: brewTemperatureTarget,
+  });
+  // Optimistic value for an in-flight write only. It is replaced by the device's
+  // own echo on the response and dropped as soon as a status broadcast (or a
+  // profile switch) lands, so a local edit can never outlive the next
+  // evt:status — every browser converges on `bto`. Losing editability (brew
+  // starts, mode changes, socket drops) also drops it: a locked field must show
+  // the device's truth, never a value the device may have refused.
+  const [pendingBrewTemperature, setPendingBrewTemperature] = useState(null);
+  useEffect(() => {
+    setPendingBrewTemperature(null);
+  }, [
+    brewTemperatureTarget,
+    s.brewTemperatureOverrideEnabled,
+    s.selectedProfileId,
+    brewTemperatureEditable,
+  ]);
+
+  const brewTemperature = resolveBrewTemperatureValue({
+    connected,
+    target: brewTemperatureTarget,
+    pending: pendingBrewTemperature,
+  });
+  const brewTemperatureHint = getBrewTemperatureHint({
+    connected,
+    target: brewTemperatureTarget,
+    overrideEnabled: s.brewTemperatureOverrideEnabled,
+  });
+
+  const setBrewTemperature = useCallback(
+    async val => {
+      if (!brewTemperatureEditable) return;
+      const v = clampBrewTemperature(val);
+      // Which profile this write belongs to. Read from the status signal (the
+      // same pattern setManualGrind/handleGrinderSelect use) rather than the
+      // render-time closure so it is the profile that is selected at the moment
+      // the request actually leaves, not whatever was selected when this
+      // callback was memoized.
+      const requestProfileId = machine.value.status.selectedProfileId;
+      setPendingBrewTemperature(v);
+      try {
+        const response = await api.request({ tp: 'req:brew-temperature:set', temperature: v });
+        // Another client may have switched the selected profile while this write
+        // was in flight. The profile-change effect above has already dropped the
+        // pending value so the field shows the NEW profile's device-authoritative
+        // `bto`; writing this response's echo would put profile A's temperature
+        // on screen while profile B is selected until the next status frame
+        // happened to land. Drop the answer instead — it is about a profile the
+        // user is no longer looking at.
+        if (machine.value.status.selectedProfileId !== requestProfileId) return;
+        if (response?.ok) {
+          // Show the device's echoed temperature (not our request value) so the
+          // number on screen is always one the device confirmed.
+          setPendingBrewTemperature(
+            Number.isFinite(response.temperature) ? response.temperature : v
+          );
+        } else {
+          // Device-authoritative reject — e.g. a brew started between the click
+          // and the response, or the mode changed. Never render a false success:
+          // drop the optimistic value and fall back to the broadcast `bto`.
+          setPendingBrewTemperature(null);
+        }
+      } catch (error) {
+        setPendingBrewTemperature(null);
+        console.error('Failed to set brew temperature:', error);
+      }
+    },
+    [api, brewTemperatureEditable]
+  );
+
   // Profile dropdown
   const [activeDropdown, setActiveDropdown] = useState(null); // 'profile' | 'bean' | null
   const [profileOptions, setProfileOptions] = useState([]);
@@ -1736,9 +1912,16 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const steamStatusLabel = targetTemp > 0 && tempVal < targetTemp
     ? `PREHEATING · TGT ${fmt(targetTemp)}°`
     : `STEAM · TGT ${fmt(targetTemp)}°`;
-  const primaryActionState = getPrimaryActionState({ active, finished, mode, isGrindAvailable, isManualAvailable });
+  const primaryActionState = getPrimaryActionState({ active, finished, mode, connected, isGrindAvailable, isManualAvailable });
   const primaryActionLabel = primaryActionState.label;
   const primaryActionAccent = primaryActionState.accent;
+  const readinessSummary = getReadinessSummary({
+    mode,
+    connected,
+    bluetoothConnected: s.bluetoothConnected,
+    selectedProfile: s.selectedProfile,
+    wakeAvailable: primaryActionLabel === 'WAKE' && connected,
+  });
   const primaryAction = () => {
     if (Object.prototype.hasOwnProperty.call(primaryActionState, 'processKind')) {
       lastProcessTypeRef.current = primaryActionState.processKind;
@@ -1838,6 +2021,9 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
       </div>
 
       {/* Sub-header: mode rail + status pills + phase strip */}
+      <div role='status' aria-live='polite' style={{ padding: '8px 16px', fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-dim)' }}>
+        {readinessSummary}
+      </div>
       <div
         style={{
           display: 'flex',
@@ -2154,6 +2340,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               primaryActionLabel={primaryActionLabel}
               onBeanClick={openBeanDropdown}
               onBeanSelect={handleBeanSelect}
+              onBeanRetry={loadBeans}
               onBeanDropdownClose={() => setActiveDropdown(null)}
               onDoseCommit={setDose}
               onEditingChange={setIsManualEditing}
@@ -2261,6 +2448,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleBeanSelect}
                 loading={loadingBeans}
                 error={beanError}
+                onRetry={loadBeans}
                 onClose={() => setActiveDropdown(null)}
               />
             )}
@@ -2274,6 +2462,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleProfileSelect}
                 loading={loadingProfiles}
                 error={profileError}
+                onRetry={loadProfiles}
                 onClose={() => setActiveDropdown(null)}
               />
             )}
@@ -2287,22 +2476,15 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
                 onSelect={handleGrinderSelect}
                 loading={loadingGrinders}
                 error={grinderError}
+                onRetry={loadGrinders}
                 onClose={() => setActiveDropdown(null)}
               />
             )}
           </div>
 
-          {/* Grind → Dose → Yield → Scales */}
+          {/* Grind → Dose → Temp → Yield → Scales */}
           <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr auto 1fr auto 1fr auto 1fr',
-              gap: 10,
-              alignItems: 'center',
-              padding: '12px 0',
-              borderTop: '1px solid var(--dm-line)',
-              borderBottom: '1px solid var(--dm-line)',
-            }}
+            style={getRecipeGridStyle(isMobile)}
           >
             {/* Manual grinder-dial setting (PRO-431, made device-authoritative in
                 PRO-603). Edits exactly like DOSE (tap → type → commit); every commit
@@ -2322,7 +2504,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               // recordManualGrindSetting event (mobile onBlur is unreliable).
               onTap={() => setManualGrind(manualGrind)}
             />
-            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
             <EditableNumBlock
               label='DOSE'
               value={dose}
@@ -2332,7 +2514,29 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               max={200}
               onCommit={setDose}
             />
-            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            {/* Selected-profile brew temperature (PRO-630). Device-authoritative:
+                the value comes from evt:status `bto` and every commit fires
+                req:brew-temperature:set, whose res: reply the device may reject
+                (brew started, wrong mode) — a reject resyncs to the next status
+                instead of showing a false success. Locked while a brew is active
+                and outside Brew mode; read-only with a placeholder on firmware
+                that doesn't publish `bto`. Scope is the profile root/default
+                target — per-phase temperature curves stay firmware-owned. */}
+            <EditableNumBlock
+              label='TEMP'
+              value={brewTemperature ?? BREW_TEMPERATURE_PLACEHOLDER}
+              unit='°C'
+              hint={brewTemperatureHint}
+              step={0.5}
+              min={BREW_TEMPERATURE_UI_MIN}
+              max={BREW_TEMPERATURE_UI_MAX}
+              onCommit={setBrewTemperature}
+              disabled={!brewTemperatureEditable}
+              lockedHint={brewTemperatureLockReason}
+              disabledTitle='The machine owns this target: it can only be changed in Brew mode while no shot is running'
+            />
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <EditableNumBlock
               label='YIELD'
               value={targetWeight}
@@ -2343,9 +2547,9 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               max={120}
               onCommit={setYield}
               disabled={!yieldEditable}
-              lockedHint='YIELD · LOCKED'
+              lockedHint={yieldLockReason}
             />
-            <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
             <div>
               <div style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, letterSpacing: '0.18em', color: 'var(--dm-fg-dim)', marginBottom: 3 }}>
                 SCALES
@@ -2420,6 +2624,8 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               <StandbyBlock
                 profileName={s.selectedProfile}
                 curve={standbyCurve}
+                profileError={profileDataError.profile}
+                onRetryProfile={retryProfileData.profile}
               />
             ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2482,6 +2688,11 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
             >
               {primaryActionLabel}
             </button>
+            {primaryActionLabel === 'WAKE' && (
+              <span role='status' aria-live='polite' style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-dim)' }}>
+                Wake, then tap again to start.
+              </span>
+            )}
           </div>
             </>
           )}
@@ -2517,7 +2728,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
           >
             LIVE EXTRACTION
           </span>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          <div style={graphLegendRowStyle}>
             <GraphLegend color='var(--dm-accent)' label='TEMP'     value={`${fmt(tempVal)}°C`} />
             <GraphLegend color='var(--dm-good)'   label='PRESSURE' value={`${fmt(pressure)} bar`} />
             <GraphLegend color='var(--dm-warn)'   label='FLOW'     value={`${fmt(flowVal)} g/s`} />

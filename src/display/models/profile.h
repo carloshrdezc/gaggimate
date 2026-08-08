@@ -39,6 +39,10 @@ struct Transition {
     bool adaptive;
 };
 
+// PRO-608: JSON-deserialised aggregate. Every field is written by ProfileManager's parser (or left
+// at the profile schema's documented default) before a Phase is read. Auditing per-field defaults
+// against the web UI's schema is real work — tracked in PRO-612, not smuggled into a CI-scope change.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Phase {
     String name;
     PhaseType phase; // "preinfusion" | "brew"
@@ -162,6 +166,9 @@ struct Phase {
     }
 };
 
+// PRO-608: same as Phase above — JSON-deserialised aggregate, populated by ProfileManager before
+// use. Tracked in PRO-612.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Profile {
     String id;
     String label;

@@ -21,15 +21,15 @@
 
 constexpr uint32_t RELAY_CLIENT_ID = 0xFFFFFFFE;
 
-constexpr size_t UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
+constexpr size_t UPDATE_CHECK_INTERVAL = size_t{5} * 60 * 1000;
 // PRO-411: cap for the exponential failure backoff of the periodic OTA
 // update-check. On consecutive check failures the effective interval doubles
 // from UPDATE_CHECK_INTERVAL up to this ceiling (6 h), then holds; a successful
 // check resets it back to UPDATE_CHECK_INTERVAL. This stops a persistently
 // failing check (github.com unreachable / TLS failing / transient WiFi loss)
 // from opening a fresh TLS connection every 5 min and hammering github.com.
-constexpr size_t UPDATE_CHECK_MAX_INTERVAL = 6 * 60 * 60 * 1000;
-constexpr size_t CLEANUP_PERIOD = 5 * 1000;
+constexpr size_t UPDATE_CHECK_MAX_INTERVAL = size_t{6} * 60 * 60 * 1000;
+constexpr size_t CLEANUP_PERIOD = size_t{5} * 1000;
 constexpr size_t STATUS_PERIOD = 500;
 constexpr size_t DNS_PERIOD = 10;
 

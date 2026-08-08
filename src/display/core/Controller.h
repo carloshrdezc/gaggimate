@@ -53,6 +53,11 @@ struct ProcessSnapshot {
     float manualFlow = 0.0f;
     int manualTemperature = DEFAULT_MANUAL_TEMPERATURE;
 };
+
+struct EffectiveBrewTemperatureOverride {
+    float temperature = 0.0f;
+    bool enabled = false;
+};
 #ifndef GAGGIMATE_HEADLESS
 #include <display/drivers/Driver.h>
 #include <display/ui/default/DefaultUI.h>
@@ -65,6 +70,11 @@ const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https:
 // Chosen to prevent UI freezes while allowing reasonable wait for mutex
 constexpr TickType_t UI_MUTEX_TIMEOUT_MS = 100;
 
+// PRO-608: Controller is a single non-polymorphic global. It has no base and no subclass, is
+// never deleted through a base pointer, and is never destroyed at all on the device (it lives for
+// the lifetime of the process). Adding a virtual destructor would put a vtable on the largest
+// object in the firmware for zero benefit. Tracked in PRO-612.
+// NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class Controller {
   public:
     Controller() = default;
@@ -76,6 +86,7 @@ class Controller {
 
     void setMode(int newMode);
     void setTargetTemp(float temperature);
+    bool setBrewTemperatureOverride(float temperature);
     void setPressureScale();
     void setPumpModelCoeffs();
     void setTargetGrindDuration(int duration);
@@ -85,6 +96,9 @@ class Controller {
     int getMode() const;
 
     float getTargetTemp() const;
+    float getBrewTemperatureOverrideTarget() const;
+    bool isBrewTemperatureOverrideEnabled() const;
+    EffectiveBrewTemperatureOverride getEffectiveBrewTemperatureOverride() const;
     int getTargetGrindDuration() const;
     int getManualTargetType() const { return settings.getManualTargetType(); }
     float getManualPressure() const { return settings.getManualPressure(); }
@@ -292,7 +306,7 @@ class Controller {
     static const unsigned long BLUETOOTH_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
     static const unsigned long CONTROLLER_WAITING_TIMEOUT_MS = 10000;
 
-    xTaskHandle taskHandle;
+    xTaskHandle taskHandle = nullptr;
 
     static void loopTask(void *arg);
 };

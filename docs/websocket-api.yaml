@@ -87,6 +87,7 @@ channels:
           - $ref: '#/components/messages/BeansDeleteResponse'
           - $ref: '#/components/messages/GrindersListResponse'
           - $ref: '#/components/messages/GrindersSaveResponse'
+          - $ref: '#/components/messages/GrindersSelectResponse'
           - $ref: '#/components/messages/HistoryListResponse'
           - $ref: '#/components/messages/HistoryGetResponse'
           - $ref: '#/components/messages/HistoryDeleteResponse'
@@ -96,6 +97,7 @@ channels:
           - $ref: '#/components/messages/HistoryRebuildResponse'
           - $ref: '#/components/messages/FlushStartResponse'
           - $ref: '#/components/messages/AuthResponse'
+          - $ref: '#/components/messages/BrewTemperatureSetResponse'
     publish:
       description: Messages sent from the client to the server.
       message:
@@ -122,6 +124,7 @@ channels:
           - $ref: '#/components/messages/StandbyOnBrewSetRequest'
           - $ref: '#/components/messages/DoseSetRequest'
           - $ref: '#/components/messages/ManualGrindSetRequest'
+          - $ref: '#/components/messages/BrewTemperatureSetRequest'
           - $ref: '#/components/messages/BeansSelectRequest'
           - $ref: '#/components/messages/FlushStartRequest'
           - $ref: '#/components/messages/ProfilesListRequest'
@@ -138,6 +141,7 @@ channels:
           - $ref: '#/components/messages/BeansDeleteRequest'
           - $ref: '#/components/messages/GrindersListRequest'
           - $ref: '#/components/messages/GrindersSaveRequest'
+          - $ref: '#/components/messages/GrindersSelectRequest'
           - $ref: '#/components/messages/HistoryListRequest'
           - $ref: '#/components/messages/HistoryGetRequest'
           - $ref: '#/components/messages/HistoryDeleteRequest'
@@ -164,6 +168,13 @@ components:
         tt:
           type: number
           description: Target temperature
+        bto:
+          type: number
+          description: Canonical selected-profile brew root temperature after applying the device-authoritative override when enabled.
+        bte:
+          type: integer
+          enum: [0, 1]
+          description: Selected-profile brew-temperature override provenance; 1 when bto is an explicit persisted override, including when it equals the profile root temperature.
         pr:
           type: number
           description: Current pressure
@@ -188,6 +199,9 @@ components:
         bn:
           type: string
           description: Selected bean name
+        gr:
+          type: string
+          description: Selected grinder name (PRO-424; '' when no grinder is selected)
         cp:
           type: boolean
           description: Pressure capability
@@ -714,6 +728,26 @@ components:
           error:
             type: string
         required: [tp]
+    GrindersSelectResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Acknowledges `req:grinders:select` by echoing the grinder name the
+          device persisted. Unlike `req:beans:select` (which is handled inline
+          and sends no reply), the grinder handler runs in
+          `WebUIPlugin::handleGrinderRequest`, whose `res:*` tp is derived from
+          the request tp, so a reply is always sent.
+        properties:
+          tp:
+            type: string
+            enum: ['res:grinders:select']
+          rid:
+            type: string
+          name:
+            type: string
+            description: The selected grinder name as persisted ('' clears the selection).
+        required: [tp]
     # ---- History responses ---------------------------------------------
     HistoryListResponse:
       x-since-version: 'unknown'
@@ -1138,6 +1172,41 @@ components:
           value:
             type: number
         required: [tp, value]
+    BrewTemperatureSetRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Set the persisted device-authoritative recipe-temperature override for
+          the selected profile root (0 <= temperature <= 160). The request is
+          rejected while a brew process is active. It never mutates profile JSON,
+          manual, steam, or water temperatures. A profile selection clears it.
+        properties:
+          tp:
+            type: string
+            enum: ['req:brew-temperature:set']
+          rid:
+            type: string
+          temperature:
+            type: number
+        required: [tp, temperature]
+    BrewTemperatureSetResponse:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        properties:
+          tp:
+            type: string
+            enum: ['res:brew-temperature:set']
+          rid:
+            type: string
+          ok:
+            type: boolean
+          temperature:
+            type: number
+          override:
+            type: boolean
+        required: [tp, ok, temperature, override]
     BeansSelectRequest:
       x-since-version: 'unknown'
       payload:
@@ -1352,6 +1421,24 @@ components:
             type: array
             items:
               type: string
+        required: [tp]
+    GrindersSelectRequest:
+      x-since-version: 'unknown'
+      payload:
+        type: object
+        description: |
+          Select the active grinder by name (PRO-424). Firmware-authoritative:
+          the name is persisted to NVS and rebroadcast as `gr` in `evt:status`
+          so every connected client converges. An empty or missing `name`
+          clears the selection. Replies with `res:grinders:select`.
+        properties:
+          tp:
+            type: string
+            enum: ['req:grinders:select']
+          rid:
+            type: string
+          name:
+            type: string
         required: [tp]
     # ---- History requests ----------------------------------------------
     HistoryListRequest:

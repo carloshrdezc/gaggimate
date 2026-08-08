@@ -16,6 +16,25 @@
 //       legacy/HTTP-superseded orphans (req:history:get even returns
 //       "use HTTP /api/history?id=<id>").
 //
+// PRO-610: (d) is now load-bearing beyond this file. The block below is the
+// SINGLE canonical allow-list of intentional spec/implementation asymmetries —
+// firmware `req:*` handlers that deliberately have no web-client caller.
+// scripts/check_ws_api_spec_drift.py (the CI drift gate) parses it out of THIS
+// file between the two marker comments, so there is exactly one list to
+// maintain. Keep the shape: one `req:*` type per line, backtick-quoted. Adding
+// or removing an entry here changes the gate's behaviour.
+//
+// PRO-610-ALLOWLIST-BEGIN
+//   `req:beans:load`     — the client reads whole beans from the req:beans:list payload
+//   `req:history:list`   — superseded by HTTP GET /api/history/index.bin
+//   `req:history:get`    — replies "use HTTP /api/history?id=<id>" (see /api/history/<id>.slog)
+// PRO-610-ALLOWLIST-END
+//
+// PRO-630 removed `req:brew-temperature:set` from the list above: the Dashboard
+// TEMP control now calls it, so it is no longer a client-less handler and must
+// stay OUT of the allow-list — otherwise the gate's stale-entry check can't tell
+// a real orphan from a documented one.
+//
 // Since there was nothing to fix, this test locks the audited *client-side*
 // dispatch/correlation contract so a future regression is caught mechanically.
 // It pins the exact behaviour of ApiService._onMessage and request():

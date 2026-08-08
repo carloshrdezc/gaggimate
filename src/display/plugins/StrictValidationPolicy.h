@@ -111,6 +111,8 @@ inline bool validateWebSocketRequest(const std::string &type, const Fields &fiel
         return false;
     if (type == "req:manual-grind:set" && !requireFields(fields, {"value"}, error))
         return false;
+    if (type == "req:brew-temperature:set" && !requireFields(fields, {"temperature"}, error))
+        return false;
     for (const auto &field : fields) {
         const std::string &name = field.name;
         const std::string &value = field.value;
@@ -118,6 +120,7 @@ inline bool validateWebSocketRequest(const std::string &type, const Fields &fiel
             (type == "req:change-grind-target" && name == "target") || (type == "req:change-mode" && name == "mode") ||
             (type == "req:change-brew-target" && name == "target") || (type == "req:dose:set" && name == "grams") ||
             (type == "req:manual-grind:set" && name == "value") ||
+            (type == "req:brew-temperature:set" && name == "temperature") ||
             (type == "req:manual:update" && (name == "pressure" || name == "flow" || name == "temperature")) ||
             (type == "req:autotune-start" && (name == "time" || name == "samples"));
         if (numericField && !field.isNumeric) {
@@ -137,6 +140,8 @@ inline bool validateWebSocketRequest(const std::string &type, const Fields &fiel
         if (type == "req:dose:set" && name == "grams" && !numberInRange(name, value, 0.000001, 200, error))
             return false;
         if (type == "req:manual-grind:set" && name == "value" && !numberInRange(name, value, 0.0, 100, error))
+            return false;
+        if (type == "req:brew-temperature:set" && name == "temperature" && !numberInRange(name, value, 0, 160, error))
             return false;
         if (type == "req:manual:update" && name == "targetType" && value != "flow" && value != "pressure") {
             error = {name, "must be 'flow' or 'pressure'"};
@@ -193,8 +198,17 @@ inline bool validateSettings(const Fields &fields, Error &error) {
         } else if (name == "brewDelay" || name == "grindDelay") {
             if (!numberInRange(name, value, 0, 4000, error))
                 return false;
-        } else if (name == "mainBrightness" || name == "standbyBrightness" || name == "sunriseR" || name == "sunriseG" ||
-                   name == "sunriseB" || name == "sunriseW" || name == "sunriseExtBrightness") {
+        } else if (name == "mainBrightness" || name == "standbyBrightness") {
+            // PRO-609: backlight *level*, not an 8-bit duty. Every panel family caps at 16
+            // (LilyGo `if (value > 16) value = 16;`, Waveshare `constrain(.., WS_BACKLIGHT_MAX)`,
+            // Amoled scales a 0..16 level by 16), and the setters below never clamp — so a
+            // wider bound here lets NVS keep a value no driver honors. The UI agrees (0..16).
+            if (!inRange(name, value, 0, 16, error))
+                return false;
+        } else if (name == "sunriseR" || name == "sunriseG" || name == "sunriseB" || name == "sunriseW" ||
+                   name == "sunriseExtBrightness") {
+            // Deliberately 8-bit, unlike the backlight above: LedControlPlugin forwards these
+            // verbatim as uint8_t over BLE (and sends ext as `255 - ext`); defaults are 255.
             if (!inRange(name, value, 0, 255, error))
                 return false;
         } else if (name == "steamPumpPercentage" || name == "steamPumpCutoff") {

@@ -8,6 +8,13 @@ class Process {
   public:
     Process() = default;
     virtual ~Process() = default;
+    // PRO-608: abstract interface base. Every concrete process is heap-allocated
+    // and owned through Process* by Controller::startProcess(); none is ever
+    // value-copied, and copying through the base would slice. Mirrors Plugin.h.
+    Process(const Process &) = delete;
+    Process &operator=(const Process &) = delete;
+    Process(Process &&) = delete;
+    Process &operator=(Process &&) = delete;
 
     virtual bool isRelayActive() = 0;
 

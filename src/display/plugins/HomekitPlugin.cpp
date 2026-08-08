@@ -160,7 +160,11 @@ void HomekitPlugin::loop() {
     if (temperatureActionRequired) {
         const float requestedTemperature = accessory->getTargetTemperature();
         if (std::fabs(controller->getTargetTemp() - requestedTemperature) > 0.05f) {
-            controller->setTargetTemp(requestedTemperature);
+            if (controller->getMode() == MODE_BREW) {
+                controller->setBrewTemperatureOverride(requestedTemperature);
+            } else {
+                controller->setTargetTemp(requestedTemperature);
+            }
         }
         clearTemperatureAction();
     }

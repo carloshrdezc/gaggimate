@@ -16,6 +16,7 @@ vi.mock('../ShotAnalyzer/services/NotesService', () => ({
 }));
 
 import { importShotHistoryArchive, buildShotHistoryArchive } from './historyArchive.js';
+import { deriveStartTargetTemperature } from './startTargetTemperature.js';
 
 describe('buildShotHistoryArchive — id serialization', () => {
   test('serializes id=0 as "0", not as ""', () => {
@@ -94,5 +95,56 @@ describe('importShotHistoryArchive — hasCoreHistoryFields guard', () => {
 
   test('throws if empty array payload', async () => {
     await expect(importShotHistoryArchive([])).rejects.toThrow('No shots found');
+  });
+});
+
+describe('start target temperature survives the archive round-trip (PRO-631)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test('exported samples keep tt so the start target is recomputable on import', async () => {
+    const shot = {
+      id: 7,
+      timestamp: 1000,
+      profile: 'Turbo Bloom',
+      profileId: 'profile-1',
+      samples: [
+        { t: 0, tt: 93.5, ct: 88.2 },
+        { t: 250, tt: 96, ct: 90.1 },
+      ],
+    };
+    expect(deriveStartTargetTemperature(shot)).toBe(93.5);
+
+    const archive = buildShotHistoryArchive([shot]);
+    expect(archive.shots[0].samples[0].tt).toBe(93.5);
+
+    const [imported] = await importShotHistoryArchive(archive);
+    expect(deriveStartTargetTemperature(imported)).toBe(93.5);
+  });
+
+  test('imported shot without a sample trace degrades to no start target', async () => {
+    const archive = buildShotHistoryArchive([
+      { id: 8, timestamp: 1000, profile: 'Notes only', profileId: 'profile-1', samples: [] },
+    ]);
+
+    const [imported] = await importShotHistoryArchive(archive);
+    expect(deriveStartTargetTemperature(imported)).toBeNull();
+  });
+
+  test('imported manual shot keeps its N/A start target across the round-trip', async () => {
+    const archive = buildShotHistoryArchive([
+      {
+        id: 9,
+        timestamp: 1000,
+        profile: 'Manual',
+        profileId: 'manual',
+        samples: [{ t: 0, tt: 93.5, ct: 92.1 }],
+      },
+    ]);
+
+    const [imported] = await importShotHistoryArchive(archive);
+    expect(imported.profileId).toBe('manual');
+    expect(deriveStartTargetTemperature(imported)).toBeNull();
   });
 });

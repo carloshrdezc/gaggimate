@@ -81,6 +81,10 @@ class VolumetricRateCalculator {
   private:
     std::vector<double> measurements;
     std::vector<double> measurementTimes;
+    // PRO-608: the window is a construction-time invariant of the rate calculator; const is the
+    // point. Dropping const to regain assignability would weaken the class for a check about
+    // copyability it never needs. Tracked in PRO-612.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const double windowDuration;
 };
 

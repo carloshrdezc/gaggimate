@@ -164,23 +164,28 @@ constexpr bool otaComponentFlashEligible(bool isTag, const char *pinnedTag, bool
 // RUN_TEST suite in test/test_ota_channel_switch_policy/.)
 //
 // within-channel guard kept (selected == installed, non-tag) -> UpgradeOnly:
-static_assert(decideOtaFlash(false, "", /*selEq=*/true, /*instEmpty=*/false, "1.2.3", false) == OtaFlashDecision::UpgradeOnly,
+static_assert(decideOtaFlash(false, "", /*selectedEqInstalled=*/true, /*installedEmpty=*/false, "1.2.3", false) ==
+                  OtaFlashDecision::UpgradeOnly,
               "PRO-400: within-channel (selected==installed) keeps upgrade-only guard");
 // empty installedChannel (missed migration) -> defensive UpgradeOnly:
-static_assert(decideOtaFlash(false, "", /*selEq=*/false, /*instEmpty=*/true, "1.2.3", false) == OtaFlashDecision::UpgradeOnly,
+static_assert(decideOtaFlash(false, "", /*selectedEqInstalled=*/false, /*installedEmpty=*/true, "1.2.3", false) ==
+                  OtaFlashDecision::UpgradeOnly,
               "PRO-400: empty installedChannel treated as equal -> upgrade-only");
 // genuine channel switch, resolve OK -> ForceChannelSwitch:
-static_assert(decideOtaFlash(false, "", /*selEq=*/false, /*instEmpty=*/false, "1.2.3", false) ==
+static_assert(decideOtaFlash(false, "", /*selectedEqInstalled=*/false, /*installedEmpty=*/false, "1.2.3", false) ==
                   OtaFlashDecision::ForceChannelSwitch,
               "PRO-400: channel switch with resolve OK -> force channel switch");
 // channel switch, resolve failed -> Refuse:
-static_assert(decideOtaFlash(false, "", /*selEq=*/false, /*instEmpty=*/false, "1.2.3", true) == OtaFlashDecision::Refuse,
+static_assert(decideOtaFlash(false, "", /*selectedEqInstalled=*/false, /*installedEmpty=*/false, "1.2.3", true) ==
+                  OtaFlashDecision::Refuse,
               "PRO-400: channel switch with resolve failed -> refuse");
 // channel switch, resolve returned empty -> Refuse:
-static_assert(decideOtaFlash(false, "", /*selEq=*/false, /*instEmpty=*/false, "", false) == OtaFlashDecision::Refuse,
+static_assert(decideOtaFlash(false, "", /*selectedEqInstalled=*/false, /*installedEmpty=*/false, "", false) ==
+                  OtaFlashDecision::Refuse,
               "PRO-400: channel switch with empty resolve -> refuse");
 // tag path, resolve failed -> Refuse:
-static_assert(decideOtaFlash(true, "2.0.8", /*selEq=*/false, /*instEmpty=*/false, "", true) == OtaFlashDecision::Refuse,
+static_assert(decideOtaFlash(true, "2.0.8", /*selectedEqInstalled=*/false, /*installedEmpty=*/false, "", true) ==
+                  OtaFlashDecision::Refuse,
               "PRO-400: tag path with resolve failed -> refuse");
 // force helper: only the two force decisions force:
 static_assert(otaDecisionForces(OtaFlashDecision::ForceMatchTag), "ForceMatchTag forces");
@@ -190,23 +195,28 @@ static_assert(!otaDecisionForces(OtaFlashDecision::Refuse), "Refuse does not for
 
 // PRO-599 otaComponentFlashEligible truth table:
 // force decisions -> eligible regardless of the semver flag:
-static_assert(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/false, "1.0.0", false, /*upd=*/false),
+static_assert(otaComponentFlashEligible(false, "", /*selectedEqInstalled=*/false, /*installedEmpty=*/false, "1.0.0", false,
+                                        /*componentUpdateAvailable=*/false),
               "PRO-599: confirmed channel switch is flash-eligible even when semver flag is false");
-static_assert(otaComponentFlashEligible(true, "2.0.8", false, false, "2.0.8", false, /*upd=*/false),
+static_assert(otaComponentFlashEligible(true, "2.0.8", false, false, "2.0.8", false, /*componentUpdateAvailable=*/false),
               "PRO-599: confirmed pinned tag is flash-eligible even when semver flag is false");
 // refuse -> never eligible even if the (stale) semver flag says true:
-static_assert(!otaComponentFlashEligible(true, "2.0.8", false, false, "1.9.9", false, /*upd=*/true),
+static_assert(!otaComponentFlashEligible(true, "2.0.8", false, false, "1.9.9", false, /*componentUpdateAvailable=*/true),
               "PRO-599: unconfirmed tag refuses regardless of stale semver flag");
-static_assert(!otaComponentFlashEligible(false, "", false, false, "1.0.0", /*resolveFailed=*/true, /*upd=*/true),
+static_assert(!otaComponentFlashEligible(false, "", false, false, "1.0.0", /*resolveFailed=*/true,
+                                         /*componentUpdateAvailable=*/true),
               "PRO-599: failed channel-switch resolve refuses regardless of stale semver flag");
 // upgrade-only -> defers to the per-component semver flag:
-static_assert(otaComponentFlashEligible(false, "", /*selEq=*/true, false, "1.2.3", false, /*upd=*/true),
+static_assert(otaComponentFlashEligible(false, "", /*selectedEqInstalled=*/true, false, "1.2.3", false,
+                                        /*componentUpdateAvailable=*/true),
               "PRO-599: within-channel eligible iff semver update-available flag is true");
-static_assert(!otaComponentFlashEligible(false, "", /*selEq=*/true, false, "1.2.3", false, /*upd=*/false),
+static_assert(!otaComponentFlashEligible(false, "", /*selectedEqInstalled=*/true, false, "1.2.3", false,
+                                         /*componentUpdateAvailable=*/false),
               "PRO-599: within-channel not eligible when semver update-available flag is false");
 // empty installedChannel (older firmware) defensively maps to upgrade-only, so a
 // device that never persisted `ic` still gets the semver-gated within-channel flag:
-static_assert(otaComponentFlashEligible(false, "", /*selEq=*/false, /*instEmpty=*/true, "1.2.3", false, /*upd=*/true),
+static_assert(otaComponentFlashEligible(false, "", /*selectedEqInstalled=*/false, /*installedEmpty=*/true, "1.2.3", false,
+                                        /*componentUpdateAvailable=*/true),
               "PRO-599: empty installedChannel defers to semver flag (upgrade-only)");
 
 #endif // OTACHANNELSWITCHPOLICY_H

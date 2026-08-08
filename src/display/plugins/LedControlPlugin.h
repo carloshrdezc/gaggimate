@@ -8,7 +8,7 @@ constexpr unsigned long UPDATE_INTERVAL = 500;
 class LedControlPlugin : public Plugin {
   public:
     void setup(Controller *controller, PluginManager *pluginManager) override;
-    void loop();
+    void loop() override;
 
   private:
     void updateControl();

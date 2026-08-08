@@ -153,10 +153,10 @@ constexpr bool otaPeriodicCheckShouldDefer(size_t largestFreeInternalBlock) {
 // inverse of otaResolveHeapSufficient (defer iff NOT sufficient).
 static_assert(!otaPeriodicCheckShouldDefer(49152u), "PRO-555: exactly the floor is sufficient — do not defer");
 static_assert(!otaPeriodicCheckShouldDefer(49153u), "PRO-555: one byte above the floor — do not defer");
-static_assert(!otaPeriodicCheckShouldDefer(1024u * 1024u), "PRO-555: a large free block — do not defer");
+static_assert(!otaPeriodicCheckShouldDefer(size_t{1024} * 1024u), "PRO-555: a large free block — do not defer");
 static_assert(otaPeriodicCheckShouldDefer(49151u), "PRO-555: one byte below the floor — defer this cycle");
 static_assert(otaPeriodicCheckShouldDefer(0u), "PRO-555: zero free internal DRAM — defer this cycle");
-static_assert(otaPeriodicCheckShouldDefer(16u * 1024u), "PRO-555: a fragmented 16 KiB block — defer this cycle");
+static_assert(otaPeriodicCheckShouldDefer(size_t{16} * 1024u), "PRO-555: a fragmented 16 KiB block — defer this cycle");
 
 // PRO-557: rate-limit for the deferred periodic-check LOG line.
 //

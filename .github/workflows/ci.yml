@@ -1,8 +1,11 @@
 # CAR-341: Unified CI gate for pull requests targeting dev-master or master.
 #
 # Runs the full local-equivalent check suite on every PR to dev-master:
-#   1. web        — cd web && npm ci && npm run build
+#   1. web        — cd web && npm ci && npm run build, ESLint, vitest, plus the
+#      WebSocket API spec-drift gate (PRO-610)
 #   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
+#      plus the shipped controller/headless envs (PRO-611) and the
+#      flag-off / driver-family permutations
 #   3. native     — pio test -e native-sanitize (ASan/UBSan; findings fail CI)
 #   4. analysis   — pio check (cppcheck, GATING) + clang-tidy over in-scope logic
 #
@@ -24,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: 'npm'
@@ -56,16 +59,30 @@ jobs:
         run: |
           cd web
           npm test
+      # PRO-610: gate the PR on docs/websocket-api.yaml matching the firmware.
+      # `req:grinders:select` shipped in PRO-424 with a live web caller and was
+      # never documented — and because replies are built as
+      # `String("res:") + type.substring(4)`, its `res:grinders:select` was
+      # undocumented too. Nothing compared the spec to the code, so the drift was
+      # invisible. This step diffs firmware handlers <-> spec operations <-> web
+      # callers in both directions and fails on any asymmetry that isn't in the
+      # allow-list block in web/src/services/ApiService.contract.test.js.
+      # Lives in the `web` job because it reads web/src (the client-caller side)
+      # and needs no PlatformIO toolchain — pure python3 + stdlib, so it adds ~1s.
+      - name: Check WebSocket API spec drift
+        run: python3 scripts/check_ws_api_spec_drift.py
+      - name: Test the WebSocket API spec drift gate
+        run: python3 scripts/test_check_ws_api_spec_drift.py
 
   relay-server:
     name: Relay server tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: 'npm'
@@ -87,16 +104,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -111,16 +128,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -146,16 +163,16 @@ jobs:
           - display-no-webui
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -188,16 +205,16 @@ jobs:
           - display-waveshare
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -214,21 +231,83 @@ jobs:
       - name: Build display firmware (${{ matrix.env }})
         run: pio run -e ${{ matrix.env }}
 
-  native:
-    name: Native tests (ASan/UBSan)
+  firmware-shipped-envs:
+    name: Firmware build (controller + headless)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - controller
+          - display-headless
+          - display-headless-8m
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+      # PRO-611: platformio.ini defines 16 build envs but this workflow only
+      # gated 12 of them, and two of the uncovered ones — `controller` and
+      # `display-headless` — are SHIPPED release artifacts (build.yml,
+      # build-nightly.yml and build-beta.yml all build them post-merge). That
+      # meant a PR could break a released binary and still pass CI; the break
+      # only surfaced after merge, in the release workflow. pr-flash.yml does
+      # build controller + display for its preview artifact, but that job is
+      # `continue-on-error: true`, so it is NOT a gate and cannot be relied on
+      # (whether it should become one is a separate decision, out of scope here).
+      #   - controller           board Gaggimate-Controller, its own
+      #                          build_src_filter (+<controller/>) and lib_deps —
+      #                          nothing else in this workflow compiles that TU
+      #                          set, so display-side changes to shared
+      #                          lib/NimBLEComm code went unbuilt here.
+      #   - display-headless     -DGAGGIMATE_HEADLESS with drivers/ + ui/ dropped
+      #                          from build_src_filter; the `#ifdef`-stubbed
+      #                          no-LVGL path only links in this env.
+      #   - display-headless-8m  same sources on board seeed_xiao_esp32s3 (8 MB) —
+      #                          catches partition/flash-size regressions the
+      #                          16 MB LilyGo legs cannot.
+      # display-heapdiag is deliberately NOT included: it is a diagnostic-only
+      # env (PRO-566) that just adds -DGM_HEAP_DIAG_ENABLED=1 on top of
+      # [env:display], is never shipped as a release artifact, and is the slowest
+      # leg (~3 min), so gating on it would spend CI time re-compiling the
+      # already-gated `display` sources. The GM_HEAP_DIAG() macros compile to
+      # nothing in every other env, so it cannot break a shipped build.
+      # Like the sibling display legs, the headless envs rely on
+      # embed_webui_pre.py's empty-bundle stub — no web build is needed for a
+      # compile/link check.
+      # NOTE (PRO-607): these three matrix legs — "Firmware build (controller +
+      # headless) (controller)", "(display-headless)" and
+      # "(display-headless-8m)" — are candidates for the required-status-checks
+      # list on dev-master.
+      - name: Build firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
+
+  native:
+    name: Native tests (ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -246,16 +325,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -272,18 +351,31 @@ jobs:
         run: platformio check -e display --fail-on-defect=medium -f "-<*>" -f "+<src/display/>" -f "-<src/display/ui>"
       - name: Static code analysis for controller (gating)
         run: platformio check -e controller --fail-on-defect=medium -f "-<*>" -f "+<src/controller/>"
-      # clang-tidy runs against the NATIVE env's compile database — the only
-      # compile DB we can build without the full xtensa ESP32 toolchain. This
-      # covers the same platform-independent logic slice the native tests cover
-      # (src/display/core/**). Generated UI (src/display/ui) and vendored drivers
-      # (src/display/drivers) are excluded by construction (not in the native
-      # build) and by .clang-tidy's HeaderFilterRegex.
+      # clang-tidy runs against the [env:native-tidy] compile database (PRO-608) —
+      # a host, analysis-only PlatformIO env that compiles src/display/core/** plus
+      # the host-shimmable src/display/plugins/** against the same desktop-simulator
+      # shim tree the `simulator` job builds, and adds test/tidy/tidy_seam_headers.cpp
+      # so the header-only *Policy.h seams land in a real translation unit. It is
+      # NOT [env:native]: that env is the unit-test runner, whose build_src_filter is
+      # a 3-file allow-list (everything it lists must LINK into all ~41 test
+      # programs), so generating the DB from it meant clang-tidy analysed
+      # PluginManager.cpp plus two vendored semver sources and nothing else —
+      # silently, for months. See the [env:native-tidy] block comment in
+      # platformio.ini for exactly what is in scope and what is deliberately out.
+      # Generated UI (src/display/ui) and vendored drivers (src/display/drivers) are
+      # excluded by scripts/select_tidy_sources.py and .clang-tidy's HeaderFilterRegex.
       # `pio run -t compiledb` writes compile_commands.json to the PROJECT ROOT.
-      - name: Generate native compile database
-        run: pio run -e native -t compiledb
+      - name: Generate host analysis compile database
+        run: pio run -e native-tidy -t compiledb
       - name: Run clang-tidy over in-scope logic
         run: |
           DB=compile_commands.json
+          # PRO-608: keep in sync with MIN_TIDY_FILES in
+          # scripts/test_select_tidy_sources.py. Asserting a MINIMUM (not just
+          # "non-empty") is the whole point: the pre-PRO-608 failure mode was a
+          # step that ran, printed 3 files, and exited 0 while 99% of the firmware
+          # went unanalysed. A silent shrinkage must fail loudly here.
+          MIN_TIDY_FILES=12
           if [ ! -f "$DB" ]; then
             echo "compile_commands.json not found at $DB" >&2
             exit 1
@@ -296,7 +388,14 @@ jobs:
             echo "No in-scope source files found in compile DB — nothing to lint." >&2
             exit 1
           fi
-          echo "Linting:"
+          COUNT=$(echo "$FILES" | wc -l | tr -d ' ')
+          if [ "$COUNT" -lt "$MIN_TIDY_FILES" ]; then
+            echo "clang-tidy scope shrank to $COUNT files (expected >= $MIN_TIDY_FILES)." >&2
+            echo "Either the compile DB came from the wrong env (use native-tidy, not native)" >&2
+            echo "or a build_src_filter change dropped firmware logic. See PRO-608." >&2
+            exit 1
+          fi
+          echo "Linting $COUNT files:"
           echo "$FILES"
           # -p points clang-tidy at the directory holding the compile DB (repo
           # root) so it uses the real flags. No -warnings-as-errors here: this
@@ -304,22 +403,26 @@ jobs:
           # non-zero (config/usage) errors. Flip to gating once the codebase is
           # clean (mirrors the -Werror note).
           echo "$FILES" | xargs clang-tidy -p .
+      # PRO-608: the selector's own regression tests. Cheap, no deps, and they
+      # re-assert the minimum against the real DB generated above.
+      - name: Test the clang-tidy source selector
+        run: python scripts/test_select_tidy_sources.py
 
   simulator:
     name: Simulator build (display-sim)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PlatformIO Core
@@ -337,7 +440,7 @@ jobs:
       # src/display/webassets/ with the real bundle. A bare `npm run build`
       # leaves embed_webui_pre.py to drop an empty stub, which links but renders
       # nothing, defeating the parity check this job exists for. [PRO-216]
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: 'npm'

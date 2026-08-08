@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 
 /**
  * Custom hook to fetch the list of available profiles
@@ -11,6 +11,8 @@ function useProfilesList(api, brew) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [retryToken, setRetryToken] = useState(0);
+  const retry = useCallback(() => setRetryToken(token => token + 1), []);
 
   useEffect(() => {
     if (!api || !brew) {
@@ -34,7 +36,6 @@ function useProfilesList(api, brew) {
         if (cancelled) return;
         console.error('Failed to load profiles list:', err);
         setError(err);
-        setData([]);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -46,9 +47,9 @@ function useProfilesList(api, brew) {
     return () => {
       cancelled = true;
     };
-  }, [api, brew]);
+  }, [api, brew, retryToken]);
 
-  return { data, loading, error };
+  return { data, loading, error, retry };
 }
 
 /**
@@ -63,8 +64,14 @@ function useSelectedProfile(api, selectedProfileId) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [retryToken, setRetryToken] = useState(0);
+  const previousProfileId = useRef(selectedProfileId);
+  const retry = useCallback(() => setRetryToken(token => token + 1), []);
 
   useEffect(() => {
+    const profileChanged = previousProfileId.current !== selectedProfileId;
+    previousProfileId.current = selectedProfileId;
+
     if (!api || !selectedProfileId) {
       setData(null);
       setLoading(false);
@@ -72,6 +79,9 @@ function useSelectedProfile(api, selectedProfileId) {
       return;
     }
 
+    if (profileChanged) {
+      setData(null);
+    }
     let cancelled = false;
 
     const execute = async () => {
@@ -88,8 +98,8 @@ function useSelectedProfile(api, selectedProfileId) {
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to load profile data:', err);
-        setError(err);
         setData(null);
+        setError(err);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -101,9 +111,9 @@ function useSelectedProfile(api, selectedProfileId) {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedProfileId]);
+  }, [api, selectedProfileId, retryToken]);
 
-  return { data, loading, error };
+  return { data, loading, error, retry };
 }
 
 /**
@@ -120,12 +130,14 @@ export function useProfileData(api, brew, selectedProfileId) {
     data: profiles,
     loading: isProfilesLoading,
     error: profilesError,
+    retry: retryProfiles,
   } = useProfilesList(api, brew);
 
   const {
     data: profileData,
     loading: isProfileLoading,
     error: profileError,
+    retry: retryProfile,
   } = useSelectedProfile(api, selectedProfileId);
 
   return {
@@ -138,6 +150,10 @@ export function useProfileData(api, brew, selectedProfileId) {
     error: {
       profiles: profilesError,
       profile: profileError,
+    },
+    retry: {
+      profiles: retryProfiles,
+      profile: retryProfile,
     },
   };
 }
