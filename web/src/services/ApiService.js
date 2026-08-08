@@ -595,6 +595,14 @@ export default class ApiService {
       manualTemperature: Number.isFinite(message.mt) ? message.mt : 93,
       currentWeight: message.cw || 0,
       bluetoothConnected: message.bc || false,
+      // PRO-640: build-time BLE-scale capability (`bse`), NOT runtime connection.
+      // On a GAGGIMATE_ENABLE_BLE_SCALE=0 firmware `bc` is hardcoded false while
+      // volumetric brewing still reaches its target via flow estimation, so a
+      // "disconnected" scale there is the expected resting state and must never
+      // read as a fault. Default TRUE: firmware older than this field always has
+      // BLE compiled in, and defaulting false would silence the genuine
+      // scale-needed warning on every legacy device.
+      bluetoothScaleEnabled: message.bse ?? true,
       process: message.process || null,
       timestamp: new Date(),
       rssi: message.rssi || 0,
@@ -676,6 +684,9 @@ export const machine = signal({
     manualPressure: 9,
     manualFlow: 2,
     manualTemperature: 93,
+    // PRO-640: assume the BLE-scale feature is present until a status says
+    // otherwise, matching the `bse ?? true` wire default above.
+    bluetoothScaleEnabled: true,
     process: null,
   },
   capabilities: {

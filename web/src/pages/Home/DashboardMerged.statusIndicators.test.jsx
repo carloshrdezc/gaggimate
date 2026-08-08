@@ -238,3 +238,48 @@ test('a connected scale is always ok', () => {
       .scale.tone
   ).toBe('ok');
 });
+
+// PRO-640 regression: on a GAGGIMATE_ENABLE_BLE_SCALE=0 firmware the status
+// payload hardcodes bc:false, yet volumetric brewing still reaches its target
+// via flow estimation. Amber there is a permanent, un-actionable fault light, so
+// the pill must stay neutral for the whole volumetric brew.
+test('a BLE-scale-disabled build never demands attention for its absent scale', () => {
+  const midVolumetricBrew = {
+    connected: true,
+    bluetoothConnected: false,
+    mode: MODE_BREW,
+    brewTarget: true,
+    active: true,
+    bluetoothScaleEnabled: false,
+  };
+  const indicators = getConnectivityIndicators(midVolumetricBrew);
+  expect(indicators.scale.tone).toBe('idle');
+  expect(indicators.scale.label).toBe('Scale not connected — this build uses flow estimation');
+  // Not just mid-shot: idle in Brew mode before starting, too.
+  expect(getConnectivityIndicators({ ...midVolumetricBrew, active: false }).scale.tone).toBe('idle');
+  // The controller pill is untouched by the BLE feature flag.
+  expect(indicators.controller.tone).toBe('ok');
+});
+
+// The same volumetric brew on a BLE-capable build (the case the amber pill
+// exists for) must keep escalating — the fix above must not blanket-silence it.
+test('the BLE-scale flag defaults to enabled so legacy firmware still escalates', () => {
+  expect(
+    getConnectivityIndicators({
+      connected: true,
+      bluetoothConnected: false,
+      mode: MODE_BREW,
+      brewTarget: true,
+      bluetoothScaleEnabled: undefined,
+    }).scale.tone
+  ).toBe('attention');
+  expect(
+    getConnectivityIndicators({
+      connected: true,
+      bluetoothConnected: false,
+      mode: MODE_BREW,
+      brewTarget: true,
+      bluetoothScaleEnabled: true,
+    }).scale.tone
+  ).toBe('attention');
+});

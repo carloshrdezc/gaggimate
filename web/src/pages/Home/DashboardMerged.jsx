@@ -2008,6 +2008,9 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
     mode,
     brewTarget: s.brewTarget,
     active,
+    // PRO-640: a BLE-scale-less build reports bc:false permanently; don't paint
+    // that as an amber fault (flow estimation carries the volumetric brew).
+    bluetoothScaleEnabled: s.bluetoothScaleEnabled,
   });
   const primaryAction = () => {
     if (Object.prototype.hasOwnProperty.call(primaryActionState, 'processKind')) {

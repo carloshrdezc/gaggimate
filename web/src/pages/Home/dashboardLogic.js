@@ -213,8 +213,27 @@ export function getReadinessAnnouncement(previous, next) {
 // stops on weight, so no scale means the profile cannot reach its target. That
 // is only live in Brew mode or while a process is running — in standby, steam,
 // water or grind a missing scale is the normal resting state.
-export function getConnectivityIndicators({ connected, bluetoothConnected, mode, brewTarget, active }) {
-  const scaleRequired = !!brewTarget && (mode === MODE_BREW || !!active);
+//
+// PRO-640: `bluetoothScaleEnabled === false` means the firmware was compiled
+// without BLE-scale support (GAGGIMATE_ENABLE_BLE_SCALE=0), so it reports
+// `bc: false` forever while volumetric brewing still reaches its target through
+// flow estimation. There is no missing link to fix there, so the pill stays
+// 'idle' no matter what the brew is doing — amber would be a permanent,
+// un-actionable fault light. Defaults to true so older firmware that never
+// sends the field (BLE always compiled in) keeps the attention behaviour.
+export function getConnectivityIndicators({
+  connected,
+  bluetoothConnected,
+  mode,
+  brewTarget,
+  active,
+  bluetoothScaleEnabled = true,
+}) {
+  const scaleRequired = bluetoothScaleEnabled !== false && !!brewTarget && (mode === MODE_BREW || !!active);
+  const idleScaleLabel =
+    bluetoothScaleEnabled === false
+      ? 'Scale not connected — this build uses flow estimation'
+      : 'Scale not connected — not needed right now';
   return {
     controller: connected
       ? { tone: 'ok', label: 'Controller connected' }
@@ -223,7 +242,7 @@ export function getConnectivityIndicators({ connected, bluetoothConnected, mode,
       ? { tone: 'ok', label: 'Scale connected' }
       : scaleRequired
         ? { tone: 'attention', label: 'Scale not connected — this volumetric brew needs it' }
-        : { tone: 'idle', label: 'Scale not connected — not needed right now' },
+        : { tone: 'idle', label: idleScaleLabel },
   };
 }
 
