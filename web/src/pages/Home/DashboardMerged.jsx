@@ -1990,7 +1990,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
           <a
             aria-label='github'
             rel='noopener noreferrer'
-            href='https://github.com/jniebuhr/gaggimate'
+            href='https://github.com/carloshrdezc/gaggimate'
             target='_blank'
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: 'transparent', color: 'var(--dm-fg-dim)', border: 'none', cursor: 'pointer', textDecoration: 'none' }}
           >
