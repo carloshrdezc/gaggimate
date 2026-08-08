@@ -255,6 +255,7 @@ html[data-theme='blueprint'] {
 
   --color-primary: var(--gm-app-accent);
   --color-primary-content: var(--gm-app-accent-content);
+  --color-primary-hover: var(--gm-app-accent-hover);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -987,7 +988,10 @@ body.nav-drawer-open {
 }
 
 .nd-segmented-btn--active:hover {
-  background: #c4161e;
+  /* PRO-643: the hover fill must follow the customizable accent too — the
+     derived hover token keeps the accent's hue and its contrast token valid.
+     The hex is only the pre-JS fallback. */
+  background: var(--color-primary-hover, #c4161e);
 }
 
 /* Status dot */
@@ -1121,8 +1125,9 @@ body.nav-drawer-open {
 }
 
 .nd-action-btn--primary:hover:not(:disabled) {
-  background: #c4161e;
-  border-color: #c4161e;
+  /* PRO-643: derived accent hover fill, not the fixed brand red. */
+  background: var(--color-primary-hover, #c4161e);
+  border-color: var(--color-primary-hover, #c4161e);
 }
 
 .nd-action-btn--danger {
@@ -1280,8 +1285,9 @@ body.nav-drawer-open {
 }
 
 .nd-day-btn--active:hover {
-  background: #c4161e;
-  border-color: #c4161e;
+  /* PRO-643: derived accent hover fill, not the fixed brand red. */
+  background: var(--color-primary-hover, #c4161e);
+  border-color: var(--color-primary-hover, #c4161e);
 }
 
 .nd-day-btn:disabled {
@@ -1446,6 +1452,7 @@ body.nav-drawer-open {
   --color-base-content: oklch(91% 0 0);
   --color-primary: var(--gm-app-accent);
   --color-primary-content: var(--gm-app-accent-content);
+  --color-primary-hover: var(--gm-app-accent-hover);
   --color-secondary: oklch(55% 0.08 240);
   --color-secondary-content: oklch(95% 0 0);
   --color-accent: oklch(72% 0.10 145);

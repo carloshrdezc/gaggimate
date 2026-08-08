@@ -91,15 +91,37 @@ function resolveColor(value) {
   return current;
 }
 
-// The `color:` declaration of a top-level rule in style.css, so the assertions
-// read the real stylesheet instead of a copy of it.
-function ruleColor(selector) {
+// Like resolveColor, but expands EVERY `var()` in place instead of only a
+// whole-value one. Needed for the derived hover fill, whose final value is a
+// `color-mix()` whose arguments are themselves accent tokens: expanding them
+// proves the hover color is computed from the accent in force rather than
+// being a hardcoded literal.
+function expandTokens(value) {
+  let current = String(value).trim();
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = current.replace(
+      /var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*))?\)/g,
+      (whole, name, fallback) => lookupToken(name) || (fallback ?? '').trim(),
+    );
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
+}
+
+// One declaration of a top-level rule in style.css, so the assertions read the
+// real stylesheet instead of a copy of it.
+function ruleDeclaration(selector, property) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const block = new RegExp(`(?:^|})\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm').exec(STYLE_CSS);
   expect(block, `rule ${selector} not found in style.css`).not.toBeNull();
-  const declaration = /(?:^|;)\s*color\s*:\s*([^;]+)/.exec(block[1].trim());
-  expect(declaration, `rule ${selector} has no color declaration`).not.toBeNull();
+  const declaration = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`).exec(block[1].trim());
+  expect(declaration, `rule ${selector} has no ${property} declaration`).not.toBeNull();
   return declaration[1].trim();
+}
+
+function ruleColor(selector) {
+  return ruleDeclaration(selector, 'color');
 }
 
 function renderDashboard() {
@@ -265,6 +287,64 @@ describe('app-accent filled controls foreground (PRO-643)', () => {
     applyThemePreferences({ theme: 'matcha', appAccent: null, dashboardAccent: null });
     // matcha's #5aaa52 default derives a dark foreground.
     expect(resolveColor(ruleColor('.nd-action-btn--primary'))).toBe('#000000');
+  });
+});
+
+// A control whose rest fill is the accent but whose :hover fill was a hardcoded
+// brand red flipped back to red on hover, breaking both the accent and the
+// contrast token chosen for it. The hover fill must be the derived hover token.
+describe('app-accent filled controls hover fill (PRO-643)', () => {
+  // [selector, properties that paint the accent on hover]
+  const HOVER_RULES = [
+    ['.nd-segmented-btn--active:hover', ['background']],
+    ['.nd-action-btn--primary:hover:not(:disabled)', ['background', 'border-color']],
+    ['.nd-day-btn--active:hover', ['background', 'border-color']],
+  ];
+
+  const cases = HOVER_RULES.flatMap(([selector, properties]) =>
+    properties.map(property => ({ selector, property })),
+  );
+
+  it.each(cases)(
+    '$selector $property follows the app accent in force',
+    ({ selector, property }) => {
+      applyThemePreferences({ theme: 'midnight', appAccent: '#ffffff', dashboardAccent: null });
+      const light = expandTokens(ruleDeclaration(selector, property));
+      applyThemePreferences({ theme: 'midnight', appAccent: '#101010', dashboardAccent: null });
+      const dark = expandTokens(ruleDeclaration(selector, property));
+
+      // The old hardcoded brand red is gone from both, and the resolved value
+      // tracks the accent rather than being any fixed literal.
+      expect(light).not.toBe('#c4161e');
+      expect(dark).not.toBe('#c4161e');
+      expect(light).not.toBe(dark);
+
+      // themeManager derives the hover fill as an 86% accent / 14% contrast-token
+      // mix, so both accent and its contrast color must appear fully resolved —
+      // no `var()` left over, which is what proves the whole chain resolves.
+      expect(light).toBe('color-mix(in srgb, #ffffff 86%, #000000)');
+      expect(dark).toBe('color-mix(in srgb, #101010 86%, #ffffff)');
+      expect(light).not.toContain('var(');
+      expect(dark).not.toContain('var(');
+    },
+  );
+
+  it('falls back to the theme default accent when no custom accent is set', () => {
+    applyThemePreferences({ theme: 'midnight', appAccent: null, dashboardAccent: null });
+    // :root's #d71921 pre-JS default, mixed toward its #ffffff contrast token —
+    // still the accent chain, not the old #c4161e literal.
+    expect(
+      expandTokens(ruleDeclaration('.nd-action-btn--primary:hover:not(:disabled)', 'background')),
+    ).toBe('color-mix(in srgb, #d71921 86%, #ffffff)');
+  });
+
+  // The danger button is intentionally exempt: its fill is the fixed brand red
+  // in every theme, so it must NOT be routed through the accent hover token.
+  it('leaves the danger button hover fill as the fixed brand red', () => {
+    applyThemePreferences({ theme: 'midnight', appAccent: '#ffffff', dashboardAccent: null });
+    expect(
+      expandTokens(ruleDeclaration('.nd-action-btn--danger:hover:not(:disabled)', 'background')),
+    ).toBe('#c4161e');
   });
 });
 
