@@ -118,7 +118,10 @@ describe('toBeanconquerorBackup — bean mapping', () => {
     expect(bean.roaster).toBe('Onyx');
     expect(bean.roastingDate).toBe('2026-07-01');
     expect(bean.note).toBe('stone fruit');
-    expect(bean.weight).toBe(250);
+    // `weight` is the BAG TOTAL upstream, not the remaining quantity: this fixture
+    // carries one 18.2 g shot, so 250 g remaining + 18.2 g accounted consumption.
+    // Available weight is asserted directly in the PRO-632 inventory suite.
+    expect(bean.weight).toBe(268.2);
     expect(bean.finished).toBe(false);
     expect(bean.bean_information).toEqual([
       expect.objectContaining({ country: 'Colombia', processing: 'Washed' }),
@@ -165,6 +168,251 @@ describe('toBeanconquerorBackup — bean mapping', () => {
     const [bean] = toBeanconquerorBackup({ beans: [{ ...BEAN, roastLevel: '' }], shots: [] }).BEANS;
     expect(bean.roast).toBe('UNKNOWN');
     expect(bean.roast_custom).toBe('');
+  });
+});
+
+describe('toBeanconquerorBackup — bean inventory (PRO-632 regression)', () => {
+  // Beanconqueror stores ONLY a bag total (`bean.weight`) — there is no
+  // `weight_used` field anywhere upstream (`grep -rn weight_used src/` at the
+  // pinned commit b713c3e returns nothing). Consumption is DERIVED from the
+  // brews that reference the bean, and available weight is the difference:
+  //
+  //   consumed  = SUM(brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight)
+  //   available = bean.weight - consumed
+  //
+  // Sources at b713c3e: `getUsedWeightCount()` in
+  // src/components/bean-information/bean-information.component.ts:228-241
+  // (duplicated in dashboard.page.ts:251-263, bean-sort-filter-helper.service.ts:391-402,
+  // uiBrewHelper.ts:183-197), rendered by bean-information.component.html:237 as
+  // `{{gramUsed}}g of {{gramTotal}}g ({{leftOver}}g)` with
+  // `leftOver: bean.weight - uiUsedWeightCount`.
+  //
+  // This helper is a literal transcription of that upstream derivation, so these
+  // tests assert what the app will actually display.
+  function upstreamConsumed(backup, beanRecord) {
+    return backup.BREWS.filter(brew => brew.bean === beanRecord.config.uuid).reduce(
+      (sum, brew) => sum + (brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight),
+      0,
+    );
+  }
+
+  function upstreamAvailable(backup, beanRecord) {
+    return beanRecord.weight - upstreamConsumed(backup, beanRecord);
+  }
+
+  test("a bean's available weight equals GaggiMate's remaining quantity", () => {
+    // GaggiMate's `quantity` is REMAINING grams (beanManager.syncBeanUsageFromNotes
+    // decrements it by each shot's doseIn), so it must land on the AVAILABLE side
+    // of the upstream relation, not in the bag-total slot.
+    const backup = toBeanconquerorBackup({
+      beans: [BEAN],
+      shots: [SHOT, { ...SHOT, id: '43' }],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamConsumed(backup, bean)).toBeCloseTo(36.4, 2); // 2 shots x 18.2 g
+    expect(upstreamAvailable(backup, bean)).toBeCloseTo(BEAN.quantity, 2);
+  });
+
+  test('a beans-only export reports the remaining quantity as available and zero consumed', () => {
+    const backup = toBeanconquerorBackup({ beans: [BEAN], shots: [] });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamConsumed(backup, bean)).toBe(0);
+    expect(upstreamAvailable(backup, bean)).toBe(250);
+    expect(bean.weight).toBe(250);
+  });
+
+  test('no bean in the archive ever reports negative available weight', () => {
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 0 }],
+      shots: [SHOT, { ...SHOT, id: '43' }, { ...SHOT, id: '44' }],
+    });
+
+    for (const bean of backup.BEANS) {
+      expect(upstreamAvailable(backup, bean)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test('the placeholder bean absorbs its brews instead of going negative', () => {
+    // The shared placeholder carries no GaggiMate quantity at all, yet its brews
+    // still carry real doses — the second independent negative-inventory site.
+    const backup = toBeanconquerorBackup({
+      beans: [],
+      shots: [{ ...SHOT, notes: { ...SHOT.notes, beanId: 'ghost' } }],
+    });
+    const [placeholder] = backup.BEANS;
+
+    expect(placeholder.name).toBe('GaggiMate (unknown bean)');
+    expect(upstreamConsumed(backup, placeholder)).toBeCloseTo(18.2, 2);
+    expect(upstreamAvailable(backup, placeholder)).toBe(0);
+  });
+
+  test('consumption is attributed per bean, not pooled across the library', () => {
+    const other = { ...BEAN, id: 'bean-other', name: 'Other', quantity: 100 };
+    const backup = toBeanconquerorBackup({
+      beans: [BEAN, other],
+      shots: [
+        SHOT,
+        { ...SHOT, id: '43', notes: { ...SHOT.notes, beanId: 'bean-other', doseIn: '20' } },
+      ],
+    });
+
+    const byName = Object.fromEntries(backup.BEANS.map(bean => [bean.name, bean]));
+    expect(upstreamConsumed(backup, byName['Pink Bourbon'])).toBeCloseTo(18.2, 2);
+    expect(upstreamConsumed(backup, byName.Other)).toBeCloseTo(20, 2);
+    expect(upstreamAvailable(backup, byName['Pink Bourbon'])).toBeCloseTo(250, 2);
+    expect(upstreamAvailable(backup, byName.Other)).toBeCloseTo(100, 2);
+  });
+
+  test('an archived bean with nothing left reports zero available, not negative', () => {
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 0, archived: true }],
+      shots: [SHOT],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(bean.finished).toBe(true);
+    expect(upstreamAvailable(backup, bean)).toBe(0);
+  });
+
+  test('float dust in the dose sum cannot push available weight below zero', () => {
+    // 1 + 1.03 sums to 2.0300000000000002 in binary float but rounds to 2.03, so
+    // a naively-rounded bag total would sit BELOW the consumption Beanconqueror
+    // recomputes, yielding a tiny negative leftOver.
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 0 }],
+      shots: [
+        { ...SHOT, id: 'd1', notes: { ...SHOT.notes, doseIn: '1' } },
+        { ...SHOT, id: 'd2', notes: { ...SHOT.notes, doseIn: '1.03' } },
+      ],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamAvailable(backup, bean)).toBeGreaterThanOrEqual(0);
+  });
+
+  // `numberOr` accepts any finite non-negative dose and GaggiMate's dose field is
+  // free text, so a 3-decimal dose (1.005 g — plausible on a 0.001 g scale) is a
+  // valid input. Quantizing `quantity + consumed` to 2dp desynchronises the two
+  // halves of the upstream relation, because Beanconqueror recomputes `consumed`
+  // from the UNROUNDED brew doses: a bag total rounded UP makes the difference read
+  // HIGHER than GaggiMate's remaining quantity (phantom coffee), and one rounded
+  // DOWN makes it read negative. The bag total must keep the precision it was
+  // built from so `weight - consumed` cancels back to the remaining quantity.
+
+  test('a 3-decimal dose keeps available weight at a zero remaining quantity', () => {
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 0 }],
+      shots: [{ ...SHOT, id: 'p1', notes: { ...SHOT.notes, doseIn: '1.005' } }],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamConsumed(backup, bean)).toBe(1.005);
+    // A 2dp bag total would be 1, i.e. BELOW the 1.005 the app recomputes.
+    expect(bean.weight).toBe(1.005);
+    expect(upstreamAvailable(backup, bean)).toBe(0);
+  });
+
+  test('a 3-decimal dose keeps available weight at a nonzero remaining quantity', () => {
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 10 }],
+      shots: [{ ...SHOT, id: 'p2', notes: { ...SHOT.notes, doseIn: '1.005' } }],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamConsumed(backup, bean)).toBe(1.005);
+    // 2dp rounding turns 11.004999… into 11.01, and 11.01 - 1.005 reads
+    // 10.004999999999999: 5 mg of coffee the bag does not hold.
+    expect(bean.weight).not.toBe(11.01);
+    expect(upstreamAvailable(backup, bean)).toBe(10);
+  });
+
+  test('a 3-decimal dose never inflates available weight across remaining quantities', () => {
+    // Generalisation of the two cases above: float addition is correctly rounded,
+    // so `(quantity + consumed) - consumed` stays within a hair of the remaining
+    // quantity and never below zero, for every quantity scale.
+    for (const quantity of [0, 0.5, 10, 18.2, 250]) {
+      const backup = toBeanconquerorBackup({
+        beans: [{ ...BEAN, quantity }],
+        shots: [
+          { ...SHOT, id: 'q1', notes: { ...SHOT.notes, doseIn: '1.005' } },
+          { ...SHOT, id: 'q2', notes: { ...SHOT.notes, doseIn: '18.234' } },
+        ],
+      });
+      const [bean] = backup.BEANS;
+      const available = upstreamAvailable(backup, bean);
+
+      expect(available).toBeGreaterThanOrEqual(0);
+      // Deliberately tighter than 2dp: a 2dp-rounded total is off by up to 5e-3.
+      expect(available).toBeCloseTo(quantity, 9);
+    }
+  });
+});
+
+describe('non-finite derived numbers (PRO-632 regression)', () => {
+  // `numberOr` clears every value it touches as finite and non-negative, but the
+  // bag total is DERIVED after that gate (`quantity + consumed`), so two
+  // individually-valid operands can still sum past Number.MAX_VALUE. Infinity is
+  // not a Beanconqueror numeric field: JSON.stringify writes it as `null`, and
+  // the importer would read a bean with no weight at all.
+  //
+  // No finite bag total satisfies `available = weight - consumed` for such
+  // operands (MAX_VALUE - 1e308 is not 1e308), so clamping would silently invent
+  // or destroy coffee and break the documented available=quantity invariant.
+  // The archive is therefore unrepresentable and must be refused.
+  const HUGE = 1e308;
+
+  function overflowingBackup() {
+    return toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: HUGE }],
+      shots: [{ ...SHOT, id: 'overflow', notes: { ...SHOT.notes, doseIn: String(HUGE) } }],
+    });
+  }
+
+  test('validation rejects a bean whose bag total overflowed to Infinity', () => {
+    const result = validateBeanconquerorBackup(overflowingBackup());
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/BEANS\[0\]\.weight.*finite/i);
+  });
+
+  test('the export path refuses instead of writing a JSON null bean weight', async () => {
+    await expect(buildBeanconquerorZip(overflowingBackup())).rejects.toThrow(/finite/i);
+  });
+
+  test('a representable huge quantity still exports a finite bean weight', async () => {
+    // Guard against over-rejecting: 1e308 + an 18.2 g dose is still finite, so
+    // this archive must keep exporting.
+    const backup = toBeanconquerorBackup({ beans: [{ ...BEAN, quantity: HUGE }], shots: [SHOT] });
+    expect(validateBeanconquerorBackup(backup)).toEqual({ valid: true, errors: [] });
+
+    const { entries } = await buildBeanconquerorZip(backup);
+    const [bean] = JSON.parse(entries['Beanconqueror.json']).BEANS;
+
+    expect(bean.weight).toBe(HUGE);
+    expect(Number.isFinite(bean.weight)).toBe(true);
+  });
+
+  test('no exported record may carry a non-finite number in any numeric field', () => {
+    // Class-level guard: any derived numeric field, not just the bag total.
+    const backup = backupOf();
+    backup.BREWS[0].grind_weight = Number.NaN;
+
+    const result = validateBeanconquerorBackup(backup);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/BREWS\[0\]\.grind_weight.*finite/i);
+  });
+
+  test('a normal export serializes no non-finite number and no null weight', async () => {
+    const { entries } = await buildBeanconquerorZip(backupOf());
+
+    for (const body of Object.values(entries)) {
+      expect(body).not.toMatch(/\bInfinity\b|\bNaN\b/);
+    }
+    const [bean] = JSON.parse(entries['Beanconqueror.json']).BEANS;
+    expect(bean.weight).not.toBeNull();
+    expect(Number.isFinite(bean.weight)).toBe(true);
   });
 });
 

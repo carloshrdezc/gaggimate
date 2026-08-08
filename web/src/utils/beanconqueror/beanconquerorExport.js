@@ -95,6 +95,32 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+/** Collects every non-finite number reachable from `value` into `errors`, as
+ * `<path> is not a finite number`. `numberOr` gates each mapped INPUT, but
+ * derived values are computed after that gate (`applyBagTotals` adds two
+ * individually-finite operands, which can overflow to Infinity), so finiteness
+ * has to be re-checked on the finished record. JSON.stringify writes Infinity
+ * and NaN as `null`, and a `null` where Beanconqueror expects a number is a
+ * silently corrupt archive — the validator therefore refuses it outright rather
+ * than clamping, because no finite bag total satisfies
+ * `available = weight - consumed` once the true sum is unrepresentable. Nulls,
+ * strings and booleans are left alone (upstream `coordinates` is all nulls). */
+function collectNonFiniteNumbers(value, path, errors) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) errors.push(`${path} is not a finite number.`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => collectNonFiniteNumbers(entry, `${path}[${index}]`, errors));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      collectNonFiniteNumbers(entry, `${path}.${key}`, errors);
+    }
+  }
+}
+
 /** Unix SECONDS. GaggiMate beans already store seconds (beanManager's
  * normalizeBeanTimestamp) and device shots store seconds in the binary index,
  * but a 0 sentinel (pre-NTP firmware) must not become a 1970 record. */
@@ -159,8 +185,10 @@ function toBeanRecord(bean, fallbackTimestamp) {
   record.note = text(bean.notes);
   record.roast = roast;
   record.roast_custom = roastCustom;
-  // GaggiMate tracks REMAINING grams; Beanconqueror's `weight` is the bag mass.
-  // Closest available mapping — documented as an approximation.
+  // GaggiMate tracks REMAINING grams. Beanconqueror's `weight` is the BAG TOTAL
+  // and it derives consumption from the archive's own brews, so the remaining
+  // quantity is only half of the pair — `applyBagTotals` adds this archive's
+  // accounted consumption once the brews are known (PRO-632).
   record.weight = numberOr(bean.quantity, 0);
   // Beanconqueror's archive flag is `finished`.
   record.finished = !!bean.archived;
@@ -228,6 +256,68 @@ function toBrewRecord(shot, { beanUuidRef, millUuidRef, preparationUuidRef }, fa
   record.tds = numberOr(notes.tds ?? shot.tds, 0);
 
   return record;
+}
+
+/**
+ * Turns each bean's REMAINING grams into the bag total Beanconqueror expects.
+ *
+ * Beanconqueror has no stored "consumed" field (there is no `weight_used`
+ * anywhere upstream at the pinned commit b713c3e). A bean carries only
+ * `weight`, the BAG TOTAL, and the app derives the rest from the brews that
+ * reference the bean:
+ *
+ *   consumed  = SUM(brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight)
+ *   available = bean.weight - consumed
+ *
+ * (`getUsedWeightCount()` in `bean-information.component.ts`, duplicated in
+ * `dashboard.page.ts`, `bean-sort-filter-helper.service.ts` and
+ * `uiBrewHelper.ts`; rendered as `{{gramUsed}}g of {{gramTotal}}g ({{leftOver}}g)`.)
+ *
+ * GaggiMate stores only the current remaining quantity — never the purchase mass
+ * and never a consumption history — so `weight = quantity` put REMAINING into the
+ * BAG-TOTAL slot and Beanconqueror subtracted the exported doses from it a second
+ * time, showing consumption as availability and going negative once the exported
+ * doses exceeded what was left.
+ *
+ * Solving `available = weight - consumed` for the one quantity we actually know
+ * gives `weight = quantity + consumed`. Nothing is invented: `consumed` is the
+ * sum of the doses the brews in THIS archive already carry, summed with
+ * upstream's own precedence. A beans-only export sums to 0 and degenerates to
+ * `weight = quantity`, consumed 0.
+ *
+ * @param {Map<string, object>} beanRecords bean records keyed by uuid, mutated in place
+ * @param {object[]} brewRecords brews already referencing those uuids
+ */
+function applyBagTotals(beanRecords, brewRecords) {
+  const consumedByBean = new Map();
+
+  for (const brew of brewRecords) {
+    // Upstream precedence: `bean_weight_in` wins when set, else `grind_weight`.
+    const dose = brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight;
+    if (!(dose > 0)) continue;
+    consumedByBean.set(brew.bean, (consumedByBean.get(brew.bean) ?? 0) + dose);
+  }
+
+  for (const [uuid, record] of beanRecords) {
+    const consumed = consumedByBean.get(uuid) ?? 0;
+    if (consumed <= 0) continue;
+    // Keep the EXACT sum: it is the only value that satisfies both halves of the
+    // upstream relation. Beanconqueror recomputes `consumed` from the unrounded
+    // brew doses, so quantizing the bag total desynchronises the pair — doses
+    // finer than 2dp are accepted by `numberOr` (a 1.005 g dose on a 0.001 g
+    // scale), and 10 + 1.005 rounded to 11.01 makes `weight - consumed` read
+    // 10.005: 5 mg of coffee the bag does not hold. Rounding the other way dips
+    // BELOW the recomputed consumption and resurfaces negative availability
+    // (float dose sums also leave binary dust: 1 + 1.03 === 2.0300000000000002).
+    // Because float addition is correctly rounded and monotonic for non-negative
+    // operands, `(quantity + consumed) - consumed` cancels back to the remaining
+    // quantity and can never go negative. The one case it cannot represent is an
+    // overflow to Infinity (two finite operands whose true sum exceeds
+    // Number.MAX_VALUE); no finite bag total satisfies the upstream relation
+    // there, so `validateBeanconquerorBackup` refuses the archive instead of
+    // clamping and breaking the available=quantity invariant.
+    record.weight = record.weight + consumed;
+  }
 }
 
 /**
@@ -323,6 +413,10 @@ export function toBeanconquerorBackup(data = {}) {
     ),
   );
 
+  // Only now are the brews (and therefore each bean's accounted consumption)
+  // known, so the remaining-quantity -> bag-total conversion happens last.
+  applyBagTotals(beanRecords, brewRecords);
+
   return {
     BEANS: [...beanRecords.values()],
     BREWS: brewRecords,
@@ -416,6 +510,15 @@ export function validateBeanconquerorBackup(backup) {
       errors.push(`BREWS[${index}] carries a reference_flow_profile but no file is exported.`);
     }
   });
+
+  // Every emitted number must survive JSON.stringify as a number. Infinity/NaN
+  // become `null`, which Beanconqueror would read as a missing numeric field —
+  // most importantly a bean with no bag weight. See `collectNonFiniteNumbers`.
+  for (const key of TOP_LEVEL_KEYS) {
+    backup[key].forEach((record, index) => {
+      collectNonFiniteNumbers(record, `${key}[${index}]`, errors);
+    });
+  }
 
   return { valid: errors.length === 0, errors };
 }
