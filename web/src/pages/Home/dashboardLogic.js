@@ -172,15 +172,59 @@ export function getBrewTemperatureHint({ connected, target, overrideEnabled }) {
   return overrideEnabled ? 'PROFILE TARGET · OVERRIDE' : 'PROFILE TARGET · DEFAULT';
 }
 
-export function getReadinessSummary({ mode, connected, bluetoothConnected, selectedProfile, wakeAvailable }) {
-  const signals = [
-    mode === MODE_STANDBY ? 'Machine in standby' : 'Machine not in standby',
-    connected ? 'Controller connected' : 'Controller offline',
-    bluetoothConnected ? 'Scale connected' : 'Scale not connected',
-    selectedProfile ? `Profile ${selectedProfile} selected` : 'No profile selected',
-  ];
-  if (wakeAvailable) signals.push('Wake available');
-  return signals.join('. ');
+// PRO-640: readiness state is modelled per axis so the screen-reader region can
+// announce ONLY the axes that actually changed instead of re-narrating the whole
+// concatenated sentence (which used to be rendered as a permanent visible line
+// AND as a static aria-live payload).
+export const READINESS_SIGNAL_KEYS = ['machine', 'controller', 'scale', 'profile', 'wake'];
+
+export function getReadinessSignals({ mode, connected, bluetoothConnected, selectedProfile, wakeAvailable }) {
+  const signals = {
+    machine: mode === MODE_STANDBY ? 'Machine in standby' : 'Machine not in standby',
+    controller: connected ? 'Controller connected' : 'Controller offline',
+    scale: bluetoothConnected ? 'Scale connected' : 'Scale not connected',
+    profile: selectedProfile ? `Profile ${selectedProfile} selected` : 'No profile selected',
+  };
+  if (wakeAvailable) signals.wake = 'Wake available';
+  return signals;
+}
+
+// The polite announcement for a transition: only the axes whose text changed.
+// Returns '' when nothing meaningful changed (nothing is pushed to the live
+// region) and on the very first render — the freshly rendered dashboard already
+// conveys its own state, so narrating it again would be pure noise.
+//
+// An axis that DISAPPEARS (wake stops being available) is not announced: it is
+// the withdrawal of an affordance the user can already see is gone, and
+// announcing it competes with whatever transition caused it.
+export function getReadinessAnnouncement(previous, next) {
+  if (!previous || !next) return '';
+  return READINESS_SIGNAL_KEYS.filter(key => next[key] && (previous[key] ?? '') !== next[key])
+    .map(key => next[key])
+    .join('. ');
+}
+
+// PRO-640: LED tone of the compact ONLINE / SCALE status pills that replaced the
+// readiness sentence. 'attention' is reserved for a disconnection that blocks
+// something the machine is doing RIGHT NOW; a disconnected-but-unneeded scale
+// stays 'idle' (neutral, unlit) so it cannot read as an alarm.
+//
+// The scale only matters for a volumetric brew: with `brewTarget` set the shot
+// stops on weight, so no scale means the profile cannot reach its target. That
+// is only live in Brew mode or while a process is running — in standby, steam,
+// water or grind a missing scale is the normal resting state.
+export function getConnectivityIndicators({ connected, bluetoothConnected, mode, brewTarget, active }) {
+  const scaleRequired = !!brewTarget && (mode === MODE_BREW || !!active);
+  return {
+    controller: connected
+      ? { tone: 'ok', label: 'Controller connected' }
+      : { tone: 'attention', label: 'Controller offline' },
+    scale: bluetoothConnected
+      ? { tone: 'ok', label: 'Scale connected' }
+      : scaleRequired
+        ? { tone: 'attention', label: 'Scale not connected — this volumetric brew needs it' }
+        : { tone: 'idle', label: 'Scale not connected — not needed right now' },
+  };
 }
 
 export function getAvailableModeOptions(isGrindAvailable = true, isManualAvailable = true) {
