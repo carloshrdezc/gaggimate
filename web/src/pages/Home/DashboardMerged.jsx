@@ -146,6 +146,21 @@ function manualDraftFromStatus(s) {
   };
 }
 
+// PRO-643: the dashboard accent is user-customizable, so any label painted ON
+// an opaque accent fill must take its foreground from the contrast token
+// `themeManager.js` derives (--gm-dashboard-accent-content) instead of a
+// hardcoded '#fff' — a light accent (e.g. #ffffff) is otherwise unreadable.
+// The other accents the primary action can receive (--dm-warn for steam,
+// --dm-fg-dim for the unavailable states) are fixed brand colors and keep their
+// existing foreground.
+const ACCENT_CONTENT_TOKENS = {
+  'var(--dm-accent)': 'var(--gm-dashboard-accent-content)',
+};
+
+function accentForeground(accent) {
+  return ACCENT_CONTENT_TOKENS[String(accent).trim()] ?? '#fff';
+}
+
 function getPrimaryActionButtonStyle({ active, finished, accent }) {
   return {
     background: active
@@ -153,7 +168,9 @@ function getPrimaryActionButtonStyle({ active, finished, accent }) {
       : finished
         ? 'var(--dm-good)'
         : `color-mix(in srgb, ${accent} 14%, transparent)`,
-    color: active || finished ? '#fff' : accent,
+    // `finished` paints --dm-good, a fixed brand green that no user setting can
+    // lighten, so it keeps its light foreground.
+    color: active ? accentForeground(accent) : finished ? '#fff' : accent,
     border: active || finished ? 'none' : `1px solid color-mix(in srgb, ${accent} 40%, transparent)`,
     fontFamily: 'var(--dm-font-display)',
     fontSize: 13,

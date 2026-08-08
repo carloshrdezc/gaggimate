@@ -980,7 +980,9 @@ body.nav-drawer-open {
 }
 
 .nd-segmented-btn--active {
-  color: var(--text-display, #ffffff);
+  /* PRO-643: --color-primary is the user-customizable app accent, so the label
+     on top of it must use its derived contrast token, not a light default. */
+  color: var(--color-primary-content, #ffffff);
   background: var(--color-primary, #d71921);
 }
 
@@ -1115,7 +1117,7 @@ body.nav-drawer-open {
 .nd-action-btn--primary {
   background: var(--color-primary, #d71921);
   border-color: var(--color-primary, #d71921);
-  color: white;
+  color: var(--color-primary-content, #ffffff);
 }
 
 .nd-action-btn--primary:hover:not(:disabled) {
@@ -1274,7 +1276,7 @@ body.nav-drawer-open {
 .nd-day-btn--active {
   background: var(--color-primary, #d71921);
   border-color: var(--color-primary, #d71921);
-  color: white;
+  color: var(--color-primary-content, #ffffff);
 }
 
 .nd-day-btn--active:hover {
