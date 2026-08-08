@@ -162,12 +162,23 @@ function preparationUuid() {
   return uuidV5('preparation:espresso', GAGGIMATE_UUID_NAMESPACE);
 }
 
-/** Stable key for a shot. `source:id` is what the ShotHistory page itself uses
- * to identify a shot (`getHistoryKey`), so a device shot and an imported browser
- * shot that happen to share an id do not collide. */
+/** Stable key for a shot. This mirrors `getHistoryKey`/`getShotNotesKey` on the
+ * ShotHistory page: the source is part of the key, so a device shot and an
+ * imported browser shot that happen to share an id do not collide, and a
+ * browser-source shot is identified by its `storageKey` — the only field that is
+ * actually unique for imported rows. Two imported shots can carry the SAME `id`
+ * (the exporting machine's shot number) with different storage keys, and keying
+ * on `id` merged them into one brew uuid, which
+ * `validateBeanconquerorBackup` then rejected as a reused uuid and the whole
+ * export failed. `name`/`id` are a fallback only for legacy rows persisted
+ * before `storageKey` was recorded. */
 function shotKey(shot) {
   const source = text(shot?.source) || 'gaggimate';
-  return `${source}:${text(shot?.id)}`;
+  const id =
+    source === 'browser'
+      ? text(shot?.storageKey) || text(shot?.name) || text(shot?.id)
+      : text(shot?.id);
+  return `${source}:${id}`;
 }
 
 function brewUuid(shot) {

@@ -634,6 +634,60 @@ describe('toBeanconquerorBackup — deterministic ids', () => {
       .map(record => record.config.uuid);
     expect(new Set(uuids).size).toBe(uuids.length);
   });
+
+  // Imported (browser-source) shots are identified by their storageKey, not by
+  // `id`: the id is the exporting machine's shot number, so two imports from
+  // different machines collide on it while their storage keys stay distinct
+  // (see getShotNotesKey/getHistoryKey on the ShotHistory page, and the
+  // 'hydrates duplicate imported browser ids by their notes persistence key'
+  // regression test). Keying brews on `id` merged both rows into one brew uuid
+  // and validateBeanconquerorBackup rejected the whole archive.
+  test('two imported browser shots sharing an id get distinct brew uuids', () => {
+    const browserShot = { ...SHOT, source: 'browser', id: 'shared-import-id' };
+    const backup = toBeanconquerorBackup({
+      beans: [BEAN],
+      shots: [
+        { ...browserShot, storageKey: 'browser-key-a' },
+        { ...browserShot, storageKey: 'browser-key-b' },
+      ],
+    });
+
+    expect(backup.BREWS).toHaveLength(2);
+    expect(backup.BREWS[0].config.uuid).not.toBe(backup.BREWS[1].config.uuid);
+    expect(validateBeanconquerorBackup(backup)).toEqual({ valid: true, errors: [] });
+  });
+
+  test('a browser shot with no storageKey falls back to its name, then its id', () => {
+    const named = toBeanconquerorBackup({
+      beans: [BEAN],
+      shots: [
+        { ...SHOT, source: 'browser', id: 'shared-import-id', name: 'legacy-a.slog' },
+        { ...SHOT, source: 'browser', id: 'shared-import-id', name: 'legacy-b.slog' },
+      ],
+    });
+    expect(named.BREWS[0].config.uuid).not.toBe(named.BREWS[1].config.uuid);
+    expect(validateBeanconquerorBackup(named)).toEqual({ valid: true, errors: [] });
+
+    // storageKey wins over name, and a device shot stays keyed on its id.
+    const keyed = toBeanconquerorBackup({
+      beans: [BEAN],
+      shots: [{ ...SHOT, source: 'browser', id: 'x', name: 'ignored', storageKey: 'key-a' }],
+    });
+    const byNameOnly = toBeanconquerorBackup({
+      beans: [BEAN],
+      shots: [{ ...SHOT, source: 'browser', id: 'x', name: 'key-a' }],
+    });
+    expect(keyed.BREWS[0].config.uuid).toBe(byNameOnly.BREWS[0].config.uuid);
+  });
+
+  test('a device shot ignores storageKey so its brew uuid stays stable', () => {
+    const withoutKey = toBeanconquerorBackup({ beans: [BEAN], shots: [SHOT] }).BREWS[0].config.uuid;
+    const withKey = toBeanconquerorBackup({
+      beans: [BEAN],
+      shots: [{ ...SHOT, storageKey: 'irrelevant-for-device-shots' }],
+    }).BREWS[0].config.uuid;
+    expect(withKey).toBe(withoutKey);
+  });
 });
 
 describe('toBeanconquerorBackup — referential integrity', () => {
