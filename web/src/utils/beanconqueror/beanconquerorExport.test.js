@@ -732,6 +732,46 @@ describe('validateBeanconquerorBackup', () => {
     expect(validateBeanconquerorBackup(null).valid).toBe(false);
     expect(validateBeanconquerorBackup([]).valid).toBe(false);
   });
+
+  // PRO-636: the finite-number walk used to recurse without a cycle guard, so a
+  // self-referencing record threw RangeError instead of returning errors[].
+  test('reports a circular reference instead of overflowing the stack', () => {
+    const backup = backupOf();
+    backup.BEANS[0].self = backup.BEANS[0];
+
+    let result;
+    expect(() => {
+      result = validateBeanconquerorBackup(backup);
+    }).not.toThrow();
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/circular/i);
+  });
+
+  test('reports a circular reference reached through an array edge', () => {
+    const backup = backupOf();
+    backup.BREWS[0].tags = [{ owner: backup.BREWS[0] }];
+
+    let result;
+    expect(() => {
+      result = validateBeanconquerorBackup(backup);
+    }).not.toThrow();
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/circular/i);
+  });
+
+  // The guard tracks the current recursion path, not every object ever seen, so a
+  // record reachable twice by different acyclic paths is still fully checked.
+  test('still flags a non-finite number under a shared, acyclic reference', () => {
+    const backup = backupOf();
+    const shared = { grams: Number.POSITIVE_INFINITY };
+    backup.BEANS[0].first = shared;
+    backup.BEANS[0].second = shared;
+
+    const result = validateBeanconquerorBackup(backup);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).not.toMatch(/circular/i);
+    expect(result.errors.filter(error => /is not a finite number/.test(error))).toHaveLength(2);
+  });
 });
 
 describe('buildBeanconquerorZip — chunking', () => {
