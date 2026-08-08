@@ -275,15 +275,18 @@ function applyBagTotals(beanRecords, brewRecords) {
   for (const [uuid, record] of beanRecords) {
     const consumed = consumedByBean.get(uuid) ?? 0;
     if (consumed <= 0) continue;
-    const total = record.weight + consumed;
-    // Round the bag total to 2dp so the app shows a clean gram figure — but only
-    // when rounding does not dip BELOW the consumption Beanconqueror recomputes.
-    // Summing float doses leaves binary dust (1 + 1.03 === 2.0300000000000002),
-    // and rounding down past it would resurface negative availability at the
-    // 1e-16 scale. Keeping the exact sum in that case makes `weight - consumed`
-    // cancel to precisely the remaining quantity.
-    const rounded = Math.round(total * 100) / 100;
-    record.weight = rounded >= consumed ? rounded : total;
+    // Keep the EXACT sum: it is the only value that satisfies both halves of the
+    // upstream relation. Beanconqueror recomputes `consumed` from the unrounded
+    // brew doses, so quantizing the bag total desynchronises the pair — doses
+    // finer than 2dp are accepted by `numberOr` (a 1.005 g dose on a 0.001 g
+    // scale), and 10 + 1.005 rounded to 11.01 makes `weight - consumed` read
+    // 10.005: 5 mg of coffee the bag does not hold. Rounding the other way dips
+    // BELOW the recomputed consumption and resurfaces negative availability
+    // (float dose sums also leave binary dust: 1 + 1.03 === 2.0300000000000002).
+    // Because float addition is correctly rounded and monotonic for non-negative
+    // operands, `(quantity + consumed) - consumed` cancels back to the remaining
+    // quantity and can never go negative.
+    record.weight = record.weight + consumed;
   }
 }
 

@@ -291,6 +291,63 @@ describe('toBeanconquerorBackup — bean inventory (PRO-632 regression)', () => 
 
     expect(upstreamAvailable(backup, bean)).toBeGreaterThanOrEqual(0);
   });
+
+  // `numberOr` accepts any finite non-negative dose and GaggiMate's dose field is
+  // free text, so a 3-decimal dose (1.005 g — plausible on a 0.001 g scale) is a
+  // valid input. Quantizing `quantity + consumed` to 2dp desynchronises the two
+  // halves of the upstream relation, because Beanconqueror recomputes `consumed`
+  // from the UNROUNDED brew doses: a bag total rounded UP makes the difference read
+  // HIGHER than GaggiMate's remaining quantity (phantom coffee), and one rounded
+  // DOWN makes it read negative. The bag total must keep the precision it was
+  // built from so `weight - consumed` cancels back to the remaining quantity.
+
+  test('a 3-decimal dose keeps available weight at a zero remaining quantity', () => {
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 0 }],
+      shots: [{ ...SHOT, id: 'p1', notes: { ...SHOT.notes, doseIn: '1.005' } }],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamConsumed(backup, bean)).toBe(1.005);
+    // A 2dp bag total would be 1, i.e. BELOW the 1.005 the app recomputes.
+    expect(bean.weight).toBe(1.005);
+    expect(upstreamAvailable(backup, bean)).toBe(0);
+  });
+
+  test('a 3-decimal dose keeps available weight at a nonzero remaining quantity', () => {
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: 10 }],
+      shots: [{ ...SHOT, id: 'p2', notes: { ...SHOT.notes, doseIn: '1.005' } }],
+    });
+    const [bean] = backup.BEANS;
+
+    expect(upstreamConsumed(backup, bean)).toBe(1.005);
+    // 2dp rounding turns 11.004999… into 11.01, and 11.01 - 1.005 reads
+    // 10.004999999999999: 5 mg of coffee the bag does not hold.
+    expect(bean.weight).not.toBe(11.01);
+    expect(upstreamAvailable(backup, bean)).toBe(10);
+  });
+
+  test('a 3-decimal dose never inflates available weight across remaining quantities', () => {
+    // Generalisation of the two cases above: float addition is correctly rounded,
+    // so `(quantity + consumed) - consumed` stays within a hair of the remaining
+    // quantity and never below zero, for every quantity scale.
+    for (const quantity of [0, 0.5, 10, 18.2, 250]) {
+      const backup = toBeanconquerorBackup({
+        beans: [{ ...BEAN, quantity }],
+        shots: [
+          { ...SHOT, id: 'q1', notes: { ...SHOT.notes, doseIn: '1.005' } },
+          { ...SHOT, id: 'q2', notes: { ...SHOT.notes, doseIn: '18.234' } },
+        ],
+      });
+      const [bean] = backup.BEANS;
+      const available = upstreamAvailable(backup, bean);
+
+      expect(available).toBeGreaterThanOrEqual(0);
+      // Deliberately tighter than 2dp: a 2dp-rounded total is off by up to 5e-3.
+      expect(available).toBeCloseTo(quantity, 9);
+    }
+  });
 });
 
 describe('toBeanconquerorBackup — shot mapping', () => {
