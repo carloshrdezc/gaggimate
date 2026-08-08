@@ -54,6 +54,27 @@ Fixes PRO-123
 
 (Replace `123` with the issue number.) Use `Fixes` / `Closes` / `Resolves` for issues that should auto-close on merge; use `Ref PRO-123` for related-but-not-closed issues.
 
+### Promotion PRs (`dev-master` -> `master`)
+
+`master` is updated from `dev-master` by a periodic promotion PR that bundles
+everything merged since the last one (PR #634 carried 39 commits). Those were
+opened by hand with an **empty body**, repeatedly (PRO-644). Generate the body
+instead of writing one:
+
+```sh
+python3 scripts/generate_promotion_pr_body.py --fetch > /tmp/promo-body.md
+gh pr create --base master --head dev-master \
+  --title "chore(release): promote dev-master to master" \
+  --body-file /tmp/promo-body.md
+```
+
+It reports the commit + merged-PR counts and lists the `PRO-NNN` issues closed
+(and separately, merely referenced) in `origin/master..origin/dev-master`. It
+emits **no** closing keywords on purpose: those issues were already closed when
+their own PR merged into `dev-master`, so a `Fixes PRO-NNN` here would re-close
+them on the promotion merge and clobber their current state. See
+`scripts/README.md` for details.
+
 ### Workflow Per Task
 
 1. Before touching code, **create the Linear issue** with description, labels, project assignment.
@@ -142,6 +163,7 @@ clang-tidy -p . $(python scripts/select_tidy_sources.py compile_commands.json)
 python scripts/test_select_tidy_sources.py           # selector regression tests + scope-minimum guard
 python3 scripts/check_ws_api_spec_drift.py           # docs/websocket-api.yaml vs firmware/web drift (PRO-610)
 python3 scripts/test_check_ws_api_spec_drift.py      # that gate's own regression tests
+python3 scripts/test_generate_promotion_pr_body.py   # promotion-PR body generator tests (PRO-644)
 ```
 
 - cppcheck is GATING (the display step lost its old `continue-on-error`).
