@@ -104,21 +104,37 @@ function nowSeconds() {
  * silently corrupt archive — the validator therefore refuses it outright rather
  * than clamping, because no finite bag total satisfies
  * `available = weight - consumed` once the true sum is unrepresentable. Nulls,
- * strings and booleans are left alone (upstream `coordinates` is all nulls). */
-function collectNonFiniteNumbers(value, path, errors) {
+ * strings and booleans are left alone (upstream `coordinates` is all nulls).
+ *
+ * `ancestors` holds the objects/arrays currently on the recursion stack so a
+ * circular reference is reported instead of overflowing it: every other check in
+ * `validateBeanconquerorBackup` degrades into an `errors[]` entry, and this is an
+ * exported function whose `backup` argument is arbitrary. A cycle is genuinely
+ * invalid — `buildBeanconquerorZip` JSON.stringify()s the backup, which throws on
+ * cyclic input — so it is flagged rather than silently skipped. Entries are
+ * removed on the way out, so a repeated but acyclic reference (a shared object
+ * reachable by two paths) is still traversed instead of being mislabelled. */
+function collectNonFiniteNumbers(value, path, errors, ancestors = new WeakSet()) {
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) errors.push(`${path} is not a finite number.`);
     return;
   }
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) => collectNonFiniteNumbers(entry, `${path}[${index}]`, errors));
+  if (!value || typeof value !== 'object') return;
+  if (ancestors.has(value)) {
+    errors.push(`${path} is a circular reference.`);
     return;
   }
-  if (value && typeof value === 'object') {
+  ancestors.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      collectNonFiniteNumbers(entry, `${path}[${index}]`, errors, ancestors),
+    );
+  } else {
     for (const [key, entry] of Object.entries(value)) {
-      collectNonFiniteNumbers(entry, `${path}.${key}`, errors);
+      collectNonFiniteNumbers(entry, `${path}.${key}`, errors, ancestors);
     }
   }
+  ancestors.delete(value);
 }
 
 /** Unix SECONDS. GaggiMate beans already store seconds (beanManager's
