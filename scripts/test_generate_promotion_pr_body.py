@@ -19,6 +19,7 @@ Run with no dependencies (there is no pytest in this repo):
     python3 scripts/test_generate_promotion_pr_body.py
 """
 import os
+import re
 import sys
 import unittest
 
@@ -26,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from generate_promotion_pr_body import (  # noqa: E402
     collect_issues,
+    defuse_closing_keywords,
     issue_key_order,
     issue_refs,
     pr_numbers,
@@ -48,6 +50,40 @@ REAL_MESSAGES = [
     "build(deps-dev): bump jsdom from 29.1.1 to 30.0.1 in /web (#614)",
     "build(deps): bump actions/checkout from 4 to 7 (#599)",
 ]
+
+# What GitHub/Linear parse as a closing reference: a keyword directly adjacent to
+# the issue key. Used to assert the generated body contains no LIVE one, without
+# forbidding the key itself (which must stay visible and auto-linked).
+_LIVE_CLOSING_RE = re.compile(r"(?i)\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s*PRO-\d+\b")
+
+
+class DefuseClosingKeywords(unittest.TestCase):
+    def test_breaks_the_keyword_away_from_the_reference(self):
+        got = defuse_closing_keywords("feat: persist brew temperature overrides (Fixes PRO-629)")
+        self.assertEqual(got, "feat: persist brew temperature overrides (`Fixes` PRO-629)")
+        self.assertFalse(_LIVE_CLOSING_RE.search(got))
+
+    def test_defuses_every_keyword_spelling_and_a_colon(self):
+        for phrase in ("Fixes PRO-1", "Fixed PRO-1", "Fix PRO-1", "Closes PRO-1", "Closed PRO-1",
+                       "Close PRO-1", "Resolves PRO-1", "Resolved PRO-1", "Resolve PRO-1",
+                       "fixes: PRO-1", "CLOSES  PRO-1"):
+            with self.subTest(phrase=phrase):
+                self.assertFalse(_LIVE_CLOSING_RE.search(defuse_closing_keywords("subject (%s)" % phrase)))
+
+    def test_defuses_a_github_issue_close_too(self):
+        # `closes #612` on a PR into this repo closes GitHub issue 612, same class
+        # of accident as the Linear one.
+        self.assertEqual(defuse_closing_keywords("fix: drop the retry (closes #612)"), "fix: drop the retry (`closes` #612)")
+
+    def test_leaves_ordinary_subjects_untouched(self):
+        # The conventional-commit `fix(...)` prefix and the `(#NNN)` squash suffix
+        # are not a closing phrase, and a hotfix is not a `fix` token. Only the
+        # subject lines: the `Fixes PRO-NNN` trailers below them are exactly what
+        # this function is supposed to rewrite.
+        subjects = [m.splitlines()[0] for m in REAL_MESSAGES]
+        for subject in subjects + ["chore: hotfix rollout (#640)", "fix(web): a thing (PRO-636) (#632)"]:
+            with self.subTest(subject=subject):
+                self.assertEqual(defuse_closing_keywords(subject), subject)
 
 
 class IssueRefs(unittest.TestCase):
@@ -228,6 +264,34 @@ class RenderBody(unittest.TestCase):
         for keyword in ("fixes pro-", "closes pro-", "resolves pro-", "fixed pro-", "closed pro-", "resolved pro-"):
             with self.subTest(keyword=keyword):
                 self.assertNotIn(keyword, body)
+
+    def test_a_closing_keyword_in_the_subject_is_not_echoed_as_a_live_reference(self):
+        # The bug: subjects are interpolated verbatim, and a real subject in this
+        # repo's history carries its own closing keyword — so the generated body
+        # became a live closing reference and Linear would re-close the issue on
+        # the promotion merge. Both buckets render subjects, so cover both.
+        for messages in (
+            ["feat: persist brew temperature overrides (Fixes PRO-629)\n\nFixes PRO-629"],  # closed bucket
+            ["feat: persist brew temperature overrides (Fixes PRO-629)"],  # mentioned bucket
+        ):
+            with self.subTest(messages=messages):
+                body = self.body(messages)
+                for keyword in ("Fixes", "Closes", "Resolves", "Fixed", "Closed", "Resolved"):
+                    self.assertNotIn("%s PRO-629" % keyword, body)
+                    self.assertNotIn("%s pro-629" % keyword.lower(), body.lower())
+                self.assertIsNone(_LIVE_CLOSING_RE.search(body))
+                # ...but the issue must still be visible and traceable in the body.
+                self.assertIn("PRO-629", body)
+                self.assertIn("persist brew temperature overrides", body)
+
+    def test_defusing_the_subject_does_not_change_the_bucketing(self):
+        # Only the rendered text is defused; the closed-vs-mentioned decision is
+        # still made from the original commit message.
+        closed = self.body(["feat: overrides (Fixes PRO-629)\n\nFixes PRO-629"])
+        self.assertIn("### Linear issues closed since the last promotion (1)", closed)
+        self.assertIn("- PRO-629 — feat: overrides (`Fixes` PRO-629)", closed)
+        mentioned = self.body(["chore: follow-up for PRO-629"])
+        self.assertIn("### Also referenced (1)", mentioned)
 
     def test_names_the_branches_being_promoted(self):
         self.assertIn("## Promoting `dev-master` to `master`", render_body("master", "dev-master", REAL_MESSAGES))

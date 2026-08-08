@@ -28,6 +28,11 @@ range were already closed when their own PR merged into `dev-master`; repeating
 overwrite whatever state they had reached in the meantime. The list is
 informational — plain `PRO-123` keys, which Linear still auto-links.
 
+That guarantee covers the rendered commit subjects too, which is easy to miss: a
+subject can carry the keyword that closed its own issue (`feat: persist brew
+temperature overrides (Fixes PRO-629)` is real history here), so subjects are put
+through `defuse_closing_keywords` before they are interpolated into the body.
+
 Usage:
     # the normal case: everything on origin/dev-master not yet on origin/master
     python3 scripts/generate_promotion_pr_body.py --fetch > /tmp/promo-body.md
@@ -71,7 +76,15 @@ _ISSUE_RE = re.compile(r"(?<![0-9A-Za-z])PRO-(\d+)(?![0-9A-Za-z-])")
 
 # A closing keyword immediately before a reference. GitHub/Linear accept the
 # `Fixes:`/`Fixed` variants too, so match the family rather than three literals.
-_CLOSING_RE = re.compile(r"(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\b[\s:]*\Z", re.IGNORECASE)
+_CLOSING_KEYWORD = r"(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)"
+_CLOSING_RE = re.compile(_CLOSING_KEYWORD + r"\b[\s:]*\Z", re.IGNORECASE)
+
+# The same keyword family, but matched together with the reference it governs, so
+# an occurrence can be defused before it is echoed into the generated body. See
+# `defuse_closing_keywords`. `#NNN` is included alongside `PRO-NNN` because a
+# subject like `fix: drop the retry (closes #612)` would close a GitHub issue on
+# this repo just as surely as `Fixes PRO-629` re-closes a Linear one.
+_DEFUSE_RE = re.compile(r"\b(" + _CLOSING_KEYWORD + r")\b([\s:]*)(PRO-\d+|#\d+)", re.IGNORECASE)
 
 # Separator between two references that share one closing keyword, i.e. the
 # `, ` in `Fixes PRO-1, PRO-2` — both are closed, but only the first one has the
@@ -172,6 +185,31 @@ def _plural(count: int, word: str) -> str:
     return "%d %s%s" % (count, word, "" if count == 1 else "s")
 
 
+def defuse_closing_keywords(text: str) -> str:
+    r"""Return `text` with any closing-keyword phrase rendered inert.
+
+    The body lists a commit *subject* next to each issue key, and a subject can
+    itself carry the closing keyword that closed the issue in the first place —
+    `feat: persist brew temperature overrides (Fixes PRO-629)` is real history in
+    this repo. Echoed verbatim, that phrase makes the promotion PR body a live
+    closing reference: Linear re-closes PRO-629 when the promotion merges,
+    clobbering whatever state it had reached since. Exactly the failure mode the
+    module docstring promises the generator does not have.
+
+    The keyword is wrapped in a code span rather than deleted: `Fixes PRO-629`
+    becomes `` `Fixes` PRO-629 ``, so the subject still reads as it was written
+    (and the issue key stays auto-linked), but the backtick between keyword and
+    reference breaks the adjacency every closing-keyword parser requires — the
+    literal `Fixes PRO-629` substring no longer exists in the output. Wrapping
+    the whole phrase instead would not: a parser that ignores code spans would be
+    satisfied, but the raw substring would survive for one that does not.
+
+    Bucketing is unaffected: `issue_refs`/`collect_issues` run on the original
+    commit messages, so PRO-629 is still reported as closed by this range.
+    """
+    return _DEFUSE_RE.sub(lambda m: "`%s`%s%s" % (m.group(1), m.group(2), m.group(3)), text)
+
+
 def render_body(base: str, head: str, messages, base_sha: str = "", head_sha: str = "") -> str:
     """Render the Markdown promotion-PR body for `messages` (newest first)."""
     commits = len(messages)
@@ -196,11 +234,11 @@ def render_body(base: str, head: str, messages, base_sha: str = "", head_sha: st
     closed, mentioned = collect_issues(messages)
     if closed:
         lines += ["### Linear issues closed since the last promotion (%d)" % len(closed), ""]
-        lines += ["- %s — %s" % (key, subject) for key, subject in closed]
+        lines += ["- %s — %s" % (key, defuse_closing_keywords(subject)) for key, subject in closed]
         lines.append("")
     if mentioned:
         lines += ["### Also referenced (%d)" % len(mentioned), ""]
-        lines += ["- %s — %s" % (key, subject) for key, subject in mentioned]
+        lines += ["- %s — %s" % (key, defuse_closing_keywords(subject)) for key, subject in mentioned]
         lines.append("")
     if not closed and not mentioned:
         lines += ["No `PRO-NNN` references in this range (dependency bumps and similar).", ""]
