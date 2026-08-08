@@ -898,12 +898,21 @@ void WebUIPlugin::loop() {
         // Add Bluetooth scale weight information
         doc["cw"] = bleConnected ? this->currentBluetoothWeight : 0; // current bluetooth weight
         doc["bc"] = bleConnected;                                    // bluetooth scale connected status
+        doc["bse"] = true;                                           // bluetooth scale feature compiled in
 #else
         // BLE scale compiled out (CAR-382): always report disconnected / zero
         // weight. Volumetric still works via flow estimation; that value flows
         // through the process snapshot, not these BLE-specific status fields.
         doc["cw"] = 0;     // current bluetooth weight
         doc["bc"] = false; // bluetooth scale connected status
+        // PRO-640: build-time capability, NOT runtime state. "bc" is hardcoded
+        // false here, so the web UI cannot otherwise tell "scale absent because
+        // it dropped" from "no scale in this firmware at all" — and it used to
+        // paint every volumetric brew on a flags-off build as an amber
+        // scale-missing fault even though flow estimation reaches the target
+        // just fine. "bse" false means: a disconnected scale is the permanent,
+        // expected state, so never escalate it to attention.
+        doc["bse"] = false; // bluetooth scale feature compiled out
 #endif
 
         // Use thread-safe snapshot to avoid use-after-free race conditions

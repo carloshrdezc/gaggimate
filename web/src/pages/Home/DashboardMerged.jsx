@@ -38,6 +38,7 @@ import {
   MODE_MANUAL,
   MODE_STANDBY,
   MODE_STEAM,
+  READINESS_SIGNAL_KEYS,
   buildStandbyProfileCurve,
   clampBrewTemperature,
   clampManualFlow,
@@ -47,7 +48,9 @@ import {
   computeYieldEditable,
   getBrewTemperatureHint,
   getBrewTemperatureLockReason,
-  getReadinessSummary,
+  getConnectivityIndicators,
+  getReadinessAnnouncement,
+  getReadinessSignals,
   getYieldLockReason,
   getAvailableModeOptions,
   getBoilerHeatingState,
@@ -197,9 +200,9 @@ export function ModeRail({ active, modes, onSelect }) {
 
 ModeRail.propTypes = { active: PropTypes.number, modes: PropTypes.arrayOf(PropTypes.object), onSelect: PropTypes.func };
 
-function StatusPill({ ledClass, label, value }) {
+function StatusPill({ ledClass, label, value, title }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} title={title}>
       <span className={`dm-led ${ledClass}`} />
       <span
         style={{
@@ -225,7 +228,20 @@ function StatusPill({ ledClass, label, value }) {
   );
 }
 
-StatusPill.propTypes = { ledClass: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
+StatusPill.propTypes = { ledClass: PropTypes.string, label: PropTypes.string, value: PropTypes.string, title: PropTypes.string };
+
+// PRO-640: the sub-header used to render the whole readiness sentence
+// ("Machine in standby. Controller connected. Scale not connected. …") as a
+// permanent visible line. It cost a row of primary dashboard space and read as
+// noise. Connection health now lives in the two compact sub-header pills
+// (ONLINE / SCALE), whose LED tone comes from getConnectivityIndicators; the
+// sentence survives only as a visually-hidden aria-live announcement of what
+// actually changed.
+export const CONNECTIVITY_TONE_CLASS = {
+  ok: 'dm-led--ok',
+  attention: 'dm-led--warm',
+  idle: 'dm-led--idle',
+};
 
 function PhaseChip({ label, isActive, isDone }) {
   return (
@@ -339,9 +355,33 @@ export function StandbyBlock({ profileName, curve, profileError, onRetryProfile 
               fontSize: 9,
               letterSpacing: '0.18em',
               color: 'var(--dm-fg-dim)',
+              display: 'inline-flex',
+              alignItems: 'baseline',
+              gap: 8,
+              minWidth: 0,
             }}
           >
             PROFILE
+            {/* PRO-640: the selected profile's NAME is now shown here. It used to
+                exist only as an aria-live sentence in the sub-header ("Profile X
+                selected"), which this issue removed — and the curve panel below
+                never renders the name, so without this label standby lost the
+                selected-profile context entirely. */}
+            <span
+              style={{
+                fontFamily: 'var(--dm-font-display)',
+                fontSize: 13,
+                letterSpacing: '0.04em',
+                fontWeight: 700,
+                color: profileName ? 'var(--dm-fg)' : 'var(--dm-fg-faint)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+              }}
+            >
+              {profileName || 'NONE SELECTED'}
+            </span>
           </span>
           {curve && (
             <span style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -1240,15 +1280,27 @@ export function getRecipeGridStyle(isMobile) {
   return {
     display: 'grid',
     // PRO-630: five fields (Grind · Dose › Temp › Yield › Scales) with four
-    // separators between them. Mobile stays a single stacked column so the extra
-    // field can't clip or overlap at narrow widths.
-    gridTemplateColumns: isMobile ? '1fr' : '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
+    // separators between them.
+    // PRO-640: mobile is a TWO-column grid (Grind|Dose, Temp|Yield, Scales
+    // full-width) instead of one field per row — one column wasted horizontal
+    // space and pushed the graph off-screen. The separators are display:none at
+    // mobile widths, so they generate no grid items and auto-placement fills
+    // the two columns in DOM order; only SCALES needs explicit placement (see
+    // getRecipeScalesCellStyle).
+    gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
     gap: 10,
     alignItems: 'center',
     padding: '12px 0',
     borderTop: '1px solid var(--dm-line)',
     borderBottom: '1px solid var(--dm-line)',
   };
+}
+
+// PRO-640: SCALES is the 5th control, so in the 2-column mobile grid it would
+// land alone in column 1 and leave a blank cell beside it. Span both columns so
+// it reads as a full-width final row. Desktop keeps auto placement.
+export function getRecipeScalesCellStyle(isMobile) {
+  return isMobile ? { gridColumn: '1 / -1' } : {};
 }
 
 export const graphLegendRowStyle = {
@@ -1311,6 +1363,29 @@ function buildGraphPaths(entries) {
   const curPY = pToY(lastEntry.currentPressure || 0).toFixed(1);
 
   return { pd, fd, tpd, tempd, curX, curPY };
+}
+
+// PRO-640: announce readiness transitions politely instead of re-rendering a
+// static narration. Holds the last announced per-axis signal set and pushes a
+// new string ONLY when an axis's text actually changed; the first render
+// announces nothing (the dashboard the user just opened is not "news").
+function useReadinessAnnouncement(signals) {
+  const signalsKey = READINESS_SIGNAL_KEYS.map(key => signals[key] ?? '').join('|');
+  // Read the freshest signals inside the effect without adding the (newly
+  // allocated every render) object to the dependency list.
+  const latestSignalsRef = useRef(signals);
+  latestSignalsRef.current = signals;
+  const announcedSignalsRef = useRef(null);
+  const [announcement, setAnnouncement] = useState('');
+
+  useEffect(() => {
+    const next = latestSignalsRef.current;
+    const changed = getReadinessAnnouncement(announcedSignalsRef.current, next);
+    announcedSignalsRef.current = next;
+    if (changed) setAnnouncement(changed);
+  }, [signalsKey]);
+
+  return announcement;
 }
 
 // ── Main component ──────────────────────────────────────────────────────────
@@ -1915,12 +1990,27 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
   const primaryActionState = getPrimaryActionState({ active, finished, mode, connected, isGrindAvailable, isManualAvailable });
   const primaryActionLabel = primaryActionState.label;
   const primaryActionAccent = primaryActionState.accent;
-  const readinessSummary = getReadinessSummary({
+  // PRO-640: readiness is no longer narrated as a permanent visible line. The
+  // per-axis signals feed (a) the ONLINE / SCALE status-pill LEDs in the
+  // sub-header and (b) a visually-hidden live region that announces only what
+  // actually changed.
+  const readinessSignals = getReadinessSignals({
     mode,
     connected,
     bluetoothConnected: s.bluetoothConnected,
     selectedProfile: s.selectedProfile,
     wakeAvailable: primaryActionLabel === 'WAKE' && connected,
+  });
+  const readinessAnnouncement = useReadinessAnnouncement(readinessSignals);
+  const connectivityIndicators = getConnectivityIndicators({
+    connected,
+    bluetoothConnected: s.bluetoothConnected,
+    mode,
+    brewTarget: s.brewTarget,
+    active,
+    // PRO-640: a BLE-scale-less build reports bc:false permanently; don't paint
+    // that as an amber fault (flow estimation carries the volumetric brew).
+    bluetoothScaleEnabled: s.bluetoothScaleEnabled,
   });
   const primaryAction = () => {
     if (Object.prototype.hasOwnProperty.call(primaryActionState, 'processKind')) {
@@ -2020,10 +2110,29 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
         </div>
       </div>
 
-      {/* Sub-header: mode rail + status pills + phase strip */}
-      <div role='status' aria-live='polite' style={{ padding: '8px 16px', fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-dim)' }}>
-        {readinessSummary}
-      </div>
+      {/* Sub-header: mode rail + status pills + phase strip.
+          PRO-640: the full readiness sentence used to sit above this row as a
+          dedicated always-visible line. It is now a visually-hidden live region
+          that speaks only on change, plus the ONLINE / SCALE pills below. */}
+      <span
+        role='status'
+        aria-live='polite'
+        data-testid='readiness-live-region'
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          margin: -1,
+          padding: 0,
+          overflow: 'hidden',
+          clip: 'rect(0 0 0 0)',
+          clipPath: 'inset(50%)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {readinessAnnouncement}
+      </span>
       <div
         style={{
           display: 'flex',
@@ -2125,12 +2234,21 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
           }}
         >
           <StatusPill
-            ledClass={connected ? 'dm-led--ok' : 'dm-led--warm'}
+            ledClass={CONNECTIVITY_TONE_CLASS[connectivityIndicators.controller.tone]}
             label='ONLINE'
             value={connected ? 'WIFI' : 'OFFLINE'}
+            title={connectivityIndicators.controller.label}
           />
           <span
             style={{ width: 1, height: 14, background: 'var(--dm-line)', display: 'inline-block' }}
+          />
+          {/* PRO-640: scale health, compact. The LED is only amber when the scale
+              is actually needed (volumetric brew) — see getConnectivityIndicators. */}
+          <StatusPill
+            ledClass={CONNECTIVITY_TONE_CLASS[connectivityIndicators.scale.tone]}
+            label='SCALE'
+            value={s.bluetoothConnected ? 'BLE' : 'OFF'}
+            title={connectivityIndicators.scale.label}
           />
           <span
             style={{ width: 1, height: 14, background: 'var(--dm-line)', display: 'inline-block' }}
@@ -2550,7 +2668,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               lockedHint={yieldLockReason}
             />
             <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
-            <div>
+            <div style={getRecipeScalesCellStyle(isMobile)}>
               <div style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, letterSpacing: '0.18em', color: 'var(--dm-fg-dim)', marginBottom: 3 }}>
                 SCALES
               </div>

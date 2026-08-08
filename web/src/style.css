@@ -1442,6 +1442,10 @@ body.nav-drawer-open {
 .dm-led--ok   { background: #7cb876; box-shadow: 0 0 6px rgba(124, 184, 118, 0.65); }
 .dm-led--warm { background: #d4a843; box-shadow: 0 0 6px rgba(212, 168, 67, 0.65); }
 .dm-led--live { background: #d71921; box-shadow: 0 0 8px rgba(215, 25, 33, 0.85); }
+/* PRO-640: neutral dot for a disconnection that does not affect anything the
+   machine is currently doing (e.g. no BLE scale while idle). Deliberately
+   unlit — no glow — so it cannot be mistaken for a warning. */
+.dm-led--idle { background: rgba(232, 232, 232, 0.22); }
 
 @keyframes dm-pulse {
   0%, 100% { opacity: 1; }

@@ -282,6 +282,15 @@ components:
         bc:
           type: boolean
           description: Bluetooth scale connected status.
+        bse:
+          type: boolean
+          description: |
+            Bluetooth-scale FEATURE compiled in (build-time capability, not runtime
+            state). False on a `GAGGIMATE_ENABLE_BLE_SCALE=0` build, where `bc` is
+            hardcoded false forever while volumetric brewing still reaches its target
+            via flow estimation — so clients must not present a disconnected scale as
+            a fault there (PRO-640). Absent on firmware older than PRO-640; clients
+            default it to true, since those builds always have BLE compiled in.
         process:
           type: object
           description: |
