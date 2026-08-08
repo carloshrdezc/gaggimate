@@ -52,7 +52,10 @@ export function PageShell({ children, navOpen, onNavToggle }) {
           aria-label={navOpen ? 'Close navigation menu' : 'Open navigation menu'}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
         >
-          <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 10, background: 'var(--dm-accent)', color: '#fff', flexShrink: 0 }}>
+          {/* PRO-643: the badge sits on the dashboard accent, which the user can
+              set to any color (including a light one), so its text must use the
+              derived readable foreground token, never a hardcoded white. */}
+          <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 10, background: 'var(--dm-accent)', color: 'var(--gm-dashboard-accent-content)', flexShrink: 0 }}>
             <span style={{ fontFamily: 'var(--dm-font-display)', fontSize: 16, fontWeight: 700 }}>G</span>
           </span>
           <span style={{ lineHeight: 1.2 }}>
