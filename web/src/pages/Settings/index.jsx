@@ -24,7 +24,17 @@ import {
 } from '../../services/localAuthFetch.js';
 import { DASHBOARD_LAYOUTS, setDashboardLayout } from '../../utils/dashboardManager.js';
 import { downloadJson, prepareDownload } from '../../utils/download.js';
-import { getStoredTheme, handleThemeChange } from '../../utils/themeManager.js';
+import {
+  getAvailableThemes,
+  getEffectiveAccents,
+  getThemePreferences,
+  normalizeHexColor,
+  resetAppAccent,
+  resetDashboardAccent,
+  setAppAccent,
+  setDashboardAccent,
+  setStoredTheme,
+} from '../../utils/themeManager.js';
 import { setGrindSettings } from '../../hooks/useGrindSettings.js';
 import { PluginCard } from './PluginCard.jsx';
 import { LocalAuthRecoveryCard } from './LocalAuthRecoveryCard.jsx';
@@ -62,6 +72,89 @@ const TOP_LEVEL_CARD_IDS = [
   'remoteAccess',
 ];
 
+// PRO-643: one accent editor (picker + hex text + preview + reset), reused for
+// the app accent and the optional dashboard accent. It is purely presentational
+// — every mutation goes through the themeManager callbacks the parent passes in.
+// `color` is the committed effective color; `draft` is the uncommitted hex text
+// (null when the field simply mirrors `color`).
+function AccentControl({
+  scope,
+  label,
+  description,
+  color,
+  draft,
+  error,
+  onPick,
+  onDraftInput,
+  onDraftCommit,
+  onDraftKeyDown,
+  onReset,
+  resetLabel,
+}) {
+  const colorId = `accent-${scope}-color`;
+  const hexId = `accent-${scope}-hex`;
+  return (
+    <div className='flex flex-col gap-2'>
+      <span className='font-nd-mono text-[14px] tracking-[0.08em] text-[var(--text-secondary,#999)] uppercase'>
+        {label}
+      </span>
+      <p className='font-nd-mono text-[12px] text-[var(--text-disabled,#666)]'>{description}</p>
+      <div className='flex flex-wrap items-center gap-3'>
+        <label htmlFor={colorId} className='sr-only'>
+          {`${label} color`}
+        </label>
+        <input
+          id={colorId}
+          type='color'
+          className='h-10 w-14 cursor-pointer rounded border border-[var(--home-border,#333)] bg-transparent p-1'
+          value={color}
+          onInput={onPick}
+          onChange={onPick}
+        />
+        <label htmlFor={hexId} className='sr-only'>
+          {`${label} hex`}
+        </label>
+        <input
+          id={hexId}
+          type='text'
+          inputMode='text'
+          spellcheck={false}
+          className='nd-input nd-input--lg w-32'
+          placeholder='#rrggbb'
+          aria-invalid={error ? 'true' : 'false'}
+          aria-describedby={`${hexId}-status`}
+          value={draft ?? color}
+          onInput={onDraftInput}
+          onBlur={onDraftCommit}
+          onKeyDown={onDraftKeyDown}
+        />
+        {/* Preview carries a text label so the state is not conveyed by color alone. */}
+        <span className='flex items-center gap-2'>
+          <span
+            aria-hidden='true'
+            className='inline-block h-5 w-5 rounded border border-[var(--home-border,#333)]'
+            style={{ background: color }}
+          />
+          <span className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
+            {`${label} preview ${color}`}
+          </span>
+        </span>
+        <button type='button' className='nd-btn nd-btn--ghost' onClick={onReset}>
+          {resetLabel}
+        </button>
+      </div>
+      {/* Always-present live region; only an invalid draft raises role=alert. */}
+      <div id={`${hexId}-status`} aria-live='polite'>
+        {error && (
+          <p role='alert' className='font-nd-mono text-[12px] text-[var(--color-error,#d71921)]'>
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Settings() {
   const apiService = useContext(ApiServiceContext);
   const [submitting, setSubmitting] = useState(false);
@@ -83,7 +176,16 @@ export function Settings() {
     }
     setOpenMap(next);
   };
-  const [currentTheme, setCurrentTheme] = useState('midnight');
+  const [themePreferences, setThemePreferences] = useState({
+    theme: 'midnight',
+    appAccent: null,
+    dashboardAccent: null,
+  });
+  // Draft hex text per scope. `null` means "follow the committed effective
+  // color"; a string is an uncommitted edit. Kept separate from the committed
+  // preference so a rejected draft can never alter what is applied.
+  const [accentDrafts, setAccentDrafts] = useState({ app: null, dashboard: null });
+  const [accentErrors, setAccentErrors] = useState({ app: null, dashboard: null });
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [authHandoffUrl, setAuthHandoffUrl] = useState(null);
   const [authHandoffError, setAuthHandoffError] = useState(null);
@@ -117,8 +219,87 @@ export function Settings() {
   }, [fetchedSettings]);
 
   useEffect(() => {
-    setCurrentTheme(getStoredTheme());
+    setThemePreferences(getThemePreferences());
   }, []);
+
+  // ── Theme accent controls (PRO-643) ────────────────────────────────────────
+  // themeManager.js is the sole owner of storage and root tokens: everything
+  // below is a controlled view that re-reads the manager after each accepted
+  // mutation and never writes localStorage or document styles itself.
+  const effectiveAccents = getEffectiveAccents(themePreferences);
+  const dashboardOverrideEnabled = themePreferences.dashboardAccent !== null;
+  const accentSetters = {
+    app: setAppAccent,
+    dashboard: setDashboardAccent,
+  };
+
+  const syncThemePreferences = scope => {
+    setThemePreferences(getThemePreferences());
+    setAccentDrafts(prev => ({ ...prev, [scope]: null }));
+    setAccentErrors(prev => ({ ...prev, [scope]: null }));
+  };
+
+  // Native picker: the value is always a valid #rrggbb, so commit immediately.
+  const onAccentPicked = scope => event => {
+    const normalized = normalizeHexColor(event.target.value);
+    if (normalized && accentSetters[scope](normalized)) syncThemePreferences(scope);
+  };
+
+  // Text field: hold the draft while typing so a half-typed hex is not rejected
+  // on every keystroke; validate on Enter/blur only.
+  const onAccentDraftInput = scope => event => {
+    const value = event.target.value;
+    setAccentDrafts(prev => ({ ...prev, [scope]: value }));
+    if (accentErrors[scope]) setAccentErrors(prev => ({ ...prev, [scope]: null }));
+  };
+
+  const commitAccentDraft = scope => () => {
+    const draft = accentDrafts[scope];
+    if (draft === null) return;
+    // Normalize here so the manager receives a canonical `#rrggbb` and an
+    // unparseable draft is rejected without ever reaching storage.
+    const normalized = normalizeHexColor(draft);
+    if (normalized && accentSetters[scope](normalized)) {
+      syncThemePreferences(scope);
+    } else {
+      setAccentErrors(prev => ({ ...prev, [scope]: 'Enter a six-digit hex color (#rrggbb).' }));
+    }
+  };
+
+  const onAccentDraftKeyDown = scope => event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitAccentDraft(scope)();
+    }
+  };
+
+  const onResetAppAccent = () => {
+    resetAppAccent();
+    syncThemePreferences('app');
+  };
+
+  const onResetDashboardAccent = () => {
+    resetDashboardAccent();
+    syncThemePreferences('dashboard');
+  };
+
+  // Enabling the override seeds it from the accent the Dashboard already shows,
+  // so the newly revealed picker starts from a valid, unsurprising value.
+  const onToggleDashboardOverride = () => {
+    if (dashboardOverrideEnabled) resetDashboardAccent();
+    else setDashboardAccent(effectiveAccents.app);
+    syncThemePreferences('dashboard');
+  };
+
+  const onThemeSelected = event => {
+    // Re-read rather than patching locally: setStoredTheme() preserves any
+    // active accent overrides and the manager remains the source of truth.
+    if (setStoredTheme(event.target.value)) {
+      setThemePreferences(getThemePreferences());
+      setAccentDrafts({ app: null, dashboard: null });
+      setAccentErrors({ app: null, dashboard: null });
+    }
+  };
 
   const prepareAuthHandoff = async () => {
     const url = localAuthHandoffUrl(formData.mdnsName);
@@ -728,18 +909,69 @@ export function Settings() {
                   id='webui-theme'
                   name='webui-theme'
                   className='nd-input nd-input--lg'
-                  value={currentTheme}
-                  onChange={e => {
-                    setCurrentTheme(e.target.value);
-                    handleThemeChange(e);
-                  }}
+                  value={themePreferences.theme}
+                  onChange={onThemeSelected}
                 >
-                  <option value='midnight'>Midnight</option>
-                  <option value='espresso'>Espresso</option>
-                  <option value='matcha'>Matcha</option>
-                  <option value='blueprint'>Blueprint</option>
+                  {getAvailableThemes().map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </div>
+
+              {/* Accent customization (PRO-643). Browser-local only — never sent
+                  to the device and deliberately absent from the backup bundle. */}
+              <AccentControl
+                scope='app'
+                label='App accent'
+                description='Used for primary buttons, selected controls and highlights across the Web UI.'
+                color={effectiveAccents.app}
+                draft={accentDrafts.app}
+                error={accentErrors.app}
+                onPick={onAccentPicked('app')}
+                onDraftInput={onAccentDraftInput('app')}
+                onDraftCommit={commitAccentDraft('app')}
+                onDraftKeyDown={onAccentDraftKeyDown('app')}
+                onReset={onResetAppAccent}
+                resetLabel='Reset to theme default'
+              />
+
+              <div className='flex flex-col gap-2'>
+                <label className='flex items-center gap-3'>
+                  <input
+                    type='checkbox'
+                    className='nd-checkbox'
+                    checked={dashboardOverrideEnabled}
+                    onChange={onToggleDashboardOverride}
+                  />
+                  <span className='font-nd-mono text-[14px] text-[var(--text-primary,#e8e8e8)]'>
+                    Use a separate dashboard accent
+                  </span>
+                </label>
+                <p className='font-nd-mono text-[12px] text-[var(--text-secondary,#999)]'>
+                  {dashboardOverrideEnabled
+                    ? 'The dashboard uses its own accent below.'
+                    : 'The dashboard follows the app accent.'}
+                </p>
+              </div>
+
+              {dashboardOverrideEnabled && (
+                <AccentControl
+                  scope='dashboard'
+                  label='Dashboard accent'
+                  description='Applies to the dashboard mode rail, primary action, live indicator and temperature graph.'
+                  color={effectiveAccents.dashboard}
+                  draft={accentDrafts.dashboard}
+                  error={accentErrors.dashboard}
+                  onPick={onAccentPicked('dashboard')}
+                  onDraftInput={onAccentDraftInput('dashboard')}
+                  onDraftCommit={commitAccentDraft('dashboard')}
+                  onDraftKeyDown={onAccentDraftKeyDown('dashboard')}
+                  onReset={onResetDashboardAccent}
+                  resetLabel='Reset dashboard accent'
+                />
+              )}
             </div>
           </Card>
 

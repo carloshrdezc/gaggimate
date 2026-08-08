@@ -189,7 +189,10 @@ export function BoundaryChart({ shot, boundaries, onBoundariesChange }) {
                     lineHeight: '16px',
                     textAlign: 'center',
                     background: 'var(--color-primary, #d71921)',
-                    color: '#fff',
+                    // PRO-643: --color-primary is the user-customizable app
+                    // accent; the glyph must follow its derived contrast token
+                    // so a light accent stays readable.
+                    color: 'var(--color-primary-content, #fff)',
                     border: 'none',
                     borderRadius: '50%',
                     cursor: 'pointer',
