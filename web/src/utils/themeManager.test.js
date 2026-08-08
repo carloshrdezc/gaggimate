@@ -190,13 +190,15 @@ describe('accent token application', () => {
 
     resetAppAccent();
     expect(document.documentElement.style.getPropertyValue('--gm-app-accent')).toBe('#4d8fd1');
-    expect(document.documentElement.style.getPropertyValue('--gm-dashboard-accent')).toBe('#4d8fd1');
+    expect(document.documentElement.style.getPropertyValue('--gm-dashboard-accent')).toBe(
+      '#4d8fd1',
+    );
   });
 
   it('reports effective accents including inheritance', () => {
-    expect(getEffectiveAccents({ theme: 'matcha', appAccent: null, dashboardAccent: null })).toEqual(
-      { app: '#5aaa52', dashboard: '#5aaa52' },
-    );
+    expect(
+      getEffectiveAccents({ theme: 'matcha', appAccent: null, dashboardAccent: null }),
+    ).toEqual({ app: '#5aaa52', dashboard: '#5aaa52' });
     expect(
       getEffectiveAccents({ theme: 'matcha', appAccent: '#ff6600', dashboardAccent: null }),
     ).toEqual({ app: '#ff6600', dashboard: '#ff6600' });
@@ -226,7 +228,9 @@ describe('style.css accent contract', () => {
 
   it('routes the dashboard --dm-accent and glow through the dashboard accent token', () => {
     expect(stylesheet).toMatch(/--dm-accent:\s*var\(--gm-dashboard-accent\)/);
-    expect(stylesheet).toMatch(/--app-shell-glow:\s*radial-gradient\([^)]*\n?[^;]*var\(--gm-dashboard-accent-glow\)/);
+    expect(stylesheet).toMatch(
+      /--app-shell-glow:\s*radial-gradient\([^)]*\n?[^;]*var\(--gm-dashboard-accent-glow\)/,
+    );
   });
 
   it('no longer hardcodes a per-theme --dm-accent inside .dm-shell', () => {
