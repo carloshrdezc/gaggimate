@@ -382,16 +382,38 @@ describe('non-finite derived numbers (PRO-632 regression)', () => {
   });
 
   test('a representable huge quantity still exports a finite bean weight', async () => {
-    // Guard against over-rejecting: 1e308 + an 18.2 g dose is still finite, so
-    // this archive must keep exporting.
-    const backup = toBeanconquerorBackup({ beans: [{ ...BEAN, quantity: HUGE }], shots: [SHOT] });
+    // Guard against over-rejecting: a sum that stays under Number.MAX_VALUE must
+    // keep exporting. The dose is 5e307 rather than SHOT's 18.2 g so the addition
+    // is OBSERVABLE: at magnitude 1e308 the float ULP is ~1.99e292, so
+    // `1e308 + 18.2 === 1e308` exactly and the assertion would hold even if
+    // `applyBagTotals` dropped the `consumed` term entirely (PRO-637). 5e307 is
+    // several ULPs wide, so `quantity + consumed` is 1.5e308 — distinguishable
+    // from `quantity` alone — while `1.5e308 - 5e307` still cancels back to
+    // exactly 1e308, proving the bag total round-trips.
+    const DOSE = 5e307;
+    const backup = toBeanconquerorBackup({
+      beans: [{ ...BEAN, quantity: HUGE }],
+      shots: [{ ...SHOT, id: 'representable', notes: { ...SHOT.notes, doseIn: String(DOSE) } }],
+    });
     expect(validateBeanconquerorBackup(backup)).toEqual({ valid: true, errors: [] });
 
     const { entries } = await buildBeanconquerorZip(backup);
-    const [bean] = JSON.parse(entries['Beanconqueror.json']).BEANS;
+    const archive = JSON.parse(entries['Beanconqueror.json']);
+    const [bean] = archive.BEANS;
 
-    expect(bean.weight).toBe(HUGE);
+    expect(bean.weight).toBe(1.5e308);
     expect(Number.isFinite(bean.weight)).toBe(true);
+
+    // Beanconqueror stores no `available` field — it derives availability as
+    // `weight - consumed` from the archive's own brews (same relation as the
+    // inventory tests above), so recover it here and confirm it lands back on
+    // GaggiMate's remaining quantity.
+    const consumed = archive.BREWS.filter(brew => brew.bean === bean.config.uuid).reduce(
+      (sum, brew) => sum + (brew.bean_weight_in > 0 ? brew.bean_weight_in : brew.grind_weight),
+      0,
+    );
+    expect(consumed).toBe(DOSE);
+    expect(bean.weight - consumed).toBe(HUGE);
   });
 
   test('no exported record may carry a non-finite number in any numeric field', () => {
