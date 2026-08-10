@@ -19,7 +19,7 @@
     "@fortawesome/fontawesome-svg-core": "^7.0.0",
     "@fortawesome/free-brands-svg-icons": "^7.0.0",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
-    "@fortawesome/react-fontawesome": "^3.0.0",
+    "@fortawesome/react-fontawesome": "^3.5.0",
     "@preact/signals": "^2.9.2",
     "chart.js": "^4.4.8",
     "chartjs-adapter-dayjs-4": "^1.0.4",
