@@ -894,6 +894,90 @@ function RingLegend({ color, label, value }) {
 
 RingLegend.propTypes = { color: PropTypes.string, label: PropTypes.string, value: PropTypes.string };
 
+// PRO-645: the recipe row's alignment invariant is structural. Every field —
+// editable or locked, EditableNumBlock or the hand-rolled SCALES readout —
+// reserves the same three bands (label / value+control / metadata) so a value or
+// arrow baseline can never move because a neighbour's label is longer or a field
+// grew supplemental metadata. The metadata band is the LAST band and the row is
+// top-aligned, so a wrapping lock reason grows downwards only.
+export const RECIPE_LABEL_BAND_HEIGHT = 12;
+export const RECIPE_VALUE_BAND_HEIGHT = 50;
+export const RECIPE_METADATA_BAND_HEIGHT = 12;
+// 24px stepper buttons stacked with a 2px gap fill the value band exactly; the
+// locked/read-only fields reserve the same column with an inert spacer.
+export const RECIPE_CONTROL_COLUMN_WIDTH = 24;
+const RECIPE_LABEL_BAND_GAP = 3;
+const RECIPE_METADATA_BAND_GAP = 2;
+
+const recipeLabelBandStyle = {
+  minHeight: RECIPE_LABEL_BAND_HEIGHT,
+  marginBottom: RECIPE_LABEL_BAND_GAP,
+  fontFamily: 'var(--dm-font-mono)',
+  fontSize: 9,
+  letterSpacing: '0.18em',
+  color: 'var(--dm-fg-dim)',
+};
+
+const recipeValueBandStyle = {
+  height: RECIPE_VALUE_BAND_HEIGHT,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  minWidth: 0,
+};
+
+const recipeMetadataBandStyle = {
+  minHeight: RECIPE_METADATA_BAND_HEIGHT,
+  marginTop: RECIPE_METADATA_BAND_GAP,
+  fontFamily: 'var(--dm-font-mono)',
+  fontSize: 9,
+  color: 'var(--dm-fg-faint)',
+};
+
+const recipeControlColumnStyle = {
+  width: RECIPE_CONTROL_COLUMN_WIDTH,
+  height: RECIPE_VALUE_BAND_HEIGHT,
+  marginLeft: 2,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 2,
+  flexShrink: 0,
+};
+
+// The big numeric glyph. Shared by all three branches so the box model — and
+// therefore the baseline the eye reads — is identical: the editable trigger's
+// dashed underline lives INSIDE its border box, so a value without one has to
+// reserve the same 1px or it renders a pixel lower inside the centred band.
+const recipeValueTextStyle = {
+  fontFamily: 'var(--dm-font-display)',
+  fontSize: 28,
+  fontWeight: 700,
+  fontVariantNumeric: 'tabular-nums',
+  lineHeight: 1,
+  borderBottomWidth: 1,
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'transparent',
+};
+
+const recipeUnitTextStyle = { fontFamily: 'var(--dm-font-mono)', fontSize: 10 };
+
+// The decorative separators are pinned to the value band via the band constants
+// (not a magic nudge) so metadata growth in any field cannot drag them along.
+function getRecipeSeparatorStyle(isMobile) {
+  return {
+    display: isMobile ? 'none' : 'inline',
+    alignSelf: 'start',
+    height: RECIPE_VALUE_BAND_HEIGHT,
+    marginTop: RECIPE_LABEL_BAND_HEIGHT + RECIPE_LABEL_BAND_GAP,
+    lineHeight: `${RECIPE_VALUE_BAND_HEIGHT}px`,
+    fontFamily: 'var(--dm-font-display)',
+    fontSize: 20,
+    color: 'var(--dm-fg-faint)',
+  };
+}
+
 // Editable NumBlock: big display number + ± stepper buttons, click-to-type
 export function EditableNumBlock({ label, value, unit, hint, accent, step, min, max, onCommit, onTap, disabled = false, lockedHint, disabledTitle }) {
   const [editing, setEditing] = useState(false);
@@ -936,73 +1020,63 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
   }, []);
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div
-        style={{
-          fontFamily: 'var(--dm-font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.18em',
-          color: 'var(--dm-fg-dim)',
-          marginBottom: 3,
-        }}
-      >
-        {disabled && lockedHint ? lockedHint : label}
+    <div style={{ position: 'relative', minWidth: 0 }} data-dm-field={label}>
+      <div data-dm-band='label' style={recipeLabelBandStyle}>
+        {label}
       </div>
 
       {disabled ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div data-dm-band='value' style={recipeValueBandStyle}>
           <span
             aria-disabled='true'
             title={disabledTitle ?? "Turn on 'Allow yield override' in Settings to edit per shot"}
-            style={{
-              fontFamily: 'var(--dm-font-display)',
-              fontSize: 28,
-              color: 'var(--dm-fg-faint)',
-              fontWeight: 700,
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: 1,
-              cursor: 'default',
-            }}
+            style={{ ...recipeValueTextStyle, color: 'var(--dm-fg-faint)', cursor: 'default' }}
           >
             {typeof value === 'number' ? value.toFixed(1) : value}
           </span>
-          <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 10, color: 'var(--dm-fg-faint)' }}>
+          <span style={{ ...recipeUnitTextStyle, color: 'var(--dm-fg-faint)' }}>
             {unit}
           </span>
+          <div data-dm-control='spacer' aria-hidden='true' style={recipeControlColumnStyle} />
         </div>
       ) : editing ? (
-        <input
-          ref={inputRef}
-          type='text'
-          aria-label={`Edit ${label}`}
-          inputMode='decimal'
-          defaultValue={value.toFixed(1)}
-          onBlur={e => commit(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') { restoreTriggerFocusRef.current = true; commit(e.target.value); }
-            if (e.key === 'Escape') finishKeyboardEdit();
-            if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); finishKeyboardEdit(); }
-            if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); finishKeyboardEdit(); }
-          }}
-          style={{
-            display: 'block',
-            width: '100%',
-            maxWidth: '100%',
-            minWidth: 0,
-            boxSizing: 'border-box',
-            fontFamily: 'var(--dm-font-display)',
-            fontSize: 26,
-            fontWeight: 700,
-            color: accent || 'var(--dm-fg)',
-            background: 'var(--dm-bg-2)',
-            border: '1px solid var(--dm-accent)',
-            borderRadius: 4,
-            padding: '4px 6px',
-            lineHeight: 1,
-          }}
-        />
+        <div data-dm-band='value' style={recipeValueBandStyle}>
+          <input
+            ref={inputRef}
+            type='text'
+            aria-label={`Edit ${label}`}
+            inputMode='decimal'
+            defaultValue={value.toFixed(1)}
+            onBlur={e => commit(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { restoreTriggerFocusRef.current = true; commit(e.target.value); }
+              if (e.key === 'Escape') finishKeyboardEdit();
+              if (e.key === 'ArrowUp') { e.preventDefault(); adjust(step); finishKeyboardEdit(); }
+              if (e.key === 'ArrowDown') { e.preventDefault(); adjust(-step); finishKeyboardEdit(); }
+            }}
+            style={{
+              display: 'block',
+              flex: 1,
+              maxWidth: '100%',
+              minWidth: 0,
+              boxSizing: 'border-box',
+              fontFamily: 'var(--dm-font-display)',
+              fontSize: 26,
+              fontWeight: 700,
+              color: accent || 'var(--dm-fg)',
+              background: 'var(--dm-bg-2)',
+              border: '1px solid var(--dm-accent)',
+              borderRadius: 4,
+              padding: '4px 6px',
+              lineHeight: 1,
+            }}
+          />
+          {/* The stepper is unavailable mid-edit, but its footprint is not: keep
+              the column reserved so committing does not shift the row. */}
+          <div data-dm-control='spacer' aria-hidden='true' style={recipeControlColumnStyle} />
+        </div>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div data-dm-band='value' style={recipeValueBandStyle}>
           <button
             ref={triggerRef}
             type='button'
@@ -1017,25 +1091,25 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
               setEditing(true);
             }}
             style={{
-              fontFamily: 'var(--dm-font-display)',
-              fontSize: 28,
+              ...recipeValueTextStyle,
               color: accent || 'var(--dm-fg)',
-              fontWeight: 700,
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: 1,
               cursor: 'text',
-              border: 'none',
-              borderBottom: '1px dashed rgba(232,232,232,0.2)',
+              borderTop: 'none',
+              borderRight: 'none',
+              borderLeft: 'none',
+              borderBottomWidth: 1,
+              borderBottomStyle: 'dashed',
+              borderBottomColor: 'rgba(232,232,232,0.2)',
               background: 'transparent',
               padding: 0,
             }}
           >
             {typeof value === 'number' ? value.toFixed(1) : value}
           </button>
-          <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 10, color: 'var(--dm-fg-dim)' }}>
+          <span style={{ ...recipeUnitTextStyle, color: 'var(--dm-fg-dim)' }}>
             {unit}
           </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginLeft: 2 }}>
+          <div data-dm-control='stepper' style={recipeControlColumnStyle}>
             <button
               type='button'
               onClick={e => { e.stopPropagation(); adjust(step); }}
@@ -1056,11 +1130,12 @@ export function EditableNumBlock({ label, value, unit, hint, accent, step, min, 
         </div>
       )}
 
-      {hint && (
-        <div style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-faint)', marginTop: 2 }}>
-          {hint}
-        </div>
-      )}
+      {/* PRO-645: lock reasons and hints live BELOW the value, in a band that is
+          always reserved, so their presence/length cannot move the value band. */}
+      <div data-dm-band='metadata' style={recipeMetadataBandStyle}>
+        {disabled && lockedHint ? <div>{lockedHint}</div> : null}
+        {hint ? <div>{hint}</div> : null}
+      </div>
     </div>
   );
 }
@@ -1306,7 +1381,13 @@ export function getRecipeGridStyle(isMobile) {
     // getRecipeScalesCellStyle).
     gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr auto 1fr auto 1fr auto 1fr auto 1fr',
     gap: 10,
-    alignItems: 'center',
+    // PRO-645: top-aligned, NOT centred. With `center` any per-field height
+    // difference (a wrapping lock reason, an extra hint line) re-centres that
+    // cell and moves its value baseline relative to its neighbours. The fields
+    // reserve identical label/value bands, so aligning at the start makes the
+    // value + arrow baseline shared by construction and lets the metadata band
+    // grow downwards only.
+    alignItems: 'start',
     padding: '12px 0',
     borderTop: '1px solid var(--dm-line)',
     borderBottom: '1px solid var(--dm-line)',
@@ -2642,7 +2723,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               // recordManualGrindSetting event (mobile onBlur is unreliable).
               onTap={() => setManualGrind(manualGrind)}
             />
-            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>·</span>
+            <span aria-hidden='true' style={getRecipeSeparatorStyle(isMobile)}>·</span>
             <EditableNumBlock
               label='DOSE'
               value={dose}
@@ -2652,7 +2733,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               max={200}
               onCommit={setDose}
             />
-            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            <span aria-hidden='true' style={getRecipeSeparatorStyle(isMobile)}>›</span>
             {/* Selected-profile brew temperature (PRO-630). Device-authoritative:
                 the value comes from evt:status `bto` and every commit fires
                 req:brew-temperature:set, whose res: reply the device may reject
@@ -2674,7 +2755,7 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               lockedHint={brewTemperatureLockReason}
               disabledTitle='The machine owns this target: it can only be changed in Brew mode while no shot is running'
             />
-            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
+            <span aria-hidden='true' style={getRecipeSeparatorStyle(isMobile)}>›</span>
             <EditableNumBlock
               label='YIELD'
               value={targetWeight}
@@ -2687,27 +2768,29 @@ export default function DashboardMerged({ navOpen = false, onNavToggle }) {
               disabled={!yieldEditable}
               lockedHint={yieldLockReason}
             />
-            <span aria-hidden='true' style={{ display: isMobile ? 'none' : 'inline', fontFamily: 'var(--dm-font-display)', fontSize: 20, color: 'var(--dm-fg-faint)' }}>›</span>
-            <div style={getRecipeScalesCellStyle(isMobile)}>
-              <div style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, letterSpacing: '0.18em', color: 'var(--dm-fg-dim)', marginBottom: 3 }}>
+            <span aria-hidden='true' style={getRecipeSeparatorStyle(isMobile)}>›</span>
+            {/* PRO-645: SCALES is a read-only readout rather than an
+                EditableNumBlock, so it mirrors the same three bands explicitly —
+                including an inert control-column spacer — instead of inventing
+                its own stack. Its value row is `center`-aligned like the other
+                fields (was `baseline`, which is what made its number sit low). */}
+            <div style={{ minWidth: 0, ...getRecipeScalesCellStyle(isMobile) }} data-dm-field='SCALES'>
+              <div data-dm-band='label' style={recipeLabelBandStyle}>
                 SCALES
               </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+              <div data-dm-band='value' style={recipeValueBandStyle}>
                 <span
                   style={{
-                    fontFamily: 'var(--dm-font-display)',
-                    fontSize: 28,
+                    ...recipeValueTextStyle,
                     color: s.bluetoothConnected ? 'var(--dm-good)' : 'var(--dm-fg-faint)',
-                    fontWeight: 700,
-                    fontVariantNumeric: 'tabular-nums',
-                    lineHeight: 1,
                   }}
                 >
                   {s.bluetoothConnected ? fmt(currentWeight) : '—'}
                 </span>
-                <span style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 10, color: 'var(--dm-fg-dim)' }}>g</span>
+                <span style={{ ...recipeUnitTextStyle, color: 'var(--dm-fg-dim)' }}>g</span>
+                <div data-dm-control='spacer' aria-hidden='true' style={recipeControlColumnStyle} />
               </div>
-              <div style={{ fontFamily: 'var(--dm-font-mono)', fontSize: 9, color: 'var(--dm-fg-faint)', marginTop: 2 }}>
+              <div data-dm-band='metadata' style={recipeMetadataBandStyle}>
                 {s.bluetoothConnected ? (scaleName || 'CONNECTED') : 'NOT CONNECTED'}
               </div>
             </div>
