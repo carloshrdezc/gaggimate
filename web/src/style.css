@@ -1256,7 +1256,10 @@ body.nav-drawer-open {
 
 .nd-toggle--active .nd-toggle-thumb {
   left: 23px;
-  background: white;
+  /* PRO-643: the checked track is filled with the user-customizable app accent,
+     so the thumb painted on top of it must use the derived contrast token — a
+     hardcoded white disappears into a light accent. */
+  background: var(--color-primary-content, #ffffff);
 }
 
 /* Day of week buttons */

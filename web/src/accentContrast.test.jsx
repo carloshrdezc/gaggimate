@@ -9,6 +9,9 @@
 //   2. the `--color-primary`-filled `nd-*` controls in `style.css`, and
 //   3. the BoundaryChart marker remove button.
 //
+// The `nd-toggle` switch thumb (4.) is the same class of offender, found later:
+// its own fill is the foreground painted on the accent-filled track.
+//
 // jsdom neither loads `style.css` nor resolves `var()` in getComputedStyle, so
 // the token chain is resolved here against BOTH sources it really comes from:
 // the custom properties declared in `style.css` and the inline properties the
@@ -345,6 +348,42 @@ describe('app-accent filled controls hover fill (PRO-643)', () => {
     expect(
       expandTokens(ruleDeclaration('.nd-action-btn--danger:hover:not(:disabled)', 'background')),
     ).toBe('#c4161e');
+  });
+});
+
+// The toggle switch inverts the usual shape: the thumb IS the foreground, and
+// what paints it is `background`, not `color`. When checked, the track is filled
+// with the raw app accent, so a hardcoded white thumb vanished on a light accent
+// (e.g. #ffffff) across Settings and the plugin cards.
+describe('toggle switch foreground (PRO-643)', () => {
+  const THUMB = '.nd-toggle--active .nd-toggle-thumb';
+
+  it('paints the checked thumb from the accent contrast token, not a literal white', () => {
+    const declaration = ruleDeclaration(THUMB, 'background');
+    expect(declaration).toBe('var(--color-primary-content, #ffffff)');
+    expect(declaration).not.toBe('white');
+  });
+
+  it('keeps the checked thumb visible on a light app accent', () => {
+    applyThemePreferences({ theme: 'midnight', appAccent: '#ffffff', dashboardAccent: null });
+    // The track is the raw accent, so the thumb must be its contrast token.
+    expect(resolveColor(ruleDeclaration('.nd-toggle--active', 'background'))).toBe('#ffffff');
+    expect(resolveColor(ruleDeclaration(THUMB, 'background'))).toBe('#000000');
+  });
+
+  it('keeps the checked thumb visible on a dark app accent', () => {
+    applyThemePreferences({ theme: 'midnight', appAccent: '#101010', dashboardAccent: null });
+    expect(resolveColor(ruleDeclaration('.nd-toggle--active', 'background'))).toBe('#101010');
+    expect(resolveColor(ruleDeclaration(THUMB, 'background'))).toBe('#ffffff');
+  });
+
+  it('contrasts with the track under the named-theme default accent', () => {
+    applyThemePreferences({ theme: 'matcha', appAccent: null, dashboardAccent: null });
+    // matcha's #5aaa52 default derives a dark thumb, so the two never collide.
+    const track = resolveColor(ruleDeclaration('.nd-toggle--active', 'background'));
+    const thumb = resolveColor(ruleDeclaration(THUMB, 'background'));
+    expect(thumb).toBe('#000000');
+    expect(thumb).not.toBe(track);
   });
 });
 
