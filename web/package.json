@@ -40,7 +40,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^9.39.4",
     "eslint-config-preact": "^2.0.0",
-    "globals": "^17.7.0",
+    "globals": "^17.11.0",
     "jsdom": "^30.0.1",
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
