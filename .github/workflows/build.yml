@@ -69,6 +69,16 @@ jobs:
         if: matrix.target != 'controller'
         run: bash scripts/build_webui.sh
       - name: Build ${{ matrix.target }}
+        # PRO-648: generate_stable_versions.py hits the GitHub Releases API from
+        # this step to build src/stable_versions.h (the OTA dropdown's allow-list).
+        # Unauthenticated calls are rate-limited to 60/hr per IP, and Actions
+        # runners share a NAT'd pool, so the call can 403 here. The script's
+        # offline branch then silently falls back to a single git-describe entry
+        # (no existing header on a fresh checkout) and the RELEASED firmware ships
+        # a degraded dropdown — with a zero exit code, so nothing fails. Passing
+        # the ambient token raises the limit to 1000/hr for this repo.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p out
           # Delete the moving `nightly` tag locally before building. The display
