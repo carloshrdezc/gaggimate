@@ -1,5 +1,6 @@
 #include "ShotHistoryPlugin.h"
 #include "ActiveShotFillPolicy.h"
+#include "ShotFinalYieldPolicy.h"
 
 #include "BeanResolutionPolicy.h"
 #include "ExtendedRecordingPolicy.h"
@@ -256,7 +257,7 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         if (xSemaphoreTake(stateMutex, pdMS_TO_TICKS(STATE_MUTEX_TIMEOUT_MS)) == pdTRUE) {
             double latest = 0.0;
             if (bluetoothWeightCoalescer.consumeInto(latest)) {
-                currentBluetoothWeight = static_cast<float>(latest);
+                currentBluetoothWeight = finalShotYieldAfterMeasurement(currentBluetoothWeight, static_cast<float>(latest));
             }
             xSemaphoreGive(stateMutex);
         } else {
