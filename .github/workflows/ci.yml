@@ -82,6 +82,16 @@ jobs:
       # step above for the same reason: python3 + stdlib only, no toolchain.
       - name: Test the promotion PR body generator
         run: python3 scripts/test_generate_promotion_pr_body.py
+      # PRO-648: the OTA stable-version manifest generator. src/stable_versions.h
+      # is gitignored and generator-owned (CAR-248), so there is no committed
+      # artifact for a reviewer to eyeball — the only way the filtering stays
+      # correct is a test. A regression here yields a header that compiles and
+      # looks right while pointing the OTA dropdown at a prerelease or at a
+      # moving `nightly`/`beta` tag, which is the same silent-nothing failure
+      # class as the two steps above. Same home for the same reason: python3 +
+      # stdlib only, no PlatformIO toolchain, ~1s.
+      - name: Test the OTA stable-version manifest generator
+        run: python3 scripts/test_generate_stable_versions.py
 
   relay-server:
     name: Relay server tests

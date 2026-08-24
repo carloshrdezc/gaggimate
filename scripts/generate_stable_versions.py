@@ -33,9 +33,10 @@ import urllib.request
 
 try:
     Import("env")  # type: ignore[name-defined]  # PlatformIO injects this
+    _PLATFORMIO_BUILD = True
 except NameError:
     # Allow running standalone for testing: `python scripts/generate_stable_versions.py`
-    pass
+    _PLATFORMIO_BUILD = False
 
 # --- Config -----------------------------------------------------------------
 
@@ -201,6 +202,10 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-else:
+elif _PLATFORMIO_BUILD:
     # Imported by PlatformIO via `pre:scripts/generate_stable_versions.py`.
+    # Gated on _PLATFORMIO_BUILD (i.e. SCons injected `env`) rather than a bare
+    # `else`, so a plain `import generate_stable_versions` — which is what
+    # scripts/test_generate_stable_versions.py does — neither hits the GitHub API
+    # nor rewrites src/stable_versions.h as an import side effect. (PRO-648)
     main()

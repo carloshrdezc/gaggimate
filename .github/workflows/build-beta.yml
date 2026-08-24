@@ -94,6 +94,11 @@ jobs:
           cp .pio/build/display/littlefs.bin out/display-filesystem.bin
           cp .pio/build/display/littlefs.bin out/display-headless-filesystem.bin
       - name: Build display
+        # PRO-648: see the note in build.yml — generate_stable_versions.py calls
+        # the GitHub Releases API here, and an unauthenticated 403 silently
+        # degrades the shipped OTA dropdown to one git-describe entry.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pio run -e display
           cp .pio/build/display/firmware.bin out/display-firmware.bin
@@ -114,6 +119,9 @@ jobs:
           firmware_dir: 'upload/display'
           firmware_files: 'bootloader.bin,partitions.bin,firmware.bin,filesystem.bin'
       - name: Build headless
+        # PRO-648: same GitHub Releases API rate-limit exposure as the display leg.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pio run -e display-headless
           cp .pio/build/display-headless/firmware.bin out/display-headless-firmware.bin
