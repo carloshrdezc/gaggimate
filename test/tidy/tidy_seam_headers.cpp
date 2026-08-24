@@ -56,6 +56,7 @@
 #include <display/plugins/PathTraversalPolicy.h>
 #include <display/plugins/PostStopGracePolicy.h>
 #include <display/plugins/RelayConnectionPolicy.h>
+#include <display/plugins/ShotFinalYieldPolicy.h>
 #include <display/plugins/ShotIndexMetadataPolicy.h>
 #include <display/plugins/ShotNotesPersistencePolicy.h>
 #include <display/plugins/StandbyReassertPolicy.h>
