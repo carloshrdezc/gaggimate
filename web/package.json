@@ -20,11 +20,11 @@
     "@fortawesome/free-brands-svg-icons": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
-    "@preact/signals": "^2.11.1",
+    "@preact/signals": "^2.11.2",
     "chart.js": "^4.4.8",
     "chartjs-adapter-dayjs-4": "^1.0.4",
     "chartjs-plugin-annotation": "^3.1.0",
-    "daisyui": "^5.7.28",
+    "daisyui": "^5.7.42",
     "dayjs": "^1.11.23",
     "idb": "^8.0.3",
     "preact": "^10.29.8",
@@ -45,7 +45,7 @@
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4.1.11",
-    "vite": "^8.2.2",
+    "vite": "^8.3.0",
     "vitest": "^5.0.0"
   }
 }
