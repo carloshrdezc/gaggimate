@@ -6,39 +6,40 @@ Coverage: **1321 / 1321** commits mapped (197 merges, 1124 non-merge).
 
 | Feature | Commits | Merges | PRs | Linear IDs |
 |---|---|---|---|---|
-| F01-deps | 62 | 0 | 62 | 1 |
+| F01-deps | 64 | 0 | 64 | 3 |
 | F02-platform-stack | 21 | 0 | 20 | 19 |
 | F10-memory-psram | 25 | 1 | 19 | 18 |
-| F03-nanopb-spike | 22 | 0 | 22 | 19 |
-| F05-ble-scale | 43 | 7 | 23 | 22 |
+| F03-nanopb-spike | 10 | 0 | 10 | 9 |
+| F05-ble-scale | 45 | 7 | 25 | 23 |
 | F04-ble-comms | 35 | 8 | 8 | 16 |
 | F06-ota | 77 | 11 | 43 | 47 |
-| F07-webui-security | 19 | 2 | 10 | 9 |
+| F07-webui-security | 18 | 2 | 10 | 9 |
 | F08-relay | 15 | 2 | 5 | 5 |
-| F09-webui-plugin-core | 49 | 10 | 24 | 29 |
+| F09-webui-plugin-core | 45 | 7 | 25 | 29 |
 | F11-diag-log | 8 | 0 | 6 | 7 |
-| F12-embed-webui-fs | 26 | 9 | 3 | 12 |
+| F12b-fs-migration-preserve | 28 | 7 | 3 | 9 |
+| F12a-embed-webui | 7 | 3 | 0 | 3 |
 | F13-simulator | 8 | 2 | 1 | 4 |
-| F14-hardware | 18 | 0 | 4 | 9 |
-| F15-eez-lvgl-ui | 156 | 36 | 6 | 46 |
+| F14-hardware | 19 | 0 | 5 | 10 |
+| F15-eez-lvgl-ui | 157 | 36 | 6 | 46 |
 | F16-manual-grind | 60 | 6 | 23 | 18 |
-| F17-standby-steam-flush | 66 | 9 | 13 | 17 |
+| F17-standby-steam-flush | 65 | 9 | 13 | 17 |
 | F18-brew-targets | 52 | 10 | 10 | 14 |
-| F19-beans | 66 | 11 | 8 | 16 |
-| F20-shot-history-analyzer | 91 | 10 | 46 | 30 |
-| F21-profiles | 93 | 11 | 13 | 18 |
-| F22-dashboard-home | 91 | 10 | 23 | 20 |
-| F23-web-theme-shell | 48 | 6 | 9 | 9 |
-| F24-settings-backup | 47 | 9 | 22 | 21 |
-| F25-ci-quality | 67 | 13 | 34 | 31 |
-| F26-docs-agents | 26 | 3 | 13 | 15 |
+| F19-beans | 68 | 12 | 9 | 18 |
+| F20-shot-history-analyzer | 90 | 9 | 46 | 30 |
+| F21-profiles | 85 | 10 | 13 | 17 |
+| F22-dashboard-home | 89 | 9 | 22 | 19 |
+| F23-web-theme-shell | 49 | 6 | 9 | 9 |
+| F24-settings-backup | 50 | 9 | 24 | 23 |
+| F25-ci-quality | 72 | 14 | 38 | 34 |
+| F26-docs-agents | 27 | 3 | 14 | 16 |
 | F27-web-misc | 13 | 4 | 0 | 2 |
 | F28-firmware-misc | 10 | 1 | 3 | 4 |
-| F99-misc | 7 | 6 | 1 | 2 |
+| F99-misc | 9 | 9 | 0 | 2 |
 
-## F01-deps (62)
+## F01-deps (64)
 
-Linear IDs: PRO-598
+Linear IDs: PRO-254, PRO-256, PRO-598
 
 - `ec9f4fc4` 2026-09-29 build(deps-dev): bump vitest from 5.0.0 to 5.0.2 in /web (#684)
 - `663ba885` 2026-09-29 build(deps-dev): bump prettier from 3.9.8 to 3.9.9 in /web (#685)
@@ -102,6 +103,8 @@ Linear IDs: PRO-598
 - `4c22b23f` 2026-07-28 build(deps): bump actions/checkout from 4 to 7 (#599)
 - `85da123d` 2026-07-28 build(deps): bump peaceiris/actions-gh-pages from 4.0.0 to 4.1.0 (#595)
 - `a8d2bd63` 2026-07-27 infra: add dependabot for web/relay-server npm + github-actions (PRO-598) (#589)
+- `39e73683` 2026-06-28 chore(deps): web minor/patch sweep + MQTT 2.5.3 (PRO-254) (#292)
+- `4a731499` 2026-06-26 chore(web): bump @preact/signals ^1.3.1 -> ^2.9.2 (PRO-256) (#267)
 
 ## F02-platform-stack (21)
 
@@ -159,11 +162,10 @@ Linear IDs: CAR-321, PRO-211, PRO-334, PRO-341, PRO-342, PRO-344, PRO-347, PRO-3
 - `458fb1da` 2026-06-04 fix(chip-bar): render icons via proven ModeScreen recipe (native REAL, no zoom)
 - `df13efb4` 2026-05-15 fix: prevent event listener leak and stale closure in BoundaryChart
 
-## F03-nanopb-spike (22)
+## F03-nanopb-spike (10)
 
-Linear IDs: PRO-239, PRO-241, PRO-242, PRO-243, PRO-244, PRO-245, PRO-246, PRO-247, PRO-248, PRO-250, PRO-252, PRO-253, PRO-254, PRO-256, PRO-258, PRO-259, PRO-306, PRO-307, PRO-309
+Linear IDs: PRO-239, PRO-241, PRO-242, PRO-243, PRO-244, PRO-245, PRO-306, PRO-307, PRO-309
 
-- `39e73683` 2026-06-28 chore(deps): web minor/patch sweep + MQTT 2.5.3 (PRO-254) (#292)
 - `4bf98cf2` 2026-06-28 docs(spike-nanopb-comms): cross-ref production proto + restore Option B breadcrumb (#291)
 - `5a91167c` 2026-06-28 test(ble): negative-path + discriminator-only-frame coverage for nanopb decode (PRO-309) (#290)
 - `2fdb8b22` 2026-06-27 refactor(ble): remove dead float_to_string text-format helper (nanopb slice 5, PRO-245) (#288)
@@ -173,22 +175,11 @@ Linear IDs: PRO-239, PRO-241, PRO-242, PRO-243, PRO-244, PRO-245, PRO-246, PRO-2
 - `34900ed2` 2026-06-27 docs(spike): tidy near-empty sh fence in nanopb findings Reproduce block (PRO-307) (#284)
 - `2b746129` 2026-06-27 refactor(ble): rename nanopb proto package gaggimate_spike -> gaggimate (PRO-306) (#283)
 - `33751012` 2026-06-27 feat(ble): nanopb infra slice 1 — proto + codegen + dep (PRO-241) (#280)
-- `4a731499` 2026-06-26 chore(web): bump @preact/signals ^1.3.1 -> ^2.9.2 (PRO-256) (#267)
-- `95a3a82b` 2026-06-24 fix(led): re-sync LED state to controller after BLE reconnect (PRO-258) (#241)
-- `74932051` 2026-06-24 docs: correct stale uploadfs "Upload the Web UI" step post embed-WebUI migration (PRO-259) (#239)
-- `2aaad864` 2026-06-23 fix(web): swap page content on nav between lazy routes (PRO-253) (#230)
-- `eec9cfea` 2026-06-23 fix(PRO-252): restore auto-wakeup schedule (and PID) on settings import (#229)
-- `b255cd0b` 2026-06-23 chore(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (master backport) (#228)
-- `05c01878` 2026-06-23 ci(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (#227)
-- `ef60874d` 2026-06-23 fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (master) (#226)
-- `2782b14c` 2026-06-23 fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (#225)
-- `9a836031` 2026-06-23 chore(PRO-247): sync master into dev-master (#223)
-- `ce9774dc` 2026-06-22 PRO-246: sync non-WebUI dev-master work into master (concurrency fixes + feature flags + build/CI + README) (#222)
 - `72da9327` 2026-06-22 spike(PRO-239): nanopb comms evaluation — schema, lossless round-trip, footprint (#221)
 
-## F05-ble-scale (43)
+## F05-ble-scale (45)
 
-Linear IDs: CAR-105, CAR-262, CAR-296, CAR-316, CAR-321, CAR-367, CAR-382, PRO-4, PRO-5, PRO-235, PRO-297, PRO-351, PRO-386, PRO-459, PRO-504, PRO-508, PRO-509, PRO-510, PRO-511, PRO-512, PRO-522, PRO-597
+Linear IDs: CAR-105, CAR-262, CAR-296, CAR-316, CAR-321, CAR-367, CAR-382, PRO-4, PRO-5, PRO-235, PRO-248, PRO-297, PRO-351, PRO-386, PRO-459, PRO-504, PRO-508, PRO-509, PRO-510, PRO-511, PRO-512, PRO-522, PRO-597
 
 - `e946cee4` 2026-08-24 fix(ble): preserve final yield after scale reset (#662)
 - `d3de3cd7` 2026-07-27 fix(display): wire Quick-settings BRIGHTNESS toggle to persisted mainBrightness; hide unbindable SCALE toggle (PRO-597) (#590)
@@ -212,6 +203,8 @@ Linear IDs: CAR-105, CAR-262, CAR-296, CAR-316, CAR-321, CAR-367, CAR-382, PRO-4
 - `80ea178b` 2026-06-30 refactor(ble): replace delay()-based BLE scale teardown with a real handshake + null-guard scanner (PRO-351) (#337)
 - `72846c9e` 2026-06-27 feat(web): unify shot ratings on 0-10 one-decimal scale (PRO-297) (#272)
 - `18d0eff7` 2026-06-26 fix(web): require connected BLE scale for editable YIELD (#255)
+- `ef60874d` 2026-06-23 fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (master) (#226)
+- `2782b14c` 2026-06-23 fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (#225)
 - `fea9cd10` 2026-06-22 feat(PRO-235): keep BLE scale listening 5s on brew->steam to capture last drops (master) (#220)
 - `144d0dc7` 2026-06-22 feat(PRO-235): 5s BLE-scale grace on brew->steam (#219)
 - `1141e728` 2026-06-16 Merge pull request #188 from carloshrdezc/car-382-gate-ble-scale-flag [merge]
@@ -356,7 +349,7 @@ Linear IDs: CAR-44, CAR-95, CAR-100, CAR-178, CAR-230, CAR-248, CAR-377, PRO-11,
 - `550f06e7` 2026-05-03 Fix display theme layout and OTA error handling
 - `c85565a5` 2026-04-15 Merge pull request #3 from carloshrdezc/webui [merge]
 
-## F07-webui-security (19)
+## F07-webui-security (18)
 
 Linear IDs: CAR-96, CAR-99, PRO-208, PRO-324, PRO-340, PRO-513, PRO-518, PRO-548, PRO-550
 
@@ -377,7 +370,6 @@ Linear IDs: CAR-96, CAR-99, PRO-208, PRO-324, PRO-340, PRO-513, PRO-518, PRO-548
 - `0dc147da` 2026-05-19 fix(security): mask all secrets on /api/settings GET; gate POST on sentinel
 - `63d8d0b2` 2026-05-19 Merge pull request #84 from carloshrdezc/carloshrdezc/car-96-id-path-traversal [merge]
 - `66082bc8` 2026-05-19 fix(security): validate profile/bean IDs to prevent path traversal over WebSocket
-- `6c24a5d1` 2026-05-18 fix(ci): allow nightly build to continue when upload server secrets are missing
 - `5bb71428` 2026-05-09 fix: address PR review issues — relay security, buffer cap, dead code, gitignore
 
 ## F08-relay (15)
@@ -400,9 +392,9 @@ Linear IDs: CAR-259, PRO-35, PRO-314, PRO-592, PRO-596
 - `0f67772d` 2026-05-10 fix: address PR review — relay task teardown race, volatile flags, notes stat, style dedup
 - `e55d0b6e` 2026-05-09 Merge pull request #39 from carloshrdezc/feat/remote-access [merge]
 
-## F09-webui-plugin-core (49)
+## F09-webui-plugin-core (45)
 
-Linear IDs: CAR-103, CAR-178, CAR-354, CAR-375, CAR-377, PRO-1, PRO-16, PRO-28, PRO-209, PRO-214, PRO-215, PRO-267, PRO-283, PRO-284, PRO-286, PRO-313, PRO-317, PRO-350, PRO-355, PRO-357, PRO-360, PRO-392, PRO-393, PRO-417, PRO-418, PRO-429, PRO-449, PRO-521, PRO-588
+Linear IDs: CAR-103, CAR-178, CAR-375, CAR-377, PRO-1, PRO-16, PRO-18, PRO-28, PRO-209, PRO-214, PRO-215, PRO-267, PRO-283, PRO-284, PRO-286, PRO-313, PRO-317, PRO-350, PRO-355, PRO-357, PRO-360, PRO-392, PRO-393, PRO-417, PRO-418, PRO-429, PRO-449, PRO-521, PRO-588
 
 - `a6892bd6` 2026-07-26 chore(firmware): note mutual-exclusion invariant for deferred-standby lastExplicitStandbyMs in WebUIPlugin.cpp (#581)
 - `43225473` 2026-07-26 docs(api): document optional `auto` field on req:change-mode (PRO-588) (#580)
@@ -412,6 +404,7 @@ Linear IDs: CAR-103, CAR-178, CAR-354, CAR-375, CAR-377, PRO-1, PRO-16, PRO-28, 
 - `dbcddce4` 2026-07-06 refactor(firmware): hoist single listGrinders() in req:grinders:save (PRO-429) (#425)
 - `2570985e` 2026-07-06 Dev master (#421)
 - `7ce001a1` 2026-07-05 test(web): pin audited WebSocket event-handling contract (PRO-16) (#415)
+- `5c0393d3` 2026-07-05 fix(web): make ApiService reconnect idempotent + explicit state machine (PRO-18) (#414)
 - `545c785e` 2026-07-03 refactor(firmware): pair release/acquire on WebUIPlugin WiFi-lifecycle atomics (PRO-418) (#412)
 - `33d3a5ec` 2026-07-03 fix(firmware): defer WebUIPlugin server start/stop off the WiFi-event task (PRO-417) (#410)
 - `a7c5d1b5` 2026-07-02 docs(api): clarify audit-point vs per-message since-version wording (PRO-393) (#386)
@@ -432,12 +425,10 @@ Linear IDs: CAR-103, CAR-178, CAR-354, CAR-375, CAR-377, PRO-1, PRO-16, PRO-28, 
 - `918705e6` 2026-06-17 docs(webui): clarify /fonts cache comment (stable-named, not hashed) (PRO-215)
 - `b409a832` 2026-06-17 fix(webui): restore /fonts immutable caching + clang-format icon handler (PRO-215)
 - `fb1e09a6` 2026-06-17 fix(webui): harden build_webui.sh per PR #196 review (PRO-214)
-- `010a5aa1` 2026-06-17 build(webui): add embed build pipeline (scripts + stub, no serving change)
 - `ac71ce94` 2026-06-15 Merge pull request #181 from carloshrdezc/car-377-otastart-cross-task-race [merge]
 - `2b89ba45` 2026-06-15 fix(CAR-178): defer all GitHubOTA calls onto loop task
 - `44b6194c` 2026-06-13 Merge pull request #178 from carloshrdezc/dev-master [merge]
 - `ee5d4c6d` 2026-06-12 feat(webui): expose allowYieldOverride over settings + status (CAR-375)
-- `883e4bdf` 2026-06-09 Merge pull request #164 from carloshrdezc/car-354-loadbean-optional [merge]
 - `8eb5799b` 2026-05-20 Merge pull request #92 from carloshrdezc/carloshrdezc/car-103-millis-rollover [merge]
 - `ebe180e1` 2026-05-20 fix(webui): use rollover-safe millis() comparisons (CAR-103)
 - `860f4a13` 2026-05-19 fix(web): handle WebSocket errors in ProfileEdit/ProfileList - prevent stuck spinner
@@ -445,13 +436,10 @@ Linear IDs: CAR-103, CAR-178, CAR-354, CAR-375, CAR-377, PRO-1, PRO-16, PRO-28, 
 - `d0e88078` 2026-05-08 Merge pull request #37 from carloshrdezc/fix/webui-code-review [merge]
 - `8aef0169` 2026-05-08 fix: web UI bugs, performance and dead code from code review
 - `3001713e` 2026-05-07 fix: expose shot ID in WebSocket status and fix Weight card bugs
-- `1eb12536` 2026-04-15 Merge branch 'master' of https://github.com/carloshrdezc/gaggimate [merge]
 - `aecc8183` 2026-04-15 Merge pull request #4 from carloshrdezc/fix/code-review-bugs [merge]
 - `e8e3e0f1` 2026-04-15 fix: resolve 4 issues from code review
 - `9e390ea6` 2026-04-15 fix: add null check for ws.makeBuffer() to prevent crash
-- `43779895` 2026-04-12 Merge branch 'master' into ui-web [merge]
 - `8538ab9f` 2026-04-12 Merge branch 'fix/code-review-issues' [merge]
-- `21d86108` 2026-04-04 Mutex timeout strategy is now consistent across all methods using UI_MUTEX_TIMEOUT_MS
 - `ea9ba45f` 2026-04-04 fix: Complete concurrency fixes and resolve all review findings
 
 ## F11-diag-log (8)
@@ -467,36 +455,50 @@ Linear IDs: CAR-321, PRO-42, PRO-266, PRO-268, PRO-310, PRO-367, PRO-368
 - `8748c96c` 2026-06-04 diag(status-bar): draw WiFi/BT at full native 40px to isolate asset vs size (CAR-321)
 - `b192e912` 2026-04-19 fix: restore QuickStatusStrip, add null guard in ExtendedProfileChart, add error logging in useProfileData
 
-## F12-embed-webui-fs (26)
+## F12b-fs-migration-preserve (28)
 
-Linear IDs: CAR-281, CAR-287, PRO-210, PRO-212, PRO-214, PRO-215, PRO-216, PRO-217, PRO-218, PRO-319, PRO-322, PRO-326
+Linear IDs: CAR-281, PRO-212, PRO-215, PRO-216, PRO-217, PRO-218, PRO-319, PRO-322, PRO-326
 
 - `4a1dee7f` 2026-06-29 docs(firmware): correct no_ota.csv partition provenance for esp32-s3-supermini (PRO-326) (#314)
 - `84d89fe7` 2026-06-28 ci: attribute headless-4m no_ota partition source to repo board file (PRO-322) (#306)
 - `adafdab8` 2026-06-28 ci: attribute headless-4m no_ota flash size to board partition table (PRO-319) (#303)
+- `04809237` 2026-06-19 Merge pull request #201 from carloshrdezc/pro-218-export-import-migration [merge]
+- `9d0637d5` 2026-06-18 fix(profiles): whole-picture restore summary + tested restore glue (PRO-218 P2)
+- `a07b946f` 2026-06-18 fix(web): close silent multi-file partial-loss path in profile restore (PRO-218)
+- `6371a363` 2026-06-18 docs(migration): tell users to verify restored profile count after re-import (PRO-218)
+- `8a135b1c` 2026-06-18 refactor(web): MigrationWarningBanner profilesHref prop + drop default export (PRO-218)
+- `d0e683d5` 2026-06-18 fix(web): wire ProfileList to shared restore orchestrator + close restore gaps (PRO-218)
+- `34121e13` 2026-06-18 fix(migration): extract shipped importProfiles() orchestrator + harden restore (PRO-218)
+- `99a5ccab` 2026-06-18 fix(web): notify on empty profile import/export (PRO-218 P3)
 - `3ebd1c34` 2026-06-18 feat(migration): off-device profile export/import for SPIFFS->LittleFS (PRO-218)
 - `b30bc7b7` 2026-06-18 Merge pull request #199 from carloshrdezc/pro-217-ci-embed-pipeline [merge]
-- `a2716e26` 2026-06-18 docs(build_webui): clarify /h is runtime-created, only /p is staged
 - `b074a6b5` 2026-06-18 ci: migrate CI matrix to embed-WebUI pipeline + drop display-headless-4m (PRO-217)
 - `01843ca2` 2026-06-18 Merge pull request #198 from carloshrdezc/pro-216-sim-embedded-ui-parity [merge]
 - `59a2ae57` 2026-06-18 ci(sim): build+embed the real WebUI bundle for display-sim parity
 - `5d1bb977` 2026-06-17 Merge pull request #197 from carloshrdezc/pro-215-serve-embedded-ui [merge]
 - `e211201c` 2026-06-17 ci: embed web UI in distributed display/headless firmware builds (PRO-215)
 - `2fb5e5da` 2026-06-17 fix(sim): build embedded web UI manifest+blob in display-sim env (PRO-215)
-- `cc5a7e49` 2026-06-17 Merge pull request #196 from carloshrdezc/pro-214-embed-webui-pipeline [merge]
 - `1f44d437` 2026-06-17 Merge pull request #195 from carloshrdezc/pro-212-spiffs-to-littlefs [merge]
 - `b79fa358` 2026-06-17 ci(fs): copy littlefs.bin (not spiffs.bin) from buildfs output (PRO-212)
 - `394e7e4d` 2026-06-17 fix(fs): swap SPIFFS for LittleFS on the web/data partition (PRO-212)
-- `b6e0c957` 2026-06-16 Merge pull request #193 from carloshrdezc/pro-210-embed-webui-spike [merge]
 - `81539f60` 2026-06-16 docs(spike): migration plan + risk assessment for embed-WebUI (PR #764) + SPIFFS->LittleFS
-- `a3bbcdc3` 2026-05-29 Merge pull request #130 from carloshrdezc/fix/car-287-embedded-route-cache [merge]
-- `37050df6` 2026-05-29 fix(web): reduce embedded route request bursts
 - `a4102ebd` 2026-05-29 Merge pull request #128 from carloshrdezc/fix/car-281-spiffs-name-len [merge]
-- `36c2a11f` 2026-05-29 fix(web): avoid embedded route chunk fanout
 - `ff30f021` 2026-05-29 Merge pull request #124 from carloshrdezc/fix/car-281-spiffs-name-len [merge]
 - `453688e3` 2026-05-29 fix(build,ci): make SPIFFS guard executable + run it in CI build pipeline
 - `be68e230` 2026-05-29 fix(web,build): keep SPIFFS asset paths under mkspiffs's 32-char limit
 - `d4ddd6b1` 2026-04-15 fix: keep original files when gzipping for SPIFFS
+
+## F12a-embed-webui (7)
+
+Linear IDs: CAR-287, PRO-210, PRO-214
+
+- `a2716e26` 2026-06-18 docs(build_webui): clarify /h is runtime-created, only /p is staged
+- `cc5a7e49` 2026-06-17 Merge pull request #196 from carloshrdezc/pro-214-embed-webui-pipeline [merge]
+- `010a5aa1` 2026-06-17 build(webui): add embed build pipeline (scripts + stub, no serving change)
+- `b6e0c957` 2026-06-16 Merge pull request #193 from carloshrdezc/pro-210-embed-webui-spike [merge]
+- `a3bbcdc3` 2026-05-29 Merge pull request #130 from carloshrdezc/fix/car-287-embedded-route-cache [merge]
+- `37050df6` 2026-05-29 fix(web): reduce embedded route request bursts
+- `36c2a11f` 2026-05-29 fix(web): avoid embedded route chunk fanout
 
 ## F13-simulator (8)
 
@@ -511,13 +513,14 @@ Linear IDs: CAR-371, CAR-399, PRO-206, PRO-362
 - `4a2380b4` 2026-06-16 feat(sim): port desktop simulator (display-sim) to Windows/MinGW with WebUI parity (CAR-399)
 - `b75ca1ab` 2026-06-12 docs/test: fix recordGrinder return-value comment + simulator batch dedup (CAR-371 review)
 
-## F14-hardware (18)
+## F14-hardware (19)
 
-Linear IDs: CAR-278, CAR-297, CAR-315, CAR-336, PRO-26, PRO-41, PRO-46, PRO-457, PRO-458
+Linear IDs: CAR-278, CAR-297, CAR-315, CAR-336, PRO-26, PRO-41, PRO-46, PRO-258, PRO-457, PRO-458
 
 - `2d91e277` 2026-07-10 chore(web): rename Try Again to Back in Autotune error state (PRO-457) (#480)
 - `426172e5` 2026-07-10 chore(web): update Autotune waiting copy to match 60s timeout constant (PRO-458) (#479)
 - `510b4a20` 2026-07-09 feat(web): improve autotune PID results UI with parsed display and one-click apply (PRO-26) (#451)
+- `95a3a82b` 2026-06-24 fix(led): re-sync LED state to controller after BLE reconnect (PRO-258) (#241)
 - `1864c877` 2026-06-23 fix(firmware): rollover-safe LED loop timing + init sentinel (PRO-41, PRO-46) (#232)
 - `eaf66f9e` 2026-06-08 fix: gate all pump targets on pressure capability in hasPumpTarget (CAR-336)
 - `1abab54f` 2026-06-08 fix: lock processMutex in hasPumpTarget; gate steam on pressure capability (CAR-336)
@@ -534,7 +537,7 @@ Linear IDs: CAR-278, CAR-297, CAR-315, CAR-336, PRO-26, PRO-41, PRO-46, PRO-457,
 - `54c42c21` 2026-04-04 fix: restore defensive check for ProcessPhase::FINISHED before accessing pump methods
 - `21ba2a6a` 2026-03-20 Revamp web UI with bean management and AMOLED styling
 
-## F15-eez-lvgl-ui (156)
+## F15-eez-lvgl-ui (157)
 
 Linear IDs: CAR-222, CAR-253, CAR-264, CAR-273, CAR-275, CAR-276, CAR-277, CAR-278, CAR-279, CAR-282, CAR-284, CAR-286, CAR-291, CAR-292, CAR-293, CAR-294, CAR-295, CAR-297, CAR-299, CAR-300, CAR-301, CAR-302, CAR-303, CAR-304, CAR-305, CAR-306, CAR-307, CAR-308, CAR-309, CAR-312, CAR-314, CAR-315, CAR-316, CAR-318, CAR-319, CAR-320, CAR-321, CAR-327, CAR-328, CAR-330, CAR-358, PRO-36, PRO-38, PRO-39, PRO-223, PRO-260
 
@@ -690,6 +693,7 @@ Linear IDs: CAR-222, CAR-253, CAR-264, CAR-273, CAR-275, CAR-276, CAR-277, CAR-2
 - `8d4d1107` 2026-04-15 fix: address PR review issues - font weight guard and data null check
 - `b14d684c` 2026-04-15 fix: address chart legend and font resize issues
 - `6d3bb928` 2026-04-04 fix: use isActiveSafe() in UI event handler to prevent false state transitions
+- `21d86108` 2026-04-04 Mutex timeout strategy is now consistent across all methods using UI_MUTEX_TIMEOUT_MS
 - `308133fc` 2026-04-04 Fixed mutex timeout issue in Controller.cpp
 - `221b89de` 2026-04-04 Merge display improvements and fixes [merge]
 - `9278dbfb` 2026-04-03 Refresh round display visual styling
@@ -760,7 +764,7 @@ Linear IDs: CAR-371, PRO-23, PRO-424, PRO-425, PRO-426, PRO-428, PRO-431, PRO-43
 - `c667c962` 2026-04-16 docs: add manual mode implementation plan
 - `f9141417` 2026-04-16 docs: add manual mode design spec
 
-## F17-standby-steam-flush (66)
+## F17-standby-steam-flush (65)
 
 Linear IDs: CAR-253, CAR-277, CAR-278, CAR-336, CAR-369, PRO-222, PRO-223, PRO-225, PRO-226, PRO-265, PRO-287, PRO-391, PRO-421, PRO-432, PRO-545, PRO-587, PRO-625
 
@@ -810,7 +814,6 @@ Linear IDs: CAR-253, CAR-277, CAR-278, CAR-336, CAR-369, PRO-222, PRO-223, PRO-2
 - `a3c0746e` 2026-05-05 feat: fill water ring in green when temperature is reached
 - `aa4d1a47` 2026-05-05 feat: fill steam ring in green when temperature is reached
 - `1fd53a1b` 2026-05-05 feat: show 'Ready to Steam' and 'Water Ready' labels when temp is reached
-- `d90a77ae` 2026-05-05 feat: add green ready ring color variables for steam and water
 - `29d2e878` 2026-05-01 Merge pull request #27 from carloshrdezc/fix/autowakeup-toggle-only [merge]
 - `279487fc` 2026-05-01 fix: check arg is non-empty before enabling autowakeup
 - `82f6274c` 2026-05-01 fix: explicitly submit autowakeupEnabled in form POST
@@ -888,11 +891,12 @@ Linear IDs: CAR-238, CAR-252, CAR-355, CAR-367, CAR-375, PRO-280, PRO-281, PRO-3
 - `5b4382ec` 2026-04-29 feat: show Heating/Preheating subtitle when below target temp
 - `ce771ba3` 2026-04-04 Fix critical bugs and performance issues from code review
 
-## F19-beans (66)
+## F19-beans (68)
 
-Linear IDs: CAR-41, CAR-45, CAR-102, CAR-236, CAR-239, CAR-356, CAR-371, CAR-372, CAR-373, PRO-372, PRO-407, PRO-410, PRO-414, PRO-422, PRO-423, PRO-632
+Linear IDs: CAR-41, CAR-45, CAR-102, CAR-236, CAR-239, CAR-354, CAR-356, CAR-371, CAR-372, CAR-373, PRO-372, PRO-407, PRO-410, PRO-414, PRO-422, PRO-423, PRO-632, PRO-637
 
 - `43a25d8d` 2026-08-07 fix(web): key Beanconqueror browser-shot brew UUIDs by storageKey, not id
+- `e73a01e8` 2026-08-07 test(web): make huge-quantity bag-total test observe the addition (PRO-637) (#633)
 - `d4953b3b` 2026-08-07 fix(web): correct Beanconqueror bean inventory export (PRO-632) (#631)
 - `509dd92f` 2026-08-07 feat(web): export beans and shots as a Beanconqueror backup (PRO-632) (#630)
 - `92d54927` 2026-07-06 refactor(firmware): DRY bean id/name marshalling in ShotHistoryPlugin (PRO-423) (#420)
@@ -916,6 +920,7 @@ Linear IDs: CAR-41, CAR-45, CAR-102, CAR-236, CAR-239, CAR-356, CAR-371, CAR-372
 - `b3958ecc` 2026-06-12 refactor(shot-history): review polish — grinders-changed event + cap on read (CAR-371, PR #174 review)
 - `e4cd04f3` 2026-06-09 Merge pull request #168 from carloshrdezc/car-356-remove-profile-bean-popup-clean [merge]
 - `dedb5532` 2026-06-09 feat(web): remove bean-selection popup from Profiles page
+- `883e4bdf` 2026-06-09 Merge pull request #164 from carloshrdezc/car-354-loadbean-optional [merge]
 - `8b160bd5` 2026-06-08 refactor(beans): return std::optional<BeanEntry> from loadBean
 - `42d9680b` 2026-05-26 Merge pull request #106 from carloshrdezc/carloshrdezc/car-239-fix-bean-rescue-duplication [merge]
 - `7f99a993` 2026-05-26 fix(beans): stop duplicate rescue entries after unsafe-ID migration
@@ -959,7 +964,7 @@ Linear IDs: CAR-41, CAR-45, CAR-102, CAR-236, CAR-239, CAR-356, CAR-371, CAR-372
 - `d4ee44a9` 2026-04-01 Remove unused selected bean state from DefaultUI
 - `07fe0d5e` 2026-04-01 Add bean management across firmware and web UI
 
-## F20-shot-history-analyzer (91)
+## F20-shot-history-analyzer (90)
 
 Linear IDs: CAR-128, CAR-328, PRO-30, PRO-31, PRO-32, PRO-223, PRO-261, PRO-299, PRO-374, PRO-406, PRO-408, PRO-412, PRO-415, PRO-430, PRO-445, PRO-453, PRO-455, PRO-463, PRO-465, PRO-467, PRO-468, PRO-469, PRO-471, PRO-472, PRO-474, PRO-477, PRO-479, PRO-489, PRO-490, PRO-493
 
@@ -1007,7 +1012,6 @@ Linear IDs: CAR-128, CAR-328, PRO-30, PRO-31, PRO-32, PRO-223, PRO-261, PRO-299,
 - `6eb6a3c6` 2026-07-03 feat(web): shot history filter and search UI (PRO-31) (#398)
 - `ba9ad25b` 2026-07-02 fix(history): guard notes JSON write byte-count + check deserialize error (PRO-374) (#368)
 - `43cc3bf4` 2026-07-01 Merge pull request #361 from carloshrdezc/reconcile-master-history-2 [merge]
-- `11f908eb` 2026-07-01 Merge remote-tracking branch 'origin/master' into reconcile-master-history-2 [merge]
 - `e64af519` 2026-06-27 web: add optional id/aria-label passthrough to RatingNumberInput (#277)
 - `c2430ab3` 2026-06-27 fix(web): normalize rating inputs on blur not per-keystroke (PRO-299) (#275)
 - `75c9d3ed` 2026-06-24 fix(firmware): gate web req:change-mode on post-shot settle window (PRO-261) (#238)
@@ -1055,9 +1059,9 @@ Linear IDs: CAR-128, CAR-328, PRO-30, PRO-31, PRO-32, PRO-223, PRO-261, PRO-299,
 - `9391b9c0` 2026-04-03 improve latency
 - `c5acfdb1` 2026-03-22 Add web backups and shot history improvements
 
-## F21-profiles (93)
+## F21-profiles (85)
 
-Linear IDs: CAR-97, CAR-129, CAR-131, CAR-233, CAR-329, CAR-331, CAR-335, CAR-339, PRO-22, PRO-218, PRO-233, PRO-337, PRO-349, PRO-354, PRO-371, PRO-383, PRO-433, PRO-630
+Linear IDs: CAR-97, CAR-129, CAR-131, CAR-233, CAR-329, CAR-331, CAR-335, CAR-339, PRO-22, PRO-233, PRO-337, PRO-349, PRO-354, PRO-371, PRO-383, PRO-433, PRO-630
 
 - `980f18a2` 2026-08-07 feat(web): DashboardMerged selected-profile temperature control (PRO-630) (#627)
 - `ee367029` 2026-07-10 chore(firmware): gate removeFavoritedProfile save() on actual erase (#488)
@@ -1071,14 +1075,6 @@ Linear IDs: CAR-97, CAR-129, CAR-131, CAR-233, CAR-329, CAR-331, CAR-335, CAR-33
 - `8306f07b` 2026-06-30 chore(tooling): drop unused import os in boot_smoke_test.py (PRO-337) (#324)
 - `2edf1995` 2026-06-29 refactor(web/profiles): extract profileTransfer module + shared Dialog (CAR-233) (#100)
 - `fe8f6303` 2026-06-21 chore(PRO-233): sync master into dev-master (#217)
-- `04809237` 2026-06-19 Merge pull request #201 from carloshrdezc/pro-218-export-import-migration [merge]
-- `9d0637d5` 2026-06-18 fix(profiles): whole-picture restore summary + tested restore glue (PRO-218 P2)
-- `a07b946f` 2026-06-18 fix(web): close silent multi-file partial-loss path in profile restore (PRO-218)
-- `6371a363` 2026-06-18 docs(migration): tell users to verify restored profile count after re-import (PRO-218)
-- `8a135b1c` 2026-06-18 refactor(web): MigrationWarningBanner profilesHref prop + drop default export (PRO-218)
-- `d0e683d5` 2026-06-18 fix(web): wire ProfileList to shared restore orchestrator + close restore gaps (PRO-218)
-- `34121e13` 2026-06-18 fix(migration): extract shipped importProfiles() orchestrator + harden restore (PRO-218)
-- `99a5ccab` 2026-06-18 fix(web): notify on empty profile import/export (PRO-218 P3)
 - `e1bfb51e` 2026-06-15 fix(CAR-335): self-heal unaddressable profile ids on boot (#184)
 - `c4c81b02` 2026-06-08 test: assert parseProfile sanitizes (not rejects) unsafe ID (CAR-339)
 - `2ece724a` 2026-06-07 Merge pull request #160 from carloshrdezc/car-331-profile-export-id [merge]
@@ -1153,16 +1149,14 @@ Linear IDs: CAR-97, CAR-129, CAR-131, CAR-233, CAR-329, CAR-331, CAR-335, CAR-33
 - `0c2c4679` 2026-04-18 fix: add prepareDownload and error handling to per-profile export
 - `b91d2fc6` 2026-04-15 feat: enhance chart with better legend, thicker lines, and improved phase markers
 
-## F22-dashboard-home (91)
+## F22-dashboard-home (89)
 
-Linear IDs: CAR-178, CAR-322, PRO-223, PRO-224, PRO-232, PRO-234, PRO-285, PRO-296, PRO-300, PRO-315, PRO-318, PRO-323, PRO-384, PRO-416, PRO-574, PRO-635, PRO-636, PRO-637, PRO-643, PRO-645
+Linear IDs: CAR-178, CAR-322, PRO-223, PRO-224, PRO-232, PRO-234, PRO-285, PRO-296, PRO-300, PRO-315, PRO-318, PRO-323, PRO-384, PRO-416, PRO-574, PRO-635, PRO-636, PRO-643, PRO-645
 
 - `59724858` 2026-08-10 fix(web): align brew recipe row on a shared three-band footprint (PRO-645) (#647)
 - `2d4996a8` 2026-08-08 feat(web): custom Web UI and Dashboard accents (PRO-643) (#639)
 - `4924f562` 2026-08-07 fix(web): point dashboard GitHub link to Carlos's fork (#635)
-- `e73a01e8` 2026-08-07 test(web): make huge-quantity bag-total test observe the addition (PRO-637) (#633)
 - `e0bdb69f` 2026-08-07 fix(web): guard collectNonFiniteNumbers against cyclic input (PRO-636) (#632)
-- `fe407e9b` 2026-08-07 Merge pull request #629 from carloshrdezc/carlos/pro-635-merge-master-ancestry [merge]
 - `97afe902` 2026-08-07 chore(release): merge master (2.0.17) into dev-master for tag ancestry (PRO-635) [merge]
 - `415dbfe1` 2026-08-06 fix(web): improve dashboard control accessibility (#625)
 - `bbb8cb6c` 2026-07-24 test(web): cover Drive-restore refetch remount PluginSubCard expand (PRO-574) (#563)
@@ -1249,21 +1243,21 @@ Linear IDs: CAR-178, CAR-322, PRO-223, PRO-224, PRO-232, PRO-234, PRO-285, PRO-2
 - `6aac05af` 2026-04-14 fix: correct 5 bugs in web UI found during code review
 - `5ee6ef8e` 2026-04-11 Web improvs
 
-## F23-web-theme-shell (48)
+## F23-web-theme-shell (49)
 
-Linear IDs: CAR-300, PRO-7, PRO-17, PRO-18, PRO-37, PRO-231, PRO-343, PRO-409, PRO-523
+Linear IDs: CAR-300, PRO-7, PRO-17, PRO-37, PRO-231, PRO-253, PRO-343, PRO-409, PRO-523
 
 - `e22404c5` 2026-08-16 fix(web): route toggle thumb foreground through accent-contrast token
 - `64d819aa` 2026-07-27 web: delete dead-code component Header.jsx (518 lines, unused) (#586)
 - `7a106403` 2026-07-24 Merge pull request #567 from carloshrdezc/dev-master [merge]
 - `3e57bd73` 2026-07-15 feat(web): add modal semantics and focus trap to navigation drawer (PRO-523) (#521)
 - `c6f71e17` 2026-07-09 feat(a11y): migrate ShotChart full-display overlay to Dialog primitive (PRO-17) (#446)
-- `5c0393d3` 2026-07-05 fix(web): make ApiService reconnect idempotent + explicit state machine (PRO-18) (#414)
 - `8d120810` 2026-07-03 refactor(web): quiet aria-live on per-second connection-banner countdown (PRO-409) (#401)
 - `ad11df32` 2026-07-03 feat(web): connection-lost banner with reconnect countdown + Reconnect now (PRO-7) (#400)
 - `a45a1e28` 2026-06-30 style: tree-wide clang-format reflow to keep future fix diffs tight (PRO-343) (#331)
 - `8333285d` 2026-06-26 test(web): add @testing-library/preact Navigation smoke test (PRO-231) (#263)
 - `aff2609f` 2026-06-24 chore(web): prune unused DaisyUI theme definitions (PRO-37) (#237)
+- `2aaad864` 2026-06-23 fix(web): swap page content on nav between lazy routes (PRO-253) (#230)
 - `e6977f2e` 2026-06-05 Brew target editor: stop accent pass painting + steppers / SAVE AS / Return-to-brew red
 - `5c91ba43` 2026-06-05 Brew editor: strip theme button styles to kill red press highlight
 - `14d8ed9d` 2026-06-05 Brew Settings editor: kill red press highlight + align temp/time rows
@@ -1273,6 +1267,7 @@ Linear IDs: CAR-300, PRO-7, PRO-17, PRO-18, PRO-37, PRO-231, PRO-343, PRO-409, P
 - `66dbb77d` 2026-05-10 Merge pull request #46 from carloshrdezc/fix/gh-pages-base-routing [merge]
 - `d341ecd7` 2026-05-10 fix(web): properly handle base path for GitHub Pages routing
 - `61b4301e` 2026-05-09 feat: unified page shell, new themes, graph bg fix, remove footer
+- `d90a77ae` 2026-05-05 feat: add green ready ring color variables for steam and water
 - `30f059a2` 2026-04-29 fix: make HEATING title flash white on dark background
 - `1a39bbc3` 2026-04-29 feat: make shortcut link text white for better readability
 - `46c0496f` 2026-04-29 feat: make segmented button text white for better readability
@@ -1302,9 +1297,9 @@ Linear IDs: CAR-300, PRO-7, PRO-17, PRO-18, PRO-37, PRO-231, PRO-343, PRO-409, P
 - `dd12142b` 2026-04-15 feat: add Stealth and Crisp bold/minimal themes
 - `549969bd` 2026-04-03 Fix display theme contrast handling
 
-## F24-settings-backup (47)
+## F24-settings-backup (50)
 
-Linear IDs: CAR-222, CAR-278, CAR-279, CAR-380, CAR-381, CAR-383, PRO-19, PRO-24, PRO-311, PRO-330, PRO-331, PRO-333, PRO-348, PRO-365, PRO-486, PRO-488, PRO-491, PRO-575, PRO-577, PRO-582, PRO-583
+Linear IDs: CAR-222, CAR-278, CAR-279, CAR-380, CAR-381, CAR-383, PRO-19, PRO-24, PRO-252, PRO-311, PRO-330, PRO-331, PRO-333, PRO-348, PRO-365, PRO-485, PRO-486, PRO-488, PRO-491, PRO-575, PRO-577, PRO-582, PRO-583
 
 - `93e69b51` 2026-07-25 test(web): strengthen weak assertions in Settings.testUtils.test.jsx (PRO-583) (#575)
 - `afccc6bc` 2026-07-25 test(web): add direct unit test for Settings.testUtils.jsx fixture factories (PRO-582) (#571)
@@ -1320,6 +1315,7 @@ Linear IDs: CAR-222, CAR-278, CAR-279, CAR-380, CAR-381, CAR-383, PRO-19, PRO-24
 - `2fa0c757` 2026-07-11 chore(firmware): add braces to vectorMutex guard in Settings::load() (PRO-491) (#493)
 - `bc4e5952` 2026-07-11 chore(firmware): add double-init guard to Settings::load() vectorMutex init (PRO-488) (#490)
 - `2738b87f` 2026-07-10 refactor(firmware): eliminate ensureVectorMutex lazy-init race in Settings (PRO-486) (#487)
+- `60481366` 2026-07-10 chore(firmware): normalize setHomeAssistantTopic call-site line wrap (PRO-485) (#486)
 - `20794eda` 2026-07-09 refactor(firmware): introduce EventIds.h central event-ID registry (PRO-24) (#444)
 - `3c39e340` 2026-07-01 fix(firmware): auto-recover STA WiFi after HomeKit AUTH_EXPIRE drop (PRO-365) (#355)
 - `894e2484` 2026-06-30 refactor(display): guard MQTTPlugin against multi-fire connect + defer blocking retry off WiFi task (PRO-348) (#340)
@@ -1328,6 +1324,7 @@ Linear IDs: CAR-222, CAR-278, CAR-279, CAR-380, CAR-381, CAR-383, PRO-19, PRO-24
 - `866aaaa3` 2026-06-29 fix(display): enforce WiFi modem-sleep before BLE init so coexistence can enable (PRO-330) (#319)
 - `fd25daf5` 2026-06-29 docs(spike): assess removing deprecated HA-over-MQTT integration (PRO-311) (#308)
 - `29095ac3` 2026-06-24 fix(mqtt): guard MQTT topic snprintf truncation + bound haTopic (PRO-19) (#243)
+- `eec9cfea` 2026-06-23 fix(PRO-252): restore auto-wakeup schedule (and PID) on settings import (#229)
 - `17abab78` 2026-06-16 Merge pull request #190 from carloshrdezc/car-383-gate-webui-flag [merge]
 - `5553e27e` 2026-06-16 Merge pull request #186 from carloshrdezc/car-381-gate-mqtt-flag [merge]
 - `95e3de58` 2026-06-16 feat(display): gate MQTT/HomeAssistant behind GAGGIMATE_ENABLE_MQTT flag
@@ -1345,6 +1342,7 @@ Linear IDs: CAR-222, CAR-278, CAR-279, CAR-380, CAR-381, CAR-383, PRO-19, PRO-24
 - `2aeed0cc` 2026-05-02 fix: explicitly submit homekit toggle in form POST
 - `24962c5a` 2026-04-19 fix: improve download error handling and restore semantic label
 - `1c7bf017` 2026-04-16 Merge pull request #6 from carloshrdezc/feat/cloud-backup [merge]
+- `2cf2e37a` 2026-04-16 fix: address all PR review issues - error propagation, validation, tests
 - `a5976eb4` 2026-04-15 fix: correct off-by-one migration lookup and add null guard
 - `804524b3` 2026-04-15 feat: add backup version migration system for future format changes
 - `6261ec0a` 2026-04-15 test: fix listBackups OAuth mocking and add uploadBackup tests
@@ -1354,9 +1352,9 @@ Linear IDs: CAR-222, CAR-278, CAR-279, CAR-380, CAR-381, CAR-383, PRO-19, PRO-24
 - `5e23ffc6` 2026-04-01 Merge branch 'codex/homekit-ui-tweaks' into master [merge]
 - `b47c093f` 2026-04-01 Refine HomeKit integration and display UI
 
-## F25-ci-quality (67)
+## F25-ci-quality (72)
 
-Linear IDs: CAR-42, CAR-43, CAR-107, CAR-110, CAR-158, CAR-254, CAR-256, CAR-339, CAR-341, CAR-384, CAR-385, PRO-8, PRO-40, PRO-45, PRO-227, PRO-228, PRO-229, PRO-316, PRO-331, PRO-332, PRO-338, PRO-339, PRO-379, PRO-388, PRO-443, PRO-444, PRO-591, PRO-593, PRO-605, PRO-610, PRO-644
+Linear IDs: CAR-42, CAR-43, CAR-107, CAR-110, CAR-158, CAR-254, CAR-256, CAR-339, CAR-341, CAR-384, CAR-385, PRO-8, PRO-40, PRO-45, PRO-227, PRO-228, PRO-229, PRO-246, PRO-247, PRO-250, PRO-316, PRO-331, PRO-332, PRO-338, PRO-339, PRO-379, PRO-388, PRO-443, PRO-444, PRO-591, PRO-593, PRO-605, PRO-610, PRO-644
 
 - `ef4e1db5` 2026-08-16 chore(release): merge origin/master into dev-master to unblock promotion PR #648 [merge]
 - `4f074a28` 2026-08-08 chore(release): promote dev-master to master (#638)
@@ -1387,6 +1385,10 @@ Linear IDs: CAR-42, CAR-43, CAR-107, CAR-110, CAR-158, CAR-254, CAR-256, CAR-339
 - `cd570455` 2026-06-28 ci: gate display-headless-4m firmware build on PRs (PRO-316) (#298)
 - `041aa4e3` 2026-06-23 ci: bump actions/checkout to v4 for Node 24 (PRO-40) (#234)
 - `2a547626` 2026-06-23 ci: bump actions/checkout to v4 for Node 24 (PRO-40) (#233)
+- `b255cd0b` 2026-06-23 chore(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (master backport) (#228)
+- `05c01878` 2026-06-23 ci(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (#227)
+- `9a836031` 2026-06-23 chore(PRO-247): sync master into dev-master (#223)
+- `ce9774dc` 2026-06-22 PRO-246: sync non-WebUI dev-master work into master (concurrency fixes + feature flags + build/CI + README) (#222)
 - `01a6d244` 2026-06-21 fix(PRO-45): harden remaining shell scripts (make_pcb_preview, flash.sh) (#214)
 - `93662f1c` 2026-06-21 fix(PRO-229): run web logic tests under vitest and gate them in CI (#213)
 - `45a958dc` 2026-06-21 fix(PRO-228): make format.sh ui/drivers exclusion actually take effect (#211)
@@ -1412,23 +1414,24 @@ Linear IDs: CAR-42, CAR-43, CAR-107, CAR-110, CAR-158, CAR-254, CAR-256, CAR-339
 - `608b553b` 2026-05-19 Merge pull request #78 from carloshrdezc/carloshrdezc/car-158-agents-md-linear-workflow [merge]
 - `adee3e3a` 2026-05-19 docs(agents): document Linear workflow and dev-master PR base in repo AGENTS.md
 - `d4387abd` 2026-05-18 Merge pull request #73 from carloshrdezc/carloshrdezc/car-43-fix-nightly-build-failing-on-fork-due-to-missing-upload [merge]
+- `6c24a5d1` 2026-05-18 fix(ci): allow nightly build to continue when upload server secrets are missing
 - `11f3d9dd` 2026-05-18 Merge pull request #72 from carloshrdezc/carloshrdezc/car-42-fix-nightly-release-name-to-include-version-from-git [merge]
 - `6a20370f` 2026-05-18 docs: merge local CLAUDE.md with Linear tracking workflow
 - `bb55aa88` 2026-05-18 docs: add CLAUDE.md with Linear issue tracking workflow
 - `60e704d9` 2026-05-11 fix: three follow-up bugs after PR #42 device testing fixes
+- `0ad43dbf` 2026-05-10 Merge pull request #43 from carloshrdezc/fix/flash-script-improvements [merge]
 - `7aefa9d7` 2026-05-10 fix: flash script improvements
 - `ab0ead2f` 2026-05-10 Merge pull request #42 from carloshrdezc/fix/device-testing-bugs [merge]
 - `86e695fd` 2026-05-09 feat: deploy web UI to GitHub Pages via Actions
 - `4c976d58` 2026-05-09 fix: use npm install instead of npm ci
 - `3fff1af4` 2026-05-03 fix: tolerate missing nightly tag in workflows
 - `b016b08f` 2026-04-19 chore: add flash script
-- `2cf2e37a` 2026-04-16 fix: address all PR review issues - error propagation, validation, tests
 - `072f9a90` 2026-04-15 test: add unit tests for GoogleDriveProvider interface
 - `b2e3834b` 2026-04-15 chore: add .worktrees to gitignore
 
-## F26-docs-agents (26)
+## F26-docs-agents (27)
 
-Linear IDs: CAR-100, CAR-102, CAR-103, CAR-340, PRO-12, PRO-43, PRO-269, PRO-289, PRO-320, PRO-506, PRO-514, PRO-515, PRO-516, PRO-525, PRO-590
+Linear IDs: CAR-100, CAR-102, CAR-103, CAR-340, PRO-12, PRO-43, PRO-259, PRO-269, PRO-289, PRO-320, PRO-506, PRO-514, PRO-515, PRO-516, PRO-525, PRO-590
 
 - `06da74bd` 2026-07-27 docs: collapse AGENTS.md/CLAUDE.md duplication to one canonical source (#587)
 - `abbb3994` 2026-07-27 docs: repository audit and maintenance findings (PRO-590) (#582)
@@ -1441,6 +1444,7 @@ Linear IDs: CAR-100, CAR-102, CAR-103, CAR-340, PRO-12, PRO-43, PRO-269, PRO-289
 - `515b3f05` 2026-06-28 docs(display): cross-reference no-lock-order-inversion in SemaphoreGuard bounded-wait invariant (PRO-320) (#302)
 - `e0024752` 2026-06-26 docs(PRO-289): NimBLE 1.x->2.x migration de-risk spike (#269)
 - `299e6963` 2026-06-24 docs: update stale Linear team key CAR -> PRO in AGENTS.md, keep historical citations (PRO-269) (#248)
+- `74932051` 2026-06-24 docs: correct stale uploadfs "Upload the Web UI" step post embed-WebUI migration (PRO-259) (#239)
 - `54a20644` 2026-06-23 docs: fix CONTRIBUTING/AGENTS build-path typos and dedupe npm steps (PRO-43) (#236)
 - `81400268` 2026-06-22 docs(readme): refresh Features, build targets, and screenshots (#76)
 - `bfd09f4e` 2026-06-08 Merge pull request #163 from carloshrdezc/car-340-cpp20-standard-bump [merge]
@@ -1490,14 +1494,16 @@ Linear IDs: CAR-101, PRO-261, PRO-378, PRO-380
 - `389a13fb` 2026-04-04 fix: add missing isActiveSafe() declaration in Controller.h
 - `a83fda2f` 2026-04-04 Fix race condition in Controller::updateControl() by inlining temperature lookup
 
-## F99-misc (7)
+## F99-misc (9)
 
-Linear IDs: CAR-401, PRO-485
+Linear IDs: CAR-401, PRO-635
 
 - `808b0930` 2026-08-08 Merge remote-tracking branch 'origin/master' into HEAD [merge]
-- `60481366` 2026-07-10 chore(firmware): normalize setHomeAssistantTopic call-site line wrap (PRO-485) (#486)
+- `fe407e9b` 2026-08-07 Merge pull request #629 from carloshrdezc/carlos/pro-635-merge-master-ancestry [merge]
 - `eaa3a581` 2026-07-07 Merge remote-tracking branch 'origin/master' into HEAD [merge]
 - `4e4d13c9` 2026-07-02 Merge remote-tracking branch 'origin/master' into resolve-master-reconcile [merge]
+- `11f908eb` 2026-07-01 Merge remote-tracking branch 'origin/master' into reconcile-master-history-2 [merge]
 - `e95583c7` 2026-06-28 Merge pull request #301 from carloshrdezc/carlos/CAR-401-merge-master-tags-forward [merge]
 - `e2c17e4b` 2026-06-28 Merge remote-tracking branch 'origin/master' into carlos/CAR-401-merge-master-tags-forward [merge]
-- `0ad43dbf` 2026-05-10 Merge pull request #43 from carloshrdezc/fix/flash-script-improvements [merge]
+- `1eb12536` 2026-04-15 Merge branch 'master' of https://github.com/carloshrdezc/gaggimate [merge]
+- `43779895` 2026-04-12 Merge branch 'master' into ui-web [merge]

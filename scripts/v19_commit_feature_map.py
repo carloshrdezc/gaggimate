@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Map every Carlos-only commit (v1.9.0..origin/dev-master) to a feature (PRO-652).
 
-Deterministic, rule-based clustering on commit subject (PR number, PRO/CAR IDs,
-conventional-commit scope, keywords) and touched paths. First matching rule wins;
-subject rules are tried before path rules. Every commit gets exactly one feature
-(fallback `F99-misc`), so coverage == commit count by construction; the script
-asserts that and prints it.
+Deterministic clustering: audited OVERRIDES (sha -> feature) first, then content-free
+sync merges -> F99, then RULES on subject (PR number, PRO/CAR IDs, scope, keywords) and
+touched paths; first match wins. Asserts: enumeration == rev-list count, every SEEDS entry
+lands in its expected feature, and F99 holds only sync merges. Enumeration is NOT proof of
+classification accuracy; see the matrix doc's QA re-audit.
 
 Outputs (beside the matrix doc):
   docs/upstream-v1.9-preservation-matrix.csv       one row per commit
@@ -28,7 +28,8 @@ RULES = [
      r"espressif32|platform.bump|roll dev-master back|pioarduino|idf ?5|pro-29[01]|pro-27\d\b", None),
     # Memory seed items mention OTA/BLE in their subjects; claim them first (PRO-566..568).
     ("F10-memory-psram", r"psram|mbedtls|internal.dram|heap.?diag|pro-56[678]\b", None),
-    ("F03-nanopb-spike", r"nanopb|pro-2(4[5-9]|5\d)\b", r"^(lib/NanoPbSpike|docs/spike-nanopb)"),
+    # PRO-245..259 is NOT a spike range (review #686 F1): only nanopb subjects/paths land here.
+    ("F03-nanopb-spike", r"nanopb", r"^(lib/NanoPbSpike|docs/spike-nanopb)"),
     ("F05-ble-scale", r"scale|blescale|pro-459|pro-647", r"BLEScale"),
     ("F04-ble-comms", r"nimblecomm|\bble\b.*(controller|bond|encrypt|write_enc|pair|reconnect|mtu)|"
      r"write_enc|bond|controller (link|connection)|\(ble\)", r"^(lib/NimBLEComm|lib/GaggiMateController/src/.*Comm|docs/ble-pairing)"),
@@ -42,8 +43,11 @@ RULES = [
     ("F10-memory-psram", r"psram|heap|dram|mbedtls|memory|oom|heapdiag|pro-566|leak",
      r"(GmHeapDiag|MbedtlsPsram|PsramAllocator|pro-566)"),
     ("F11-diag-log", r"diag|log tee|udp log|esp_log|logging|\blog\b", r"(DiagnosticLog|EspLogTee|DiagLog)"),
-    ("F12-embed-webui-fs", r"embed|partition|littlefs|spiffs|filesystem|\(fs\)|webassets|build_webui",
-     r"(embed_webui|build_spiffs|partitions|webassets|scripts/build_webui)"),
+    # F12a = upstream-equivalent embed pipeline (superseded by 3bc04041);
+    # F12b = Carlos-only FS migration / user-data preservation / CI+sim parity (port, PRO-659).
+    ("F12b-fs-migration-preserve", r"littlefs|spiffs|filesystem|\(fs\)|\(migration\)|docs\(migration|partition|"
+     r"pro-21[2568]\b", r"(build_spiffs|partitions)"),
+    ("F12a-embed-webui", r"embed|webassets|build_webui", r"(embed_webui|webassets|scripts/build_webui)"),
     ("F13-simulator", r"\bsim\b|simulator|display-sim|\(sim\)|windows sim|pro-207", r"^sim/"),
     ("F14-hardware", r"max31855|thermocouple|boiler.?fill|pump|adc|pressure sensor|board def|dimmer|"
      r"\bpsm\b|lilygo|amoled|waveshare|\bpid\b|autotune|heater|\bled\b",
@@ -79,6 +83,40 @@ RULES = [
     ("F28-firmware-misc", None, r"^(src/|lib/|platformio\.ini)"),
 ]
 FALLBACK = "F99-misc"
+# Hand-audited overrides (review #686). sha prefix -> feature. Applied before rules.
+OVERRIDES = {
+    # ex-F03 (PRO-245..259 regex spill)
+    "ef60874d": "F05-ble-scale", "2782b14c": "F05-ble-scale",          # PRO-248 steam scale/drip recording
+    "05c01878": "F25-ci-quality", "b255cd0b": "F25-ci-quality",        # PRO-250 gh-pages CI
+    "eec9cfea": "F24-settings-backup",                                 # PRO-252 settings import auto-wakeup
+    "2aaad864": "F23-web-theme-shell",                                 # PRO-253 lazy-route nav
+    "95a3a82b": "F14-hardware",                                        # PRO-258 LED re-sync on reconnect
+    "74932051": "F26-docs-agents",                                     # PRO-259 uploadfs docs
+    "39e73683": "F01-deps", "4a731499": "F01-deps",                    # PRO-254/256 dep bumps
+    "9a836031": "F25-ci-quality", "ce9774dc": "F25-ci-quality",        # PRO-246/247 dev-master<->master sync squashes
+    # review sample misclusters
+    "e73a01e8": "F19-beans", "883e4bdf": "F19-beans",
+    "d90a77ae": "F23-web-theme-shell", "0ad43dbf": "F25-ci-quality",
+    "60481366": "F24-settings-backup",                                 # PRO-485 HA topic call-site (MQTT)
+    # re-audit seed 652 (40 rows) errors
+    "5c0393d3": "F09-webui-plugin-core", "010a5aa1": "F12a-embed-webui", "21d86108": "F15-eez-lvgl-ui",
+    # re-audit seed 6520 (40 rows) errors
+    "6c24a5d1": "F25-ci-quality", "2cf2e37a": "F24-settings-backup",
+    # F12 split: the three CI/sim embed-parity commits are Carlos-only (port)
+    "b074a6b5": "F12b-fs-migration-preserve", "b30bc7b7": "F12b-fs-migration-preserve",
+    "59a2ae57": "F12b-fs-migration-preserve", "01843ca2": "F12b-fs-migration-preserve",
+    "2fb5e5da": "F12b-fs-migration-preserve",
+}
+# Seeds that MUST land where stated, or the script fails (guards against rule regressions).
+SEEDS = dict(OVERRIDES, **{
+    "72da9327": "F03-nanopb-spike", "33751012": "F03-nanopb-spike", "5a91167c": "F03-nanopb-spike",
+    "394e7e4d": "F12b-fs-migration-preserve", "3ebd1c34": "F12b-fs-migration-preserve",
+    "b79fa358": "F12b-fs-migration-preserve", "be68e230": "F12b-fs-migration-preserve",
+    "ea232239": "F02-platform-stack", "96e7fdf6": "F10-memory-psram", "f2a8764c": "F10-memory-psram",
+})
+# F99 may hold only content-free sync merges: merge commits whose subject is a plain branch sync.
+SYNC_MERGE_RE = re.compile(r"^Merge (remote-tracking )?branch '(origin/)?(master|dev-master)'|"
+                           r"^Merge pull request #\d+ from \S+/\S*merge-master", re.I)
 COMPILED = [(f, re.compile(s, re.I) if s else None, re.compile(p) if p else None) for f, s, p in RULES]
 PR_RE = re.compile(r"\(#(\d+)\)")
 ID_RE = re.compile(r"\b((?:PRO|CAR|GM)-\d+)\b", re.I)
@@ -107,6 +145,10 @@ def load_commits(base, tip):
 
 def classify(c):
     subj = c["subject"]
+    if c["sha"][:8] in OVERRIDES:
+        return OVERRIDES[c["sha"][:8]], "override"
+    if c["merge"] and SYNC_MERGE_RE.search(subj):
+        return FALLBACK, "sync-merge"
     for f, s, _ in COMPILED:
         if s and s.search(subj):
             return f, "subject"
@@ -137,6 +179,14 @@ def main():
             groups[f].append((c, prs, ids))
     total = sum(len(v) for v in groups.values())
     assert total == len(commits) == expected, (total, len(commits), expected)
+    placed = {c["sha"][:8]: f for f, rows in groups.items() for c, _, _ in rows}
+    missing = sorted(set(OVERRIDES) - set(placed))
+    assert not missing, f"override shas not in range: {missing}"
+    bad = {s: (placed.get(s), f) for s, f in SEEDS.items() if placed.get(s) != f}
+    assert not bad, f"seed misclassified (got, want): {bad}"
+    junk = [c["sha"][:8] for c, _, _ in groups[FALLBACK] if not (c["merge"] and SYNC_MERGE_RE.search(c["subject"]))]
+    assert not junk, f"content-bearing commits in {FALLBACK}: {junk}"
+    print(f"asserts ok: {len(SEEDS)} seeds, {len(OVERRIDES)} overrides, F99 sync-only")
     tip = git("rev-parse", "--short=10", a.tip).strip()
     with open(a.out + ".appendix.md", "w") as fh:
         fh.write(f"# Appendix: commit -> feature map ({a.base}..{a.tip} @ {tip})\n\n")

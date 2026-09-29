@@ -44,17 +44,17 @@ aa4cf5c36d,2026-08-10,0,F01-deps,subject,#645,,build(deps): bump @fortawesome/fo
 0836b8b905,2026-08-09,0,F01-deps,subject,#640,,build(deps): bump ws from 8.21.1 to 8.21.2 in /relay-server (#640)
 2d4996a8a5,2026-08-08,0,F22-dashboard-home,subject,#639,PRO-643,feat(web): custom Web UI and Dashboard accents (PRO-643) (#639)
 4f074a287a,2026-08-08,0,F25-ci-quality,subject,#638,,chore(release): promote dev-master to master (#638)
-808b093018,2026-08-08,1,F99-misc,fallback,,,Merge remote-tracking branch 'origin/master' into HEAD
+808b093018,2026-08-08,1,F99-misc,sync-merge,,,Merge remote-tracking branch 'origin/master' into HEAD
 99fbe5804c,2026-08-08,0,F25-ci-quality,subject,#637,PRO-644,chore(scripts): generate dev-master->master promotion PR bodies (PRO-644) (#637)
 9619d0c4b3,2026-08-08,0,F17-standby-steam-flush,subject,#636,,fix(web): quiet standby readiness narration + 2-col mobile recipe grid (#636)
 4924f56298,2026-08-07,0,F22-dashboard-home,subject,#635,,fix(web): point dashboard GitHub link to Carlos's fork (#635)
 d9aa40a873,2026-08-07,0,F25-ci-quality,subject,#634,,Update dependencies and improve CI checks for firmware (#634)
 43a25d8d05,2026-08-07,0,F19-beans,subject,,,"fix(web): key Beanconqueror browser-shot brew UUIDs by storageKey, not id"
-e73a01e814,2026-08-07,0,F22-dashboard-home,subject,#633,PRO-637,test(web): make huge-quantity bag-total test observe the addition (PRO-637) (#633)
+e73a01e814,2026-08-07,0,F19-beans,override,#633,PRO-637,test(web): make huge-quantity bag-total test observe the addition (PRO-637) (#633)
 e0bdb69fb8,2026-08-07,0,F22-dashboard-home,subject,#632,PRO-636,fix(web): guard collectNonFiniteNumbers against cyclic input (PRO-636) (#632)
 d4953b3bc2,2026-08-07,0,F19-beans,subject,#631,PRO-632,fix(web): correct Beanconqueror bean inventory export (PRO-632) (#631)
 509dd92f36,2026-08-07,0,F19-beans,subject,#630,PRO-632,feat(web): export beans and shots as a Beanconqueror backup (PRO-632) (#630)
-fe407e9b6c,2026-08-07,1,F22-dashboard-home,subject,,PRO-635,Merge pull request #629 from carloshrdezc/carlos/pro-635-merge-master-ancestry
+fe407e9b6c,2026-08-07,1,F99-misc,sync-merge,,PRO-635,Merge pull request #629 from carloshrdezc/carlos/pro-635-merge-master-ancestry
 97afe90228,2026-08-07,1,F22-dashboard-home,subject,,PRO-635,chore(release): merge master (2.0.17) into dev-master for tag ancestry (PRO-635)
 794d1adac5,2026-08-07,0,F18-brew-targets,subject,#628,PRO-631,feat(web): show brew start target temperature in Shot Notes (PRO-631) (#628)
 980f18a24f,2026-08-07,0,F21-profiles,subject,#627,PRO-630,feat(web): DashboardMerged selected-profile temperature control (PRO-630) (#627)
@@ -196,7 +196,7 @@ bc4e59528f,2026-07-11,0,F24-settings-backup,subject,#490,PRO-488,chore(firmware)
 e72dbe8033,2026-07-11,0,F20-shot-history-analyzer,subject,#489,PRO-32,feat(web): add CSV export to Shot History page (PRO-32) (#489)
 ee3670291f,2026-07-10,0,F21-profiles,subject,#488,,chore(firmware): gate removeFavoritedProfile save() on actual erase (#488)
 2738b87ff3,2026-07-10,0,F24-settings-backup,subject,#487,PRO-486,refactor(firmware): eliminate ensureVectorMutex lazy-init race in Settings (PRO-486) (#487)
-604813663c,2026-07-10,0,F99-misc,fallback,#486,PRO-485,chore(firmware): normalize setHomeAssistantTopic call-site line wrap (PRO-485) (#486)
+604813663c,2026-07-10,0,F24-settings-backup,override,#486,PRO-485,chore(firmware): normalize setHomeAssistantTopic call-site line wrap (PRO-485) (#486)
 0c99f82704,2026-07-10,0,F21-profiles,subject,#485,,refactor(firmware): guard favoritedProfiles/profileOrder vector setters and migrateProfileIds under Settings mutex (#485)
 789644a35c,2026-07-10,0,F25-ci-quality,subject,#484,,chore(test/web): rename dedup-at-capacity test to cap-guard-at-capacity (#484)
 ab6e5001d5,2026-07-10,0,F20-shot-history-analyzer,subject,#483,,chore(docs): use full repo-relative path for HistoryCard.jsx in AGENTS.md (#483)
@@ -243,7 +243,7 @@ c6f71e17e5,2026-07-09,0,F23-web-theme-shell,subject,#446,PRO-17,feat(a11y): migr
 91b3ffc864,2026-07-09,0,F06-ota,subject,#442,PRO-13,fix(firmware): async-resolve OTA forced-tag/channel-switch off the main loop (PRO-13) (#442)
 18a158f0b5,2026-07-08,0,F06-ota,subject,#441,PRO-11,PRO-11: extract WebUIPlugin OTA-intent state machine into host-testable header (#441)
 caa58cc4f2,2026-07-07,1,F09-webui-plugin-core,path,,,Merge pull request #440 from carloshrdezc/dev-master
-eaa3a5814d,2026-07-07,1,F99-misc,fallback,,,Merge remote-tracking branch 'origin/master' into HEAD
+eaa3a5814d,2026-07-07,1,F99-misc,sync-merge,,,Merge remote-tracking branch 'origin/master' into HEAD
 92cd1ae2a9,2026-07-07,0,F26-docs-agents,subject,#439,,chore: add .mailmap to consolidate author identities (#439)
 36c78b4950,2026-07-07,0,F18-brew-targets,subject,#438,PRO-440,feat(firmware): global cumulative-weight cutoff for shots (PRO-440) (#438)
 5b81e1951c,2026-07-07,0,F25-ci-quality,subject,#437,PRO-444,chore(ci): drop display-headless-4m 4MB build target (PRO-444) (#437)
@@ -269,7 +269,7 @@ fb648a302d,2026-07-06,0,F19-beans,subject,#419,PRO-422,fix(firmware): record sel
 f8b347eb2b,2026-07-06,0,F25-ci-quality,subject,#417,,ci: bump actions/deploy-pages v4 -> v5 (#417)
 ecd53beb84,2026-07-05,0,F05-ble-scale,subject,#416,PRO-4,fix(firmware): fall back volumetric source to flow-estimation when BLE scale dies mid-shot (PRO-4) (#416)
 7ce001a1ce,2026-07-05,0,F09-webui-plugin-core,subject,#415,PRO-16,test(web): pin audited WebSocket event-handling contract (PRO-16) (#415)
-5c0393d3ec,2026-07-05,0,F23-web-theme-shell,subject,#414,PRO-18,fix(web): make ApiService reconnect idempotent + explicit state machine (PRO-18) (#414)
+5c0393d3ec,2026-07-05,0,F09-webui-plugin-core,override,#414,PRO-18,fix(web): make ApiService reconnect idempotent + explicit state machine (PRO-18) (#414)
 adb795b9d5,2026-07-05,0,F26-docs-agents,subject,#413,PRO-12,refactor(firmware): board-specific display driver build filters (PRO-12) (#413)
 ad25c2c59e,2026-07-05,1,F05-ble-scale,path,,,Merge pull request #387 from carloshrdezc/dev-master
 545c785e10,2026-07-03,0,F09-webui-plugin-core,subject,#412,PRO-418,refactor(firmware): pair release/acquire on WebUIPlugin WiFi-lifecycle atomics (PRO-418) (#412)
@@ -297,7 +297,7 @@ a13ef96649,2026-07-02,0,F06-ota,subject,#391,PRO-400,feat(firmware): OTA channel
 acc2edd482,2026-07-02,0,F06-ota,subject,#390,PRO-398,"refactor(web): extract shared ImportButton, migrate ProfileList/Settings/Beans (PRO-398) (#390)"
 ce7c45069f,2026-07-02,0,F06-ota,subject,#389,PRO-399,fix(web): match Temperature input id to its label htmlFor (PRO-399) (#389)
 e352b38451,2026-07-02,0,F06-ota,subject,#388,PRO-395,fix(web): wire Import Profiles button to file input (PRO-395) (#388)
-4e4d13c99e,2026-07-02,1,F99-misc,fallback,,,Merge remote-tracking branch 'origin/master' into resolve-master-reconcile
+4e4d13c99e,2026-07-02,1,F99-misc,sync-merge,,,Merge remote-tracking branch 'origin/master' into resolve-master-reconcile
 a7c5d1b5d4,2026-07-02,0,F09-webui-plugin-core,subject,#386,PRO-393,docs(api): clarify audit-point vs per-message since-version wording (PRO-393) (#386)
 ce7a0ad202,2026-07-02,0,F09-webui-plugin-core,subject,#385,PRO-392,docs(api): point WebSocket spec preview link at dev-master (PRO-392) (#385)
 69285b89f9,2026-07-02,0,F17-standby-steam-flush,subject,#384,PRO-391,fix(controller): rising-edge steam button so explicit Standby wins over latched-high switch (PRO-391) (#384)
@@ -325,7 +325,7 @@ efbf01c60e,2026-07-01,0,F18-brew-targets,subject,#363,PRO-381,refactor(controlle
 7df4ccb334,2026-07-01,0,F18-brew-targets,subject,#362,PRO-369,refactor(controller): reset volumetricCoalescer in clear() for cross-shot defense-in-depth (PRO-369) (#362)
 85a7b6114b,2026-07-01,0,F25-ci-quality,subject,#359,,Release: promote dev-master to master (202 commits) (#359)
 43cc3bf4ed,2026-07-01,1,F20-shot-history-analyzer,subject,,,Merge pull request #361 from carloshrdezc/reconcile-master-history-2
-11f908eb92,2026-07-01,1,F20-shot-history-analyzer,subject,,,Merge remote-tracking branch 'origin/master' into reconcile-master-history-2
+11f908eb92,2026-07-01,1,F99-misc,sync-merge,,,Merge remote-tracking branch 'origin/master' into reconcile-master-history-2
 3196f7fc59,2026-07-01,0,F25-ci-quality,subject,#305 #360,,ci(nightly): exclude beta/nightly moving tags from version describe (#305) (#360)
 b96d67a840,2026-07-01,0,F05-ble-scale,subject,#358,PRO-5,fix(firmware): reconnect BLE scale after display sleep (PRO-5) (#358)
 86ed749cfa,2026-07-01,0,F11-diag-log,subject,#357,PRO-367,fix(firmware): stop losing volumetric yield stop under diag-log contention (PRO-367) (#357)
@@ -372,7 +372,7 @@ c173afc603,2026-06-29,0,F24-settings-backup,subject,#322,PRO-333,fix(display): m
 5453c75985,2026-06-29,0,F02-platform-stack,subject,#317,PRO-328,docs: reconcile xtensa gcc version to 14.2.0 for pioarduino 55.03.39 (PRO-328) (#317)
 e6d9e7711b,2026-06-29,0,F02-platform-stack,subject,#316,PRO-327,docs: mark superseded BLOCKED/NO-GO status headlines in C++20 spike docs (PRO-327) (#316)
 e6ca71c615,2026-06-29,0,F02-platform-stack,subject,#315,PRO-294,build(firmware): enable C++20 (-std=gnu++20) across firmware + native envs (PRO-294) (#315)
-4a1dee7f3c,2026-06-29,0,F12-embed-webui-fs,subject,#314,PRO-326,docs(firmware): correct no_ota.csv partition provenance for esp32-s3-supermini (PRO-326) (#314)
+4a1dee7f3c,2026-06-29,0,F12b-fs-migration-preserve,subject,#314,PRO-326,docs(firmware): correct no_ota.csv partition provenance for esp32-s3-supermini (PRO-326) (#314)
 e9723b5bea,2026-06-29,0,F02-platform-stack,subject,#313,PRO-293,build(firmware): migrate to pioarduino platform-espressif32 (Arduino-esp32 3.x) (PRO-293) (#313)
 ef4e10b1bb,2026-06-29,0,F02-platform-stack,subject,#312,PRO-292,docs(firmware): re-validate remaining lib_deps + boards + LittleFS for Arduino-esp32 3.x (PRO-292) (#312)
 95164d7a73,2026-06-29,0,F22-dashboard-home,subject,#311,PRO-323,fix(web): collapse deprecated HA-over-MQTT settings card unless enabled (PRO-323) (#311)
@@ -380,13 +380,13 @@ ec62987644,2026-06-29,0,F07-webui-security,subject,#310,PRO-324,docs: clarify ha
 99295c5862,2026-06-29,0,F02-platform-stack,subject,#309,PRO-291,fix(display): resolve TFT_eSPI panel driver for Arduino-esp32 3.x (PRO-291) (#309)
 fd25daf563,2026-06-29,0,F24-settings-backup,subject,#308,PRO-311,docs(spike): assess removing deprecated HA-over-MQTT integration (PRO-311) (#308)
 c150d3d35e,2026-06-29,0,F02-platform-stack,subject,#307,PRO-290,feat(ble): migrate NimBLE-Arduino 1.4.3 -> 2.x (PRO-290) (#307)
-84d89fe722,2026-06-28,0,F12-embed-webui-fs,subject,#306,PRO-322,ci: attribute headless-4m no_ota partition source to repo board file (PRO-322) (#306)
-adafdab823,2026-06-28,0,F12-embed-webui-fs,subject,#303,PRO-319,ci: attribute headless-4m no_ota flash size to board partition table (PRO-319) (#303)
+84d89fe722,2026-06-28,0,F12b-fs-migration-preserve,subject,#306,PRO-322,ci: attribute headless-4m no_ota partition source to repo board file (PRO-322) (#306)
+adafdab823,2026-06-28,0,F12b-fs-migration-preserve,subject,#303,PRO-319,ci: attribute headless-4m no_ota flash size to board partition table (PRO-319) (#303)
 dcd0ebce2b,2026-06-28,0,F25-ci-quality,subject,#305,,ci(nightly): exclude beta/nightly moving tags from version describe (#305)
 b5e5d20e76,2026-06-28,0,F25-ci-quality,subject,#304,,ci(nightly): exclude beta/nightly moving tags from version describe (#304)
 515b3f05ef,2026-06-28,0,F26-docs-agents,subject,#302,PRO-320,docs(display): cross-reference no-lock-order-inversion in SemaphoreGuard bounded-wait invariant (PRO-320) (#302)
-e95583c712,2026-06-28,1,F99-misc,fallback,,CAR-401,Merge pull request #301 from carloshrdezc/carlos/CAR-401-merge-master-tags-forward
-e2c17e4b2e,2026-06-28,1,F99-misc,fallback,,CAR-401,Merge remote-tracking branch 'origin/master' into carlos/CAR-401-merge-master-tags-forward
+e95583c712,2026-06-28,1,F99-misc,sync-merge,,CAR-401,Merge pull request #301 from carloshrdezc/carlos/CAR-401-merge-master-tags-forward
+e2c17e4b2e,2026-06-28,1,F99-misc,sync-merge,,CAR-401,Merge remote-tracking branch 'origin/master' into carlos/CAR-401-merge-master-tags-forward
 d2cbc9dbf2,2026-06-28,0,F09-webui-plugin-core,path,#300,PRO-317,refactor(display): soften SemaphoreGuard invariant comment for bounded waits (PRO-317) (#300)
 06e7f0881f,2026-06-28,0,F22-dashboard-home,subject,#299,PRO-318,chore: sync master into dev-master (bring 2.0.14 tags forward) (PRO-318) (#299)
 cd570455f4,2026-06-28,0,F25-ci-quality,subject,#298,PRO-316,ci: gate display-headless-4m firmware build on PRs (PRO-316) (#298)
@@ -395,7 +395,7 @@ cd570455f4,2026-06-28,0,F25-ci-quality,subject,#298,PRO-316,ci: gate display-hea
 2e60dfebf4,2026-06-28,0,F02-platform-stack,subject,#295,PRO-312,docs(spike-nimble-2x): correct subscribe-site count 8 -> 7 in findings.md (PRO-312) (#295)
 566f053d88,2026-06-28,0,F09-webui-plugin-core,subject,#294,PRO-313,fix(display): serialize AsyncWebSocket client-list access across tasks (PRO-313) (#294)
 1913ffb741,2026-06-28,0,F02-platform-stack,subject,#293,PRO-255,docs(spike): NimBLE-Arduino 1.4.3 -> 2.x migration findings (PRO-255) (#293)
-39e7368385,2026-06-28,0,F03-nanopb-spike,subject,#292,PRO-254,chore(deps): web minor/patch sweep + MQTT 2.5.3 (PRO-254) (#292)
+39e7368385,2026-06-28,0,F01-deps,override,#292,PRO-254,chore(deps): web minor/patch sweep + MQTT 2.5.3 (PRO-254) (#292)
 4bf98cf2f5,2026-06-28,0,F03-nanopb-spike,subject,#291,,docs(spike-nanopb-comms): cross-ref production proto + restore Option B breadcrumb (#291)
 5a91167c1d,2026-06-28,0,F03-nanopb-spike,subject,#290,PRO-309,test(ble): negative-path + discriminator-only-frame coverage for nanopb decode (PRO-309) (#290)
 253833e105,2026-06-27,0,F11-diag-log,subject,#289,PRO-310,chore(firmware): log pb_encode failure in make_system_info (PRO-310) (#289)
@@ -420,7 +420,7 @@ f482fca95b,2026-06-27,0,F22-dashboard-home,subject,#274,PRO-300,refactor(web): d
 989cf0930b,2026-06-26,0,F22-dashboard-home,subject,#270,PRO-285,test(web): make Navigation Dashboard href assertion BASE_URL-robust (PRO-285) (#270)
 e0024752fc,2026-06-26,0,F26-docs-agents,subject,#269,PRO-289,docs(PRO-289): NimBLE 1.x->2.x migration de-risk spike (#269)
 d7d1f940f0,2026-06-26,0,F02-platform-stack,subject,#268,PRO-257,docs(PRO-257): espressif32 7.x platform bump spike findings (C++20 enabler) (#268)
-4a731499cd,2026-06-26,0,F03-nanopb-spike,subject,#267,PRO-256,chore(web): bump @preact/signals ^1.3.1 -> ^2.9.2 (PRO-256) (#267)
+4a731499cd,2026-06-26,0,F01-deps,override,#267,PRO-256,chore(web): bump @preact/signals ^1.3.1 -> ^2.9.2 (PRO-256) (#267)
 04027204f8,2026-06-26,0,F09-webui-plugin-core,subject,#266,PRO-284,test(webui): complete non-STANDBY defer-on-settle row with MODE_BREW/MODE_WATER (PRO-284) (#266)
 2e5c834f43,2026-06-26,0,F09-webui-plugin-core,subject,#265,PRO-283,docs(webui): note pendingModeChangeTarget default 0 == MODE_STANDBY invariant (PRO-283) (#265)
 0378b7f825,2026-06-26,0,F06-ota,subject,#264,PRO-282,chore(native): document [env:native] lib_ignore = OTA host-safe allow-list (PRO-282) (#264)
@@ -446,9 +446,9 @@ ab274a57b4,2026-06-24,0,F02-platform-stack,subject,#249,PRO-270,docs: update sta
 3443121d3f,2026-06-24,0,F15-eez-lvgl-ui,subject,#244,PRO-38,chore(ui): remove seasonal Christmas standby logo asset (PRO-38) (#244)
 29095ac3cd,2026-06-24,0,F24-settings-backup,subject,#243,PRO-19,fix(mqtt): guard MQTT topic snprintf truncation + bound haTopic (PRO-19) (#243)
 071e03f89e,2026-06-24,0,F15-eez-lvgl-ui,subject,#242,PRO-36,fix(ui): guard ui_StandbyScreen_time accesses with lv_obj_is_valid in standby path (PRO-36) (#242)
-95a3a82b80,2026-06-24,0,F03-nanopb-spike,subject,#241,PRO-258,fix(led): re-sync LED state to controller after BLE reconnect (PRO-258) (#241)
+95a3a82b80,2026-06-24,0,F14-hardware,override,#241,PRO-258,fix(led): re-sync LED state to controller after BLE reconnect (PRO-258) (#241)
 dc768aa023,2026-06-24,0,F06-ota,subject,#240,PRO-20,fix(ota): strip semver build-metadata (+meta) before parsing version tags (PRO-20) (#240)
-74932051e7,2026-06-24,0,F03-nanopb-spike,subject,#239,PRO-259,"docs: correct stale uploadfs ""Upload the Web UI"" step post embed-WebUI migration (PRO-259) (#239)"
+74932051e7,2026-06-24,0,F26-docs-agents,override,#239,PRO-259,"docs: correct stale uploadfs ""Upload the Web UI"" step post embed-WebUI migration (PRO-259) (#239)"
 75c9d3ed6b,2026-06-24,0,F20-shot-history-analyzer,subject,#238,PRO-261,fix(firmware): gate web req:change-mode on post-shot settle window (PRO-261) (#238)
 aff2609f76,2026-06-24,0,F23-web-theme-shell,subject,#237,PRO-37,chore(web): prune unused DaisyUI theme definitions (PRO-37) (#237)
 54a206448e,2026-06-23,0,F26-docs-agents,subject,#236,PRO-43,docs: fix CONTRIBUTING/AGENTS build-path typos and dedupe npm steps (PRO-43) (#236)
@@ -457,14 +457,14 @@ f82c6ca406,2026-06-23,0,F15-eez-lvgl-ui,subject,#235,PRO-39,chore(ui): remove un
 2a54762670,2026-06-23,0,F25-ci-quality,subject,#233,PRO-40,ci: bump actions/checkout to v4 for Node 24 (PRO-40) (#233)
 1864c8775a,2026-06-23,0,F14-hardware,subject,#232,PRO-41 PRO-46,"fix(firmware): rollover-safe LED loop timing + init sentinel (PRO-41, PRO-46) (#232)"
 d578a62239,2026-06-23,0,F22-dashboard-home,subject,#231,PRO-224,chore(web): remove dead HomeModeCard.jsx (PRO-224) (#231)
-2aaad864b4,2026-06-23,0,F03-nanopb-spike,subject,#230,PRO-253,fix(web): swap page content on nav between lazy routes (PRO-253) (#230)
-eec9cfeaa2,2026-06-23,0,F03-nanopb-spike,subject,#229,PRO-252,fix(PRO-252): restore auto-wakeup schedule (and PID) on settings import (#229)
-b255cd0b5d,2026-06-23,0,F03-nanopb-spike,subject,#228,PRO-250,chore(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (master backport) (#228)
-05c0187863,2026-06-23,0,F03-nanopb-spike,subject,#227,PRO-250,ci(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (#227)
-ef60874d2d,2026-06-23,0,F03-nanopb-spike,subject,#226,PRO-248,fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (master) (#226)
-2782b14c01,2026-06-23,0,F03-nanopb-spike,subject,#225,PRO-248,fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (#225)
-9a83603185,2026-06-23,0,F03-nanopb-spike,subject,#223,PRO-247,chore(PRO-247): sync master into dev-master (#223)
-ce9774dca2,2026-06-22,0,F03-nanopb-spike,subject,#222,PRO-246,PRO-246: sync non-WebUI dev-master work into master (concurrency fixes + feature flags + build/CI + README) (#222)
+2aaad864b4,2026-06-23,0,F23-web-theme-shell,override,#230,PRO-253,fix(web): swap page content on nav between lazy routes (PRO-253) (#230)
+eec9cfeaa2,2026-06-23,0,F24-settings-backup,override,#229,PRO-252,fix(PRO-252): restore auto-wakeup schedule (and PID) on settings import (#229)
+b255cd0b5d,2026-06-23,0,F25-ci-quality,override,#228,PRO-250,chore(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (master backport) (#228)
+05c0187863,2026-06-23,0,F25-ci-quality,override,#227,PRO-250,ci(PRO-250): stop gh-pages firmware accumulation + fix ref-lock race (#227)
+ef60874d2d,2026-06-23,0,F05-ble-scale,override,#226,PRO-248,fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (master) (#226)
+2782b14c01,2026-06-23,0,F05-ble-scale,override,#225,PRO-248,fix(PRO-248): unify steam scale-alive & drip-recording windows so last drips reach yield (#225)
+9a83603185,2026-06-23,0,F25-ci-quality,override,#223,PRO-247,chore(PRO-247): sync master into dev-master (#223)
+ce9774dca2,2026-06-22,0,F25-ci-quality,override,#222,PRO-246,PRO-246: sync non-WebUI dev-master work into master (concurrency fixes + feature flags + build/CI + README) (#222)
 72da932769,2026-06-22,0,F03-nanopb-spike,subject,#221,PRO-239,"spike(PRO-239): nanopb comms evaluation — schema, lossless round-trip, footprint (#221)"
 81400268e8,2026-06-22,0,F26-docs-agents,subject,#76,,"docs(readme): refresh Features, build targets, and screenshots (#76)"
 fea9cd1034,2026-06-22,0,F05-ble-scale,subject,#220,PRO-235,feat(PRO-235): keep BLE scale listening 5s on brew->steam to capture last drops (master) (#220)
@@ -487,38 +487,38 @@ a73de48b75,2026-06-20,1,F17-standby-steam-flush,subject,,PRO-223,Merge pull requ
 856b60cda7,2026-06-20,0,F15-eez-lvgl-ui,path,,PRO-223,"fix(PRO-223): address re-review findings (atomic flags, settle re-render, comments)"
 1b36352e7b,2026-06-20,0,F20-shot-history-analyzer,path,,PRO-223,fix(PRO-223): mark recording flags volatile for cross-task reads (review nit)
 395d2509b7,2026-06-20,0,F17-standby-steam-flush,subject,,PRO-223,fix(PRO-223): gate auto-steam until extended-recording settle completes
-04809237b8,2026-06-19,1,F21-profiles,subject,,PRO-218,Merge pull request #201 from carloshrdezc/pro-218-export-import-migration
-9d0637d540,2026-06-18,0,F21-profiles,subject,,PRO-218,fix(profiles): whole-picture restore summary + tested restore glue (PRO-218 P2)
-a07b946f79,2026-06-18,0,F21-profiles,subject,,PRO-218,fix(web): close silent multi-file partial-loss path in profile restore (PRO-218)
-6371a36384,2026-06-18,0,F21-profiles,subject,,PRO-218,docs(migration): tell users to verify restored profile count after re-import (PRO-218)
-8a135b1c7c,2026-06-18,0,F21-profiles,subject,,PRO-218,refactor(web): MigrationWarningBanner profilesHref prop + drop default export (PRO-218)
-d0e683d530,2026-06-18,0,F21-profiles,subject,,PRO-218,fix(web): wire ProfileList to shared restore orchestrator + close restore gaps (PRO-218)
-34121e138e,2026-06-18,0,F21-profiles,subject,,PRO-218,fix(migration): extract shipped importProfiles() orchestrator + harden restore (PRO-218)
-99a5ccaba6,2026-06-18,0,F21-profiles,subject,,PRO-218,fix(web): notify on empty profile import/export (PRO-218 P3)
-3ebd1c347e,2026-06-18,0,F12-embed-webui-fs,subject,,PRO-218,feat(migration): off-device profile export/import for SPIFFS->LittleFS (PRO-218)
-b30bc7b7e3,2026-06-18,1,F12-embed-webui-fs,subject,,PRO-217,Merge pull request #199 from carloshrdezc/pro-217-ci-embed-pipeline
-a2716e2689,2026-06-18,0,F12-embed-webui-fs,subject,,,"docs(build_webui): clarify /h is runtime-created, only /p is staged"
-b074a6b56f,2026-06-18,0,F12-embed-webui-fs,subject,,PRO-217,ci: migrate CI matrix to embed-WebUI pipeline + drop display-headless-4m (PRO-217)
-01843ca248,2026-06-18,1,F12-embed-webui-fs,subject,,PRO-216,Merge pull request #198 from carloshrdezc/pro-216-sim-embedded-ui-parity
-59a2ae5747,2026-06-18,0,F12-embed-webui-fs,subject,,,ci(sim): build+embed the real WebUI bundle for display-sim parity
-5d1bb977db,2026-06-17,1,F12-embed-webui-fs,subject,,PRO-215,Merge pull request #197 from carloshrdezc/pro-215-serve-embedded-ui
-e211201c20,2026-06-17,0,F12-embed-webui-fs,subject,,PRO-215,ci: embed web UI in distributed display/headless firmware builds (PRO-215)
-2fb5e5daa0,2026-06-17,0,F12-embed-webui-fs,subject,,PRO-215,fix(sim): build embedded web UI manifest+blob in display-sim env (PRO-215)
+04809237b8,2026-06-19,1,F12b-fs-migration-preserve,subject,,PRO-218,Merge pull request #201 from carloshrdezc/pro-218-export-import-migration
+9d0637d540,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,fix(profiles): whole-picture restore summary + tested restore glue (PRO-218 P2)
+a07b946f79,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,fix(web): close silent multi-file partial-loss path in profile restore (PRO-218)
+6371a36384,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,docs(migration): tell users to verify restored profile count after re-import (PRO-218)
+8a135b1c7c,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,refactor(web): MigrationWarningBanner profilesHref prop + drop default export (PRO-218)
+d0e683d530,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,fix(web): wire ProfileList to shared restore orchestrator + close restore gaps (PRO-218)
+34121e138e,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,fix(migration): extract shipped importProfiles() orchestrator + harden restore (PRO-218)
+99a5ccaba6,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,fix(web): notify on empty profile import/export (PRO-218 P3)
+3ebd1c347e,2026-06-18,0,F12b-fs-migration-preserve,subject,,PRO-218,feat(migration): off-device profile export/import for SPIFFS->LittleFS (PRO-218)
+b30bc7b7e3,2026-06-18,1,F12b-fs-migration-preserve,override,,PRO-217,Merge pull request #199 from carloshrdezc/pro-217-ci-embed-pipeline
+a2716e2689,2026-06-18,0,F12a-embed-webui,subject,,,"docs(build_webui): clarify /h is runtime-created, only /p is staged"
+b074a6b56f,2026-06-18,0,F12b-fs-migration-preserve,override,,PRO-217,ci: migrate CI matrix to embed-WebUI pipeline + drop display-headless-4m (PRO-217)
+01843ca248,2026-06-18,1,F12b-fs-migration-preserve,override,,PRO-216,Merge pull request #198 from carloshrdezc/pro-216-sim-embedded-ui-parity
+59a2ae5747,2026-06-18,0,F12b-fs-migration-preserve,override,,,ci(sim): build+embed the real WebUI bundle for display-sim parity
+5d1bb977db,2026-06-17,1,F12b-fs-migration-preserve,subject,,PRO-215,Merge pull request #197 from carloshrdezc/pro-215-serve-embedded-ui
+e211201c20,2026-06-17,0,F12b-fs-migration-preserve,subject,,PRO-215,ci: embed web UI in distributed display/headless firmware builds (PRO-215)
+2fb5e5daa0,2026-06-17,0,F12b-fs-migration-preserve,override,,PRO-215,fix(sim): build embedded web UI manifest+blob in display-sim env (PRO-215)
 918705e6d8,2026-06-17,0,F09-webui-plugin-core,subject,,PRO-215,"docs(webui): clarify /fonts cache comment (stable-named, not hashed) (PRO-215)"
 b409a83264,2026-06-17,0,F09-webui-plugin-core,subject,,PRO-215,fix(webui): restore /fonts immutable caching + clang-format icon handler (PRO-215)
 113e83ce5b,2026-06-17,0,F06-ota,subject,,PRO-215,"feat(webui): serve UI from embedded blob, drop OTA filesystem phase (PRO-215)"
-cc5a7e499b,2026-06-17,1,F12-embed-webui-fs,subject,,PRO-214,Merge pull request #196 from carloshrdezc/pro-214-embed-webui-pipeline
+cc5a7e499b,2026-06-17,1,F12a-embed-webui,subject,,PRO-214,Merge pull request #196 from carloshrdezc/pro-214-embed-webui-pipeline
 fb1e09a6ee,2026-06-17,0,F09-webui-plugin-core,subject,,PRO-214,fix(webui): harden build_webui.sh per PR #196 review (PRO-214)
-010a5aa139,2026-06-17,0,F09-webui-plugin-core,subject,,,"build(webui): add embed build pipeline (scripts + stub, no serving change)"
-1f44d4374a,2026-06-17,1,F12-embed-webui-fs,subject,,PRO-212,Merge pull request #195 from carloshrdezc/pro-212-spiffs-to-littlefs
-b79fa3584e,2026-06-17,0,F12-embed-webui-fs,subject,,PRO-212,ci(fs): copy littlefs.bin (not spiffs.bin) from buildfs output (PRO-212)
-394e7e4d16,2026-06-17,0,F12-embed-webui-fs,subject,,PRO-212,fix(fs): swap SPIFFS for LittleFS on the web/data partition (PRO-212)
+010a5aa139,2026-06-17,0,F12a-embed-webui,override,,,"build(webui): add embed build pipeline (scripts + stub, no serving change)"
+1f44d4374a,2026-06-17,1,F12b-fs-migration-preserve,subject,,PRO-212,Merge pull request #195 from carloshrdezc/pro-212-spiffs-to-littlefs
+b79fa3584e,2026-06-17,0,F12b-fs-migration-preserve,subject,,PRO-212,ci(fs): copy littlefs.bin (not spiffs.bin) from buildfs output (PRO-212)
+394e7e4d16,2026-06-17,0,F12b-fs-migration-preserve,subject,,PRO-212,fix(fs): swap SPIFFS for LittleFS on the web/data partition (PRO-212)
 432ea5ce63,2026-06-17,1,F10-memory-psram,subject,,PRO-211,Merge pull request #194 from carloshrdezc/pro-211-embed-webui-headroom
 7ba9c0d8b1,2026-06-16,1,F13-simulator,subject,,PRO-206,Merge pull request #192 from carloshrdezc/pro-206-display-sim-ci
 652a5ff23a,2026-06-16,0,F10-memory-psram,subject,,PRO-211,docs(embed-webui): measure web-UI footprint + partition headroom (PRO-211)
 4eac677cac,2026-06-16,0,F13-simulator,subject,,PRO-206,fix(sim): link SDL2 via LIBS so display-sim links on Linux/macOS (PRO-206)
-b6e0c95751,2026-06-16,1,F12-embed-webui-fs,subject,,PRO-210,Merge pull request #193 from carloshrdezc/pro-210-embed-webui-spike
-81539f60f2,2026-06-16,0,F12-embed-webui-fs,subject,,,docs(spike): migration plan + risk assessment for embed-WebUI (PR #764) + SPIFFS->LittleFS
+b6e0c95751,2026-06-16,1,F12a-embed-webui,subject,,PRO-210,Merge pull request #193 from carloshrdezc/pro-210-embed-webui-spike
+81539f60f2,2026-06-16,0,F12b-fs-migration-preserve,subject,,,docs(spike): migration plan + risk assessment for embed-WebUI (PR #764) + SPIFFS->LittleFS
 72627a02bb,2026-06-16,0,F13-simulator,subject,,PRO-206,fix(sim): generate version.h in display-sim env (PRO-206)
 fdf6a399a3,2026-06-16,0,F06-ota,subject,,PRO-206,fix(sim): generate stable_versions.h in display-sim env so it builds on a clean checkout (PRO-206)
 4d32168fff,2026-06-16,0,F13-simulator,subject,,PRO-206,ci: build display-sim simulator on PRs to dev-master (PRO-206)
@@ -599,7 +599,7 @@ e4cd04f33f,2026-06-09,1,F19-beans,subject,,CAR-356,Merge pull request #168 from 
 dedb5532b9,2026-06-09,0,F19-beans,subject,,,feat(web): remove bean-selection popup from Profiles page
 dbc9261c18,2026-06-09,1,F18-brew-targets,subject,,CAR-355,Merge pull request #165 from carloshrdezc/car-355-yield-shot-stop-target
 03a9d797b1,2026-06-09,0,F18-brew-targets,subject,,CAR-355,"fix(profile): apply dashboard YIELD to all volumetric phases, not just brew (CAR-355)"
-883e4bdfa1,2026-06-09,1,F09-webui-plugin-core,path,,CAR-354,Merge pull request #164 from carloshrdezc/car-354-loadbean-optional
+883e4bdfa1,2026-06-09,1,F19-beans,override,,CAR-354,Merge pull request #164 from carloshrdezc/car-354-loadbean-optional
 8b160bd57b,2026-06-08,0,F19-beans,subject,,,refactor(beans): return std::optional<BeanEntry> from loadBean
 bfd09f4e94,2026-06-08,1,F26-docs-agents,path,,CAR-340,Merge pull request #163 from carloshrdezc/car-340-cpp20-standard-bump
 350163afa7,2026-06-08,0,F02-platform-stack,subject,,CAR-340,docs(build): record C++20 toolchain spike result; keep gnu++17 (CAR-340 slice 1)
@@ -750,15 +750,15 @@ dd3de44884,2026-05-29,0,F15-eez-lvgl-ui,subject,,CAR-286,fix(firmware): clear LV
 8c4a2295a8,2026-05-29,0,F15-eez-lvgl-ui,path,,CAR-284,fix(firmware): surface generic error message for all non-runaway error states (CAR-284)
 cf89452e60,2026-05-29,0,F15-eez-lvgl-ui,subject,,CAR-282,fix(firmware): render AM/PM suffix in separate label for 12-hour standby clock (CAR-282)
 e4852f68c1,2026-05-29,0,F15-eez-lvgl-ui,subject,,,feat(firmware): rebuild Standby screen in the Nothing theme (ambient clock)
-a3bbcdc329,2026-05-29,1,F12-embed-webui-fs,subject,,CAR-287,Merge pull request #130 from carloshrdezc/fix/car-287-embedded-route-cache
-37050df6fa,2026-05-29,0,F12-embed-webui-fs,subject,,,fix(web): reduce embedded route request bursts
+a3bbcdc329,2026-05-29,1,F12a-embed-webui,subject,,CAR-287,Merge pull request #130 from carloshrdezc/fix/car-287-embedded-route-cache
+37050df6fa,2026-05-29,0,F12a-embed-webui,subject,,,fix(web): reduce embedded route request bursts
 c1e99db7cc,2026-05-29,1,F21-profiles,subject,,,Merge pull request #129 from carloshrdezc/fix/revert-inline-dynamic-imports
 011c707a02,2026-05-29,0,F05-ble-scale,subject,,,fix(web): preload scales route for embedded UI
-a4102ebdbb,2026-05-29,1,F12-embed-webui-fs,subject,,CAR-281,Merge pull request #128 from carloshrdezc/fix/car-281-spiffs-name-len
-36c2a11f31,2026-05-29,0,F12-embed-webui-fs,subject,,,fix(web): avoid embedded route chunk fanout
-ff30f02191,2026-05-29,1,F12-embed-webui-fs,subject,,CAR-281,Merge pull request #124 from carloshrdezc/fix/car-281-spiffs-name-len
-453688e310,2026-05-29,0,F12-embed-webui-fs,subject,,,"fix(build,ci): make SPIFFS guard executable + run it in CI build pipeline"
-be68e23058,2026-05-29,0,F12-embed-webui-fs,subject,,,"fix(web,build): keep SPIFFS asset paths under mkspiffs's 32-char limit"
+a4102ebdbb,2026-05-29,1,F12b-fs-migration-preserve,subject,,CAR-281,Merge pull request #128 from carloshrdezc/fix/car-281-spiffs-name-len
+36c2a11f31,2026-05-29,0,F12a-embed-webui,subject,,,fix(web): avoid embedded route chunk fanout
+ff30f02191,2026-05-29,1,F12b-fs-migration-preserve,subject,,CAR-281,Merge pull request #124 from carloshrdezc/fix/car-281-spiffs-name-len
+453688e310,2026-05-29,0,F12b-fs-migration-preserve,subject,,,"fix(build,ci): make SPIFFS guard executable + run it in CI build pipeline"
+be68e23058,2026-05-29,0,F12b-fs-migration-preserve,subject,,,"fix(web,build): keep SPIFFS asset paths under mkspiffs's 32-char limit"
 12493d7d32,2026-05-29,1,F15-eez-lvgl-ui,subject,,CAR-276,Merge pull request #122 from carloshrdezc/carloshrdezc/car-276-nothing-theme-foundation
 2fc8656ab0,2026-05-29,0,F15-eez-lvgl-ui,subject,,,fix(firmware): expose status-bar clock via gm_h instead of hard-coding 07:42
 b434d3e1e3,2026-05-29,0,F15-eez-lvgl-ui,subject,,,feat(firmware): add Nothing-theme foundation — palette + shared LVGL builders (v8)
@@ -887,7 +887,7 @@ adee3e3a6a,2026-05-19,0,F25-ci-quality,subject,,,docs(agents): document Linear w
 e64f29a48c,2026-05-18,1,F06-ota,subject,,CAR-44,Merge pull request #74 from carloshrdezc/carloshrdezc/car-44-fix-ota-version-check-stripping-first-character-instead-of-v
 fc18e4c4c7,2026-05-18,0,F06-ota,subject,,,fix(ota): only strip leading 'v' from version string if present
 d4387abd48,2026-05-18,1,F25-ci-quality,subject,,CAR-43,Merge pull request #73 from carloshrdezc/carloshrdezc/car-43-fix-nightly-build-failing-on-fork-due-to-missing-upload
-6c24a5d17e,2026-05-18,0,F07-webui-security,subject,,,fix(ci): allow nightly build to continue when upload server secrets are missing
+6c24a5d17e,2026-05-18,0,F25-ci-quality,override,,,fix(ci): allow nightly build to continue when upload server secrets are missing
 11f3d9dd23,2026-05-18,1,F25-ci-quality,subject,,CAR-42,Merge pull request #72 from carloshrdezc/carloshrdezc/car-42-fix-nightly-release-name-to-include-version-from-git
 4e7847d5a5,2026-05-18,0,F22-dashboard-home,subject,,,fix(ci): include version string in nightly release name
 9549a75661,2026-05-18,1,F19-beans,subject,,CAR-41,Merge pull request #71 from carloshrdezc/carloshrdezc/car-41-shot-history-shows-archived-beans-next-to-profile-name-in
@@ -1032,7 +1032,7 @@ d341ecd70a,2026-05-10,0,F23-web-theme-shell,path,,,fix(web): properly handle bas
 ec1b42f79b,2026-05-10,1,F27-web-misc,path,,,Merge pull request #44 from carloshrdezc/fix/gh-pages-router-base
 9850e0e051,2026-05-10,0,F22-dashboard-home,subject,,,fix(web): expand PRESS label to PRESSURE in ring legend
 9e5688b40c,2026-05-10,0,F27-web-misc,path,,,fix(web): pass BASE_URL to LocationProvider for GitHub Pages sub-path routing
-0ad43dbf3a,2026-05-10,1,F99-misc,fallback,,,Merge pull request #43 from carloshrdezc/fix/flash-script-improvements
+0ad43dbf3a,2026-05-10,1,F25-ci-quality,override,,,Merge pull request #43 from carloshrdezc/fix/flash-script-improvements
 7aefa9d710,2026-05-10,0,F25-ci-quality,subject,,,fix: flash script improvements
 ab0ead2f41,2026-05-10,1,F25-ci-quality,subject,,,Merge pull request #42 from carloshrdezc/fix/device-testing-bugs
 b7a54dcacd,2026-05-10,0,F08-relay,subject,,,fix: address second-pass review — hasNotes regression and relay task OOM guard
@@ -1102,7 +1102,7 @@ d158ca15cb,2026-05-05,0,F22-dashboard-home,path,,,feat: show brew title in white
 a3c0746e30,2026-05-05,0,F17-standby-steam-flush,subject,,,feat: fill water ring in green when temperature is reached
 aa4d1a47bc,2026-05-05,0,F17-standby-steam-flush,subject,,,feat: fill steam ring in green when temperature is reached
 1fd53a1b95,2026-05-05,0,F17-standby-steam-flush,subject,,,feat: show 'Ready to Steam' and 'Water Ready' labels when temp is reached
-d90a77ae01,2026-05-05,0,F17-standby-steam-flush,subject,,,feat: add green ready ring color variables for steam and water
+d90a77ae01,2026-05-05,0,F23-web-theme-shell,override,,,feat: add green ready ring color variables for steam and water
 550f06e7ec,2026-05-03,0,F06-ota,subject,,,Fix display theme layout and OTA error handling
 7c77f3d761,2026-05-03,1,F15-eez-lvgl-ui,subject,,,Merge branch 'feat/fonts-and-display-updates' of https://github.com/carloshrdezc/gaggimate into feat/fonts-and-display-updates
 6e7fa2213c,2026-05-03,0,F15-eez-lvgl-ui,path,,,Adjust screens
@@ -1243,7 +1243,7 @@ eeadc54a5e,2026-04-16,0,F22-dashboard-home,subject,,,feat: add popover UI for st
 e9a7d0fd05,2026-04-16,0,F22-dashboard-home,subject,,,fix: add stat-pill-clickable CSS class for click-outside detection
 a89690a868,2026-04-16,0,F22-dashboard-home,subject,,,feat: make header stat pills clickable
 1c7bf0176c,2026-04-16,1,F24-settings-backup,subject,,,Merge pull request #6 from carloshrdezc/feat/cloud-backup
-2cf2e37a85,2026-04-16,0,F25-ci-quality,subject,,,"fix: address all PR review issues - error propagation, validation, tests"
+2cf2e37a85,2026-04-16,0,F24-settings-backup,override,,,"fix: address all PR review issues - error propagation, validation, tests"
 a5976eb4e3,2026-04-15,0,F24-settings-backup,path,,,fix: correct off-by-one migration lookup and add null guard
 804524b31a,2026-04-15,0,F24-settings-backup,subject,,,feat: add backup version migration system for future format changes
 6261ec0a13,2026-04-15,0,F24-settings-backup,subject,,,test: fix listBackups OAuth mocking and add uploadBackup tests
@@ -1254,7 +1254,7 @@ d41b8c815e,2026-04-15,0,F27-web-misc,path,,,fix: limit authorizedFetch retry to 
 7e3753ca5e,2026-04-15,0,F24-settings-backup,subject,,,refactor: extract CloudBackupProvider interface for cloud-agnostic backups
 dad575b685,2026-04-15,1,F22-dashboard-home,path,,,Merge pull request #5 from carloshrdezc/feat/bold-minimal-webui
 a1edab9f33,2026-04-15,1,F22-dashboard-home,path,,,Merge branch 'feat/bold-minimal-webui'
-1eb125367f,2026-04-15,1,F09-webui-plugin-core,path,,,Merge branch 'master' of https://github.com/carloshrdezc/gaggimate
+1eb125367f,2026-04-15,1,F99-misc,sync-merge,,,Merge branch 'master' of https://github.com/carloshrdezc/gaggimate
 08065b5430,2026-04-15,0,F22-dashboard-home,path,,,"fix: address PR review issues - error handling, race conditions, globals"
 5c3d953e1c,2026-04-15,0,F23-web-theme-shell,subject,,,fix: add theme-controller radios and custom theme blocks for daisyUI 5
 b7ebcdc3be,2026-04-15,0,F23-web-theme-shell,subject,,,fix: add Stealth and Crisp to theme selector dropdown
@@ -1270,7 +1270,7 @@ b2e3834b9c,2026-04-15,0,F25-ci-quality,subject,,,chore: add .worktrees to gitign
 aecc8183b5,2026-04-15,1,F09-webui-plugin-core,path,,,Merge pull request #4 from carloshrdezc/fix/code-review-bugs
 e8e3e0f199,2026-04-15,0,F09-webui-plugin-core,path,,,fix: resolve 4 issues from code review
 c85565a564,2026-04-15,1,F06-ota,path,,,Merge pull request #3 from carloshrdezc/webui
-d4ddd6b17b,2026-04-15,0,F12-embed-webui-fs,subject,,,fix: keep original files when gzipping for SPIFFS
+d4ddd6b17b,2026-04-15,0,F12b-fs-migration-preserve,subject,,,fix: keep original files when gzipping for SPIFFS
 5818f13ab0,2026-04-15,0,F19-beans,subject,,,chore: ignore bean-whisperer directory
 9e390ea6b6,2026-04-15,0,F09-webui-plugin-core,subject,,,fix: add null check for ws.makeBuffer() to prevent crash
 2256fe28c3,2026-04-15,0,F24-settings-backup,subject,,,fix: restore delay(2) in main loop to prevent task watchdog starvation
@@ -1278,7 +1278,7 @@ d04bb01115,2026-04-14,0,F22-dashboard-home,subject,,,fix: improve header stat pi
 243b75dbbc,2026-04-14,0,F19-beans,path,,,refactor: extract UI components and improve statistics display
 6aac05afcb,2026-04-14,0,F22-dashboard-home,subject,,,fix: correct 5 bugs in web UI found during code review
 a2a6b1961a,2026-04-12,0,F05-ble-scale,subject,,,Fix firmware concurrency and improve OTA and scale UI
-43779895a4,2026-04-12,1,F09-webui-plugin-core,path,,,Merge branch 'master' into ui-web
+43779895a4,2026-04-12,1,F99-misc,sync-merge,,,Merge branch 'master' into ui-web
 8538ab9fd5,2026-04-12,1,F09-webui-plugin-core,path,,,Merge branch 'fix/code-review-issues'
 5ee6ef8eda,2026-04-11,0,F22-dashboard-home,path,,,Web improvs
 c8660af3b7,2026-04-04,0,F28-firmware-misc,path,,,fix: correct Process member access in getProcessSnapshot
@@ -1292,7 +1292,7 @@ b6e0c71301,2026-04-04,0,F14-hardware,subject,,,fix: use isActiveSafe() in autotu
 cfe1d418e0,2026-04-04,0,F28-firmware-misc,path,,,fix: use isActiveSafe() in handleBrewButton() to prevent false brew stops
 389a13fbbc,2026-04-04,0,F28-firmware-misc,path,,,fix: add missing isActiveSafe() declaration in Controller.h
 54c42c2140,2026-04-04,0,F14-hardware,subject,,,fix: restore defensive check for ProcessPhase::FINISHED before accessing pump methods
-21d86108ff,2026-04-04,0,F09-webui-plugin-core,path,,,Mutex timeout strategy is now consistent across all methods using UI_MUTEX_TIMEOUT_MS
+21d86108ff,2026-04-04,0,F15-eez-lvgl-ui,override,,,Mutex timeout strategy is now consistent across all methods using UI_MUTEX_TIMEOUT_MS
 308133fc4c,2026-04-04,0,F15-eez-lvgl-ui,path,,,Fixed mutex timeout issue in Controller.cpp
 69c848a0d7,2026-04-04,0,F26-docs-agents,subject,,,docs: Add deprecation warning to Controller::getProcess()
 ea9ba45fde,2026-04-04,0,F09-webui-plugin-core,path,,,fix: Complete concurrency fixes and resolve all review findings

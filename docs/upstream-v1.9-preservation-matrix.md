@@ -7,8 +7,12 @@ Merge base `0172f1f6`.
 ## Coverage
 
 - Range `v1.9.0..origin/dev-master`: **1321 commits** (1124 non-merge + 197 merge).
-- Mapped to a feature: **1321 / 1321 (100%)**. The generator asserts this
-  (`total == git rev-list --count`).
+- **Enumerated: 1321 / 1321.** The generator asserts `total == git rev-list --count`. That only
+  proves every commit has a row. It does not prove the row is correct.
+- **Classification verified**: 27 hand-audited `OVERRIDES` plus 37 `SEEDS` (overrides + 10 anchors) that must land in
+  their expected feature, or the script fails. F99 must be content-free sync merges only (asserted).
+  Random re-audits (40 rows each, before fixing): seed 652 **3/40 errors**, new seed 6520 **2/40 errors (5%)**. All five are now overridden (see QA).
+  The review's seed-686 sample (n=25) found 4 misclusters, all now overridden.
 - Commit→feature map, one row per commit: `docs/upstream-v1.9-preservation-matrix.csv`
   (sha, date, merge flag, feature, matched_by, PRs, Linear IDs, subject).
 - Per-feature commit lists: `docs/upstream-v1.9-preservation-matrix.appendix.md`.
@@ -20,14 +24,13 @@ here, not the 1315 in the epic. The extra 6 are all dependabot bumps (#680–#68
 
 ## Method and decisions I made on my own
 
-1. **Clustering is rule-based and deterministic.** The rules live in
-   `RULES` in the script, and the first match wins. Subject rules (PR `(#NNN)`, `PRO-/CAR-` IDs,
-   conventional scope, keywords) run before path rules. Commits that matched nothing fall into
-   `F99-misc`. Those are merge-from-master commits, which carry no feature of their own.
-   Keyword clustering is approximate at the edges. Example: a "fix(web): dashboard
-   dose" commit can land in F18 rather than F22. Each **slice owner reads the appendix list for
-   their feature(s) and the neighbouring features**. The row decision applies to the feature, not
-   to each commit.
+1. **Clustering is rules plus audited overrides.** `OVERRIDES` (sha → feature, hand-audited)
+   runs first, then content-free sync merges go to `F99-misc`, then `RULES` apply (first match wins,
+   subject rules before path rules). `SEEDS` assertions fail the script if a known commit drifts.
+   F99 holds only no-content sync merges. The assert rejects any other commit there.
+   Keyword clustering is still approximate at the edges. Each **slice owner reads the appendix
+   list for their feature(s) and the neighbouring features**. Where a row splits (F12a/F12b, F14),
+   the decision is per commit.
 2. **Merges are included** (the AC says "every commit"). A merge maps to the feature named in its
    subject/branch, or to its first-parent diff paths.
 3. **Upstream equivalents were verified** against the `v1.9.0` tag with `git ls-tree` / `git grep` /
@@ -56,35 +59,67 @@ upstream commit reachable from it.
 
 | # | Feature (commits) | Key sources | Up v1.9.0 equivalent (evidence) | Decision | Slice | Proving test |
 |---|---|---|---|---|---|---|
-| F01 | Dependency bumps (62) | dependabot #589–#685, `.github/dependabot.yml` | none: no `.github/dependabot.yml` in v1.9.0 | **drop** the bump commits and re-resolve versions on the integrated lockfile. **port** `dependabot.yml` | PRO-665 (lockfiles), PRO-667 (dependabot) | `cd web && npm ci && npm run build`; relay `npm test` |
+| F01 | Dependency bumps (64) | dependabot #589–#685, `.github/dependabot.yml` | none: no `.github/dependabot.yml` in v1.9.0 | **drop** the bump commits and re-resolve versions on the integrated lockfile. **port** `dependabot.yml` | PRO-665 (lockfiles), PRO-667 (dependabot) | `cd web && npm ci && npm run build`; relay `npm test` |
 | F02 | Arduino-3.x / NimBLE-2.x / C++20 stack (21) | #307 c150d3d3, #309 99295c58, PRO-290/291, rollback #356 ea232239, docs/cpp-standard-spike.md | v1.9.0 is also `espressif32@6.12.0` + `NimBLE-Arduino@^1.4.0` + `gnu++17` (platformio.ini:12,60,27) | **drop**: already reverted at tip by #356. Keep the `gnu++17` pin and the CAR-340 comment | PRO-665 | `pio run -e display` on the pinned platform |
-| F03 | NanoPb comms spike (22) | `lib/NanoPbSpike`, `docs/spike-nanopb-comms/`, `test/test_nanopb_comms`, PRO-245..259 | upstream shipped the real thing: `lib/NanoPbComm/` (22 files), ccfe792b "Framed nanopb TX/RX comms protocol (replaces NimBLEComm)" (#726) | **superseded**. Salvage only the runtime measurements in the spike docs for the PRO-655 review | PRO-655, PRO-665 | n/a (delete). PRO-655 comms tests replace it |
+| F03 | NanoPb comms spike: nanopb subjects/paths only (10) | `lib/NanoPbSpike`, `docs/spike-nanopb-comms/`, `test/test_nanopb_comms`, 72da9327 (PRO-239), PRO-241..244, PRO-306/307/309 | upstream shipped the real thing: `lib/NanoPbComm/` (22 files), ccfe792b "Framed nanopb TX/RX comms protocol (replaces NimBLEComm)" (#726) | **superseded** (all 10 are spike/proto work). Salvage only the runtime measurements in the spike docs for the PRO-655 review. The former PRO-245..259 spill is re-homed: ef60874d/2782b14c→F05, 05c01878/b255cd0b/9a836031/ce9774dc→F25, eec9cfea→F24, 2aaad864→F23, 95a3a82b→F14, 74932051→F26, 39e73683/4a731499→F01 | PRO-655, PRO-665 | n/a (delete). PRO-655 comms tests replace it |
 | F04 | Controller BLE comms (35) | `lib/NimBLEComm/*` (9 files), `comms.proto`, WRITE_ENC revert e81cec5a (CAR-257), bond/reconnect fixes, `docs/ble-pairing.md` | `lib/NimBLEComm` gone in v1.9.0. `lib/NanoPbComm/src/ble/Ble{Client,Server}Transport.cpp` hold bonding + security. Startup-race recovery 4f858880 (#873) | **rework** onto NanoPbComm: carry the behaviours (bond recovery, setpoint-write regression CAR-257, reconnect), not the code | PRO-655 | new NanoPbComm host tests + PRO-667 pair/re-pair/boiler-heats on HW |
-| F05 | BLE scale plugin hardening (43) | PRO-459, PRO-647 teardown/mutex/UAF, `BLEScale{Scan,Connect,Measurement}Policy.h`, `BLEVolumetricOverridePolicy.h` | v1.9.0 `BLEScalePlugin.cpp` has none of the policies (`git grep ScanPolicy v1.9.0` empty). Upstream added battery 73ee4b39 (#682) | **port** the policies + mutex/teardown onto upstream's plugin, and keep upstream battery reporting | PRO-655 | `test_ble_scale_{scan,connect,measurement}_policy`, `test_ble_volumetric_override_policy` |
+| F05 | BLE scale plugin hardening (45) | PRO-459, PRO-647 teardown/mutex/UAF, `BLEScale{Scan,Connect,Measurement}Policy.h`, `BLEVolumetricOverridePolicy.h` | v1.9.0 `BLEScalePlugin.cpp` has none of the policies (`git grep ScanPolicy v1.9.0` empty). Upstream added battery 73ee4b39 (#682) | **port** the policies + mutex/teardown onto upstream's plugin, and keep upstream battery reporting | PRO-655 | `test_ble_scale_{scan,connect,measurement}_policy`, `test_ble_volumetric_override_policy` |
 | F06 | OTA policies + channels (77) | `Ota{AsyncResolve,ChannelSwitch,ResolveHeap,ResolveReuse,UpdateCheck}Policy.h`, `OtaIntentState.h`, 95fe4fc4, PRO-394/400/554–569/599/648/649, CAR-248 `scripts/generate_stable_versions.py` | upstream rewrote the download path: `lib/OTA/src/ResumableDownloader.cpp`, `EspHttpTransport.cpp` (5c380e08 #900, aa4e3228). OOM fix for the update check 2dd893da (#755). No `installedChannel`/STABLE_VERSIONS | **rework**: adopt the upstream downloader and port the Carlos resolve/heap/channel/intent policies on top | PRO-661 | `test_ota_*` (8 suites), `test_semver_extensions`, `test_github_ota_semver_reassign`, `scripts/test_generate_stable_versions.py`, upstream `test_ota_download` |
-| F07 | WebUI security: local auth, narrowed CORS, path traversal, secret masking (19) | 0f5b48fb, `LocalAuthPolicy.h`, `PathTraversalPolicy.h`, CAR-96 (#84), settings secret sentinel | none. v1.9.0 `WebUIPlugin.cpp` has no `Access-Control-Allow-Origin` and no local auth (`git grep` empty) | **port** (semantic, onto upstream WebUIPlugin + `WebSocketHandler.cpp` split) | PRO-660 | `test_local_auth_policy`, `test_path_traversal_guard`, `Settings.localAuthHandoff.test.jsx` |
+| F07 | WebUI security: local auth, narrowed CORS, path traversal, secret masking (18) | 0f5b48fb, `LocalAuthPolicy.h`, `PathTraversalPolicy.h`, CAR-96 (#84), settings secret sentinel | none. v1.9.0 `WebUIPlugin.cpp` has no `Access-Control-Allow-Origin` and no local auth (`git grep` empty) | **port** (semantic, onto upstream WebUIPlugin + `WebSocketHandler.cpp` split) | PRO-660 | `test_local_auth_policy`, `test_path_traversal_guard`, `Settings.localAuthHandoff.test.jsx` |
 | F08 | Relay server + secure relay tokens + relay policy (15) | `relay-server/` (13 files, CF Workers), 67541c6f, b068f462 `RelayConnectionPolicy.h` | none: no `relay-server/` in v1.9.0 (the `relay` grep hit only SmartGrindPlugin's GPIO relay) | **port** (relay-server is standalone; the display side is semantic onto WebUIPlugin) | PRO-660 | `test_relay_connection_policy`; `cd relay-server && npm test` |
-| F09 | WebUIPlugin core: WS reassembly cap, broadcast/close, lifecycle deferral, ws mutex, spec gate (49) | `WsReassemblyPolicy.h`, `WsBroadcastClosePolicy.h`, `WebUiLifecycleDeferPolicy.h`, `docs/websocket-api.yaml`, `scripts/check_ws_api_spec_drift.py` (PRO-610) | upstream split WS handling into `src/display/plugins/WebSocketHandler.cpp` and PSRAM-backed rx buffers (70c54ca0 #724, f3dd9d17). `docs/websocket-api.yaml` exists upstream too | **rework**: re-home the policies into WebSocketHandler, merge both YAML specs, keep the drift gate | PRO-660 | `test_ws_reassembly_cap`, `test_ws_broadcast_close_policy`, `test_webui_lifecycle_defer_policy`, `check_ws_api_spec_drift.py` + its test, `ApiService.contract.test.js` |
+| F09 | WebUIPlugin core: WS reassembly cap, broadcast/close, lifecycle deferral, ws mutex, spec gate (45) | `WsReassemblyPolicy.h`, `WsBroadcastClosePolicy.h`, `WebUiLifecycleDeferPolicy.h`, `docs/websocket-api.yaml`, `scripts/check_ws_api_spec_drift.py` (PRO-610) | upstream split WS handling into `src/display/plugins/WebSocketHandler.cpp` and PSRAM-backed rx buffers (70c54ca0 #724, f3dd9d17). `docs/websocket-api.yaml` exists upstream too | **rework**: re-home the policies into WebSocketHandler, merge both YAML specs, keep the drift gate | PRO-660 | `test_ws_reassembly_cap`, `test_ws_broadcast_close_policy`, `test_webui_lifecycle_defer_policy`, `check_ws_api_spec_drift.py` + its test, `ApiService.contract.test.js` |
 | F10 | Memory: mbedTLS PSRAM, NimBLE host PSRAM, heap diag, DRAM audit (25) | 96e7fdf6 `MbedtlsPsramAllocator*`, 886bbc3e (PRO-567 platformio.ini NimBLE msys), 8e3b79a2 `GmHeapDiag.h`, `docs/pro-566-internal-dram-audit.md`, env `display-heapdiag` | partial: upstream `src/display/util/PsramAllocator.h` (ArduinoJson PSRAM allocator), bccb12c2 (#723), 70c54ca0 (#724). No mbedTLS/NimBLE PSRAM routing | **port** mbedTLS/NimBLE routing + heapdiag. **superseded** where Carlos PSRAMs JsonDocuments (use upstream `PsramAllocator`) | PRO-662 | `test_mbedtls_psram_allocator_policy`; PRO-662 stress runs on PSRAM + no-PSRAM boards |
 | F11 | Diagnostic log plugin / ESP log tee / queue (8) | f2a8764c, `DiagnosticLogPlugin.*`, `DiagLogFormat.h`, `src/display/EspLogTee.h` | none (`esp_log_set_vprintf`/DiagnosticLog absent in v1.9.0) | **port** | PRO-662 (queue/heap), then gap G1 | `test_diag_log_tee` |
-| F12 | Embedded WebUI / FS / partitions (26) | `scripts/embed_webui*.py`, `build_webui.sh`, `docs/embed-webui-partition-headroom.md`, CAR-281 SPIFFS name len (#128), `build_spiffs.sh` | **superseded** core: upstream 3bc04041 "Embed WebUI in application partition" (#764) ships `scripts/embed_webui.py`, `embed_webui_pre.py`, `build_webui.sh`. Partition tables are unchanged (both `boards/LilyGo-T-RGB.json` → `default_16MB.csv`) | **superseded** for the embed pipeline. **port** Carlos headroom checks + CAR-281 fix if still relevant | PRO-659 | `pio run -e display` size report vs headroom doc; boot + `/` served (PRO-667) |
+| F12 | Embedded WebUI / FS / partitions (35 = F12a 7 + F12b 28) | see the two sub-rows | see sub-rows | split per commit | PRO-659 | see sub-rows |
+| F12a | Embed pipeline, upstream-equivalent (7) | 010a5aa1, cc5a7e49 (#196), b6e0c957, a2716e26, CAR-287 route cache 37050df6/36c2a11f/a3bbcdc3 | upstream 3bc04041 "Embed WebUI in application partition" (#764) ships `scripts/embed_webui.py`, `embed_webui_pre.py`, `build_webui.sh` | **superseded** (take upstream). Re-check the CAR-287 route-burst fixes against upstream serving | PRO-659 | boot + `/` served with no chunk fan-out (PRO-667) |
+| F12b | Carlos-only FS migration + user-data preservation + CI/sim parity (28) | 394e7e4d SPIFFS→LittleFS (PRO-212), b79fa358, 3ebd1c34 profile export/import + PRO-218 restore hardening (34121e13, a07b946f, 9d0637d5, d0e683d5), CI embed matrix b074a6b5 (PRO-217), sim parity 59a2ae57/2fb5e5da (PRO-215/216), CAR-281 SPIFFS name len be68e230/453688e3, partition provenance PRO-319/322/326 | none. Upstream has no SPIFFS→LittleFS migration path or off-device profile export/import | **port** (keep the PRO-212/218 user-data preservation) | PRO-659 | host: vitest `importProfiles` restore-orchestrator suites + a new round-trip export→import test. On-device (PRO-667): **SPIFFS-era device keeps profiles/settings after OTA to the integrated build**; LittleFS mounts with no format; the restore banner round-trip restores N/N profiles; `display-sim` serves the embedded UI in CI |
 | F13 | Simulator (display-sim) + Windows sim (8) | `sim/platform/*` shims, `fs_shim.cpp`, PRO-207 Windows build | upstream `sim/` (60 files) + `[env:display-sim]` in v1.9.0 platformio.ini:166. No Windows support (`git grep WIN32 v1.9.0 -- sim` empty) | **rework** onto upstream sim + NanoPbComm, and port the Windows shims | PRO-656 | `pio run -e display-sim` on Linux + Windows |
-| F14 | Hardware: controller lib, PID/autotune, drivers, boards, LED (18) | `lib/GaggiMateController` (32-file diff, −1243 lines vs tag), drivers, `BoilerFillPlugin` (7-line diff) | `Max31855Thermocouple` and `BoilerFillPlugin` **already exist upstream** (v1.9.0 `GaggiMateController.h:10`, `plugins/BoilerFillPlugin.cpp`). Upstream added Alba I2C ad8a1ace (#915), precise water a0519300 (#885), LED fixes 9e9eecb9/6833963d, SIMC autotune 48802e20 (#683), Waveshare 1.43 f7c186b2 (#617) | **superseded** by default (take upstream controller lib/drivers). **port** only the Carlos deltas the slice diff proves are fixes | PRO-657 | upstream `test_autotune_simc`, `test_puckflow_latch`; PRO-657 HW matrix |
-| F15 | LVGL/SquareLine display UI: Nothing theme, status/chip bars, BrewScreen, Quick Settings brightness/restart, fonts/icons (156) | `src/display/ui/default/lvgl/` (76 files), `DisplayRestartPolicy.h`, `assets/fonts`, `assets/gm-icons`, CAR-292/293 | upstream moved to **EEZ Studio**: `src/display/ui/default/eez/` (57 files), `eez-ui/gaggimate.eez-project`. No `lvgl/` dir. June UI update 3452bca6 (#792) | **rework**: reapply the Carlos UI on the EEZ project. This is the biggest-risk row | PRO-658 | `test_display_restart_policy`; PRO-667 screen-by-screen visual check |
+| F14 | Hardware: LED, pump-target safety, autotune UI, AMOLED layout (19) | per-commit list below the table | `Max31855Thermocouple`/`BoilerFillPlugin` exist in v1.9.0, but **none of the 19 commits implements either**. Behavior diff tip vs v1.9.0 is below the table | **per-commit** (see *F14 commit audit*). No blanket supersede | PRO-657 | upstream `test_autotune_simc`, `test_puckflow_latch`; PRO-657 HW matrix; BoilerFill mode-change test |
+| F15 | LVGL/SquareLine display UI: Nothing theme, status/chip bars, BrewScreen, Quick Settings brightness/restart, fonts/icons (157) | `src/display/ui/default/lvgl/` (76 files), `DisplayRestartPolicy.h`, `assets/fonts`, `assets/gm-icons`, CAR-292/293 | upstream moved to **EEZ Studio**: `src/display/ui/default/eez/` (57 files), `eez-ui/gaggimate.eez-project`. No `lvgl/` dir. June UI update 3452bca6 (#792) | **rework**: reapply the Carlos UI on the EEZ project. This is the biggest-risk row | PRO-658 | `test_display_restart_policy`; PRO-667 screen-by-screen visual check |
 | F16 | Manual mode + manual GRIND persistence + grinder manager (60) | 9cbe1b22, 9fa9d726, `process/ManualProcess.h`, `GrinderManager.*`, CAR-371 `grinderManager.js`, `test_notes_grind_setting_policy` | none: v1.9.0 `core/process/` has no ManualProcess, and there is no GrinderManager | **port** | PRO-657 (firmware process) + PRO-664 (web) | `test_notes_grind_setting_policy`, `grinderManager.test.js` |
-| F17 | Standby / auto-steam / flush / steam button / auto-wakeup (66) | acf03ea3 standby post-brew, `StandbyTransitionPolicy.h`, `StandbyReassertPolicy.h`, `SteamButtonPolicy.h`, `useStandbyOnBrew.js` | partial: upstream flush as a button behaviour c9c84ba3 (#720) + button rework f6534f56 (#899), `flushDuration` in v1.9.0 `Settings.h`, steam refill on mode change 64ba0d99. No auto-steam or standby-on-brew (`git grep -i autoSteam v1.9.0` empty) | **superseded** for flush/button handling (take upstream `test_button_handler`). **port** standby-post-brew, auto-steam, standby policies | PRO-657 (firmware) + PRO-664 (web) | `test_standby_transition_policy`, `test_standby_reassert_policy`, `test_steam_button_edge_policy`, upstream `test_button_handler` |
+| F17 | Standby / auto-steam / flush / steam button / auto-wakeup (65) | acf03ea3 standby post-brew, `StandbyTransitionPolicy.h`, `StandbyReassertPolicy.h`, `SteamButtonPolicy.h`, `useStandbyOnBrew.js` | partial: upstream flush as a button behaviour c9c84ba3 (#720) + button rework f6534f56 (#899), `flushDuration` in v1.9.0 `Settings.h`, steam refill on mode change 64ba0d99. No auto-steam or standby-on-brew (`git grep -i autoSteam v1.9.0` empty) | **superseded** for flush/button handling (take upstream `test_button_handler`). **port** standby-post-brew, auto-steam, standby policies | PRO-657 (firmware) + PRO-664 (web) | `test_standby_transition_policy`, `test_standby_reassert_policy`, `test_steam_button_edge_policy`, upstream `test_button_handler` |
 | F18 | Brew targets: volumetric source/coalesce, global weight cutoff, yield override, per-profile temp override (52) | PRO-629, `VolumetricCoalescer.h`, `VolumetricMeasurementSource.h`, `GlobalWeightCutoffPolicy.h`, `BrewTemperatureOverridePolicy.h`, `ShotFinalYieldPolicy.h` | none (all symbols absent in v1.9.0). Upstream changed water accounting a0519300 (#885) | **port** and re-validate against upstream `BrewProcess.h` | PRO-657 | `test_volumetric_{target,coalesce,source_policy}`, `test_global_weight_cutoff`, `test_brew_temperature_override`, `test_shot_final_yield_policy` |
-| F19 | Beans + Beanconqueror export (66) | `BeanManager.*`, `req:beans:*`, `pages/Beans`, `utils/beanconqueror/`, CAR-371..375, `docs/beanconqueror-export.md` | none: no BeanManager or Beans page in v1.9.0 | **port** | PRO-664 (web) + PRO-660 (WS handlers) | `test_bean_resolution_policy`, `beanManager.test.js`, `Beans.beanconquerorExport.test.jsx`, `ShotHistory.beanconquerorExport.test.jsx` |
-| F20 | Shot history / analyzer / notes / comparison / CSV / shot→profile (91) | PRO-631 notes start target temp, `ShotNotesPersistencePolicy.h`, `ShotIndexMetadataPolicy.h`, `ExtendedRecordingPolicy.h`, `historyExport.js`, `shotFilters.js`, `comparisonShots.js`, `pages/ShotToProfile` | partial: upstream `ShotNotesCard.jsx`, `ShotAnalyzer/` (puck resistance f3892ed2 #905), Visualizer upload. No CSV/filters/comparison/ShotToProfile | **rework**: merge onto upstream analyzer (take upstream puck resistance), and port notes/metadata/export/filters/comparison/ShotToProfile | PRO-664 (web) + PRO-660 (plugin) | `test_shot_index_metadata`, `test_extended_recording_policy`, `ShotNotesCard.test.jsx`, `historyExport.test.js`, `shotFilters.test.js`, `detectPhases.test.js` |
-| F21 | Profiles: validation, schema, keyframes, import/export (93) | `test_profile_validation`, `test_strict_validation`, `StrictValidationPolicy.h`, `ProfileKeyframeChart.jsx`, `keyframeProfileLogic.js`, `schema/profile.json`, CAR-233 profile transfer | partial: upstream `ProfileManager.cpp` + `models/profile.h` validation, startup profile fa0f9c12 (#626) | **rework**: keep upstream startup profile, port strict validation + keyframes + schema extensions | PRO-664 | `test_profile_validation`, `test_strict_validation`, `keyframeProfileLogic.test.js` |
-| F22 | Dashboard / Home (PRO-623..640) (91) | `pages/Home/DashboardMerged.jsx`, `dashboardLogic.js`, `dashboardManager` | upstream rewrote Home (`pages/Home/cards/*`, `DashboardSidebar.jsx`, `FlushButton.jsx`) + `pages/DashboardSettings` | **rework**: decide on one dashboard. Default: Carlos's DashboardMerged on top of upstream data hooks (`useDashboardState.js`) | PRO-664 | `DashboardMerged.a11y.test.jsx` + dashboard vitest suites |
-| F23 | Web theme / shell / accents / a11y / connection banner (48) | PRO-643 custom accents, `themeManager.js`, `PageShell.jsx`, `ConnectionBanner.jsx`, `ApiService` reconnect | partial: upstream `web/src/style.css` restyle (June UI). No accents manager or ConnectionBanner | **port** | PRO-664 | `accentContrast.test.jsx`, `PageShell.accentBadge.test.jsx`, `ConnectionBanner.test.jsx`, `ApiService.reconnect.test.js` |
-| F24 | Settings, backup/restore, Google Drive, WiFi/mDNS, MQTT/HomeKit flags, EventIds, settings transactions (47) | `backupBundle.js`, `GoogleDriveBackupCard.jsx`, `SettingsPersistenceTransaction.h`, `MdnsNamePolicy.h`, `MqttConnectPolicy.h`, `EventIds.h`, `config/features.h`, PRO-365 STA recovery (#355) | partial: upstream Settings split into `tabs/*Tab.jsx`, `WifiStaWatchdogPlugin`, `NetworkWatchdogPlugin`, `mDNSPlugin` | **rework**: map Carlos settings into upstream tabs. **superseded** for STA recovery if `WifiStaWatchdogPlugin` covers the HomeKit AUTH_EXPIRE case (verify in slice). **port** the rest | PRO-664 (web) + PRO-663 (watchdog) + PRO-662 (MQTT/HomeKit flags) | `test_settings_persistence_transaction`, `test_mqtt_connect_policy`, `test_event_system`, `backupBundle.test.js`, `Settings.*.test.jsx` |
-| F25 | CI / quality: ci.yml, check/pr-flash/nightly/beta, clang-tidy, cppcheck, sanitize, extra PIO envs, promotion + stable-versions scripts, flash.sh (67) | `.github/workflows/{ci,check,pr-flash,build-nightly,build-beta,deploy-web}.yml`, `[env:native-sanitize]`, `[env:native-tidy]`, `display-flags-off`, `display-no-*`, `display-{lilygo,amoled,waveshare}`, `scripts/select_tidy_sources.py`, `generate_promotion_pr_body.py` (PRO-644), CAR-341, PRO-608..611 | partial: upstream `.github/workflows/{build,build-nightly,check,pr-flash,ota-testbench}.yml`. No ci.yml / tidy / sanitize / flag-off envs | **port** gates + envs. **rework** workflow files to merge with upstream's (keep `ota-testbench.yml`) | PRO-667 (+ PRO-665 for env cleanup) | CI green on the integration branch; `scripts/test_*.py` |
-| F26 | Docs / AGENTS / plans / specs (26) | `docs/superpowers/*`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `.mailmap` | n/a | **port** AGENTS/CONTRIBUTING (update for NanoPb/EEZ). **drop** stale plans/specs | PRO-665 | doc review |
+| F19 | Beans + Beanconqueror export (68) | `BeanManager.*`, `req:beans:*`, `pages/Beans`, `utils/beanconqueror/`, CAR-371..375, `docs/beanconqueror-export.md` | none: no BeanManager or Beans page in v1.9.0 | **port** | PRO-664 (web) + PRO-660 (WS handlers) | `test_bean_resolution_policy`, `beanManager.test.js`, `Beans.beanconquerorExport.test.jsx`, `ShotHistory.beanconquerorExport.test.jsx` |
+| F20 | Shot history / analyzer / notes / comparison / CSV / shot→profile (90) | PRO-631 notes start target temp, `ShotNotesPersistencePolicy.h`, `ShotIndexMetadataPolicy.h`, `ExtendedRecordingPolicy.h`, `historyExport.js`, `shotFilters.js`, `comparisonShots.js`, `pages/ShotToProfile` | partial: upstream `ShotNotesCard.jsx`, `ShotAnalyzer/` (puck resistance f3892ed2 #905), Visualizer upload. No CSV/filters/comparison/ShotToProfile | **rework**: merge onto upstream analyzer (take upstream puck resistance), and port notes/metadata/export/filters/comparison/ShotToProfile | PRO-664 (web) + PRO-660 (plugin) | `test_shot_index_metadata`, `test_extended_recording_policy`, `ShotNotesCard.test.jsx`, `historyExport.test.js`, `shotFilters.test.js`, `detectPhases.test.js` |
+| F21 | Profiles: validation, schema, keyframes, import/export (85) | `test_profile_validation`, `test_strict_validation`, `StrictValidationPolicy.h`, `ProfileKeyframeChart.jsx`, `keyframeProfileLogic.js`, `schema/profile.json`, CAR-233 profile transfer | partial: upstream `ProfileManager.cpp` + `models/profile.h` validation, startup profile fa0f9c12 (#626) | **rework**: keep upstream startup profile, port strict validation + keyframes + schema extensions | PRO-664 | `test_profile_validation`, `test_strict_validation`, `keyframeProfileLogic.test.js` |
+| F22 | Dashboard / Home (PRO-623..640) (89) | `pages/Home/DashboardMerged.jsx`, `dashboardLogic.js`, `dashboardManager` | upstream rewrote Home (`pages/Home/cards/*`, `DashboardSidebar.jsx`, `FlushButton.jsx`) + `pages/DashboardSettings` | **port Carlos's Home UI** (decided, PRO-664). Upstream Home is not adopted as the UI. Upstream Home capabilities get wired into Carlos's Home: flush button behavior c9c84ba3 (#720), `wp` water-pumped status 6dff0448 (#931), and any other upstream status fields the slice diff finds | PRO-664 | `DashboardMerged.a11y.test.jsx` + dashboard vitest suites + new tests for flush action and `wp` readout |
+| F23 | Web theme / shell / accents / a11y / connection banner (49) | PRO-643 custom accents, `themeManager.js`, `PageShell.jsx`, `ConnectionBanner.jsx`, `ApiService` reconnect | partial: upstream `web/src/style.css` restyle (June UI). No accents manager or ConnectionBanner | **port** | PRO-664 | `accentContrast.test.jsx`, `PageShell.accentBadge.test.jsx`, `ConnectionBanner.test.jsx`, `ApiService.reconnect.test.js` |
+| F24 | Settings, backup/restore, Google Drive, WiFi/mDNS, MQTT/HomeKit flags, EventIds, settings transactions (50) | `backupBundle.js`, `GoogleDriveBackupCard.jsx`, `SettingsPersistenceTransaction.h`, `MdnsNamePolicy.h`, `MqttConnectPolicy.h`, `EventIds.h`, `config/features.h`, PRO-365 STA recovery (#355) | partial: upstream Settings split into `tabs/*Tab.jsx`, `WifiStaWatchdogPlugin`, `NetworkWatchdogPlugin`, `mDNSPlugin` | **rework**: map Carlos settings into upstream tabs. **superseded** for STA recovery if `WifiStaWatchdogPlugin` covers the HomeKit AUTH_EXPIRE case (verify in slice). **port** the rest | PRO-664 (web) + PRO-663 (watchdog) + PRO-662 (MQTT/HomeKit flags) | `test_settings_persistence_transaction`, `test_mqtt_connect_policy`, `test_event_system`, `backupBundle.test.js`, `Settings.*.test.jsx` |
+| F25 | CI / quality: ci.yml, check/pr-flash/nightly/beta, clang-tidy, cppcheck, sanitize, extra PIO envs, promotion + stable-versions scripts, flash.sh (72) | `.github/workflows/{ci,check,pr-flash,build-nightly,build-beta,deploy-web}.yml`, `[env:native-sanitize]`, `[env:native-tidy]`, `display-flags-off`, `display-no-*`, `display-{lilygo,amoled,waveshare}`, `scripts/select_tidy_sources.py`, `generate_promotion_pr_body.py` (PRO-644), CAR-341, PRO-608..611 | partial: upstream `.github/workflows/{build,build-nightly,check,pr-flash,ota-testbench}.yml`. No ci.yml / tidy / sanitize / flag-off envs | **port** gates + envs. **rework** workflow files to merge with upstream's (keep `ota-testbench.yml`) | PRO-667 (+ PRO-665 for env cleanup) | CI green on the integration branch; `scripts/test_*.py` |
+| F26 | Docs / AGENTS / plans / specs (27) | `docs/superpowers/*`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `.mailmap` | n/a | **port** AGENTS/CONTRIBUTING (update for NanoPb/EEZ). **drop** stale plans/specs | PRO-665 | doc review |
 | F27 | Web misc, not otherwise clustered (13) | see appendix | per-commit | **port** (triage in the slice) | PRO-664 | vitest suite |
 | F28 | Firmware misc: Controller race/isActiveSafe fixes, rule-of-5, dead code (10) | a83fda2f, cfe1d418, PRO-378, PRO-380, CAR-101 | per-commit. Controller.cpp was heavily rewritten upstream | **rework**: re-check each against upstream Controller | PRO-663 | `test_change_mode_defer_policy`; native-sanitize |
-| F99 | Merge-from-master / sync merges, stray chores (7) | `Merge remote-tracking branch 'origin/master'`, CAR-401, PRO-485 | n/a | **drop** (no content of their own) | none needed | n/a |
+| F99 | Content-free sync merges only (9) | `Merge remote-tracking branch 'origin/master'`, `Merge branch 'master'`, CAR-401 / PRO-635 merge-master PRs | n/a | **drop** (asserted: only merges matching `SYNC_MERGE_RE`). PRO-485 60481366 moved to F24 and 0ad43dbf moved to F25 | none needed | script assert |
+
+### F14 commit audit (explicit preserve/drop)
+
+Behavior diff tip vs v1.9.0 (`git diff v1.9.0 origin/dev-master`):
+- **MAX_SAFE_TEMP location**: v1.9.0 declares it in `peripherals/TemperatureSensor.h`, and the
+  interface there has a virtual dtor + `setup()`. Carlos's tree declares it in
+  `peripherals/Max31855Thermocouple.h`, and `TemperatureSensor` has no dtor/`setup()`. **Take
+  upstream's layout.** Keep the value (170.0) and make sure Carlos includes resolve it.
+- **BoilerFill steam→refill**: v1.9.0 refills when leaving STEAM for any mode except STEAM/STANDBY
+  (water/grind included). That is upstream `64ba0d99` "Trigger steam refill on change to
+  water/grind". Correction to the review: `git merge-base --is-ancestor 64ba0d99 v1.9.0` succeeds
+  and `git tag --contains` lists `v1.9.0`, so it **is in the tag**, not post-tag. The PRO-666
+  post-tag delta is therefore not needed for this behavior. Carlos's tip refills only on
+  STEAM→BREW. **Take upstream.** Keep only Carlos's `EventIds::` constants (F24/PRO-24).
+- **Max31855Thermocouple.cpp / BoilerFill logic**: no Carlos implementation commits exist in range.
+  The only touches are 20794eda (EventIds), ea232239 (#356), e9723b5b (reverted 3.x), and d7dbeb39.
+
+| sha | what | decision |
+|---|---|---|
+| 95a3a82b | LED re-sync to controller after BLE reconnect (PRO-258) | **preserve**: re-apply onto upstream LED fixes 9e9eecb9/6833963d if they don't cover it |
+| 1864c877 | rollover-safe LED loop timing + init sentinel (PRO-41/46) | **preserve** (diff vs upstream LED plugin) |
+| 59981731 | `isActiveSafe()` in LED control | **preserve** (`isActiveSafe` absent in v1.9.0) |
+| b6e0c713 | `isActiveSafe()` in autotune() | **preserve** |
+| 54c42c21 | FINISHED-phase guard before pump methods | **preserve** |
+| eaf66f9e, 1abab54f, 86501408, 39d3ae70, ffbb3372, cfa89384 | CAR-336 `hasPumpTarget` capability gate / mutex / standby pump-target readout | **preserve** (`hasPumpTarget` absent in v1.9.0) |
+| 3a4df82a, a1d7d105 | manual profileId sentinel, revert pump-mode guard (net change) | **preserve** 3a4df82a with F16 ManualProcess. a1d7d105 is a revert pair, so **drop** it |
+| 510b4a20, 426172e5, 2d91e277 | autotune results UI, 60s copy, Back label (PRO-26/457/458) | **preserve** in web, rebased onto upstream SIMC autotune 48802e20 result format |
+| 4e8cb22d | round-AMOLED BrewScreen sub-state layout (CAR-315) | **preserve** with F15 (PRO-663) |
+| b168082d | StatusScreen status_time breadcrumb doc | **drop** (doc-only breadcrumb) |
+| 21ba2a6a | early bulk web revamp (beans + AMOLED styling) | **drop** as a unit. Its content is superseded by the later F19/F23 commits |
 
 ### Cross-cutting rows
 
@@ -112,6 +147,11 @@ edited):
   The 3.x-only items in this group (e9723b5b pioarduino, e6ca71c6 gnu++20, 12cdbc00 NimBLE 2.5,
   866aaaa3) are diff-noise against the rollback and stay **drop** (the tip platformio.ini is 6.12.0 /
   1.4.3 / gnu++17).
+- **Re-audit after reclassification**: I re-ran the `git apply --check` partition on a clean
+  `origin/dev-master` worktree and got the same **11 / 4 / 34** (49 total). The partition is
+  patch-based, so reclassification cannot change it. The new feature mapping of the 49: reverted 11 =
+  F02×6, F10×3, F09×1, F24×1 (fd25daf5 3.x doc); present 4 = F05, F13, F09×2; modified 34 = F02×4 (all drop),
+  and 30 live across F04/F05/F06/F07/F09/F10/F12b/F21/F22/F23/F24/F25. None landed in F03/F14/F99.
 
 ## Seed-list cross-check
 
@@ -120,41 +160,48 @@ edited):
 | NimBLE host PSRAM | 886bbc3e | F10 | port, PRO-662 (verify NimBLE 1.4.x / NanoPb path keeps `MEM_ALLOC_MODE_EXTERNAL`) |
 | BLE scale UAF/teardown | PRO-459, PRO-647 (e946cee4) | F05 | port, PRO-655 |
 | OTA flash eligibility / channels | 95fe4fc4, PRO-394 a13ef966, PRO-400/554–569/599/648 | F06 | rework, PRO-661 |
-| PRO-649 | no commit in range or in any ref (`git log --all --grep PRO-649` empty) | none | gap **G2** |
+| PRO-649 | Done issue ("OTA behavior remains broken after dev-master flash"). Its investigation closed with "no code shipped", so no commit/PR cites it | none | **G2 resolved**: closed without a tagged commit/PR |
 | Local auth + CORS, relay tokens, relay policy | 0f5b48fb, 67541c6f, b068f462 | F07, F07, F08 | port, PRO-660 |
 | mbedTLS PSRAM, diag log queue, DRAM audit | 96e7fdf6, f2a8764c, 8e3b79a2 | F10 | port, PRO-662 |
 | Manual GRIND, active-shot grind, standby post-brew | 9cbe1b22, 9fa9d726, acf03ea3 | F16, F16, F17 | port |
 | Per-profile temp override | PRO-629 → f39cb9db (#626). The subject has no ID | F18 | port, PRO-657 |
 | Shot Notes start temp / accents | PRO-631, PRO-643 | F18 / F22 (keyword spill, see Method 1) | port, PRO-664 |
 | Windows sim | PRO-207 → 4a2380b4 (CAR-399, #191) | F13 | rework, PRO-656 |
-| Max31855, BoilerFill | lib/GaggiMateController | F14 | superseded (both exist in v1.9.0) |
+| Max31855, BoilerFill | lib/GaggiMateController, BoilerFillPlugin | F14 | take upstream (incl. in-tag 64ba0d99). The MAX_SAFE_TEMP header move is noted; see *F14 commit audit* |
 | Infra envs / CI / tidy / cppcheck / scripts | CAR-341, PRO-608..611, PRO-644 | F25 | port, PRO-667 |
 
 ## Gaps and risks
 
-- **G1 Diagnostic log plugin (F11) has no natural slice.** PRO-662 covers only its PSRAM queue.
-  Proposal: add "port DiagnosticLogPlugin + EspLogTee" to PRO-662's scope (added in the Linear
-  comment).
-- **G2 PRO-649** is in the seed list, but no commit references it. It is either unmerged or cited
-  wrongly. Carlos to confirm.
-- **G3 Relay server (F08)**: PRO-660 names relay tokens and relay policy but not the
-  `relay-server/` Node/Cloudflare package or its CI/deploy. I assigned it to PRO-660 and flagged it.
-- **G4 Beans/grinder/manual-mode firmware (F16/F19)** have no upstream counterpart and span
-  PRO-657/660/664. Those slices must agree on the WS handler owner (proposal: PRO-660).
-- **G5 Dependabot config + GitHub Pages deploy (`deploy-web.yml`)** are not named in any slice.
-  I assigned them to PRO-667.
-- **R1 EEZ UI (F15, 156 commits)** is the largest and riskiest row. All LVGL work must be redone.
-- **R2 Dashboard (F22)**: two parallel rewrites. A product decision is needed before PRO-664 starts.
+- **G1 Diagnostic log plugin (F11)**: **resolved**. Owner PRO-662 (approved), covering
+  DiagnosticLogPlugin + EspLogTee + the PSRAM queue.
+- **G2 PRO-649**: **resolved**. It is a real Done issue ("OTA behavior remains broken after
+  dev-master flash"), closed without a tagged commit/PR. Its investigation concluded "no code
+  shipped", so nothing needs porting.
+- **G3 Relay server (F08)**: **resolved**. Owner PRO-660 (approved), including the `relay-server/`
+  Node/Cloudflare package and its CI/deploy.
+- **G4 Beans/grinder/manual-mode firmware (F16/F19)**: **resolved**. WS handler owner PRO-660 (approved).
+- **G5 Dependabot config + GitHub Pages deploy (`deploy-web.yml`)**: **resolved**. Owner PRO-667 (approved).
+- **R1 EEZ UI (F15, 157 commits)** is the largest and riskiest row. All LVGL work must be redone.
+- **R2 Dashboard (F22)**: **resolved**. Decision: port Carlos's Home UI (PRO-664). Upstream Home
+  capabilities (flush button c9c84ba3, `wp` status #931, …) get wired into it.
 - **R3 Test debt (X1)**: upstream has no web unit tests, so every Carlos vitest suite must come
   across or the regressions stay silent.
 
 ## QA self-review
 
-- The coverage assert passed: 1321 mapped = 1321 in `git rev-list --count v1.9.0..origin/dev-master`.
-  The table row counts also sum to 1321.
-- Spot-check: 18 random commits (`random.seed(652)` over the CSV). All 18 mapped to the right
-  feature, e.g. a13ef966 → F06, PRO-266 UDP log tee → F11, CAR-371 grinder → F16, CAR-373 beans → F19,
-  CAR-307 icons → F15, #677 wrangler → F01, PRO-547 dose recorder → F18. Two misroutes I found
-  earlier in QA are fixed in the rules: the memory seeds (96e7fdf6/f2a8764c/8e3b79a2/886bbc3e) had
-  landed in OTA/BLE, and PRO-647 had landed in BLE comms.
+- **Enumerated 1321/1321**: the coverage assert passed, and the table row counts sum to 1321.
+- **Classification verified**. Method: audited `OVERRIDES` + `SEEDS` asserts + F99 sync-only assert
+  + manual random re-audit, reading each subject and (where ambiguous) its `git show --stat`.
+  - Review sample (seed 686, n=25): 4 errors (e73a01e8, 883e4bdf, d90a77ae, 0ad43dbf). All overridden.
+  - Re-audit A (seed 652, n=40): 3 errors (5c0393d3 ApiService reconnect F23→F09, 010a5aa1 embed
+    pipeline F09→F12a, 21d86108 UI mutex F09→F15). All overridden.
+  - Re-audit B (new seed 6520, n=40, run after A's fixes): **2 errors / 40 (5%)**: 6c24a5d1 nightly-CI
+    secrets F07→F25, 2cf2e37a Google Drive backup fixes F25→F24. Both overridden. Correct rows:
+    77446134 0f285189 e6d9e771 1f44d437 11f3d9dd 5553e27e 6e462078 be220260 620f24fa 0af93e25
+    eaf66f9e bc4e5952 e8e3e0f1 2e5c834f 22b3d5a1 cbf7c501 cd48452b af54852e 3a5e735e 152de827
+    a3d007b6 a11f3e01 0f03488b a4102ebd e65699ed c26573e6 cdff24c4 d916f0bf 4e8cb22d 8391aa87
+    99a5ccab af818573 81539f60 bc8f088e a6ba4fc9 4e4d13c9 bf73e575 ac0a6494.
+  - Residual error estimate: ~5% at the edges. Slice owners still read neighbouring features.
+- The F03 (10), F12a (7), F12b (28), F14 (19), and F99 (9) rows were each read commit-by-commit.
+- The memory seeds (96e7fdf6/f2a8764c/8e3b79a2/886bbc3e) and PRO-647 misroutes from the first QA stay fixed.
 - No firmware or web code changes. Only docs plus a read-only generator script.
