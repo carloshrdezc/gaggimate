@@ -56,7 +56,7 @@ d4953b3bc2,2026-08-07,0,F19-beans,subject,,F19-beans:357,#631,PRO-632,fix(web): 
 509dd92f36,2026-08-07,0,F19-beans,subject,F20-shot-history-analyzer,F19-beans:2679 F20-shot-history-analyzer:41,#630,PRO-632,feat(web): export beans and shots as a Beanconqueror backup (PRO-632) (#630)
 fe407e9b6c,2026-08-07,1,F99-misc,sync-merge,,,,PRO-635,Merge pull request #629 from carloshrdezc/carlos/pro-635-merge-master-ancestry
 97afe90228,2026-08-07,1,F22-dashboard-home,subject,,,,PRO-635,chore(release): merge master (2.0.17) into dev-master for tag ancestry (PRO-635)
-794d1adac5,2026-08-07,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:451,#628,PRO-631,feat(web): show brew start target temperature in Shot Notes (PRO-631) (#628)
+794d1adac5,2026-08-07,0,F20-shot-history-analyzer,subject,,F20-shot-history-analyzer:451,#628,PRO-631,feat(web): show brew start target temperature in Shot Notes (PRO-631) (#628)
 980f18a24f,2026-08-07,0,F22-dashboard-home,path-wins,F27-web-misc F09-webui-plugin-core,F22-dashboard-home:535 F27-web-misc:194 F09-webui-plugin-core:28,#627,PRO-630,feat(web): DashboardMerged selected-profile temperature control (PRO-630) (#627)
 f39cb9db02,2026-08-07,0,F18-brew-targets,subject,F24-settings-backup F09-webui-plugin-core F21-profiles,F18-brew-targets:148 F24-settings-backup:78 F09-webui-plugin-core:21 F21-profiles:11,#626,,feat(firmware): device-authoritative per-profile brew temperature override (#626)
 415dbfe1be,2026-08-06,0,F22-dashboard-home,subject,F23-web-theme-shell,F22-dashboard-home:206 F23-web-theme-shell:5,#625,,fix(web): improve dashboard control accessibility (#625)
@@ -175,7 +175,7 @@ e4c4692dcb,2026-07-15,0,F05-ble-scale,subject,F09-webui-plugin-core,F05-ble-scal
 31ec842de3,2026-07-14,0,F05-ble-scale,subject,,F05-ble-scale:63,#510,PRO-510,fix(firmware): guard BLEScalePlugin inline status readers with scaleMutex_ (PRO-510) (#510)
 3d74f204a9,2026-07-14,0,F05-ble-scale,subject,,F05-ble-scale:21,#509,PRO-508,refactor(firmware): downgrade BLEScalePlugin scaleMutex_ from recursive_mutex to mutex (PRO-508) (#509)
 08c5b219d0,2026-07-14,0,F05-ble-scale,subject,,F05-ble-scale:13,#508,PRO-509,fix(firmware): guard BLEScalePlugin::onProcessStart() tare() with scaleMutex_ (PRO-509) (#508)
-73ddeeadd9,2026-07-14,0,F05-ble-scale,path-wins,,F05-ble-scale:6,#507,PRO-506,doc(firmware): rephrase synchronizes-with comment to acquirer perspective (PRO-506) (#507)
+73ddeeadd9,2026-07-14,0,F05-ble-scale,path,,F05-ble-scale:6,#507,PRO-506,doc(firmware): rephrase synchronizes-with comment to acquirer perspective (PRO-506) (#507)
 e71e1e3acb,2026-07-14,0,F05-ble-scale,subject,,F05-ble-scale:39,#506,PRO-459,fix(firmware): guard BLEScalePlugin::update() against concurrent teardown UAF (PRO-459) (#506)
 81e07a2ea5,2026-07-14,0,F10-memory-psram,crosscut-subject,F05-ble-scale,F05-ble-scale:3,#505,PRO-505,doc(firmware): add memory_order_release comment on tearingDown reset (PRO-505) (#505)
 d7dbeb39aa,2026-07-14,0,F05-ble-scale,subject,F09-webui-plugin-core F20-shot-history-analyzer F06-ota F21-profiles F18-brew-targets F24-settings-backup F19-beans F14-hardware,F09-webui-plugin-core:124 F20-shot-history-analyzer:89 F06-ota:44 F05-ble-scale:38 F21-profiles:9 F18-brew-targets:8 F24-settings-backup:7 F19-beans:5 F14-hardware:2,#504,PRO-504,fix(firmware): guard BLEScalePlugin::disconnect() against concurrent cross-task teardown (PRO-504) (#504)
@@ -212,7 +212,7 @@ d19eb63eb2,2026-07-10,0,F20-shot-history-analyzer,subject,,F20-shot-history-anal
 ad92fb7e5a,2026-07-10,0,F26-docs-agents,path,,,#473,,chore(web): document useComputed hook convention for in-component signal reads (#473)
 710c440326,2026-07-10,0,F20-shot-history-analyzer,subject,,F20-shot-history-analyzer:2,#472,PRO-474,chore(web): clarify partial-load banner wording in ComparisonChart (PRO-474) (#472)
 52e869986d,2026-07-10,0,F20-shot-history-analyzer,subject,,F20-shot-history-analyzer:1,#471,,test(web): add content assertion to dedup-at-capacity test in comparisonShots (#471)
-49b2efc17e,2026-07-10,0,F24-settings-backup,path-wins,,F24-settings-backup:223,#470,,refactor(firmware): guard remaining Settings String members against cross-task torn reads (#470)
+49b2efc17e,2026-07-10,0,F24-settings-backup,subject,,F24-settings-backup:223,#470,,refactor(firmware): guard remaining Settings String members against cross-task torn reads (#470)
 190690bd44,2026-07-10,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:12,#469,,docs(firmware): explain OTA settings re-read is Idle-latch-only while resolving (#469)
 ed5a87c4e6,2026-07-09,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:3,#468,,chore(firmware): use PRIu32 instead of %lu for uint32_t in OTA resolve timeout ESP_LOGE (#468)
 3c0634f0d9,2026-07-09,0,F18-brew-targets,path,,F18-brew-targets:3,#467,PRO-446,chore(firmware): document GTE-cumulative-target assumption in GlobalWeightCutoffPolicy.h (PRO-446) (#467)
@@ -270,7 +270,7 @@ f8b347eb2b,2026-07-06,0,F25-ci-quality,subject,,F25-ci-quality:2,#417,,ci: bump 
 ecd53beb84,2026-07-05,0,F18-brew-targets,path-wins,,F18-brew-targets:168,#416,PRO-4,fix(firmware): fall back volumetric source to flow-estimation when BLE scale dies mid-shot (PRO-4) (#416)
 7ce001a1ce,2026-07-05,0,F09-webui-plugin-core,subject,,,#415,PRO-16,test(web): pin audited WebSocket event-handling contract (PRO-16) (#415)
 5c0393d3ec,2026-07-05,0,F09-webui-plugin-core,override,,,#414,PRO-18,fix(web): make ApiService reconnect idempotent + explicit state machine (PRO-18) (#414)
-adb795b9d5,2026-07-05,0,F25-ci-quality,path-wins,F15-eez-lvgl-ui,F25-ci-quality:38 F15-eez-lvgl-ui:14,#413,PRO-12,refactor(firmware): board-specific display driver build filters (PRO-12) (#413)
+adb795b9d5,2026-07-05,0,F25-ci-quality,path,F15-eez-lvgl-ui,F25-ci-quality:38 F15-eez-lvgl-ui:14,#413,PRO-12,refactor(firmware): board-specific display driver build filters (PRO-12) (#413)
 ad25c2c59e,2026-07-05,1,F06-ota,path,F20-shot-history-analyzer F09-webui-plugin-core F23-web-theme-shell F17-standby-steam-flush F21-profiles F25-ci-quality F24-settings-backup F05-ble-scale F19-beans F11-diag-log F14-hardware,F06-ota:1052 F20-shot-history-analyzer:869 F09-webui-plugin-core:691 F23-web-theme-shell:240 F17-standby-steam-flush:224 F21-profiles:163 F25-ci-quality:148 F24-settings-backup:69 F05-ble-scale:39 F19-beans:23 F11-diag-log:12 F14-hardware:2,,,Merge pull request #387 from carloshrdezc/dev-master
 545c785e10,2026-07-03,0,F09-webui-plugin-core,subject,,F09-webui-plugin-core:180,#412,PRO-418,refactor(firmware): pair release/acquire on WebUIPlugin WiFi-lifecycle atomics (PRO-418) (#412)
 437fae596c,2026-07-03,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:34,#411,PRO-416,refactor(web): drop sensitivity:'base' in availableBeans sort for deterministic case/accent ordering (PRO-416) (#411)
@@ -304,7 +304,7 @@ ce7a0ad202,2026-07-02,0,F09-webui-plugin-core,subject,,,#385,PRO-392,docs(api): 
 f28cda82a0,2026-07-02,0,F09-webui-plugin-core,subject,,,#383,PRO-28,docs(api): document full WebSocket message surface + x-since-version + rendered preview link (PRO-28) (#383)
 53eb7a5483,2026-07-02,0,F21-profiles,path,,F21-profiles:2,#382,PRO-383,refactor(web): align stop-condition dropdown z-index with sibling dropdowns (z-50 -> z-[65]) (PRO-383) (#382)
 8c0f0b92ff,2026-07-02,0,F06-ota,subject,,F06-ota:29,#381,,test(ota): add direct parse_component '+'-lead rejection test via seam (#381)
-2aa4ba6781,2026-07-02,0,F22-dashboard-home,subject,,,#380,PRO-384,docs(core): document Plugin()=default is mandatory after declaring copy/move (PRO-384) (#380)
+2aa4ba6781,2026-07-02,0,F28-firmware-misc,override,,,#380,PRO-384,docs(core): document Plugin()=default is mandatory after declaring copy/move (PRO-384) (#380)
 0d8b583e7b,2026-07-02,0,F05-ble-scale,path-wins,,F05-ble-scale:14,#379,PRO-385,docs(ble): document getLastWeight() rate-limit freeze is intentional (PRO-385) (#379)
 01a0a2b8bb,2026-07-02,0,F06-ota,subject,,F06-ota:24,#378,PRO-389,test(ota): correct '+' component comment / cover precheck reachability in semver_extensions test (PRO-389) (#378)
 c03a4e30d9,2026-07-02,0,F05-ble-scale,subject,F25-ci-quality,F25-ci-quality:80 F05-ble-scale:23,#377,PRO-386,test(ble): native coverage for BLEScalePlugin gate-then-cache ordering (PRO-386) (#377)
@@ -366,7 +366,7 @@ da3ecd3020,2026-06-29,0,F25-ci-quality,subject,,F25-ci-quality:570,#323,PRO-332,
 c173afc603,2026-06-29,0,F24-settings-backup,subject,F09-webui-plugin-core F13-simulator,F24-settings-backup:328 F09-webui-plugin-core:42 F13-simulator:6,#322,PRO-333,fix(display): make Controller the single WiFi owner + SoftAP watchdog (PRO-333) (#322)
 18dfb6d3c4,2026-06-29,0,F24-settings-backup,subject,,F24-settings-backup:26,#321,PRO-331,"fix(display): read settings from NVS in setup(), not the global ctor (PRO-331) (#321)"
 12cdbc0015,2026-06-29,0,F02-platform-stack,subject,,,#320,PRO-330,fix(ble): bump NimBLE-Arduino 2.2.3 -> 2.5.0 to fix esp32-s3 BLE-init crash (PRO-330) (#320)
-866aaaa303,2026-06-29,0,F24-settings-backup,subject,,,#319,PRO-330,fix(display): enforce WiFi modem-sleep before BLE init so coexistence can enable (PRO-330) (#319)
+866aaaa303,2026-06-29,0,F04-ble-comms,override,,,#319,PRO-330,fix(display): enforce WiFi modem-sleep before BLE init so coexistence can enable (PRO-330) (#319)
 5d7b05d098,2026-06-29,0,F02-platform-stack,crosscut-subject,F14-hardware,F14-hardware:180,#318,,"fix(display): migrate panel ADC to ESP-IDF 5.x oneshot, fix driver_ng boot abort (#318)"
 2edf199588,2026-06-29,0,F21-profiles,subject,F23-web-theme-shell F20-shot-history-analyzer,F23-web-theme-shell:299 F20-shot-history-analyzer:232 F21-profiles:18,#100,CAR-233,refactor(web/profiles): extract profileTransfer module + shared Dialog (CAR-233) (#100)
 5453c75985,2026-06-29,0,F02-platform-stack,subject,,,#317,PRO-328,docs: reconcile xtensa gcc version to 14.2.0 for pioarduino 55.03.39 (PRO-328) (#317)
@@ -388,10 +388,10 @@ b5e5d20e76,2026-06-28,0,F25-ci-quality,subject,,F25-ci-quality:11,#304,,ci(night
 e95583c712,2026-06-28,1,F99-misc,sync-merge,,,,CAR-401,Merge pull request #301 from carloshrdezc/carlos/CAR-401-merge-master-tags-forward
 e2c17e4b2e,2026-06-28,1,F99-misc,sync-merge,,,,CAR-401,Merge remote-tracking branch 'origin/master' into carlos/CAR-401-merge-master-tags-forward
 d2cbc9dbf2,2026-06-28,0,F09-webui-plugin-core,path,,F09-webui-plugin-core:9,#300,PRO-317,refactor(display): soften SemaphoreGuard invariant comment for bounded waits (PRO-317) (#300)
-06e7f0881f,2026-06-28,0,F22-dashboard-home,subject,,,#299,PRO-318,chore: sync master into dev-master (bring 2.0.14 tags forward) (PRO-318) (#299)
+06e7f0881f,2026-06-28,0,F25-ci-quality,override,,,#299,PRO-318,chore: sync master into dev-master (bring 2.0.14 tags forward) (PRO-318) (#299)
 cd570455f4,2026-06-28,0,F25-ci-quality,subject,,F25-ci-quality:30,#298,PRO-316,ci: gate display-headless-4m firmware build on PRs (PRO-316) (#298)
 052f7c87d6,2026-06-28,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:79,#297,PRO-314,refactor(display): unify ws/relay RAII semaphore guards (PRO-314) (#297)
-91fe8f2092,2026-06-28,0,F22-dashboard-home,subject,,,#296,PRO-315,"chore: sync master into dev-master (bring 2.0.14 tag forward, keep dev-master newer code) (PRO-315) (#296)"
+91fe8f2092,2026-06-28,0,F14-hardware,override,,,#296,PRO-315,"chore: sync master into dev-master (bring 2.0.14 tag forward, keep dev-master newer code) (PRO-315) (#296)"
 2e60dfebf4,2026-06-28,0,F02-platform-stack,subject,,,#295,PRO-312,docs(spike-nimble-2x): correct subscribe-site count 8 -> 7 in findings.md (PRO-312) (#295)
 566f053d88,2026-06-28,0,F09-webui-plugin-core,subject,,F09-webui-plugin-core:115,#294,PRO-313,fix(display): serialize AsyncWebSocket client-list access across tasks (PRO-313) (#294)
 1913ffb741,2026-06-28,0,F02-platform-stack,subject,,,#293,PRO-255,docs(spike): NimBLE-Arduino 1.4.3 -> 2.x migration findings (PRO-255) (#293)
@@ -413,7 +413,7 @@ f45d2a8cff,2026-06-27,0,F04-ble-comms,subject,,F04-ble-comms:8,#279,PRO-303,feat
 e64af5195e,2026-06-27,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:35,#277,,web: add optional id/aria-label passthrough to RatingNumberInput (#277)
 ddc006c582,2026-06-27,0,F23-web-theme-shell,path-wins,,F23-web-theme-shell:14,#276,PRO-296,test(web): tighten Dashboard nav-link href assertion to BASE_URL (PRO-296) (#276)
 c2430ab363,2026-06-27,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:256,#275,PRO-299,fix(web): normalize rating inputs on blur not per-keystroke (PRO-299) (#275)
-f482fca95b,2026-06-27,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:73,#274,PRO-300,refactor(web): dedupe rating star rendering into shared RatingStars + pin getRatingFillPercent rounding (PRO-300) (#274)
+f482fca95b,2026-06-27,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:73,#274,PRO-300,refactor(web): dedupe rating star rendering into shared RatingStars + pin getRatingFillPercent rounding (PRO-300) (#274)
 06d013d884,2026-06-27,0,F16-manual-grind,path-wins,,F16-manual-grind:4,#273,PRO-287,refactor(firmware): mirror BREW/WATER into ChangeModeDeferPolicy static_assert table (PRO-287) (#273)
 72846c9e48,2026-06-27,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:127,#272,PRO-297,feat(web): unify shot ratings on 0-10 one-decimal scale (PRO-297) (#272)
 6275f1dcc6,2026-06-27,0,F09-webui-plugin-core,subject,,F09-webui-plugin-core:6,#271,PRO-286,refactor(webui): static_assert(MODE_STANDBY==0) for pendingModeChangeTarget default (PRO-286) (#271)
@@ -423,7 +423,7 @@ d7d1f940f0,2026-06-26,0,F02-platform-stack,subject,,,#268,PRO-257,docs(PRO-257):
 4a731499cd,2026-06-26,0,F01-deps,override,,,#267,PRO-256,chore(web): bump @preact/signals ^1.3.1 -> ^2.9.2 (PRO-256) (#267)
 04027204f8,2026-06-26,0,F16-manual-grind,path-wins,,F16-manual-grind:2,#266,PRO-284,test(webui): complete non-STANDBY defer-on-settle row with MODE_BREW/MODE_WATER (PRO-284) (#266)
 2e5c834f43,2026-06-26,0,F09-webui-plugin-core,subject,,F09-webui-plugin-core:5,#265,PRO-283,docs(webui): note pendingModeChangeTarget default 0 == MODE_STANDBY invariant (PRO-283) (#265)
-0378b7f825,2026-06-26,0,F06-ota,subject,,,#264,PRO-282,chore(native): document [env:native] lib_ignore = OTA host-safe allow-list (PRO-282) (#264)
+0378b7f825,2026-06-26,0,F25-ci-quality,override,,,#264,PRO-282,chore(native): document [env:native] lib_ignore = OTA host-safe allow-list (PRO-282) (#264)
 8333285dd9,2026-06-26,0,F23-web-theme-shell,subject,,F23-web-theme-shell:67,#263,PRO-231,test(web): add @testing-library/preact Navigation smoke test (PRO-231) (#263)
 3e2d830a04,2026-06-26,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:71,#262,PRO-35,refactor(webui): make relay-task shutdown handshake std::atomic (acquire/release) (PRO-35) (#262)
 cd1a8f92c9,2026-06-26,0,F09-webui-plugin-core,subject,F16-manual-grind,F16-manual-grind:117 F09-webui-plugin-core:10,#261,PRO-267,refactor(webui): extract req:change-mode defer-gate into pure predicate (PRO-267) (#261)
@@ -471,15 +471,15 @@ fea9cd1034,2026-06-22,0,F05-ble-scale,subject,F25-ci-quality,F05-ble-scale:109 F
 144d0dc716,2026-06-22,0,F05-ble-scale,subject,F25-ci-quality,F05-ble-scale:109 F25-ci-quality:59,#219,PRO-235,feat(PRO-235): 5s BLE-scale grace on brew->steam (#219)
 eff137fed8,2026-06-22,0,F23-web-theme-shell,path-wins,,F23-web-theme-shell:105,#218,PRO-234,fix(PRO-234): theme Statistics cards under midnight/espresso/matcha/blueprint (#218)
 fe8f6303f2,2026-06-21,0,F24-settings-backup,path,F21-profiles F22-dashboard-home F06-ota F23-web-theme-shell F25-ci-quality F16-manual-grind,F24-settings-backup:170 F21-profiles:135 F22-dashboard-home:128 F06-ota:107 F23-web-theme-shell:105 F25-ci-quality:39 F16-manual-grind:17,#217,PRO-233,chore(PRO-233): sync master into dev-master (#217)
-a8dc6f9b3d,2026-06-21,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:121,#216,PRO-232,fix(PRO-232): open extended-recording settle window without requiring a live BLE sample (#216)
-07b095f5d5,2026-06-21,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:121,#215,PRO-232,fix(PRO-232): open extended-recording settle window without requiring a live BLE sample (#215)
+a8dc6f9b3d,2026-06-21,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:121,#216,PRO-232,fix(PRO-232): open extended-recording settle window without requiring a live BLE sample (#216)
+07b095f5d5,2026-06-21,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:121,#215,PRO-232,fix(PRO-232): open extended-recording settle window without requiring a live BLE sample (#215)
 01a6d24436,2026-06-21,0,F25-ci-quality,path,,F25-ci-quality:13,#214,PRO-45,"fix(PRO-45): harden remaining shell scripts (make_pcb_preview, flash.sh) (#214)"
 93662f1c2a,2026-06-21,0,F25-ci-quality,subject,F24-settings-backup F21-profiles F22-dashboard-home F23-web-theme-shell F06-ota F16-manual-grind,F24-settings-backup:170 F21-profiles:135 F22-dashboard-home:128 F23-web-theme-shell:105 F06-ota:104 F16-manual-grind:17 F25-ci-quality:11,#213,PRO-229,fix(PRO-229): run web logic tests under vitest and gate them in CI (#213)
 45a958dccb,2026-06-21,0,F25-ci-quality,subject,,F25-ci-quality:11,#211,PRO-228,fix(PRO-228): make format.sh ui/drivers exclusion actually take effect (#211)
 1976b66ddd,2026-06-20,0,F25-ci-quality,subject,,F25-ci-quality:7,#210,PRO-227,fix(PRO-227): exclude beta tag from firmware version + document NIGHTLY_BUILD omission (#210)
 d8e40d390a,2026-06-20,0,F06-ota,subject,F25-ci-quality F09-webui-plugin-core,F25-ci-quality:209 F06-ota:26 F09-webui-plugin-core:11,#209,PRO-227,feat(PRO-227): add Beta OTA channel sourced from master (master-targeted companion to #208) (#209)
 2468518642,2026-06-20,0,F06-ota,subject,F25-ci-quality F09-webui-plugin-core,F25-ci-quality:208 F06-ota:26 F09-webui-plugin-core:11,#208,PRO-227,feat(PRO-227): add Beta OTA channel sourced from master (#208)
-6b676001dc,2026-06-20,0,F15-eez-lvgl-ui,path-wins,F20-shot-history-analyzer,F15-eez-lvgl-ui:38 F20-shot-history-analyzer:16,#207,PRO-223,"chore: sync master into dev-master (bring PRO-223 forward, keep dev-master newer code) (#207)"
+6b676001dc,2026-06-20,0,F15-eez-lvgl-ui,path,F20-shot-history-analyzer,F15-eez-lvgl-ui:38 F20-shot-history-analyzer:16,#207,PRO-223,"chore: sync master into dev-master (bring PRO-223 forward, keep dev-master newer code) (#207)"
 b2d57a737e,2026-06-20,0,F17-standby-steam-flush,subject,F22-dashboard-home F09-webui-plugin-core F24-settings-backup,F17-standby-steam-flush:68 F22-dashboard-home:68 F09-webui-plugin-core:33 F24-settings-backup:20,#206,PRO-222,feat(PRO-222): device-authoritative auto-steam + dose → master (#204 + #205) (#206)
 6a19552769,2026-06-20,0,F17-standby-steam-flush,subject,F22-dashboard-home,F17-standby-steam-flush:68 F22-dashboard-home:68,#205,PRO-226,feat(PRO-226): device-authoritative auto-steam + dose in web UI (#205)
 e0ddc941f7,2026-06-20,0,F09-webui-plugin-core,path-wins,F24-settings-backup,F09-webui-plugin-core:33 F24-settings-backup:20,#204,PRO-225,feat(PRO-225): device-authoritative auto-steam + dose (firmware) (#204)
@@ -513,20 +513,20 @@ fb1e09a6ee,2026-06-17,0,F12a-embed-webui,path-wins,,F12a-embed-webui:31,,PRO-214
 1f44d4374a,2026-06-17,1,F12b-fs-migration-preserve,crosscut-subject,F09-webui-plugin-core F25-ci-quality F06-ota F20-shot-history-analyzer,F09-webui-plugin-core:24 F25-ci-quality:14 F06-ota:10 F20-shot-history-analyzer:10,,PRO-212,Merge pull request #195 from carloshrdezc/pro-212-spiffs-to-littlefs
 b79fa3584e,2026-06-17,0,F12b-fs-migration-preserve,crosscut-subject,F25-ci-quality,F25-ci-quality:14,,PRO-212,ci(fs): copy littlefs.bin (not spiffs.bin) from buildfs output (PRO-212)
 394e7e4d16,2026-06-17,0,F12b-fs-migration-preserve,crosscut-subject,F09-webui-plugin-core F06-ota F20-shot-history-analyzer,F09-webui-plugin-core:24 F06-ota:10 F20-shot-history-analyzer:10,,PRO-212,fix(fs): swap SPIFFS for LittleFS on the web/data partition (PRO-212)
-432ea5ce63,2026-06-17,1,F10-memory-psram,subject,,,,PRO-211,Merge pull request #194 from carloshrdezc/pro-211-embed-webui-headroom
+432ea5ce63,2026-06-17,1,F12a-embed-webui,override,,,,PRO-211,Merge pull request #194 from carloshrdezc/pro-211-embed-webui-headroom
 7ba9c0d8b1,2026-06-16,1,F13-simulator,subject,F25-ci-quality,F25-ci-quality:44 F13-simulator:21,,PRO-206,Merge pull request #192 from carloshrdezc/pro-206-display-sim-ci
-652a5ff23a,2026-06-16,0,F10-memory-psram,subject,,,,PRO-211,docs(embed-webui): measure web-UI footprint + partition headroom (PRO-211)
+652a5ff23a,2026-06-16,0,F12a-embed-webui,override,,,,PRO-211,docs(embed-webui): measure web-UI footprint + partition headroom (PRO-211)
 4eac677cac,2026-06-16,0,F13-simulator,subject,,F13-simulator:21,,PRO-206,fix(sim): link SDL2 via LIBS so display-sim links on Linux/macOS (PRO-206)
 b6e0c95751,2026-06-16,1,F12a-embed-webui,subject,,,,PRO-210,Merge pull request #193 from carloshrdezc/pro-210-embed-webui-spike
 81539f60f2,2026-06-16,0,F12b-fs-migration-preserve,subject,,,,,docs(spike): migration plan + risk assessment for embed-WebUI (PR #764) + SPIFFS->LittleFS
 72627a02bb,2026-06-16,0,F13-simulator,subject,,,,PRO-206,fix(sim): generate version.h in display-sim env (PRO-206)
-fdf6a399a3,2026-06-16,0,F06-ota,subject,,,,PRO-206,fix(sim): generate stable_versions.h in display-sim env so it builds on a clean checkout (PRO-206)
+fdf6a399a3,2026-06-16,0,F13-simulator,override,,,,PRO-206,fix(sim): generate stable_versions.h in display-sim env so it builds on a clean checkout (PRO-206)
 4d32168fff,2026-06-16,0,F25-ci-quality,path-wins,,F25-ci-quality:44,,PRO-206,ci: build display-sim simulator on PRs to dev-master (PRO-206)
 4531ad68fe,2026-06-16,1,F13-simulator,subject,F09-webui-plugin-core F04-ble-comms F10-memory-psram F05-ble-scale F11-diag-log F12b-fs-migration-preserve F06-ota F15-eez-lvgl-ui F18-brew-targets F20-shot-history-analyzer F24-settings-backup F25-ci-quality,F13-simulator:3993 F09-webui-plugin-core:1030 F04-ble-comms:443 F10-memory-psram:60 F05-ble-scale:59 F11-diag-log:43 F12b-fs-migration-preserve:33 F06-ota:30 F15-eez-lvgl-ui:26 F18-brew-targets:3 F20-shot-history-analyzer:3 F24-settings-backup:2 F25-ci-quality:2,,,Merge pull request #191 from carloshrdezc/car-windows-sim-port
 4a2380b4ce,2026-06-16,0,F13-simulator,subject,F09-webui-plugin-core F04-ble-comms F10-memory-psram F05-ble-scale F11-diag-log F12b-fs-migration-preserve F06-ota F15-eez-lvgl-ui F18-brew-targets F20-shot-history-analyzer F24-settings-backup F25-ci-quality,F13-simulator:3993 F09-webui-plugin-core:1030 F04-ble-comms:443 F10-memory-psram:60 F05-ble-scale:59 F11-diag-log:43 F12b-fs-migration-preserve:33 F06-ota:30 F15-eez-lvgl-ui:26 F18-brew-targets:3 F20-shot-history-analyzer:3 F24-settings-backup:2 F25-ci-quality:2,,CAR-399,feat(sim): port desktop simulator (display-sim) to Windows/MinGW with WebUI parity (CAR-399)
 17abab78c4,2026-06-16,1,F24-settings-backup,path,,F24-settings-backup:10,,CAR-383,Merge pull request #190 from carloshrdezc/car-383-gate-webui-flag
 cc8fb70df6,2026-06-16,0,F24-settings-backup,path-wins,,F24-settings-backup:10,,,fix(display): gate mDNS HTTP advertisement behind GAGGIMATE_ENABLE_WEBUI
-d4db7d4c6e,2026-06-16,0,F08-relay,subject,,,,,feat(display): gate WebUI / relay-websocket behind GAGGIMATE_ENABLE_WEBUI flag
+d4db7d4c6e,2026-06-16,0,F09-webui-plugin-core,override,,,,,feat(display): gate WebUI / relay-websocket behind GAGGIMATE_ENABLE_WEBUI flag
 1141e728ae,2026-06-16,1,F05-ble-scale,subject,F09-webui-plugin-core,F05-ble-scale:57 F09-webui-plugin-core:12,,CAR-382,Merge pull request #188 from carloshrdezc/car-382-gate-ble-scale-flag
 50ea95f742,2026-06-16,0,F25-ci-quality,subject,,F25-ci-quality:108,#189,CAR-385,ci(build): parallelize firmware release build into a matrix (CAR-385) (#189)
 c90d72a5ac,2026-06-16,0,F25-ci-quality,path,,F25-ci-quality:14,#187,CAR-384,chore(build): pin PlatformIO Core and floating deps for reproducibility (CAR-384) (#187)
@@ -543,7 +543,7 @@ c7c439b8d7,2026-06-15,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:1
 1d2092c84b,2026-06-15,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:44,,CAR-377,fix(CAR-377): defer OTA-start intent onto loop task
 563fa6a4fc,2026-06-15,1,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:96,,CAR-178,Merge pull request #180 from carloshrdezc/car-178-ota-state-race
 49312b440c,2026-06-15,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:22,,,fix(review): re-resolve OTA URL on contended handoff; fix clang-format
-34efbbcf84,2026-06-15,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:12,,CAR-178,"fix(CAR-178): address review — guard drain ordering, surface dropped handoff"
+34efbbcf84,2026-06-15,0,F09-webui-plugin-core,path,,F09-webui-plugin-core:12,,CAR-178,"fix(CAR-178): address review — guard drain ordering, surface dropped handoff"
 2b89ba45bb,2026-06-15,0,F09-webui-plugin-core,path,,F09-webui-plugin-core:72,,CAR-178,fix(CAR-178): defer all GitHubOTA calls onto loop task
 fceaae6afa,2026-06-15,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:175,#179,CAR-259,fix(CAR-259): cooperative relay-task shutdown; stop unsafe vTaskDelete (#179)
 44b6194ce9,2026-06-13,1,F19-beans,path,F16-manual-grind F15-eez-lvgl-ui F18-brew-targets F22-dashboard-home F20-shot-history-analyzer F21-profiles F09-webui-plugin-core F24-settings-backup,F19-beans:958 F16-manual-grind:801 F15-eez-lvgl-ui:539 F18-brew-targets:226 F22-dashboard-home:83 F20-shot-history-analyzer:74 F21-profiles:63 F09-webui-plugin-core:49 F24-settings-backup:31,,,Merge pull request #178 from carloshrdezc/dev-master
@@ -613,7 +613,7 @@ eaf66f9e7d,2026-06-08,0,F14-hardware,subject,,,,CAR-336,fix: gate all pump targe
 39d3ae70e8,2026-06-08,0,F14-hardware,mismatch-override,F09-webui-plugin-core,F09-webui-plugin-core:15,,CAR-336,fix: distinguish unavailable vs zero pump targets in standby (CAR-336)
 ffbb3372ef,2026-06-08,0,F14-hardware,mismatch-override,F22-dashboard-home,F22-dashboard-home:8,,CAR-336,fix: preserve legitimate 0 pump targets in standby dashboard readout (CAR-336)
 cfa8938444,2026-06-08,0,F14-hardware,subject,,,,CAR-336,fix: preview both pump axes in standby; symmetric pt/tf null mapping (CAR-336)
-944b62bc9d,2026-06-08,0,F17-standby-steam-flush,subject,,,,CAR-336,fix: guard standby pressure/flow against -1 hold sentinel (CAR-336)
+944b62bc9d,2026-06-08,0,F14-hardware,override,,,,CAR-336,fix: guard standby pressure/flow against -1 hold sentinel (CAR-336)
 cea278c6b1,2026-06-07,0,F22-dashboard-home,path-wins,F09-webui-plugin-core,F22-dashboard-home:2 F09-webui-plugin-core:1,,CAR-336,fix: standby web UI target temp/pressure/flow track selected profile (CAR-336)
 2ece724a90,2026-06-07,1,F21-profiles,subject,,F21-profiles:70,,CAR-331,Merge pull request #160 from carloshrdezc/car-331-profile-export-id
 e2ca333019,2026-06-07,0,F21-profiles,subject,,F21-profiles:26,,CAR-331,fix(web): track minted ids during import to prevent same-import overwrite (CAR-331)
@@ -640,13 +640,13 @@ e6977f2e18,2026-06-05,0,F15-eez-lvgl-ui,path-wins,,F15-eez-lvgl-ui:16,,,Brew tar
 923df970fa,2026-06-05,0,F15-eez-lvgl-ui,path-wins,,F15-eez-lvgl-ui:10,,,Fix HEATING pill overlapping hero temperature on round brew landing
 9f5b7cd205,2026-06-05,1,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:66,,CAR-321,Merge pull request #156 from carloshrdezc/car-321-status-icons
 36d8e09546,2026-06-05,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:126,,,chore(status-icons): drop dead _sm assets; address Codex review
-e7dee65808,2026-06-05,0,F10-memory-psram,crosscut-subject,F15-eez-lvgl-ui,F15-eez-lvgl-ui:38,,CAR-321,fix(standby): render wifi/bt via upstream TRUE_COLOR_ALPHA assets instead of dead A8 zoom path (CAR-321)
+e7dee65808,2026-06-05,0,F15-eez-lvgl-ui,path-wins,,F15-eez-lvgl-ui:38,,CAR-321,fix(standby): render wifi/bt via upstream TRUE_COLOR_ALPHA assets instead of dead A8 zoom path (CAR-321)
 89b5537183,2026-06-05,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:31,,CAR-321,fix(status-bar): use upstream TRUE_COLOR_ALPHA wifi/bt assets instead of invisible A8 gm_ic_* (CAR-321)
 8748c96c9d,2026-06-04,0,F15-eez-lvgl-ui,path-wins,,F15-eez-lvgl-ui:8,,CAR-321,diag(status-bar): draw WiFi/BT at full native 40px to isolate asset vs size (CAR-321)
-8c5e2b828c,2026-06-04,0,F10-memory-psram,crosscut-subject,F15-eez-lvgl-ui,F15-eez-lvgl-ui:141,,CAR-321,fix(status-bar): native 22px WiFi/BT icons instead of broken zoom path (CAR-321)
+8c5e2b828c,2026-06-04,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:141,,CAR-321,fix(status-bar): native 22px WiFi/BT icons instead of broken zoom path (CAR-321)
 a2f226772d,2026-06-04,0,F15-eez-lvgl-ui,path-wins,,F15-eez-lvgl-ui:22,,CAR-321,fix(status-bar): wrap scaled WiFi/BT icons so flex layout can't clip them (CAR-321)
 52fa211f0e,2026-06-04,1,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:32,,CAR-320,Merge pull request #155 from carloshrdezc/car-320-chip-icon-render-fix
-458fb1da7f,2026-06-04,0,F10-memory-psram,crosscut-subject,F15-eez-lvgl-ui,F15-eez-lvgl-ui:32,,,"fix(chip-bar): render icons via proven ModeScreen recipe (native REAL, no zoom)"
+458fb1da7f,2026-06-04,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:32,,,"fix(chip-bar): render icons via proven ModeScreen recipe (native REAL, no zoom)"
 e8fdd3169e,2026-06-04,1,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:76,,CAR-320,Merge pull request #154 from carloshrdezc/car-320-chip-bar-icons
 d91d869884,2026-06-04,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:67,,CAR-320,refactor(chip-bar): consolidate BrewScreen chips into shared gm_chip_bar() (CAR-320)
 eda5628f99,2026-06-04,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:20,,,fix(chip-bar): render mode-chip icons on all shared screens (Steam/Water/Standby)
@@ -779,7 +779,7 @@ ffcafae32f,2026-05-28,0,F15-eez-lvgl-ui,subject,,F15-eez-lvgl-ui:98834,,,perf(fi
 063951eb7e,2026-05-28,0,F27-web-misc,path,,,,,perf(web): code-split route components to shrink initial bundle
 934b34ff57,2026-05-28,1,F05-ble-scale,subject,F25-ci-quality,F25-ci-quality:37 F05-ble-scale:15,,CAR-262,Merge pull request #115 from carloshrdezc/carloshrdezc/car-262-ble-scale-scan-gating
 1ba06edf5e,2026-05-28,0,F05-ble-scale,subject,F25-ci-quality,F25-ci-quality:37 F05-ble-scale:15,,,fix(ble): gate scale scanning by active mode
-267d6ff2bd,2026-05-27,1,F04-ble-comms,subject,,F04-ble-comms:127,,,Merge pull request #114 from carloshrdezc/carloshrdezc/car-fix-ble-encryption-boiler-no-heat
+267d6ff2bd,2026-05-27,1,F04-ble-comms,path,,F04-ble-comms:127,,,Merge pull request #114 from carloshrdezc/carloshrdezc/car-fix-ble-encryption-boiler-no-heat
 e4b0f265aa,2026-05-27,0,F04-ble-comms,subject,,F04-ble-comms:78,,CAR-257,fix(ble): don't initiate SMP / don't disconnect on failed pair — addresses Codex P1 (CAR-257)
 e81cec5afd,2026-05-27,0,F04-ble-comms,subject,,F04-ble-comms:75,,CAR-257,fix(ble): boiler never heats — revert WRITE_ENC gating that silently rejected setpoints (CAR-257)
 f1915497aa,2026-05-27,1,F06-ota,subject,F09-webui-plugin-core,F06-ota:679 F09-webui-plugin-core:109,,CAR-248,Merge pull request #108 from carloshrdezc/car-248-ota-version-selector
@@ -801,7 +801,7 @@ e6ca6960ab,2026-05-27,0,F06-ota,subject,F09-webui-plugin-core,F06-ota:164 F09-we
 990057b07d,2026-05-27,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:6,,,fix(grind): guard change-grind-target against malformed payloads
 1682514bf4,2026-05-27,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:15,,,fix(grind): restore Time/Weight mode toggle in change-grind-target
 c22aa4c805,2026-05-27,0,F09-webui-plugin-core,path-wins,F21-profiles,F09-webui-plugin-core:29 F21-profiles:17,,CAR-252,fix(brew): wire dashboard YIELD slider to active profile target (CAR-252)
-3a5e735e5f,2026-05-27,1,F15-eez-lvgl-ui,subject,,,,CAR-253,Merge pull request #110 from carloshrdezc/car-253-steam-mode-ui-freeze
+3a5e735e5f,2026-05-27,1,F17-standby-steam-flush,subject,,,,CAR-253,Merge pull request #110 from carloshrdezc/car-253-steam-mode-ui-freeze
 40ce2e9542,2026-05-27,0,F17-standby-steam-flush,subject,,,,CAR-253,fix(steam): skip tare + 200ms settle in steam/water modes (CAR-253)
 7cb8cc3f60,2026-05-27,1,F04-ble-comms,path,,F04-ble-comms:54,,CAR-231,Merge pull request #109 from carloshrdezc/carloshrdezc/car-231-ble-mid-session-drops
 22b3d5a1b3,2026-05-27,0,F04-ble-comms,subject,,F04-ble-comms:6,,CAR-231,fix(ble): clear pendingInitialPair after tolerated auth callback (CAR-231)
@@ -812,7 +812,7 @@ c22aa4c805,2026-05-27,0,F09-webui-plugin-core,path-wins,F21-profiles,F09-webui-p
 42d9680b2a,2026-05-26,1,F19-beans,subject,F24-settings-backup F21-profiles,F19-beans:18 F24-settings-backup:8 F21-profiles:6,,CAR-239,Merge pull request #106 from carloshrdezc/carloshrdezc/car-239-fix-bean-rescue-duplication
 c916fb769c,2026-05-26,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:1,,,fix(web): remove duplicate favicon.ico 204 handler shadowing real icon
 ff7d10fa1c,2026-05-26,0,F24-settings-backup,path-wins,,F24-settings-backup:8,,CAR-222,fix(web): persist homekit and clock24hFormat toggles (same hasArg bug as CAR-222)
-78cb5c9978,2026-05-26,0,F09-webui-plugin-core,path-wins,,F09-webui-plugin-core:1,,,fix(web): return 204 for /favicon.ico to silence 501 browser errors
+78cb5c9978,2026-05-26,0,F09-webui-plugin-core,path,,F09-webui-plugin-core:1,,,fix(web): return 204 for /favicon.ico to silence 501 browser errors
 7f99a9936c,2026-05-26,0,F19-beans,subject,F21-profiles,F19-beans:18 F21-profiles:6,,,fix(beans): stop duplicate rescue entries after unsafe-ID migration
 4754637b30,2026-05-26,1,F22-dashboard-home,path-wins,,F22-dashboard-home:12,,CAR-238,Merge pull request #104 from carloshrdezc/carloshrdezc/car-238-mobile-numeric-keyboard-dose-yield
 b7b9191be3,2026-05-26,0,F22-dashboard-home,path-wins,,F22-dashboard-home:2,,,fix(web): normalize all comma decimals in dose/yield input
@@ -836,7 +836,7 @@ b55b269038,2026-05-26,0,F04-ble-comms,subject,,F04-ble-comms:43,,CAR-225,fix(ble
 6e4620786b,2026-05-25,0,F04-ble-comms,subject,,F04-ble-comms:124,,CAR-225,fix(ble): auto-recover from stale/asymmetric BLE bonds so boiler heats (CAR-225)
 8bed724bf3,2026-05-25,1,F24-settings-backup,subject,,F24-settings-backup:7,,CAR-222,Merge pull request #96 from carloshrdezc/carloshrdezc/car-222-settings-toggles-persist
 2af24a3486,2026-05-25,0,F24-settings-backup,path,,F24-settings-backup:7,,CAR-222,fix(web): persist Auto Adjust and momentary switch toggles (CAR-222)
-f602897944,2026-05-21,1,F21-profiles,subject,F24-settings-backup F18-brew-targets,F21-profiles:93 F24-settings-backup:39 F18-brew-targets:21,,CAR-97,Merge pull request #95 from carloshrdezc/carloshrdezc/car-97-f-04-parseprofile-returns-true-on-garbage-json
+f602897944,2026-05-21,1,F21-profiles,path,F24-settings-backup F18-brew-targets,F21-profiles:93 F24-settings-backup:39 F18-brew-targets:21,,CAR-97,Merge pull request #95 from carloshrdezc/carloshrdezc/car-97-f-04-parseprofile-returns-true-on-garbage-json
 5abdcc4e43,2026-05-21,0,F21-profiles,subject,F24-settings-backup F18-brew-targets,F21-profiles:93 F24-settings-backup:39 F18-brew-targets:21,,,fix(profile): harden profile validation and settings ids
 f3b3be73ce,2026-05-21,1,F04-ble-comms,subject,F14-hardware F06-ota F09-webui-plugin-core,F04-ble-comms:223 F14-hardware:14 F06-ota:3 F09-webui-plugin-core:1,,CAR-94,Merge pull request #94 from carloshrdezc/carloshrdezc/car-94-f-01-unauthenticated-remote-ble-flash-format-on-controller
 32e05c7f0b,2026-05-21,0,F06-ota,path-wins,,F06-ota:2,,,fix(ble): keep OTA write response support
@@ -876,7 +876,7 @@ b697593998,2026-05-19,0,F25-ci-quality,subject,,F25-ci-quality:138,,,fix(ci): re
 175ac7dc85,2026-05-19,1,F21-profiles,path,,F21-profiles:8,,CAR-131,Merge pull request #80 from carloshrdezc/carloshrdezc/car-131-numeric-onchange-parsefloat
 55c824c6b5,2026-05-19,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:205,,,fix(web): make IndexedDBService resilient to closed connections and surface quota errors
 93cb2e9556,2026-05-19,0,F21-profiles,subject,,F21-profiles:8,,,fix(web): cast numeric input values with parseFloat in profile forms
-4fb8e7c3db,2026-05-19,1,F21-profiles,subject,,F21-profiles:139,,CAR-129,Merge pull request #79 from carloshrdezc/carloshrdezc/car-129-profileedit-error-handling
+4fb8e7c3db,2026-05-19,1,F21-profiles,path,,F21-profiles:139,,CAR-129,Merge pull request #79 from carloshrdezc/carloshrdezc/car-129-profileedit-error-handling
 860f4a1372,2026-05-19,0,F21-profiles,path-wins,,F21-profiles:139,,,fix(web): handle WebSocket errors in ProfileEdit/ProfileList - prevent stuck spinner
 608b553b48,2026-05-19,1,F25-ci-quality,subject,,,,CAR-158,Merge pull request #78 from carloshrdezc/carloshrdezc/car-158-agents-md-linear-workflow
 adee3e3a6a,2026-05-19,0,F25-ci-quality,subject,,,,,docs(agents): document Linear workflow and dev-master PR base in repo AGENTS.md
@@ -889,7 +889,7 @@ fc18e4c4c7,2026-05-18,0,F06-ota,subject,,F06-ota:4,,,fix(ota): only strip leadin
 d4387abd48,2026-05-18,1,F25-ci-quality,subject,,F25-ci-quality:3,,CAR-43,Merge pull request #73 from carloshrdezc/carloshrdezc/car-43-fix-nightly-build-failing-on-fork-due-to-missing-upload
 6c24a5d17e,2026-05-18,0,F25-ci-quality,override,,F25-ci-quality:3,,,fix(ci): allow nightly build to continue when upload server secrets are missing
 11f3d9dd23,2026-05-18,1,F25-ci-quality,subject,,F25-ci-quality:5,,CAR-42,Merge pull request #72 from carloshrdezc/carloshrdezc/car-42-fix-nightly-release-name-to-include-version-from-git
-4e7847d5a5,2026-05-18,0,F25-ci-quality,path-wins,,F25-ci-quality:5,,,fix(ci): include version string in nightly release name
+4e7847d5a5,2026-05-18,0,F25-ci-quality,subject,,F25-ci-quality:5,,,fix(ci): include version string in nightly release name
 9549a75661,2026-05-18,1,F19-beans,subject,F20-shot-history-analyzer,F20-shot-history-analyzer:43 F19-beans:31,,CAR-41,Merge pull request #71 from carloshrdezc/carloshrdezc/car-41-shot-history-shows-archived-beans-next-to-profile-name-in
 31a07f6724,2026-05-18,0,F19-beans,subject,F20-shot-history-analyzer,F19-beans:31 F20-shot-history-analyzer:13,,,fix(web): use bean ID for archived status lookup in shot history
 9c4cef36ae,2026-05-18,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:38,,,fix(web): label archived beans in shot history display
@@ -898,7 +898,7 @@ a34ac31c5f,2026-05-18,1,F26-docs-agents,path,,,,,Merge pull request #70 from car
 bb55aa8802,2026-05-18,0,F25-ci-quality,subject,,,,,docs: add CLAUDE.md with Linear issue tracking workflow
 142be82434,2026-05-17,1,F19-beans,subject,F05-ble-scale,F19-beans:136 F05-ble-scale:3,,,Merge pull request #69 from carloshrdezc/feature/beanconqueror-integration
 33702a78d8,2026-05-17,0,F19-beans,path,,F19-beans:7,,,fix: correct CoffeeSensor UUIDs and brew:end/clear event names
-7fff80318d,2026-05-17,0,F19-beans,path-wins,,F19-beans:6,,,fix: use setDeviceName instead of re-calling init() for ESPROFILE GAP name
+7fff80318d,2026-05-17,0,F19-beans,path,,F19-beans:6,,,fix: use setDeviceName instead of re-calling init() for ESPROFILE GAP name
 027171b3d4,2026-05-17,0,F19-beans,subject,,F19-beans:47,,,feat: switch BeanconquerorPlugin to ESPROFILE (CoffeeSensor) protocol
 64b7512a67,2026-05-17,0,F19-beans,subject,,F19-beans:8,,,fix: add null guards in BeanconquerorPlugin initBLEServer
 a2a6adf40d,2026-05-17,0,F19-beans,subject,,,,,feat: register BeanconquerorPlugin in Controller
@@ -909,7 +909,7 @@ be22026076,2026-05-17,0,F19-beans,subject,,F19-beans:102,,,feat: implement Beanc
 f46c5a464b,2026-05-17,0,F19-beans,subject,,,,,docs: add Beanconqueror integration design spec
 0a116d00bb,2026-05-17,1,F20-shot-history-analyzer,path-wins,F23-web-theme-shell F21-profiles,F20-shot-history-analyzer:454 F23-web-theme-shell:5 F21-profiles:2,,,Merge pull request #62 from carloshrdezc/fix-yield-setter
 fc139c3308,2026-05-17,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:13,,,fix: require 2-sample minimum gap for boundaries (click and drag)
-092c4f2151,2026-05-17,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:14,,,fix: enforce 1-sample gap between markers during drag
+092c4f2151,2026-05-17,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:14,,,fix: enforce 1-sample gap between markers during drag
 36d6fe826f,2026-05-17,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:21,,,fix: preserve segment edits correctly when boundary is dragged
 b5fb464a38,2026-05-17,0,F20-shot-history-analyzer,path-wins,F23-web-theme-shell,F20-shot-history-analyzer:47 F23-web-theme-shell:5,,,fix: address code-review issues in ShotToProfile (post-merge)
 31952bd942,2026-05-17,1,F21-profiles,subject,F20-shot-history-analyzer,F21-profiles:1189 F20-shot-history-analyzer:4,,,merge: resolve conflicts with master (PR #63 keyframe editor)
@@ -960,7 +960,7 @@ d17702134e,2026-05-15,0,F21-profiles,subject,,,,,docs: plan interactive profile 
 2d92aaee76,2026-05-15,0,F21-profiles,subject,,,,,docs: design interactive profile keyframes
 5685668c7e,2026-05-15,0,F20-shot-history-analyzer,subject,,,,,feat: register /shots/:id/to-profile route
 5ef58df18d,2026-05-15,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:15,,,feat: add Save as Profile button to manual shots in HistoryCard
-089e9b235e,2026-05-15,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:13,,,"fix: abort in-flight fetch on unmount, add bounds check in boundariesToSegments"
+089e9b235e,2026-05-15,0,F20-shot-history-analyzer,path,,F20-shot-history-analyzer:13,,,"fix: abort in-flight fetch on unmount, add bounds check in boundariesToSegments"
 8f636dd3fe,2026-05-15,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:181,,,feat: add ShotToProfile page with phase segmentation UI
 df13efb4cd,2026-05-15,0,F10-memory-psram,crosscut-subject,F20-shot-history-analyzer,F20-shot-history-analyzer:53,,,fix: prevent event listener leak and stale closure in BoundaryChart
 2fe2228373,2026-05-15,0,F20-shot-history-analyzer,path-wins,,F20-shot-history-analyzer:152,,,feat: add BoundaryChart with draggable phase boundary markers
@@ -1038,7 +1038,7 @@ ab0ead2f41,2026-05-10,1,F09-webui-plugin-core,path-wins,F20-shot-history-analyze
 b7a54dcacd,2026-05-10,0,F09-webui-plugin-core,path-wins,F20-shot-history-analyzer,F09-webui-plugin-core:13 F20-shot-history-analyzer:3,,,fix: address second-pass review — hasNotes regression and relay task OOM guard
 0f67772d62,2026-05-10,0,F08-relay,mismatch-override,F20-shot-history-analyzer F22-dashboard-home F23-web-theme-shell F09-webui-plugin-core F15-eez-lvgl-ui,F20-shot-history-analyzer:33 F22-dashboard-home:9 F23-web-theme-shell:9 F09-webui-plugin-core:8 F15-eez-lvgl-ui:4,,,"fix: address PR review — relay task teardown race, volatile flags, notes stat, style dedup"
 8406cf5947,2026-05-10,0,F23-web-theme-shell,path-wins,F22-dashboard-home,F23-web-theme-shell:11 F22-dashboard-home:10,,,fix(web): change auto steam button highlight from blue to red
-4e94f1b551,2026-05-10,0,F15-eez-lvgl-ui,subject,F09-webui-plugin-core F20-shot-history-analyzer,F09-webui-plugin-core:45 F20-shot-history-analyzer:18 F15-eez-lvgl-ui:8,,,"fix: resolve WebUI freeze, autosteam override, steam ring, and shot history bean capture"
+4e94f1b551,2026-05-10,0,F09-webui-plugin-core,path-wins,F20-shot-history-analyzer F15-eez-lvgl-ui,F09-webui-plugin-core:45 F20-shot-history-analyzer:18 F15-eez-lvgl-ui:8,,,"fix: resolve WebUI freeze, autosteam override, steam ring, and shot history bean capture"
 50067d5569,2026-05-10,1,F24-settings-backup,subject,,F24-settings-backup:245,,,Merge pull request #40 from carloshrdezc/feat/gdrive-backup-improvements
 440ea0c8fd,2026-05-10,0,F24-settings-backup,path-wins,,F24-settings-backup:245,,,feat(backup): improve Google Drive backup UX and fix device shot history
 e55d0b6e18,2026-05-09,1,F09-webui-plugin-core,path,F08-relay F24-settings-backup F25-ci-quality F23-web-theme-shell,F09-webui-plugin-core:391 F08-relay:176 F24-settings-backup:117 F25-ci-quality:57 F23-web-theme-shell:3,,,Merge pull request #39 from carloshrdezc/feat/remote-access
@@ -1198,7 +1198,7 @@ c0bf0320f8,2026-04-19,1,F21-profiles,subject,F22-dashboard-home,F22-dashboard-ho
 72fb9c3e36,2026-04-19,0,F21-profiles,subject,F22-dashboard-home,F21-profiles:149 F22-dashboard-home:132,,,Fix brew profile chart regressions
 0028091f68,2026-04-19,0,F21-profiles,path,,F21-profiles:5,,,fix: address remaining review items
 b192e9121e,2026-04-19,0,F22-dashboard-home,path-wins,F21-profiles,F22-dashboard-home:11 F21-profiles:6,,,"fix: restore QuickStatusStrip, add null guard in ExtendedProfileChart, add error logging in useProfileData"
-92bc7bec63,2026-04-19,0,F21-profiles,path-wins,,F21-profiles:1,,,fix: set maintainAspectRatio:false to let chart fill container
+92bc7bec63,2026-04-19,0,F21-profiles,path,,F21-profiles:1,,,fix: set maintainAspectRatio:false to let chart fill container
 25f34d0b16,2026-04-19,0,F22-dashboard-home,path,,F22-dashboard-home:4,,,feat: increase chart size to max-h-72 sm:max-h-96
 f7fda2c785,2026-04-19,0,F22-dashboard-home,path,,F22-dashboard-home:17,,,feat: remove QuickStatusStrip and enlarge chart to max-h-56 sm:max-h-64
 6ccfa96302,2026-04-19,0,F22-dashboard-home,path-wins,,F22-dashboard-home:6,,,fix: pass null processInfo to chart in idle state so full profile renders
@@ -1276,7 +1276,7 @@ d4ddd6b17b,2026-04-15,0,F12b-fs-migration-preserve,subject,,F12b-fs-migration-pr
 2256fe28c3,2026-04-15,0,F06-ota,path-wins,,F06-ota:4,,,fix: restore delay(2) in main loop to prevent task watchdog starvation
 d04bb01115,2026-04-14,0,F22-dashboard-home,subject,F23-web-theme-shell,F22-dashboard-home:13 F23-web-theme-shell:7,,,fix: improve header stat pills styling and text overflow handling
 243b75dbbc,2026-04-14,0,F22-dashboard-home,path,F21-profiles F19-beans F16-manual-grind F20-shot-history-analyzer F18-brew-targets F23-web-theme-shell,F22-dashboard-home:411 F21-profiles:130 F19-beans:109 F16-manual-grind:85 F20-shot-history-analyzer:57 F18-brew-targets:40 F23-web-theme-shell:5,,,refactor: extract UI components and improve statistics display
-6aac05afcb,2026-04-14,0,F22-dashboard-home,subject,F23-web-theme-shell F20-shot-history-analyzer,F22-dashboard-home:1056 F23-web-theme-shell:100 F20-shot-history-analyzer:27,,,fix: correct 5 bugs in web UI found during code review
+6aac05afcb,2026-04-14,0,F22-dashboard-home,path,F23-web-theme-shell F20-shot-history-analyzer,F22-dashboard-home:1056 F23-web-theme-shell:100 F20-shot-history-analyzer:27,,,fix: correct 5 bugs in web UI found during code review
 a2a6b1961a,2026-04-12,0,F05-ble-scale,subject,F06-ota F14-hardware F09-webui-plugin-core,F06-ota:589 F05-ble-scale:134 F14-hardware:4 F09-webui-plugin-core:2,,,Fix firmware concurrency and improve OTA and scale UI
 43779895a4,2026-04-12,1,F99-misc,sync-merge,,,,,Merge branch 'master' into ui-web
 8538ab9fd5,2026-04-12,1,F20-shot-history-analyzer,path,F15-eez-lvgl-ui F09-webui-plugin-core F18-brew-targets F14-hardware,F20-shot-history-analyzer:669 F15-eez-lvgl-ui:113 F09-webui-plugin-core:54 F18-brew-targets:5 F14-hardware:2,,,Merge branch 'fix/code-review-issues'
@@ -1294,7 +1294,7 @@ cfe1d418e0,2026-04-04,0,F28-firmware-misc,path,,,,,fix: use isActiveSafe() in ha
 54c42c2140,2026-04-04,0,F14-hardware,subject,,,,,fix: restore defensive check for ProcessPhase::FINISHED before accessing pump methods
 21d86108ff,2026-04-04,0,F15-eez-lvgl-ui,override,F09-webui-plugin-core,F09-webui-plugin-core:9 F15-eez-lvgl-ui:2,,,Mutex timeout strategy is now consistent across all methods using UI_MUTEX_TIMEOUT_MS
 308133fc4c,2026-04-04,0,F15-eez-lvgl-ui,path,,F15-eez-lvgl-ui:14,,,Fixed mutex timeout issue in Controller.cpp
-69c848a0d7,2026-04-04,0,F26-docs-agents,subject,,,,,docs: Add deprecation warning to Controller::getProcess()
+69c848a0d7,2026-04-04,0,F28-firmware-misc,override,,,,,docs: Add deprecation warning to Controller::getProcess()
 ea9ba45fde,2026-04-04,0,F15-eez-lvgl-ui,path,F09-webui-plugin-core F20-shot-history-analyzer,F15-eez-lvgl-ui:95 F09-webui-plugin-core:49 F20-shot-history-analyzer:3,,,fix: Complete concurrency fixes and resolve all review findings
 ac1ac93cad,2026-04-04,0,F20-shot-history-analyzer,subject,,F20-shot-history-analyzer:9,,,fix: Resolve compile error in ShotHistoryPlugin::startRecording
 494da6cfc9,2026-04-04,0,F20-shot-history-analyzer,subject,,F20-shot-history-analyzer:36,,,fix: Resolve critical concurrency issues in Controller and ShotHistoryPlugin

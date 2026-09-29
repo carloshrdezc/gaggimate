@@ -31,7 +31,7 @@ RULES = [
     ("F10-memory-psram", r"psram|mbedtls|internal.dram|heap.?diag|pro-56[678]\b", None),
     # PRO-245..259 is NOT a spike range (review #686 F1): only nanopb subjects/paths land here.
     ("F03-nanopb-spike", r"nanopb", r"^(lib/NanoPbSpike|docs/spike-nanopb)"),
-    ("F05-ble-scale", r"scale|blescale|pro-459|pro-647", r"BLEScale"),
+    ("F05-ble-scale", r"scaled?|blescale|pro-459|pro-647", r"BLEScale"),
     ("F04-ble-comms", r"nimblecomm|\bble\b.*(controller|bond|encrypt|write_enc|pair|reconnect|mtu)|"
      r"write_enc|bond|controller (link|connection)|\(ble\)", r"^(lib/NimBLEComm|lib/GaggiMateController/src/.*Comm|docs/ble-pairing)"),
     ("F06-ota", r"\bota\b|firmware update|update check|stable.versions|installedchannel|semver|"
@@ -39,11 +39,11 @@ RULES = [
     ("F07-webui-security", r"local.?auth|cors|relay token|path.traversal|secret|mask|security|"
      r"\bauth\b|pro-3[0-9]{2}.*auth", r"(LocalAuthPolicy|PathTraversalPolicy)"),
     ("F08-relay", r"relay|wrangler|cloudflare", r"^(relay-server/|src/display/plugins/Relay|web/src/.*[Rr]elay)"),
-    ("F09-webui-plugin-core", r"websocket|\bws\b|webuiplugin|reassembl|broadcast|lifecycle.?defer|\(webui\)|\(api\)|\(ws\)",
+    ("F09-webui-plugin-core", r"websocket|\bws\b|webuiplugin|reassembl[a-z]*|broadcast|lifecycle.?defer|\(webui\)|\(api\)|\(ws\)",
      r"(WebUIPlugin|WsReassembly|WsBroadcast|WebUiLifecycle|docs/websocket-api|check_ws_api_spec)"),
     ("F10-memory-psram", r"psram|heap|dram|mbedtls|memory|oom|heapdiag|pro-566|leak",
      r"(GmHeapDiag|MbedtlsPsram|PsramAllocator|pro-566)"),
-    ("F11-diag-log", r"diag|log tee|udp log|esp_log|logging|\blog\b", r"(DiagnosticLog|EspLogTee|DiagLog)"),
+    ("F11-diag-log", r"diag(nostics?)?|log tee|udp log|esp_log|logging|\blog\b", r"(DiagnosticLog|EspLogTee|DiagLog)"),
     # F12a = upstream-equivalent embed pipeline (superseded by 3bc04041);
     # F12b = Carlos-only FS migration / user-data preservation / CI+sim parity (port, PRO-659).
     ("F12b-fs-migration-preserve", r"littlefs|spiffs|filesystem|\(fs\)|\(migration\)|docs\(migration|partition|"
@@ -57,7 +57,7 @@ RULES = [
      r"quick settings|brightness|nothing|ndot|font|icon|\(display\).*(screen|ui)|standby screen|clock",
      r"^(src/display/ui/|assets/(fonts|gm-icons))"),
     ("F16-manual-grind", r"manual|grind(er)?\b|\(grind\)", r"(ManualProcess|GrindProcess|GrinderManager)"),
-    ("F17-standby-steam-flush", r"standby|auto.?steam|steam|flush|autowakeup|auto.wake|water|preinfus",
+    ("F17-standby-steam-flush", r"standby|auto.?steam|steam|flush|autowakeup|auto.wake|water|preinfus[a-z]*",
      r"(AutoWakeup|SteamProcess|useStandbyOnBrew)"),
     ("F18-brew-targets", r"volumetric|weight cutoff|yield|temp(erature)? override|target temp|dose|"
      r"pro-629|brew temp", r"(Volumetric|GlobalWeightCutoff|BrewTemperatureOverride|BrewProcess)"),
@@ -75,8 +75,8 @@ RULES = [
     ("F24-settings-backup", r"settings|backup|restore|google drive|export|wifi|mdns|homekit|mqtt|"
      r"strict.?valid|event.?id",
      r"(pages/Settings|Settings\.(cpp|h)|StrictValidation|backupBundle|MQTTPlugin|HomekitPlugin|EventIds|mDNS)"),
-    ("F25-ci-quality", r"\bci\b|\(ci\)|workflow|clang-tidy|tidy|cppcheck|sanitiz|lint|prettier|eslint|"
-     r"format|vitest|test|coverage|flash script|gitignore|worktree|promotion|nightly|beta|release|car-341|pro-6(0[89]|1[01]|44)\b",
+    ("F25-ci-quality", r"\bci\b|\(ci\)|workflow|clang-tidy|tidy|cppcheck|sanitiz[a-z]*|lint|prettier|eslint|"
+     r"format(ting|ted)?|vitest|test|coverage|flash script|gitignore|worktree|promotion|nightly|beta|release|car-341|pro-6(0[89]|1[01]|44)\b",
      r"^(\.github/|scripts/|test/|\.clang)"),
     ("F26-docs-agents", r"^docs|readme|agents|claude\.md|contributing|plan|spec|spike|mailmap",
      r"^(docs/|AGENTS\.md|CLAUDE\.md|README|CONTRIBUTING|\.mailmap)"),
@@ -189,7 +189,32 @@ OVERRIDES = {
     "b074a6b5": "F12b-fs-migration-preserve", "b30bc7b7": "F12b-fs-migration-preserve",
     "59a2ae57": "F12b-fs-migration-preserve", "01843ca2": "F12b-fs-migration-preserve",
     "2fb5e5da": "F12b-fs-migration-preserve",
+    # review #686 round 3: squash-style "chore: sync master into dev-master" (not merges, so not F99).
+    "06e7f088": "F25-ci-quality",      # PRO-318: empty diff (tag carry-forward), same class as 9a836031
+    "91fe8f20": "F14-hardware",        # PRO-315: real content = new display-headless-4m board env
+    "2aa4ba67": "F28-firmware-misc",   # PRO-384: Plugin rule-of-5 invariant doc (core, not F22 "declaring")
+    # PRO-211 embed-webui headroom doc + its merge: keep together (were F10 via "headroom" -> `oom`)
+    "652a5ff2": "F12a-embed-webui", "432ea5ce": "F12a-embed-webui",
+    # neutral-only-subject audit (round 3): subject keyword chose the wrong feature on a hub-only diff
+    "69c848a0": "F28-firmware-misc",   # Controller::getProcess() deprecation is code, not docs
+    "944b62bc": "F14-hardware",        # CAR-336 pump-target family (siblings eaf66f9e/86501408 in F14)
+    "d4db7d4c": "F09-webui-plugin-core",  # GAGGIMATE_ENABLE_WEBUI gate: WebUIPlugin, not relay
+    "866aaaa3": "F04-ble-comms",       # WiFi modem-sleep before BLE init = BLE coexistence, not settings
+    "0378b7f8": "F25-ci-quality",      # [env:native] lib_ignore doc = host-test env, not OTA
+    "fdf6a399": "F13-simulator",       # display-sim env build fix, not stable-versions/OTA
 }
+# neutral-only-subject bucket (round 3): commits whose only non-doc paths are NEUTRAL hubs, so the
+# subject alone decided and the mismatch check is blind. Every one is hand-verified here (or above in
+# OVERRIDES); the run fails on an unverified or stale entry.
+NEUTRAL_VERIFIED = set("""
+886bbc3e 5bcd651b d974d618 7ce001a1 5c0393d3 2aa4ba67 f8ecec73 efbf01c6 7df4ccb3 e5445ca6 12cdbc00
+866aaaa3 e6ca71c6 39e73683 0378b7f8 2aaad864 2fb5e5da 72627a02 fdf6a399 d4db7d4c 5553e27e 95e3de58
+2b579771 01c5fd1c 0f14b2aa 0f03488b e9e5b802 e56c7616 270ef3b2 350163af eaf66f9e 1abab54f 86501408
+cfa89384 944b62bc 3e327bb9 e49d7efe 3a5e735e 40ce2e95 669e654a a2a6adf4 5685668c e07fdadc b8d317e6
+b2e3834b 5818f13a b6e0c713 54c42c21 69c848a0
+""".split())
+# Non-doc NEUTRAL paths (hubs + build config); docs/lockfiles alone don't qualify.
+HUB_RE = re.compile(PATH_RULES_C[2][0].pattern + r"|^platformio\.ini$|(^|/)\.gitignore$")
 # Seeds that MUST land where stated, or the script fails (guards against rule regressions).
 SEEDS = dict(OVERRIDES, **{
     "72da9327": "F03-nanopb-spike", "33751012": "F03-nanopb-spike", "5a91167c": "F03-nanopb-spike",
@@ -205,7 +230,59 @@ SECONDARY_SEEDS = {"0f67772d": {"F20-shot-history-analyzer", "F09-webui-plugin-c
 # F99 may hold only content-free sync merges: merge commits whose subject is a plain branch sync.
 SYNC_MERGE_RE = re.compile(r"^Merge (remote-tracking )?branch '(origin/)?(master|dev-master)'|"
                            r"^Merge pull request #\d+ from \S+/\S*merge-master", re.I)
-COMPILED = [(f, re.compile(s, re.I) if s else None, re.compile(p) if p else None) for f, s, p in RULES]
+# Subject keywords are TOKENS, never substrings (review #686 round 3: `ring` hit "declaring",
+# `oom` hit "zoom", `card` hit "discard"). Every top-level alternative of a subject regex is
+# wrapped in token boundaries: it must start at a string edge / non-letter / CamelCase or acronym
+# boundary (`getRingVisual`, `useShotDoseRecorder`, `BLEScale`) and end at one, after an optional
+# inflection (`rings`, `tests`, `logging`). Stems meant as prefixes spell their tail (`[a-z]*`).
+# Case-sensitive classes are scoped with (?-i:...) because subjects are matched with re.I.
+TOK_L = r"(?-i:(?![A-Za-z])|(?<![A-Za-z])|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]))"
+TOK_R = r"(?:s|es|ed|ing|ings|er|ers)?(?-i:(?<![A-Za-z])|(?![a-z]))"
+
+
+def split_alts(rx):
+    """Top-level `|` alternatives of a regex (respects (), [] and escapes)."""
+    alts, depth, cls, cur, i = [], 0, False, "", 0
+    while i < len(rx):
+        ch = rx[i]
+        if ch == "\\":
+            cur += rx[i:i + 2]
+            i += 2
+            continue
+        if cls:
+            cls = ch != "]"
+        elif ch == "[":
+            cls = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "|" and depth == 0:
+            alts.append(cur)
+            cur, i = "", i + 1
+            continue
+        cur += ch
+        i += 1
+    return alts + [cur]
+
+
+def tokenize(rx):
+    return "|".join(f"{TOK_L}(?:{a}){TOK_R}" for a in split_alts(rx))
+
+
+def is_token_span(s, a, b):
+    """Guard: s[a:b] is a whole token (edge/non-letter/CamelCase/acronym boundary both sides)."""
+    def boundary(i):
+        if i <= 0 or i >= len(s) or not (s[i - 1].isalpha() and s[i].isalpha()):
+            return True
+        p, n = s[i - 1], s[i]
+        return (p.islower() and n.isupper()) or (p.isupper() and n.isupper()
+                                                 and i + 1 < len(s) and s[i + 1].islower())
+    return boundary(a) and boundary(b)
+
+
+COMPILED = [(f, re.compile(tokenize(s), re.I) if s else None, re.compile(p) if p else None)
+            for f, s, p in RULES]
 PR_RE = re.compile(r"\(#(\d+)\)")
 ID_RE = re.compile(r"\b((?:PRO|CAR|GM)-\d+)\b", re.I)
 
@@ -350,6 +427,27 @@ def main():
     badsec = {s: sorted(want - set(by8[s]["secondary"])) for s, want in SECONDARY_SEEDS.items()
               if not want <= set(by8[s]["secondary"])}
     assert not badsec, f"secondary seed missing owners: {badsec}"
+    # Token guard: every subject rule hit must be a whole token, never inside a lowercase word.
+    subword = []
+    for c in commits:
+        for f, s, _ in COMPILED:
+            mm = s.search(c["subject"]) if s else None
+            if mm:
+                if not is_token_span(c["subject"], mm.start(), mm.end()):
+                    subword.append((c["sha"][:8], f, mm.group(0)))
+                break
+    assert not subword, f"subject keyword matched inside a word: {subword}"
+    # neutral-only-subject: only non-doc paths are NEUTRAL hubs, so the subject alone decided.
+    neutral_only = [c for c in commits if not c["pf"] and subject_feature(c)
+                    and any(HUB_RE.search(p) for p in c["paths"])]
+    nkeys = {c["sha"][:8] for c in neutral_only}
+    unverified = sorted(nkeys - NEUTRAL_VERIFIED)
+    assert not unverified, f"neutral-only-subject commits not hand-verified: {unverified}"
+    stale_nv = sorted(NEUTRAL_VERIFIED - nkeys)
+    assert not stale_nv, f"NEUTRAL_VERIFIED entries no longer in bucket: {stale_nv}"
+    n_nov = len(nkeys & set(OVERRIDES))
+    print(f"neutral-only-subject: {len(neutral_only)} commits, all hand-verified "
+          f"({n_nov} overridden, {len(neutral_only) - n_nov} subject confirmed); token guard ok")
     n_sec = sum(1 for c in commits if c["secondary"])
     print(f"asserts ok: {len(SEEDS)} seeds, {len(OVERRIDES)} overrides, F99 sync-only, "
           f"unresolved_mismatches == 0")
