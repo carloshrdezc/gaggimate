@@ -4,6 +4,7 @@
 #include "LegacyClientCharPolicy.h"
 #include "NimBLEComm.h"
 #include "cstring"
+#include <atomic>
 
 class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLEClientCallbacks {
   public:
@@ -53,6 +54,16 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     mutable portMUX_TYPE backoffMux = portMUX_INITIALIZER_UNLOCKED;
     LegacyClientBackoff loadBackoff() const;
     void storeBackoff(const LegacyClientBackoff &b);
+    // PRO-669 round 2: set on reject, cleared by onDisconnect()/a compatible
+    // connect. Keeps the link reported not-connected (and the disconnect being
+    // retried) even after the 30 s backoff window expires.
+    std::atomic<bool> rejectedLink{false};
+    // Touched by the display task (reject), loop task (retry), host task (onDisconnect).
+    std::atomic<bool> hasRejectDisconnectAttempt{false};
+    std::atomic<uint32_t> lastRejectDisconnectMs{0};
+    void requestRejectDisconnect(uint32_t nowMs);
+    void clearCharacteristics();
+    bool linkUsable(const NimBLERemoteCharacteristic *chr) const;
     NimBLERemoteCharacteristic *tempControlChar = nullptr;
     NimBLERemoteCharacteristic *pumpControlChar = nullptr;
     NimBLERemoteCharacteristic *valveControlChar = nullptr;

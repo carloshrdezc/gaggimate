@@ -84,6 +84,32 @@ void test_millis_wraparound() {
     TEST_ASSERT_FALSE(b.active);
 }
 
+void test_report_connected() {
+    TEST_ASSERT_TRUE(legacyClientShouldReportConnected(true, false));
+    TEST_ASSERT_FALSE(legacyClientShouldReportConnected(true, true)); // rejected link lingering
+    TEST_ASSERT_FALSE(legacyClientShouldReportConnected(false, false));
+    TEST_ASSERT_FALSE(legacyClientShouldReportConnected(false, true));
+}
+
+void test_may_send_output() {
+    TEST_ASSERT_TRUE(legacyClientMaySendOutput(true, false, true));
+    TEST_ASSERT_FALSE(legacyClientMaySendOutput(true, true, true)); // rejected: fail closed even with a stale char
+    TEST_ASSERT_FALSE(legacyClientMaySendOutput(true, false, false));
+    TEST_ASSERT_FALSE(legacyClientMaySendOutput(false, false, true));
+    TEST_ASSERT_FALSE(legacyClientMaySendOutput(false, true, false));
+}
+
+void test_retry_disconnect() {
+    constexpr uint32_t R = LEGACY_CLIENT_DISCONNECT_RETRY_MS;
+    TEST_ASSERT_TRUE(legacyClientShouldRetryDisconnect(true, true, false, 0, 0)); // never tried
+    TEST_ASSERT_FALSE(legacyClientShouldRetryDisconnect(true, true, true, 5000 + R - 1, 5000)); // bounded cadence
+    TEST_ASSERT_TRUE(legacyClientShouldRetryDisconnect(true, true, true, 5000 + R, 5000));
+    TEST_ASSERT_FALSE(legacyClientShouldRetryDisconnect(false, true, true, 99999, 0)); // link dropped
+    TEST_ASSERT_FALSE(legacyClientShouldRetryDisconnect(true, false, true, 99999, 0)); // compatible
+    TEST_ASSERT_TRUE(legacyClientShouldRetryDisconnect(true, true, true, 0x100u, 0xFFFFFF00u + 0x200u - R)); // wrap
+    TEST_ASSERT_FALSE(legacyClientShouldRetryDisconnect(true, true, true, 0x10u, 0xFFFFFFF0u)); // wrap, 32 ms
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_all_present_is_compatible);
@@ -95,5 +121,8 @@ int main(int, char **) {
     RUN_TEST(test_expiry_clears_address);
     RUN_TEST(test_expiry_via_other_address_advert_clears);
     RUN_TEST(test_millis_wraparound);
+    RUN_TEST(test_report_connected);
+    RUN_TEST(test_may_send_output);
+    RUN_TEST(test_retry_disconnect);
     return UNITY_END();
 }

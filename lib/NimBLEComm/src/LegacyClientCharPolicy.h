@@ -97,3 +97,25 @@ inline bool legacyClientAdvertBlocked(LegacyClientBackoff &b, uint64_t address, 
     }
     return b.address == address && b.addressType == addressType;
 }
+
+// PRO-669 round 2: fail closed while a rejected controller's link lingers
+// (client->disconnect() failed or onDisconnect() never fired).
+
+// The display must never see a rejected link as "connected": that suppresses
+// the waiting-for-controller UI and would let callers treat it as live.
+constexpr bool legacyClientShouldReportConnected(bool linkUp, bool incompatible) { return linkUp && !incompatible; }
+
+// Every write to the controller is gated here: needs a live, accepted link and
+// a cached characteristic (cleared on reject/disconnect).
+constexpr bool legacyClientMaySendOutput(bool linkUp, bool incompatible, bool charPresent) {
+    return legacyClientShouldReportConnected(linkUp, incompatible) && charPresent;
+}
+
+// Re-issue disconnect() for a rejected link that is still up, at most once per
+// this interval. Wrap-safe; hasAttempted=false means "never tried" => retry now.
+constexpr uint32_t LEGACY_CLIENT_DISCONNECT_RETRY_MS = 1000;
+constexpr bool legacyClientShouldRetryDisconnect(bool linkUp, bool incompatible, bool hasAttempted, uint32_t nowMs,
+                                                 uint32_t lastAttemptMs) {
+    return linkUp && incompatible &&
+           (!hasAttempted || static_cast<uint32_t>(nowMs - lastAttemptMs) >= LEGACY_CLIENT_DISCONNECT_RETRY_MS);
+}

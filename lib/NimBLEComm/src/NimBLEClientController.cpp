@@ -22,7 +22,9 @@ void NimBLEClientController::storeBackoff(const LegacyClientBackoff &b) {
     portEXIT_CRITICAL(&backoffMux);
 }
 
-bool NimBLEClientController::isIncompatible() const { return loadBackoff().active; }
+// True while a rejected link is still up (independent of the 30 s window, which
+// may expire before the link drops) or the per-address backoff is open.
+bool NimBLEClientController::isIncompatible() const { return rejectedLink || loadBackoff().active; }
 
 void NimBLEClientController::initClient() {
     ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
@@ -56,7 +58,7 @@ void NimBLEClientController::scan() {
 }
 
 void NimBLEClientController::tare() {
-    if (volumetricTareChar != nullptr && client->isConnected()) {
+    if (linkUsable(volumetricTareChar)) {
         // PRO-244: nanopb wire format (was literal "1"). Tare is an empty
         // message — it encodes to 0 bytes, the write event itself is the signal.
         // (A 1-byte buffer avoids a zero-length array; bytes_written stays 0.)
@@ -144,54 +146,18 @@ bool NimBLEClientController::connectToServer() {
     volumetricTareChar = pRemoteService->getCharacteristic(NimBLEUUID(VOLUMETRIC_TARE_UUID));
     ledControlChar = pRemoteService->getCharacteristic(NimBLEUUID(LED_CONTROL_UUID));
 
-    // Obtain the remote notify characteristic and subscribe to it
-
     errorChar = pRemoteService->getCharacteristic(NimBLEUUID(ERROR_CHAR_UUID));
-    if (errorChar != nullptr && errorChar->canNotify()) {
-        errorChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                             std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
-
     brewBtnChar = pRemoteService->getCharacteristic(NimBLEUUID(BREW_BTN_UUID));
-    if (brewBtnChar != nullptr && brewBtnChar->canNotify()) {
-        brewBtnChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                               std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
-
     steamBtnChar = pRemoteService->getCharacteristic(NimBLEUUID(STEAM_BTN_UUID));
-    if (steamBtnChar != nullptr && steamBtnChar->canNotify()) {
-        steamBtnChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                                std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
-
     autotuneResultChar = pRemoteService->getCharacteristic(NimBLEUUID(AUTOTUNE_RESULT_UUID));
-    if (autotuneResultChar != nullptr && autotuneResultChar->canNotify()) {
-        autotuneResultChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                                      std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
-
     sensorChar = pRemoteService->getCharacteristic(NimBLEUUID(SENSOR_DATA_UUID));
-    if (sensorChar != nullptr && sensorChar->canNotify()) {
-        sensorChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                              std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
-
     volumetricMeasurementChar = pRemoteService->getCharacteristic(NimBLEUUID(VOLUMETRIC_MEASUREMENT_UUID));
-    if (volumetricMeasurementChar != nullptr && volumetricMeasurementChar->canNotify()) {
-        volumetricMeasurementChar->subscribe(true,
-                                             std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                                       std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
-
     tofMeasurementChar = pRemoteService->getCharacteristic(NimBLEUUID(TOF_MEASUREMENT_UUID));
-    if (tofMeasurementChar != nullptr && tofMeasurementChar->canNotify()) {
-        tofMeasurementChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
-                                                      std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    }
 
     // PRO-669: refuse a controller missing characteristics the display cannot
     // run without (rationale in LegacyClientCharPolicy.h) instead of going
-    // false-ready. Optional characteristics stay optional.
+    // false-ready. Optional characteristics stay optional. Checked BEFORE any
+    // subscribe() so a rejected peer never gets notifications wired up.
     LegacyClientChars present;
     present.outputControl = outputControlChar != nullptr;
     present.sensor = sensorChar != nullptr;
@@ -202,9 +168,45 @@ bool NimBLEClientController::connectToServer() {
         ESP_LOGE(LOG_TAG, "Incompatible controller: missing required characteristic(s): %s. Disconnecting; retry in %u ms",
                  missing.c_str(), static_cast<unsigned>(LEGACY_CLIENT_INCOMPATIBLE_BACKOFF_MS));
         storeBackoff(legacyClientBackoffReject(static_cast<uint64_t>(serverAddress), serverAddress.getType(), millis()));
-        client->disconnect(); // onDisconnect() clears chars and restarts the scan
+        // Fail closed first: with the pointers cleared every send path is a
+        // no-op even if the link lingers. loop() retries the disconnect.
+        rejectedLink = true;
+        clearCharacteristics();
+        requestRejectDisconnect(millis());
         return false;
     }
+
+    // Compatible: now subscribe to the notify characteristics.
+    if (errorChar != nullptr && errorChar->canNotify()) {
+        errorChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                             std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    if (brewBtnChar != nullptr && brewBtnChar->canNotify()) {
+        brewBtnChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                               std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    if (steamBtnChar != nullptr && steamBtnChar->canNotify()) {
+        steamBtnChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                                std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    if (autotuneResultChar != nullptr && autotuneResultChar->canNotify()) {
+        autotuneResultChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                                      std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    if (sensorChar != nullptr && sensorChar->canNotify()) {
+        sensorChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                              std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    if (volumetricMeasurementChar != nullptr && volumetricMeasurementChar->canNotify()) {
+        volumetricMeasurementChar->subscribe(true,
+                                             std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                                       std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    if (tofMeasurementChar != nullptr && tofMeasurementChar->canNotify()) {
+        tofMeasurementChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
+                                                      std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
+    rejectedLink = false;
     storeBackoff(LegacyClientBackoff{}); // success clears any stored rejection
 
     delay(500);
@@ -212,8 +214,31 @@ bool NimBLEClientController::connectToServer() {
     return true;
 }
 
+void NimBLEClientController::requestRejectDisconnect(uint32_t nowMs) {
+    lastRejectDisconnectMs = nowMs;
+    hasRejectDisconnectAttempt = true;
+#ifdef GAGGIMATE_FAULT_REJECT_DISCONNECT
+    // HIL fault probe (PRO-669): simulate a failing disconnect. NEVER enable in a shipped build.
+    const int rc = BLE_HS_EUNKNOWN;
+    ESP_LOGW(LOG_TAG, "FAULT PROBE: skipping disconnect() of rejected controller");
+#else
+    const int rc = client->disconnect(); // success => onDisconnect() rescans
+#endif
+    if (rc != 0 && rc != BLE_HS_EALREADY) {
+        ESP_LOGE(LOG_TAG, "Disconnect of rejected controller failed (rc=%d); retrying in %u ms", rc,
+                 static_cast<unsigned>(LEGACY_CLIENT_DISCONNECT_RETRY_MS));
+    }
+}
+
 void NimBLEClientController::loop() {
-    if (!readyForConnection && !client->isConnected() && !scanner->isScanning()) {
+    const bool linkUp = client->isConnected();
+    // rejectedLink (not the address backoff): a compatible controller mid-connect
+    // while another address's backoff is still open must never be disconnected.
+    if (legacyClientShouldRetryDisconnect(linkUp, rejectedLink, hasRejectDisconnectAttempt, millis(), lastRejectDisconnectMs)) {
+        ESP_LOGW(LOG_TAG, "Rejected controller still connected; retrying disconnect");
+        requestRejectDisconnect(millis());
+    }
+    if (!readyForConnection && !linkUp && !scanner->isScanning()) {
         ESP_LOGI("NimBLEClientController", "Scan interrupted. Restarting...");
         scan();
     }
@@ -221,7 +246,7 @@ void NimBLEClientController::loop() {
 
 void NimBLEClientController::sendAdvancedOutputControl(bool valve, float boilerSetpoint, bool pressureTarget, float pressure,
                                                        float flow) {
-    if (client->isConnected() && outputControlChar != nullptr) {
+    if (linkUsable(outputControlChar)) {
         // PRO-242: nanopb wire format. Byte 0 = type discriminator (1=advanced),
         // bytes 1.. = encoded AdvancedOutput.
         gaggimate_AdvancedOutput msg = gaggimate_AdvancedOutput_init_zero;
@@ -243,7 +268,7 @@ void NimBLEClientController::sendAdvancedOutputControl(bool valve, float boilerS
 }
 
 void NimBLEClientController::sendOutputControl(bool valve, float pumpSetpoint, float boilerSetpoint) {
-    if (client->isConnected() && outputControlChar != nullptr) {
+    if (linkUsable(outputControlChar)) {
         // PRO-242: nanopb wire format. Byte 0 = type discriminator (0=simple),
         // bytes 1.. = encoded SimpleOutput.
         gaggimate_SimpleOutput msg = gaggimate_SimpleOutput_init_zero;
@@ -263,7 +288,7 @@ void NimBLEClientController::sendOutputControl(bool valve, float pumpSetpoint, f
 }
 
 void NimBLEClientController::sendPidSettings(const String &pid) {
-    if (pidControlChar != nullptr && client->isConnected()) {
+    if (linkUsable(pidControlChar)) {
         // PRO-244: nanopb wire format. The public signature stays a legacy-shaped
         // comma String ("Kp,Ki,Kd[,Kf]") built by Settings::getPid(); parse it
         // here (same get_token logic the controller used) into the proto fields.
@@ -288,7 +313,7 @@ void NimBLEClientController::sendPidSettings(const String &pid) {
 }
 
 void NimBLEClientController::sendPumpModelCoeffs(const String &pumpModelCoeffs) {
-    if (pumpModelCoeffsChar != nullptr && client->isConnected()) {
+    if (linkUsable(pumpModelCoeffsChar)) {
         // PRO-244: nanopb wire format. The public signature stays a legacy-shaped
         // comma String ("a,b,c,d") built by Settings::getPumpModelCoeffs(); parse
         // it here (same get_token logic the controller used). c and d may be "nan"
@@ -311,7 +336,7 @@ void NimBLEClientController::sendPumpModelCoeffs(const String &pumpModelCoeffs) 
 }
 
 void NimBLEClientController::setPressureScale(float scale) {
-    if (client->isConnected() && pressureScaleChar != nullptr) {
+    if (linkUsable(pressureScaleChar)) {
         // PRO-244: nanopb wire format (was lossy 3-dp float_to_string text).
         gaggimate_PressureScale msg = gaggimate_PressureScale_init_zero;
         msg.scale = scale;
@@ -327,7 +352,7 @@ void NimBLEClientController::setPressureScale(float scale) {
 }
 
 void NimBLEClientController::sendLedControl(uint8_t channel, uint8_t brightness) {
-    if (client->isConnected() && ledControlChar != nullptr) {
+    if (linkUsable(ledControlChar)) {
         // PRO-244: nanopb wire format (was "channel,brightness" comma text).
         gaggimate_LedControl msg = gaggimate_LedControl_init_zero;
         msg.channel = channel;
@@ -344,7 +369,7 @@ void NimBLEClientController::sendLedControl(uint8_t channel, uint8_t brightness)
 }
 
 void NimBLEClientController::sendAltControl(bool pinState) {
-    if (altControlChar != nullptr && client->isConnected()) {
+    if (linkUsable(altControlChar)) {
         // PRO-244: nanopb wire format (was literal "1"/"0").
         gaggimate_AltControl msg = gaggimate_AltControl_init_zero;
         msg.active = pinState;
@@ -360,7 +385,7 @@ void NimBLEClientController::sendAltControl(bool pinState) {
 }
 
 void NimBLEClientController::sendPing() {
-    if (pingChar != nullptr && client->isConnected()) {
+    if (linkUsable(pingChar)) {
         // PRO-244: nanopb wire format (was literal "1"). Ping is an empty
         // message — it encodes to 0 bytes, the write event itself is the signal.
         // (A 1-byte buffer avoids a zero-length array; bytes_written stays 0.)
@@ -376,7 +401,7 @@ void NimBLEClientController::sendPing() {
 }
 
 void NimBLEClientController::sendAutotune(int testTime, int samples) {
-    if (autotuneChar != nullptr && client->isConnected()) {
+    if (linkUsable(autotuneChar)) {
         // PRO-244: nanopb wire format (was "testTime,samples" comma text).
         gaggimate_AutotuneRequest msg = gaggimate_AutotuneRequest_init_zero;
         msg.test_time = testTime;
@@ -394,7 +419,16 @@ void NimBLEClientController::sendAutotune(int testTime, int samples) {
 
 bool NimBLEClientController::isReadyForConnection() const { return readyForConnection; }
 
-bool NimBLEClientController::isConnected() { return client != nullptr && client->isConnected(); }
+// PRO-669: a rejected controller whose link lingers is NOT connected. Keyed on
+// rejectedLink (the CURRENT link), not the per-address backoff, so an open
+// window for controller A never gates an accepted controller B.
+bool NimBLEClientController::isConnected() {
+    return client != nullptr && legacyClientShouldReportConnected(client->isConnected(), rejectedLink);
+}
+
+bool NimBLEClientController::linkUsable(const NimBLERemoteCharacteristic *chr) const {
+    return client != nullptr && legacyClientMaySendOutput(client->isConnected(), rejectedLink, chr != nullptr);
+}
 
 // BLEAdvertisedDeviceCallbacks override
 void NimBLEClientController::onResult(NimBLEAdvertisedDevice *advertisedDevice) {
@@ -428,8 +462,7 @@ void NimBLEClientController::onResult(NimBLEAdvertisedDevice *advertisedDevice) 
     }
 }
 
-void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
-    ESP_LOGI(LOG_TAG, "Disconnected from server, trying to reconnect...");
+void NimBLEClientController::clearCharacteristics() {
     tempControlChar = nullptr;
     pumpControlChar = nullptr;
     valveControlChar = nullptr;
@@ -451,9 +484,17 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     volumetricTareChar = nullptr;
     ledControlChar = nullptr;
     tofMeasurementChar = nullptr;
+}
+
+void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
+    ESP_LOGI(LOG_TAG, "Disconnected from server, trying to reconnect...");
+    const bool wasRejected = rejectedLink; // this link, not another address's backoff
+    rejectedLink = false;
+    hasRejectDisconnectAttempt = false;
+    clearCharacteristics();
     // PRO-669: an incompatible controller was never reported as connected, so
     // don't report its rejection as a disconnect either.
-    if (disconnectCallback != nullptr && !isIncompatible()) {
+    if (disconnectCallback != nullptr && !wasRejected) {
         disconnectCallback();
     }
     scan();
@@ -564,6 +605,8 @@ void NimBLEClientController::loopTask(void *arg) {
     auto *controller = static_cast<NimBLEClientController *>(arg);
     while (true) {
         controller->loop();
-        xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(5000));
+        // 1 s while a rejected link lingers (disconnect retry), else 5 s.
+        const bool retrying = controller->rejectedLink && controller->client->isConnected();
+        xTaskDelayUntil(&lastWake, pdMS_TO_TICKS(retrying ? LEGACY_CLIENT_DISCONNECT_RETRY_MS : 5000));
     }
 }
