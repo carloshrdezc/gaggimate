@@ -1,6 +1,6 @@
 # PRO-655: migrate display↔controller comms from NimBLEComm to upstream NanoPbComm
 
-Status: design + increment 1 (vendor + codec tests). Ref PRO-655, epic PRO-651.
+Status: design + increment 1 (vendor + codec tests) landed; increments 2-6 open. Ref PRO-655, epic PRO-651.
 Base: `feature/upstream-v1.9-integration` (Carlos dev-master + v1.9 docs).
 Upstream reference: tag `v1.9.0` (pristine tree), commits `ccfe792b` (#726, framed
 nanopb protocol) and `94f8a5e` (#730, incompatible-controller OTA recovery).
@@ -226,7 +226,24 @@ reason the new host tests live in their own env rather than in `env:native`
 ## 7. Size
 
 Increment 1 adds no runtime code, so the firmware delta is expected to be zero
-(recorded in the PR). The real deltas land in increments 2 and 3. The 8 MB
+(measured, see the table below).
+
+Increment 1 measured on this host (pio 6.1.19). The numbers are **identical to
+the byte** with and without `lib/NanoPbComm` present (re-built controller and
+headless-8m with the lib moved away). No firmware env references it, so LDF
+does not compile it:
+
+| Env | App / Flash (B) | % of app0 | Static DRAM (B) |
+|---|---|---|---|
+| controller | 681,917 | 20.4% | 32,640 |
+| display | 2,999,297 | 45.8% | 79,428 |
+| display-headless | 2,143,145 | 32.7% | 73,836 |
+| display-headless-8m | 2,132,493 | 63.8% | 73,404 |
+| display-sim (host ELF text/data/bss) | 2,869,063 / 33,672 / 12,748 | n/a | n/a |
+
+(`upstream-v1.9-baseline.md` records *upstream* v1.9.0: headless-8m at 78.6%,
+2,628,425 B. Carlos's branch is currently about 496 KB smaller there. The 78.6%
+figure is the ceiling reference for after increment 3.) The real deltas land in increments 2 and 3. The 8 MB
 headless env is at 78.6% (baseline doc), and upstream's own v1.9.0 build of the
 same lib fits there, so that is not expected to be a blocker. Re-measure then.
 
