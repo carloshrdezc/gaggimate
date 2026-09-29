@@ -67,8 +67,10 @@ step pio-display-buildfs pio run -e display -t buildfs
 ENVS=$(sed -n 's/^\[env:\(.*\)\]$/\1/p' "$TREE/platformio.ini" | grep -vx native)
 : >"$LOG/bins.tsv"
 for env in $ENVS; do
-    step "pio-$env" pio run -e "$env" -j "$JOBS"
     bin="$TREE/.pio/build/$env/firmware.bin"
+    # Drop the previous artifact so a failed rebuild can't report a stale size.
+    rm -f "$bin" "$TREE/.pio/build/$env/program"
+    step "pio-$env" pio run -e "$env" -j "$JOBS"
     printf '%s\t%s\n' "$env" "$([ -f "$bin" ] && stat -c %s "$bin" || echo -)" >>"$LOG/bins.tsv"
 done
 
@@ -80,6 +82,7 @@ step ota-testbench env OTA_LOAD_ITERATIONS=60 bash scripts/ota_testbench.sh
 # The compat retry runs last on purpose: PLATFORMIO_BUILD_FLAGS changes the project checksum, and PlatformIO
 # then wipes every .pio/build/<env> dir (firmware.bin sizes were already captured in bins.tsv above).
 SIM="$TREE/.pio/build/display-sim/program"
+# $SIM was removed before the display-sim build above, so if it exists now it came from this run.
 if [ ! -x "$SIM" ] && [ -n "${SIM_COMPAT_HEADER:-}" ]; then
     step pio-display-sim-compat env PLATFORMIO_BUILD_FLAGS="-include $(realpath "$SIM_COMPAT_HEADER")" \
         pio run -e display-sim -j "$JOBS"
