@@ -343,6 +343,13 @@ jobs:
           ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
           UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
         run: pio test -e native-sanitize
+      # PRO-655: codec tests for the vendored upstream lib/NanoPbComm run in
+      # their own env (gaggimate.proto collides with comms.proto's package).
+      - name: Run sanitized NanoPbComm codec tests
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
+        run: pio test -e native-nanopbcomm-sanitize
 
   analysis:
     name: Static analysis (cppcheck + clang-tidy)
