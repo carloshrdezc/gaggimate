@@ -55,11 +55,45 @@ inline std::string legacyClientMissingRequiredChars(const LegacyClientChars &c) 
 
 inline bool legacyClientIsCompatible(const LegacyClientChars &c) { return legacyClientMissingRequiredChars(c).empty(); }
 
-// After rejecting an incompatible controller, ignore its adverts for this long
+// After rejecting an incompatible controller, ignore ITS adverts for this long
 // so the reject/rescan cycle cannot monopolise the radio (BLE scale scanning).
+// Other controllers are never blocked.
 constexpr uint32_t LEGACY_CLIENT_INCOMPATIBLE_BACKOFF_MS = 30000;
 
-// Wrap-safe: true once backoff has elapsed since the last rejection.
-constexpr bool legacyClientRetryAllowed(bool incompatible, uint32_t nowMs, uint32_t rejectedAtMs) {
-    return !incompatible || static_cast<uint32_t>(nowMs - rejectedAtMs) >= LEGACY_CLIENT_INCOMPATIBLE_BACKOFF_MS;
+// Snapshot of the per-address rejection backoff. Plain value type: the owner
+// publishes/reads it as ONE unit under a lock so address and timestamp can
+// never be observed torn (PRO-669 review).
+struct LegacyClientBackoff {
+    bool active = false;
+    uint64_t address = 0; // BLE address as 48-bit integer
+    uint8_t addressType = 0;
+    uint32_t rejectedAtMs = 0;
+};
+
+inline LegacyClientBackoff legacyClientBackoffReject(uint64_t address, uint8_t addressType, uint32_t nowMs) {
+    LegacyClientBackoff b;
+    b.active = true;
+    b.address = address;
+    b.addressType = addressType;
+    b.rejectedAtMs = nowMs;
+    return b;
+}
+
+// Wrap-safe: true once the window has elapsed since the rejection.
+constexpr bool legacyClientBackoffExpired(const LegacyClientBackoff &b, uint32_t nowMs) {
+    return !b.active || static_cast<uint32_t>(nowMs - b.rejectedAtMs) >= LEGACY_CLIENT_INCOMPATIBLE_BACKOFF_MS;
+}
+
+// Decide an advert. Returns true if it must be skipped (same rejected address,
+// window still open). Clears `b` in place once the window has expired so a
+// stale address is never kept around.
+inline bool legacyClientAdvertBlocked(LegacyClientBackoff &b, uint64_t address, uint8_t addressType, uint32_t nowMs) {
+    if (!b.active) {
+        return false;
+    }
+    if (legacyClientBackoffExpired(b, nowMs)) {
+        b = LegacyClientBackoff{};
+        return false;
+    }
+    return b.address == address && b.addressType == addressType;
 }

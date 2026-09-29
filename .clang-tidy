@@ -125,7 +125,8 @@ Checks: >
 # against. The CI step additionally restricts the *source files* passed to tidy
 # to the in-scope logic (scripts/select_tidy_sources.py), so generated UI /
 # vendored drivers / .pio libdeps are excluded there too.
-HeaderFilterRegex: 'src/display/(core|plugins|models)/'
+# PRO-669: plus lib-owned header-only *Policy.h seams (lib/NimBLEComm/src/).
+HeaderFilterRegex: '(src/display/(core|plugins|models)/|lib/NimBLEComm/src/[A-Za-z]*Policy\.h)'
 
 WarningsAsErrors: ''
 

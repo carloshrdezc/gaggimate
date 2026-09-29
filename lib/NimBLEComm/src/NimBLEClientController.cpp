@@ -1,5 +1,4 @@
 #include "NimBLEClientController.h"
-#include "../../../src/display/core/LegacyClientCharPolicy.h"
 
 #include "comms.pb.h"
 #include "pb_decode.h"
@@ -9,6 +8,21 @@
 constexpr size_t MAX_CONNECT_RETRIES = 3;
 
 NimBLEClientController::NimBLEClientController() : client(nullptr) {}
+
+LegacyClientBackoff NimBLEClientController::loadBackoff() const {
+    portENTER_CRITICAL(&backoffMux);
+    const LegacyClientBackoff b = backoff;
+    portEXIT_CRITICAL(&backoffMux);
+    return b;
+}
+
+void NimBLEClientController::storeBackoff(const LegacyClientBackoff &b) {
+    portENTER_CRITICAL(&backoffMux);
+    backoff = b;
+    portEXIT_CRITICAL(&backoffMux);
+}
+
+bool NimBLEClientController::isIncompatible() const { return loadBackoff().active; }
 
 void NimBLEClientController::initClient() {
     ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
@@ -187,12 +201,11 @@ bool NimBLEClientController::connectToServer() {
     if (!missing.empty()) {
         ESP_LOGE(LOG_TAG, "Incompatible controller: missing required characteristic(s): %s. Disconnecting; retry in %u ms",
                  missing.c_str(), static_cast<unsigned>(LEGACY_CLIENT_INCOMPATIBLE_BACKOFF_MS));
-        incompatible = true;
-        incompatibleSinceMs = millis();
+        storeBackoff(legacyClientBackoffReject(static_cast<uint64_t>(serverAddress), serverAddress.getType(), millis()));
         client->disconnect(); // onDisconnect() clears chars and restarts the scan
         return false;
     }
-    incompatible = false;
+    storeBackoff(LegacyClientBackoff{}); // success clears any stored rejection
 
     delay(500);
 
@@ -391,9 +404,18 @@ void NimBLEClientController::onResult(NimBLEAdvertisedDevice *advertisedDevice) 
     if (advertisedDevice->haveServiceUUID()) {
         ESP_LOGI(LOG_TAG, "Found BLE service. Checking for ID...");
         if (advertisedDevice->isAdvertisingService(NimBLEUUID(SERVICE_UUID))) {
-            // PRO-669: back off from a controller we just rejected so the
-            // reject/reconnect cycle cannot hog the radio (BLE scale scanning).
-            if (!legacyClientRetryAllowed(incompatible, millis(), incompatibleSinceMs)) {
+            // PRO-669: back off from the controller we just rejected (by
+            // address) so the reject/reconnect cycle cannot hog the radio;
+            // any other controller connects immediately. Decide + expire in
+            // one critical section so a concurrent reject cannot be lost.
+            const NimBLEAddress addr = advertisedDevice->getAddress();
+            const auto addr64 = static_cast<uint64_t>(addr);
+            const uint8_t addrType = addr.getType();
+            const uint32_t now = millis();
+            portENTER_CRITICAL(&backoffMux);
+            const bool blocked = legacyClientAdvertBlocked(backoff, addr64, addrType, now);
+            portEXIT_CRITICAL(&backoffMux);
+            if (blocked) {
                 return;
             }
             ESP_LOGI(LOG_TAG, "Found target BLE device. Connecting...");
@@ -431,7 +453,7 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     tofMeasurementChar = nullptr;
     // PRO-669: an incompatible controller was never reported as connected, so
     // don't report its rejection as a disconnect either.
-    if (disconnectCallback != nullptr && !incompatible) {
+    if (disconnectCallback != nullptr && !isIncompatible()) {
         disconnectCallback();
     }
     scan();

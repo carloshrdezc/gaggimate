@@ -1,6 +1,7 @@
 #ifndef NIMBLECLIENTCONTROLLER_H
 #define NIMBLECLIENTCONTROLLER_H
 
+#include "LegacyClientCharPolicy.h"
 #include "NimBLEComm.h"
 #include "cstring"
 
@@ -23,9 +24,10 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void sendLedControl(uint8_t channel, uint8_t brightness);
     bool isReadyForConnection() const;
     bool isConnected();
-    // PRO-669: diagnostics only — last connect rejected a controller missing
-    // required characteristics. Cleared on the next successful connect.
-    bool isIncompatible() const { return incompatible; }
+    // PRO-669: diagnostics only — a controller missing required characteristics
+    // was rejected and its backoff window is open. Cleared on the next successful
+    // connect or when the window expires. Safe from any task (locked snapshot).
+    bool isIncompatible() const;
     void scan();
     void tare();
     void registerRemoteErrorCallback(const remote_err_callback_t &callback);
@@ -43,8 +45,14 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     NimBLEClient *client;
     NimBLEScan *scanner;
 
-    bool incompatible = false;
-    uint32_t incompatibleSinceMs = 0;
+    // PRO-669: per-address rejection backoff. Written by the display task
+    // (connectToServer) and read by the NimBLE host task (onResult/onDisconnect),
+    // so every access copies/stores the WHOLE struct inside backoffMux — address
+    // and timestamp are published as one unit and can never be seen torn.
+    LegacyClientBackoff backoff{};
+    mutable portMUX_TYPE backoffMux = portMUX_INITIALIZER_UNLOCKED;
+    LegacyClientBackoff loadBackoff() const;
+    void storeBackoff(const LegacyClientBackoff &b);
     NimBLERemoteCharacteristic *tempControlChar = nullptr;
     NimBLERemoteCharacteristic *pumpControlChar = nullptr;
     NimBLERemoteCharacteristic *valveControlChar = nullptr;

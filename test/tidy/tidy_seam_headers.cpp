@@ -29,7 +29,6 @@
 
 // src/display/core/
 #include <display/core/BrewTemperatureOverridePolicy.h>
-#include <display/core/LegacyClientCharPolicy.h>
 #include <display/core/MbedtlsPsramAllocatorPolicy.h>
 #include <display/core/MdnsNamePolicy.h>
 #include <display/core/StandbyTransitionPolicy.h>
@@ -37,6 +36,11 @@
 
 // src/display/core/process/
 #include <display/core/process/GlobalWeightCutoffPolicy.h>
+
+// lib/NimBLEComm/src/ (PRO-669: seam owned by the BLE lib; resolved via `-I src`
+// without putting lib/NimBLEComm/src on the path, which would let its real
+// NimBLEClientController.h shadow the sim/comms stand-in)
+#include <../lib/NimBLEComm/src/LegacyClientCharPolicy.h>
 
 // src/display/plugins/
 #include <display/plugins/ActiveShotFillPolicy.h>
