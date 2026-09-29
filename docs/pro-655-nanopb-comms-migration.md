@@ -254,19 +254,82 @@ Safety requirements carried into increments 2/3:
 - R3 (inc 3): the new display treats missing TX/RX as `onIncompatibleController`.
   It shows a clear "incompatible controller, update required" UI, offers
   controller OTA only, and sends no heater/pump commands.
-- R4 (inc 2, recommended): a defensive guard in the legacy client, described below.
+- R4a (inc 2 + small `dev-master` PR, recommended): legacy-display guard. Scope
+  is deliberately narrow; see below.
+- R4b (inc 3): the real incompatible-controller UX, from upstream's mismatch
+  model. See below.
 
-Defensive guard recommendation: **yes, add it in increment 2 and also offer it
-to `dev-master`.** In `NimBLEClientController::connectToServer()`, treat a
-missing *required* characteristic (`outputControlChar`, `sensorChar`,
-`pingChar`, `infoChar`) as not connected: log it, disconnect, set an
-`incompatible` flag, and return false. `Controller` then stays in
-`waitingForController` and can surface "incompatible controller, update display"
-instead of false-ready. It is about 10 lines, display-only, and adds no wire
-change. It closes the reverse case for any display that ships it *before* a
-NanoPbComm controller exists in the field. That is why `dev-master` (the
-shipping legacy build) should carry it too, as a separate small PR/issue. It
-cannot fix displays that are already deployed, so the display-first rule stays.
+**R4a: legacy dev-master display guard.** In
+`NimBLEClientController::connectToServer()`, treat a missing *required*
+characteristic (`outputControlChar`, `sensorChar`, `pingChar`, `infoChar`) as
+not connected: log a distinct line (e.g. `ESP_LOGE "Controller missing required
+char <uuid>: incompatible firmware (NanoPbComm?), not connecting"`), disconnect,
+latch `incompatible = true` (getter `isIncompatible()`, host/log visibility
+only), and return false.
+
+What R4a guarantees, and nothing more:
+- No false-ready: `Controller::loop()` (`src/display/core/Controller.cpp:482`)
+  never takes the `connectToServer() == true` branch, so `setupInfos()`,
+  `CONTROLLER_READY` and `CONTROLLER_BLUETOOTH_CONNECT` never fire.
+- No control or telemetry dependence: nothing is sent to, or read from, the
+  incompatible controller.
+- The display stays in the existing generic path: after
+  `CONTROLLER_WAITING_TIMEOUT_MS` (`Controller.h:307`, 10 s) the
+  `waitingForController` branch (`Controller.cpp:476-480`) fires
+  `CONTROLLER_BLUETOOTH_WAITING`, and the standby kicker shows the existing
+  "WAITING FOR CONTROLLER" (`DefaultUI.cpp:1049`). **That is what the user
+  sees.** There is no "incompatible controller" screen in R4a.
+- It re-scans and re-rejects the controller on every attempt (bounded by the
+  scan cadence; log only).
+
+Why R4a does not reuse the error UI: `ERROR_CODE_*`
+(`lib/NimBLEComm/src/NimBLEComm.h:28-33`) reaches `Controller::error` only
+through the remote-error callback (`Controller.cpp:317-325`), which needs a
+connected controller. Setting it locally would need new Controller plumbing, and
+the only rendered text is the generic "ERROR · RESTART" (`DefaultUI.cpp:1045`),
+which is wrong advice (restart does not fix it) and latches `isErrorState()`.
+Adding a proper message would need SquareLine/LVGL work. So R4a stays at
+waiting + log, with no UI change.
+
+Recovery (release notes/HIL): the display cannot recover itself. Either (a)
+update the display to the NanoPbComm build (increment 3), then OTA the controller
+from it, or (b) re-flash the controller to the legacy build over USB. A
+power-cycle alone only re-enters the same waiting state.
+
+R4a is display-only, adds no wire change, and is about 10-15 lines plus a log
+line. It covers only displays that ship it *before* a NanoPbComm controller
+exists in the field, which is why `dev-master` (the shipping legacy build) should
+carry it too, as a separate small PR/issue. Already-deployed displays cannot get
+it, so the display-first rule stays.
+
+**R4b: integrated display (increment 3).** The proper incompatible-controller
+UX is upstream's existing mismatch model, taken as-is with increment 3 (refs
+from `v1.9.0`, `src/display/core/Controller.cpp` unless noted):
+- `onSystemInfo()` (:322-352) sets `systemInfo.protocolMismatch`. On mismatch
+  it logs "control inhibited, OTA only", triggers `controller:protocol:mismatch`,
+  and skips PID/pressure/pump-coeff config. `controller:ready` still fires, but
+  standby is not activated for a mismatch.
+- The keepalive ping is suppressed on mismatch (:636), so the controller's own
+  ping-timeout failsafe keeps outputs off.
+- `updateControl()` returns early on mismatch (:897): control is inhibited.
+- `getSystemState()` returns `SYSTEM_PROTOCOL_MISMATCH` (state key "mismatch",
+  :652-661), and `getSystemStateMessage()` returns "Version mismatch, update
+  display" or "... update controller", depending on which side is older
+  (:677-678).
+- `src/display/ui/default/DefaultUI.cpp:174` handles `controller:protocol:mismatch`
+  by switching to the standby screen, where the state message is rendered.
+- R3's missing-TX/RX path (`onIncompatibleController`) feeds the same model.
+
+UI dependency: the core half (the mismatch flag, ping suppression, control
+inhibition, `SystemState`/message, event, and the WebSocket state key via
+`WebSocketHandler.cpp`) is UI-agnostic and comes with increment 3. The
+rendering half (`DefaultUI.cpp:174` plus the standby-screen label) is upstream's
+**EEZ** UI (`src/display/ui/default/eez`). Carlos's display uses the SquareLine **LVGL**
+`DefaultUI` (`src/display/ui/default/lvgl`), so increment 3 must add an
+equivalent handler plus a kicker message ("VERSION MISMATCH · UPDATE
+DISPLAY/CONTROLLER") in Carlos's `DefaultUI`. That is an LVGL-side change unless
+PRO-658 (EEZ UI port) lands first, and it needs a host test for the
+state-to-message mapping.
 
 ## 5. BLE scale coexistence, PSRAM, NimBLE pin
 
@@ -299,7 +362,7 @@ cannot fix displays that are already deployed, so the display-first rule stays.
 | # | Scope | Runtime change | Status |
 |---|---|---|---|
 | 1 | Vendor `lib/NanoPbComm` from **v1.9.0 verbatim**. Add host codec tests (Frame/Payload round-trip for all 17 payloads, `protocol_version` missing-field codec default (the production mismatch gate is not host-testable yet; it is tested in increment 3 and by HIL §8), `coalescingKey`, `CoalescingPriorityQueue`, `UartFraming`) in dedicated envs `native-nanopbcomm{,-sanitize}` plus a CI step. Nothing links it yet. | none (0-byte firmware delta) | **this PR** |
-| 2 | Controller: `GaggiMateController` → `GaggiMateServer` (`-e controller` switches to `gaggimate.proto`), and drop `comms.proto` from the controller env. Also R1/R2 (§4), plus the R4 legacy-client guard. | controller (+ tiny legacy-display guard) | todo |
+| 2 | Controller: `GaggiMateController` → `GaggiMateServer` (`-e controller` switches to `gaggimate.proto`), and drop `comms.proto` from the controller env. Also R1/R2 (§4), plus the R4a legacy-client guard (no false-ready; waiting path + log only, no new UI). | controller (+ tiny legacy-display guard) | todo |
 | 3 | Display: `Controller` → `GaggiMateClient`, output batching, `onConnectionChanged`/`onIncompatibleController`, mismatch → OTA-only UI/plugin event, plus R3 (§4). Host-test the mismatch/inhibit policy (extract it into a pure `*Policy.h`); the codec-level test in inc 1 does not cover it. Envs `display*`, `display-sim` (sim comms shim must learn the new API). After this, `lib/NimBLEComm` is unreferenced (AC 1). | display | todo |
 | 4 | Mixed-version: nanopb `SystemInfo` fallback in `onIncompatibleController` for old Carlos controllers (§4), with a host test. | display | todo |
 | 5 | UART transport build leg (upstream `display-*-uart`/controller UART envs, if Carlos wants them), plus PRO-10 re-scoped fix in `BleClientTransport` (atomics/portMUX). | optional | todo |
@@ -347,9 +410,13 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
 2a. Reverse case (hard-rule check, controlled bench only): pair a **legacy**
    display with the **new** controller. Confirm (i) no heater/pump actuation
    (boiler temperature flat, pump silent), (ii) the controller's ping-timeout failsafe log
-   fires, (iii) with the R4 guard the display shows "incompatible controller"
-   rather than ready, and without it record the false-ready UI. Then (iv)
-   recover by flashing the display first.
+   fires, (iii) with the R4a guard: the serial log shows the distinct
+   missing-char line, no `CONTROLLER_READY`/connect event fires, and after
+   ~10 s the display shows the generic "WAITING FOR CONTROLLER" (no
+   incompatible screen is expected). Without the guard, record the false-ready
+   UI. Then (iv) recover by flashing the display first (or re-flash the
+   controller to legacy over USB) and confirm that a power-cycle alone does not
+   recover. The real "Version mismatch" UX (R4b) is checked in step 1.
 3. Brew, steam and hot water. Power-cycle the controller mid-idle and confirm
    it reconnects.
 4. With the BLE scale connected, run a shot. Weight should stream, and the scale
@@ -366,5 +433,8 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
 2. Should increment 4 (nanopb SystemInfo fallback for old Carlos controllers) be done, or is
    "Legacy controller 0.0.0 + OTA" good enough?
 3. Do you want the UART env legs (increment 5)? Is there UART hardware to HIL?
-4. OK to open the R4 legacy-client guard (§4) as a small separate `dev-master`
-   PR as well as carrying it in increment 2?
+4. OK to open the R4a legacy-client guard (§4) as a small separate `dev-master`
+   PR as well as carrying it in increment 2? It only prevents false-ready: the
+   user sees the generic "WAITING FOR CONTROLLER" plus a log line, not an
+   incompatible screen. The proper "Version mismatch" UX is R4b (increment 3)
+   and needs a `DefaultUI` (LVGL) handler unless PRO-658 lands first.

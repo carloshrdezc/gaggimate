@@ -2,7 +2,7 @@
 // lib/NanoPbComm (v1.9.0). Runs in [env:native-nanopbcomm] against the real
 // gaggimate.proto, codegen'd at build time. Covers the pure layers only:
 // Frame/Payload nanopb round-trips for every Payload oneof member, the
-// protocol-version mismatch rule, Protocol.h coalescing/priority, the
+// missing protocol-version codec default, Protocol.h coalescing/priority, the
 // coalescing priority queue, and the UART COBS/CRC framing. Endpoint and the
 // BLE/UART transports are FreeRTOS/NimBLE-bound and are HIL-only.
 //
