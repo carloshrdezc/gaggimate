@@ -1,6 +1,7 @@
 #include "GaggiMateController.h"
 #include "LinkLivenessPolicy.h"
 #include <Arduino.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <peripherals/DimmedPump.h>
@@ -74,6 +75,9 @@ void GaggiMateController::setup() {
     capabilities.tof = _config.capabilites.tof;
     capabilities.led_control = _config.capabilites.ledControls;
     // Read the steam switch before steamBtn->setup() below.
+    // PRO-303 (preserved): heap headroom right before NimBLE init.
+    ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
     _comms.init("GPBLS", _config.name.c_str(), _version, capabilities, isSteamSwitchOn());
 
     if (_config.capabilites.ledControls) {

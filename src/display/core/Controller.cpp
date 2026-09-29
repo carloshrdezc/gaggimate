@@ -1,6 +1,7 @@
 #include "Controller.h"
 #include "ArduinoJson.h"
 #include "esp_sntp.h"
+#include <esp_heap_caps.h>
 #ifndef GAGGIMATE_SIM
 // PRO-330: esp_wifi_set_ps() — enforce WiFi modem-sleep before BLE controller
 // init so WiFi/BLE software coexistence can enable (device-only; the sim stubs
@@ -284,6 +285,9 @@ void Controller::setupBluetooth() {
 #endif
     // PRO-655: upstream NanoPbComm framed protocol (was NimBLEClientController).
     GM_HEAP_DIAG("before comms.init"); // PRO-566
+    // PRO-303 (preserved): heap headroom right before NimBLE init.
+    ESP_LOGI(LOG_TAG, "Pre-BLE-init heap: free=%u largest_block=%u", static_cast<unsigned>(esp_get_free_heap_size()),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
     comms.init("GPBLC");
     GM_HEAP_DIAG("after comms.init"); // PRO-566
     comms.onConnectionChanged([this](bool connected) {
