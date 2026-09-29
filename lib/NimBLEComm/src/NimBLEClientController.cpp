@@ -1,4 +1,5 @@
 #include "NimBLEClientController.h"
+#include "../../../src/display/core/LegacyClientCharPolicy.h"
 
 #include "comms.pb.h"
 #include "pb_decode.h"
@@ -173,6 +174,25 @@ bool NimBLEClientController::connectToServer() {
         tofMeasurementChar->subscribe(true, std::bind(&NimBLEClientController::notifyCallback, this, std::placeholders::_1,
                                                       std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
     }
+
+    // PRO-669: refuse a controller missing characteristics the display cannot
+    // run without (rationale in LegacyClientCharPolicy.h) instead of going
+    // false-ready. Optional characteristics stay optional.
+    LegacyClientChars present;
+    present.outputControl = outputControlChar != nullptr;
+    present.sensor = sensorChar != nullptr;
+    present.ping = pingChar != nullptr;
+    present.info = infoChar != nullptr;
+    const std::string missing = legacyClientMissingRequiredChars(present);
+    if (!missing.empty()) {
+        ESP_LOGE(LOG_TAG, "Incompatible controller: missing required characteristic(s): %s. Disconnecting; retry in %u ms",
+                 missing.c_str(), static_cast<unsigned>(LEGACY_CLIENT_INCOMPATIBLE_BACKOFF_MS));
+        incompatible = true;
+        incompatibleSinceMs = millis();
+        client->disconnect(); // onDisconnect() clears chars and restarts the scan
+        return false;
+    }
+    incompatible = false;
 
     delay(500);
 
@@ -371,6 +391,11 @@ void NimBLEClientController::onResult(NimBLEAdvertisedDevice *advertisedDevice) 
     if (advertisedDevice->haveServiceUUID()) {
         ESP_LOGI(LOG_TAG, "Found BLE service. Checking for ID...");
         if (advertisedDevice->isAdvertisingService(NimBLEUUID(SERVICE_UUID))) {
+            // PRO-669: back off from a controller we just rejected so the
+            // reject/reconnect cycle cannot hog the radio (BLE scale scanning).
+            if (!legacyClientRetryAllowed(incompatible, millis(), incompatibleSinceMs)) {
+                return;
+            }
             ESP_LOGI(LOG_TAG, "Found target BLE device. Connecting...");
             scanner->stop();
             // Copy the address by value; the advertised-device pointer may be
@@ -404,7 +429,9 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     volumetricTareChar = nullptr;
     ledControlChar = nullptr;
     tofMeasurementChar = nullptr;
-    if (disconnectCallback != nullptr) {
+    // PRO-669: an incompatible controller was never reported as connected, so
+    // don't report its rejection as a disconnect either.
+    if (disconnectCallback != nullptr && !incompatible) {
         disconnectCallback();
     }
     scan();

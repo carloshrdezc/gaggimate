@@ -23,6 +23,9 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void sendLedControl(uint8_t channel, uint8_t brightness);
     bool isReadyForConnection() const;
     bool isConnected();
+    // PRO-669: diagnostics only — last connect rejected a controller missing
+    // required characteristics. Cleared on the next successful connect.
+    bool isIncompatible() const { return incompatible; }
     void scan();
     void tare();
     void registerRemoteErrorCallback(const remote_err_callback_t &callback);
@@ -40,6 +43,8 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     NimBLEClient *client;
     NimBLEScan *scanner;
 
+    bool incompatible = false;
+    uint32_t incompatibleSinceMs = 0;
     NimBLERemoteCharacteristic *tempControlChar = nullptr;
     NimBLERemoteCharacteristic *pumpControlChar = nullptr;
     NimBLERemoteCharacteristic *valveControlChar = nullptr;
