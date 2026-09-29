@@ -126,3 +126,128 @@ this rule.
   follow-up once Carlos decides to track master (see open questions). Mixing it
   in would make the controller/display pair incompatible with stock v1.9.0
   firmware.
+
+## 3. Upstream NanoPbComm (v1.9.0)
+
+Layers (`lib/NanoPbComm/src`, ~2.6 kLOC):
+- `gaggimate.proto` + `.options`: `Frame{id, ack, repeated Payload payloads(max 6)}`,
+  `Payload` is a `oneof` of 17 messages (D→C tags 1–11, C→D tags 20–26).
+  nanopb codegen runs at build time (`custom_nanopb_protos`,
+  `custom_nanopb_options = --error-on-unmatched`) and nothing generated is committed.
+- `Messages.h`: `gm::` aliases for the nanopb structs. `Protocol.h`: UUIDs,
+  `PROTOCOL_VERSION`, priorities, `coalescingKey()` (header-only, pure).
+- `CoalescingPriorityQueue.h`: pure, header-only.
+- `Endpoint.{h,cpp}`: reliable framed link (ids/acks, retransmit, latency,
+  coalescing queue). It is **FreeRTOS-bound** (queue/semaphore/task notify).
+- `Transport.h`: abstract datagram transport. `ble/BleClientTransport`,
+  `ble/BleServerTransport` (TX/RX/INFO chars), `uart/UartTransport` +
+  `UartFraming.h` (pure).
+- `GaggiMateClient` (display) / `GaggiMateServer` (controller): typed facades.
+
+How upstream wires it:
+- Display `Controller` owns `GaggiMateClient comms`. `setup()` calls
+  `comms.init("GPBLC")` and registers `onSystemInfo`, `onSensorData`,
+  `onButtonState`, `onConnectionChanged`, `onIncompatibleController`, etc.
+  `loop()` calls `comms.loop()` (send pump + retransmit). Outputs are sent as
+  batched Relay/Pump/Boiler payloads.
+- Controller `GaggiMateController` owns `GaggiMateServer`. `init(name, hw, ver,
+  caps)` pushes SystemInfo, and there are `on*` handlers per D→C payload. Sensor
+  data goes out as `sendUnreliable` telemetry.
+
+## 4. Version handling and mixed-version recovery
+
+Upstream semantics (kept verbatim):
+1. The controller publishes `SystemInfo.protocol_version` over the framed link.
+   The display compares it with `gm_proto::PROTOCOL_VERSION`. On mismatch it
+   triggers `controller:protocol:mismatch`, inhibits control and offers OTA only.
+2. If the TX/RX chars are missing (a pre-NanoPb controller), `BleClientTransport`
+   sets `_incompatible`, keeps the link up for the OTA service, and reads the
+   legacy INFO char. `Controller::onIncompatibleController` parses it as
+   **JSON** (`hw`/`v`/`cp`).
+
+Carlos-specific wrinkle: **Carlos's current controller encodes the INFO char as
+nanopb (PRO-243), not JSON.** A new display paired with an old Carlos controller
+therefore hits the `deserializeJson` error branch. It reports "Legacy controller
+0.0.0", keeps OTA reachable and inhibits control. That is safe and still
+recoverable, but it loses the hw/version display. Options (increment 4):
+(a) accept it, (b) teach `onIncompatibleController` to try nanopb `SystemInfo`
+decode as a fallback (display-only, no wire change). Recommend (b). It is small
+and host-testable.
+Reverse case (old Carlos display + new controller): the old display finds none
+of its per-message chars and never becomes ready. Recovery is to flash the
+display first. **HIL order: display first, then the controller via the display's
+OTA path.**
+
+## 5. BLE scale coexistence, PSRAM, NimBLE pin
+
+- Both the old and the new client call `NimBLEDevice::init` and share the single
+  `NimBLEDevice::getScan()`. Carlos's `BLEScalePlugin` (PRO-459/647/5 teardown
+  order, `stopAsyncScan` before delete, mutex, UAF fixes) owns its own
+  `RemoteScalesScanner` and does not touch the comms client. Upstream
+  `BleClientTransport` calls `setAdvertisedDeviceCallbacks(this, true)` on the
+  shared scanner, **exactly like** `NimBLEClientController` does today. So the
+  coexistence contract is unchanged. HIL must still cover "scale connected
+  during a shot" and "controller reconnect while scale connected".
+  Upstream's transport stores the paired controller address in its own NVS and
+  only clears the controller bond (`clearBonds`), which is compatible with scale
+  bonds (3-slot store).
+- NimBLE host PSRAM (`-DCONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=1`, F10,
+  `886bbc3e`) is an env build flag. It is independent of the comms lib and stays.
+- NimBLE-Arduino: keep Carlos's exact pin **`1.4.3`**. It satisfies upstream's
+  `^1.4.0` and is what `ea232239` settled on. The vendored `library.json` keeps
+  `^1.4.0`. The env-level pin wins.
+- **PRO-10**: upstream `BleClientTransport` still has plain `_serverAddress` /
+  `_readyForConnection` members written from the scan callback and read in
+  `connectToServer()`. **The race still exists upstream.** Re-scope PRO-10 to
+  `lib/NanoPbComm/src/ble/BleClientTransport` rather than closing it.
+  Evidence: `onResult()` (NimBLE host task) writes both members at
+  `BleClientTransport.cpp:256+`. `maintain()` reads them at lines 41/59 from
+  the display loop task.
+
+## 6. Ordered increments (each one is a PR that builds and passes tests on its own)
+
+| # | Scope | Runtime change | Status |
+|---|---|---|---|
+| 1 | Vendor `lib/NanoPbComm` from **v1.9.0 verbatim**. Add host codec tests (Frame/Payload round-trip for all 17 payloads, `protocol_version` mismatch detection, `coalescingKey`, `CoalescingPriorityQueue`, `UartFraming`) in dedicated envs `native-nanopbcomm{,-sanitize}` plus a CI step. Nothing links it yet. | none (0-byte firmware delta) | **this PR** |
+| 2 | Controller: `GaggiMateController` → `GaggiMateServer` (`-e controller` switches to `gaggimate.proto`), and drop `comms.proto` from the controller env. | controller only | todo |
+| 3 | Display: `Controller` → `GaggiMateClient`, output batching, `onConnectionChanged`/`onIncompatibleController`, mismatch → OTA-only UI/plugin event. Envs `display*`, `display-sim` (sim comms shim must learn the new API). After this, `lib/NimBLEComm` is unreferenced (AC 1). | display | todo |
+| 4 | Mixed-version: nanopb `SystemInfo` fallback in `onIncompatibleController` for old Carlos controllers (§4), with a host test. | display | todo |
+| 5 | UART transport build leg (upstream `display-*-uart`/controller UART envs, if Carlos wants them), plus PRO-10 re-scoped fix in `BleClientTransport` (atomics/portMUX). | optional | todo |
+| 6 | HIL (Carlos): see §8. Then PRO-665 deletes `lib/NimBLEComm`. | — | todo |
+
+Increments 2 and 3 **must ship together to devices** (the wire is incompatible),
+but they can merge separately on the integration branch because nothing is
+released from it. Increment 1 cannot enable `gaggimate.proto` in the firmware
+envs: both protos declare `package gaggimate`, so the generated
+`gaggimate_SensorData` etc. would collide with `comms.pb.h`. For the same
+reason the new host tests live in their own env rather than in `env:native`
+(whose `test_nanopb_comms` still covers `comms.proto` until PRO-665).
+
+## 7. Size
+
+Increment 1 adds no runtime code, so the firmware delta is expected to be zero
+(recorded in the PR). The real deltas land in increments 2 and 3. The 8 MB
+headless env is at 78.6% (baseline doc), and upstream's own v1.9.0 build of the
+same lib fits there, so that is not expected to be a blocker. Re-measure then.
+
+## 8. HIL plan (Carlos only; agents must not flash)
+
+1. Flash the display (increment 3 build) and confirm that the old controller is
+   detected as incompatible/legacy, the OTA path is offered, and no boiler
+   control is sent.
+2. Update the controller via the display's controller-OTA. It should pair, and
+   SystemInfo should show `proto=5`.
+3. Brew, steam and hot water. Power-cycle the controller mid-idle and confirm
+   it reconnects.
+4. With the BLE scale connected, run a shot. Weight should stream, and the scale
+   should survive a controller reconnect.
+5. 30-minute soak with no disconnect/panic (serial log).
+6. Rollback path: previous display+controller images kept for re-flash.
+
+## 9. Open questions for Carlos
+
+1. Track upstream `master` (PROTOCOL_VERSION 6, `dual_boiler`) now, or stay on
+   v1.9.0 = 5 until the next upstream tag? (Default in this plan: v1.9.0.)
+2. Should increment 4 (nanopb SystemInfo fallback for old Carlos controllers) be done, or is
+   "Legacy controller 0.0.0 + OTA" good enough?
+3. Do you want the UART env legs (increment 5)? Is there UART hardware to HIL?
