@@ -151,13 +151,15 @@ void test_system_info_and_protocol_version(void) {
     TEST_ASSERT_EQUAL_UINT32(gm_proto::PROTOCOL_VERSION, o.content.system_info.protocol_version);
 }
 
-// Pins the vendored revision: v1.9.0 = 5 (2b089d6's bump to 4 is an ancestor;
-// upstream/master is 6). Changing this is a deliberate wire break.
+// Pins the vendored revision: the v1.9.0 final tree has PROTOCOL_VERSION = 5
+// (upstream/master is 6). Changing this is a deliberate wire break.
 void test_protocol_version_pinned(void) { TEST_ASSERT_EQUAL_UINT32(5, gm_proto::PROTOCOL_VERSION); }
 
-// Mismatch path input: a pre-versioning controller omits field 4, which
-// proto3 decodes as 0 -> always != PROTOCOL_VERSION -> display inhibits control.
-void test_missing_protocol_version_decodes_as_zero_mismatch(void) {
+// Codec default only: an omitted SystemInfo.protocol_version (field 4) decodes
+// as the proto3 default 0, which can never equal a real PROTOCOL_VERSION. This
+// does NOT exercise the production mismatch gate / control inhibition; that
+// lives in the display Controller (increment 3) and is covered there + by HIL.
+void test_codec_missing_protocol_version_defaults_to_zero(void) {
     gm::Payload p = make(gaggimate_Payload_system_info_tag);
     std::strcpy(p.content.system_info.version, "old");
     gm::Payload o = roundTrip(p);
@@ -339,7 +341,7 @@ int main(int, char **) {
     RUN_TEST(test_autotune_pressure_scale_led);
     RUN_TEST(test_system_info_and_protocol_version);
     RUN_TEST(test_protocol_version_pinned);
-    RUN_TEST(test_missing_protocol_version_decodes_as_zero_mismatch);
+    RUN_TEST(test_codec_missing_protocol_version_defaults_to_zero);
     RUN_TEST(test_sensor_data);
     RUN_TEST(test_button_autotune_volumetric_tof_error);
     RUN_TEST(test_error_codes_match_legacy_values);

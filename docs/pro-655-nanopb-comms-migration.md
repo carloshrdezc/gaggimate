@@ -108,24 +108,62 @@ touch the wire:
 Carlos-only field is ever needed, the rule is: add it with a fresh field number
 (never reuse or `reserved`), keep proto3 default = "feature absent", and bump
 `PROTOCOL_VERSION` only for changes that are not wire-compatible. That matches
-upstream's own comment in `Protocol.h`. Note that the upstream `2b089d6` fix swapped
-two field numbers **and** bumped the version, which is the precedent for
-this rule.
+upstream's own comment in `Protocol.h`. Upstream's `2b089d6` ("Fix protocol")
+swapped two field numbers **and** bumped the version; it is cited here only as
+a precedent for the rule, not as evidence of what v1.9.0 contains (see §2.4).
 
 ### 2.4 Which upstream revision to vendor
 
-- `2b089d6` ("Fix protocol", `Capabilities.dual_boiler`/`addons` renumber, v3→4)
-  is **already an ancestor of `v1.9.0`**. v1.9.0 ships `PROTOCOL_VERSION = 5`
-  with no `dual_boiler` field. PRO-666 therefore needs no extra cherry-pick for
-  this migration.
-- `upstream/master` has since re-added `Capabilities.dual_boiler = 6` and bumped
-  to `PROTOCOL_VERSION = 6` (dual-boiler work in `346dfec0`, `b91efd5b`,
-  `c741e1b1`). It also changes the `SensorCallback`/`SystemInfoCallback`
-  signatures.
-- **Decision**: vendor **v1.9.0 exactly** (version 5). The v6 delta is a separate
-  follow-up once Carlos decides to track master (see open questions). Mixing it
-  in would make the controller/display pair incompatible with stock v1.9.0
-  firmware.
+Evidence is a **direct final-tree comparison**, not ancestry. `2b089d6`
+("Fix protocol") is **not** an ancestor of `v1.9.0`
+(`git merge-base --is-ancestor 2b089d64 v1.9.0` exits 1; the histories
+diverged), so nothing about v1.9.0 is inferred from it. The two candidate trees:
+
+```
+$ git show v1.9.0:lib/NanoPbComm/proto/gaggimate.proto        # lines 161-167
+message Capabilities {
+    bool dimming = 1;
+    bool pressure = 2;
+    bool led_control = 3;
+    bool tof = 4;
+    repeated Addon addons = 5;
+}
+$ git show v1.9.0:lib/NanoPbComm/src/Protocol.h               # line 22
+static constexpr uint32_t PROTOCOL_VERSION = 5;
+
+$ git show upstream/master:lib/NanoPbComm/proto/gaggimate.proto  # lines 161-168
+message Capabilities {
+    bool dimming = 1;
+    bool pressure = 2;
+    bool led_control = 3;
+    bool tof = 4;
+    repeated Addon addons = 5;
+    bool dual_boiler = 6;
+}
+$ git show upstream/master:lib/NanoPbComm/src/Protocol.h      # line 22
+static constexpr uint32_t PROTOCOL_VERSION = 6;
+```
+
+The vendored `lib/NanoPbComm` is byte-identical to the v1.9.0 tree
+(`diff -r` against a pristine v1.9.0 checkout is empty), so this PR ships the
+first shape: no `dual_boiler`, version 5. `upstream/master` also changes the
+`SensorCallback`/`SystemInfoCallback` signatures (dual-boiler work in
+`346dfec0`, `b91efd5b`, `c741e1b1`).
+
+**Current default**: vendor **v1.9.0 exactly** (v5). Moving to v6 (PRO-666
+"adopt now") is a pending **Carlos decision** (§9 Q1). It is not decided here.
+Here is what each option changes downstream:
+
+| | Option A: stay v5 (default) | Option B: adopt v6 now (PRO-666) |
+|---|---|---|
+| Inc 1 (this PR) | as is, verbatim v1.9.0 | no longer verbatim: add `Capabilities.dual_boiler = 6`, `PROTOCOL_VERSION = 6`, update `test_protocol_version_pinned` to 6 plus a `dual_boiler` round-trip |
+| Inc 2 (controller) | `GaggiMateServer::init(..., caps)` with v1.9.0 caps; publishes `protocol_version = 5` | same, plus it sets `caps.dual_boiler = false` (Carlos hardware is single boiler); publishes 6. Do **not** port upstream's obsolete intermediate server bool API; use master's final shape |
+| Inc 3 (display) | v1.9.0 callback signatures; mismatch gate `!= 5` | master's final `SensorCallback`/`SystemInfoCallback` signatures (boiler index / dual-boiler flag); mismatch gate `!= 6`; UI ignores `dual_boiler` (always false) |
+| Interop | pairs with stock v1.9.0 firmware | pairs with upstream master/next tag; stock v1.9.0 halves are reported as mismatch → OTA-only |
+| HIL §8 step 2 | expects `proto=5` | expects `proto=6` |
+
+Increments 2 and 3 have to use the **same** option. Mixing them is the §4
+mismatch path by construction.
 
 ## 3. Upstream NanoPbComm (v1.9.0)
 
@@ -173,10 +211,62 @@ recoverable, but it loses the hw/version display. Options (increment 4):
 (a) accept it, (b) teach `onIncompatibleController` to try nanopb `SystemInfo`
 decode as a fallback (display-only, no wire change). Recommend (b). It is small
 and host-testable.
-Reverse case (old Carlos display + new controller): the old display finds none
-of its per-message chars and never becomes ready. Recovery is to flash the
-display first. **HIL order: display first, then the controller via the display's
-OTA path.**
+Reverse case (old Carlos display + new NanoPbComm controller). This is a
+**false-ready / degraded** state, not a clean failure. Code at the current tip:
+- The service UUID did not change. `lib/NanoPbComm/src/Protocol.h:11`
+  `SERVICE_UUID` equals `lib/NimBLEComm/src/NimBLEComm.h:8`. The new server
+  also exposes INFO (same UUID, `NimBLEComm.h:18` / `Protocol.h:17`) and the
+  legacy error char (`BleServerTransport.cpp:31,34`). The old display's scan
+  therefore matches, and it connects.
+- `NimBLEClientController::connectToServer()`
+  (`lib/NimBLEComm/src/NimBLEClientController.cpp:86-180`) fails only when the
+  *service* is missing (`:113-118`). Each per-message `getCharacteristic()`
+  (`:121-171`) can return null, subscriptions are skipped when null, and it
+  **returns true** (`:179`).
+- `Controller::loop()` (`src/display/core/Controller.cpp:482-497`) then clears
+  `waitingForController` and calls `setupInfos()` (`:345`). `readInfo()`
+  (`NimBLEClientController.cpp:79-84`) returns the new server's **JSON** INFO
+  (`GaggiMateServer.cpp:43-50`). `pb_decode` of that text (`Controller.cpp:375`)
+  fails or yields garbage, and the fallback is "GaggiMate Standard 1.x v1.0.0,
+  no caps". It then sends PID/pump coeffs (no-ops) and fires `CONTROLLER_READY`
+  and `CONTROLLER_BLUETOOTH_CONNECT`.
+- Result: the UI believes a controller is connected and ready, but it gets no
+  sensor, button or error telemetry. Every write (`sendOutputControl`, `sendPing`,
+  PID, and so on) is null-guarded (`NimBLEClientController.cpp:191,213,233,…,330`)
+  and silently dropped. **No heater or pump command reaches the controller**, and
+  because the display stops pinging, the controller's ping-timeout failsafe (heater,
+  pump, valve and alt off; `lib/GaggiMateController/src/GaggiMateController.cpp:202-208`,
+  same in v1.9.0) keeps outputs off. The hazard is therefore misleading UI (a
+  "brew" that does nothing, stale 0 °C/0 bar readings), not actuation. It still
+  has to be prevented.
+
+**Hard rule: upgrade the display first, then the controller through the new
+display's controller-OTA.** Never OTA a controller to NanoPbComm while its
+display runs legacy NimBLEComm. Release notes and the HIL checklist must say
+this explicitly.
+
+Safety requirements carried into increments 2/3:
+- R1 (inc 2): the new controller must keep a link-liveness failsafe that works
+  whatever the display sends. With no framed traffic, heater/pump/valve/alt
+  stay off (upstream's ping timeout; host-test or HIL it).
+- R2 (inc 2): the new controller must not act on any legacy-char write (it
+  exposes none, and that must stay true).
+- R3 (inc 3): the new display treats missing TX/RX as `onIncompatibleController`.
+  It shows a clear "incompatible controller, update required" UI, offers
+  controller OTA only, and sends no heater/pump commands.
+- R4 (inc 2, recommended): a defensive guard in the legacy client, described below.
+
+Defensive guard recommendation: **yes, add it in increment 2 and also offer it
+to `dev-master`.** In `NimBLEClientController::connectToServer()`, treat a
+missing *required* characteristic (`outputControlChar`, `sensorChar`,
+`pingChar`, `infoChar`) as not connected: log it, disconnect, set an
+`incompatible` flag, and return false. `Controller` then stays in
+`waitingForController` and can surface "incompatible controller, update display"
+instead of false-ready. It is about 10 lines, display-only, and adds no wire
+change. It closes the reverse case for any display that ships it *before* a
+NanoPbComm controller exists in the field. That is why `dev-master` (the
+shipping legacy build) should carry it too, as a separate small PR/issue. It
+cannot fix displays that are already deployed, so the display-first rule stays.
 
 ## 5. BLE scale coexistence, PSRAM, NimBLE pin
 
@@ -208,9 +298,9 @@ OTA path.**
 
 | # | Scope | Runtime change | Status |
 |---|---|---|---|
-| 1 | Vendor `lib/NanoPbComm` from **v1.9.0 verbatim**. Add host codec tests (Frame/Payload round-trip for all 17 payloads, `protocol_version` mismatch detection, `coalescingKey`, `CoalescingPriorityQueue`, `UartFraming`) in dedicated envs `native-nanopbcomm{,-sanitize}` plus a CI step. Nothing links it yet. | none (0-byte firmware delta) | **this PR** |
-| 2 | Controller: `GaggiMateController` → `GaggiMateServer` (`-e controller` switches to `gaggimate.proto`), and drop `comms.proto` from the controller env. | controller only | todo |
-| 3 | Display: `Controller` → `GaggiMateClient`, output batching, `onConnectionChanged`/`onIncompatibleController`, mismatch → OTA-only UI/plugin event. Envs `display*`, `display-sim` (sim comms shim must learn the new API). After this, `lib/NimBLEComm` is unreferenced (AC 1). | display | todo |
+| 1 | Vendor `lib/NanoPbComm` from **v1.9.0 verbatim**. Add host codec tests (Frame/Payload round-trip for all 17 payloads, `protocol_version` missing-field codec default (the production mismatch gate is not host-testable yet; it is tested in increment 3 and by HIL §8), `coalescingKey`, `CoalescingPriorityQueue`, `UartFraming`) in dedicated envs `native-nanopbcomm{,-sanitize}` plus a CI step. Nothing links it yet. | none (0-byte firmware delta) | **this PR** |
+| 2 | Controller: `GaggiMateController` → `GaggiMateServer` (`-e controller` switches to `gaggimate.proto`), and drop `comms.proto` from the controller env. Also R1/R2 (§4), plus the R4 legacy-client guard. | controller (+ tiny legacy-display guard) | todo |
+| 3 | Display: `Controller` → `GaggiMateClient`, output batching, `onConnectionChanged`/`onIncompatibleController`, mismatch → OTA-only UI/plugin event, plus R3 (§4). Host-test the mismatch/inhibit policy (extract it into a pure `*Policy.h`); the codec-level test in inc 1 does not cover it. Envs `display*`, `display-sim` (sim comms shim must learn the new API). After this, `lib/NimBLEComm` is unreferenced (AC 1). | display | todo |
 | 4 | Mixed-version: nanopb `SystemInfo` fallback in `onIncompatibleController` for old Carlos controllers (§4), with a host test. | display | todo |
 | 5 | UART transport build leg (upstream `display-*-uart`/controller UART envs, if Carlos wants them), plus PRO-10 re-scoped fix in `BleClientTransport` (atomics/portMUX). | optional | todo |
 | 6 | HIL (Carlos): see §8. Then PRO-665 deletes `lib/NimBLEComm`. | — | todo |
@@ -253,7 +343,13 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
    detected as incompatible/legacy, the OTA path is offered, and no boiler
    control is sent.
 2. Update the controller via the display's controller-OTA. It should pair, and
-   SystemInfo should show `proto=5`.
+   SystemInfo should show `proto=5` (or 6 under §2.4 option B).
+2a. Reverse case (hard-rule check, controlled bench only): pair a **legacy**
+   display with the **new** controller. Confirm (i) no heater/pump actuation
+   (boiler temperature flat, pump silent), (ii) the controller's ping-timeout failsafe log
+   fires, (iii) with the R4 guard the display shows "incompatible controller"
+   rather than ready, and without it record the false-ready UI. Then (iv)
+   recover by flashing the display first.
 3. Brew, steam and hot water. Power-cycle the controller mid-idle and confirm
    it reconnects.
 4. With the BLE scale connected, run a shot. Weight should stream, and the scale
@@ -264,7 +360,11 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
 ## 9. Open questions for Carlos
 
 1. Track upstream `master` (PROTOCOL_VERSION 6, `dual_boiler`) now, or stay on
-   v1.9.0 = 5 until the next upstream tag? (Default in this plan: v1.9.0.)
+   v1.9.0 = 5 until the next upstream tag? (Default in this plan: v1.9.0.
+   PRO-666 "adopt now" is **pending your decision**; §2.4 table lists the exact
+   inc 1/2/3 changes per option.)
 2. Should increment 4 (nanopb SystemInfo fallback for old Carlos controllers) be done, or is
    "Legacy controller 0.0.0 + OTA" good enough?
 3. Do you want the UART env legs (increment 5)? Is there UART hardware to HIL?
+4. OK to open the R4 legacy-client guard (§4) as a small separate `dev-master`
+   PR as well as carrying it in increment 2?
