@@ -1,7 +1,7 @@
 #ifndef GAGGIMATECONTROLLER_H
 #define GAGGIMATECONTROLLER_H
 #include "ControllerConfig.h"
-#include "NimBLEServerController.h"
+#include "GaggiMateServer.h"
 #include <peripherals/DigitalInput.h>
 #include <peripherals/DistanceSensor.h>
 #include <peripherals/Heater.h>
@@ -28,6 +28,7 @@ class GaggiMateController {
   private:
     void detectBoard();
     void detectAddon();
+    bool isSteamSwitchOn() const;
     void handlePing();
     void handlePingTimeout(void);
     void thermalRunawayShutdown(void);
@@ -36,7 +37,7 @@ class GaggiMateController {
     void sendSensorData(void);
 
     ControllerConfig _config = ControllerConfig{};
-    NimBLEServerController _ble;
+    GaggiMateServer _comms;
 
     Max31855Thermocouple *thermocouple = nullptr;
     Heater *heater = nullptr;
@@ -53,7 +54,7 @@ class GaggiMateController {
 
     String _version;
     unsigned long lastPingTime = 0;
-    size_t errorState = ERROR_CODE_NONE;
+    int errorState = ERROR_CODE_NONE;
 
     const char *LOG_TAG = "GaggiMateController";
 };

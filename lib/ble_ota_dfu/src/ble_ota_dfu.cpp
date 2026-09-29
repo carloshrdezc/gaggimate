@@ -245,6 +245,7 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
             // Write updater content to the flash
         case 0xFC: {
+            OTA_DFU_BLE->setUpdating(true);
             if (len < 5) {
                 ESP_LOGW(TAG, "0xFC: short packet (len=%u)", len);
                 break;
@@ -299,6 +300,7 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
             // Remove previous file and send transfer mode
         case 0xFD: {
+            OTA_DFU_BLE->setUpdating(true);
             // Remove previous (failed?) update
             if (FLASH.exists("/update.bin")) {
                 ESP_LOGI(TAG, "Removing previous update");
@@ -326,6 +328,7 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
             // Switch to update mode
         case 0xFF: {
+            OTA_DFU_BLE->setUpdating(true);
             // Setup packet from the peer announces (parts, MTU) for the
             // upcoming transfer. Validate MTU against the per-buffer size
             // before any 0xFB writes can use it. parts is checked against a
@@ -468,3 +471,7 @@ void BLE_OTA_DFU::send_OTA_DFU(String value) {
     this->pCharacteristic_BLE_OTA_DFU_TX->setValue(value.c_str());
     this->pCharacteristic_BLE_OTA_DFU_TX->notify();
 }
+
+bool BLE_OTA_DFU::isUpdating() const { return updating; }
+
+void BLE_OTA_DFU::setUpdating(bool updating) { this->updating = updating; }

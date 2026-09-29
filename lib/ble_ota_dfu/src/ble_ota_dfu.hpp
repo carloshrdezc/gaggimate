@@ -66,6 +66,9 @@ private:
   BLEService *pServiceOTA = nullptr;
   BLECharacteristic *pCharacteristic_BLE_OTA_DFU_TX = nullptr;
   friend class BLEOverTheAirDeviceFirmwareUpdate;
+  // PRO-655 (from upstream v1.9): set once a DFU transfer starts so NanoPbComm's
+  // ping watchdog does not drop the BLE link mid-OTA.
+  bool updating = false;
 
 public:
   BLE_OTA_DFU() = default;
@@ -77,6 +80,8 @@ public:
   bool begin(String local_name);
 
   bool connected();
+  bool isUpdating() const;
+  void setUpdating(bool updating);
 
   void send_OTA_DFU(uint8_t value);
   void send_OTA_DFU(uint8_t *value, size_t size);
