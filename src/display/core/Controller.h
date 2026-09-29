@@ -1,10 +1,11 @@
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
-#include "NimBLEClientController.h"
-#include "NimBLEComm.h"
+#include "ControllerLinkPolicy.h"
+#include "GaggiMateClient.h"
 #include "PluginManager.h"
 #include "Settings.h"
+#include "SystemInfo.h"
 #include "VolumetricCoalescer.h"
 #include "VolumetricMeasurementSource.h"
 #include <WiFi.h>
@@ -208,7 +209,11 @@ class Controller {
 
     SystemInfo getSystemInfo() const { return systemInfo; }
 
-    NimBLEClientController *getClientController() { return &clientController; }
+    // PRO-655: the display-side NanoPbComm facade (was NimBLEClientController).
+    GaggiMateClient *getClientController() { return &comms; }
+    // PRO-655 R3/R4b: true while the connected controller speaks a different (or no)
+    // framed protocol version: control inhibited, controller OTA only.
+    bool isProtocolMismatch() const { return systemInfo.protocolMismatch; }
 
   private:
     // Initialization methods
@@ -216,7 +221,11 @@ class Controller {
     void setupPanel();
 #endif
     void setupBluetooth();
-    void setupInfos();
+    void onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
+                      bool ledControl, bool tof, bool dualBoiler, const std::vector<uint32_t> &addons);
+    void onIncompatibleController(const String &info);
+    void setPidSettings();
+    bool isControlAllowed() const;
     void setupWifi();
 
     // Functional methods
@@ -246,7 +255,7 @@ class Controller {
     DefaultUI *ui = nullptr;
     Driver *driver = nullptr;
 #endif
-    NimBLEClientController clientController;
+    GaggiMateClient comms;
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
@@ -263,6 +272,8 @@ class Controller {
     int tofDistance = 0;
 
     SystemInfo systemInfo{};
+    // PRO-655: set once a SystemInfo arrived on the current link (cleared on disconnect).
+    std::atomic<bool> systemInfoReceived{false};
 
     Process *currentProcess = nullptr;
     Process *lastProcess = nullptr;
@@ -305,6 +316,14 @@ class Controller {
     volumetric::Coalescer volumetricCoalescer{};
     static const unsigned long BLUETOOTH_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
     static const unsigned long CONTROLLER_WAITING_TIMEOUT_MS = 10000;
+    // PRO-655: keepalive ping cadence (upstream PING_INTERVAL); completes the
+    // server handshake and feeds the controller watchdog between control frames.
+    static const unsigned long PING_INTERVAL_MS = 2000;
+    // PRO-655 (upstream v1.9): re-send the connect-time config burst for a short window.
+    static const unsigned long CONFIG_RESEND_WINDOW_MS = 8000;
+    static const unsigned long CONFIG_RESEND_INTERVAL_MS = 1000;
+    unsigned long configResendUntil = 0;
+    unsigned long lastConfigResend = 0;
 
     xTaskHandle taskHandle = nullptr;
 

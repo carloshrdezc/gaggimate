@@ -1,8 +1,8 @@
-// Plain protocol vocabulary used by the simulator's MockController and the
-// NimBLEClientController mock. Upstream re-includes this from lib/NanoPbComm;
-// this fork doesn't have that lib (it uses lib/NimBLEComm), so the simulator
-// carries a self-contained copy of the plain command types here — they have no
-// Arduino/NimBLE dependencies and never touch the on-wire encoding. [CAR-399]
+// Plain protocol vocabulary (PumpControlMode, *Command, ERROR_CODE_*) used by the
+// simulator's MockController and GaggiMateClient mock. PRO-655: this fork now
+// vendors lib/NanoPbComm, but its GaggiMateComm.h is plain C++ with no
+// Arduino/NimBLE deps; this self-contained copy is kept so the sim include path
+// never pulls lib/NanoPbComm/src (whose GaggiMateClient.h this dir shadows). [CAR-399]
 #pragma once
 
 #include <cstdint>

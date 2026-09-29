@@ -26,6 +26,8 @@ inline constexpr const char *CONTROLLER_BLUETOOTH_INIT = "controller:bluetooth:i
 inline constexpr const char *CONTROLLER_BLUETOOTH_CONNECT = "controller:bluetooth:connect";
 inline constexpr const char *CONTROLLER_BLUETOOTH_DISCONNECT = "controller:bluetooth:disconnect";
 inline constexpr const char *CONTROLLER_BLUETOOTH_WAITING = "controller:bluetooth:waiting";
+// PRO-655 (upstream v1.9): controller speaks another protocol version; control inhibited, OTA only. value = controller version.
+inline constexpr const char *CONTROLLER_PROTOCOL_MISMATCH = "controller:protocol:mismatch";
 inline constexpr const char *CONTROLLER_WIFI_CONNECT = "controller:wifi:connect";
 inline constexpr const char *CONTROLLER_WIFI_DISCONNECT = "controller:wifi:disconnect";
 

@@ -1,11 +1,5 @@
 #include "Controller.h"
 #include "ArduinoJson.h"
-#ifndef GAGGIMATE_SIM
-// PRO-243: nanopb SystemInfo decode for the INFO characteristic (real firmware
-// only; the sim keeps the legacy JSON path — see setupInfos()).
-#include "comms.pb.h"
-#include "pb_decode.h"
-#endif
 #include "esp_sntp.h"
 #ifndef GAGGIMATE_SIM
 // PRO-330: esp_wifi_set_ps() — enforce WiFi modem-sleep before BLE controller
@@ -288,10 +282,18 @@ void Controller::setupBluetooth() {
     // enforces it, which is why the NimBLE 1.x->2.x + platform bump regressed it.
     esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 #endif
-    GM_HEAP_DIAG("before clientController.initClient"); // PRO-566
-    clientController.initClient();
-    GM_HEAP_DIAG("after clientController.initClient"); // PRO-566
-    clientController.registerDisconnectCallback([this]() {
+    // PRO-655: upstream NanoPbComm framed protocol (was NimBLEClientController).
+    GM_HEAP_DIAG("before comms.init"); // PRO-566
+    comms.init("GPBLC");
+    GM_HEAP_DIAG("after comms.init"); // PRO-566
+    comms.onConnectionChanged([this](bool connected) {
+        if (connected) {
+            ESP_LOGI(LOG_TAG, "Controller link up, waiting for SystemInfo");
+            return;
+        }
+        // Control stays inhibited until the next link delivers a matching SystemInfo.
+        systemInfoReceived.store(false, std::memory_order_release);
+        configResendUntil = 0;
         if (initialized) {
             pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT);
             waitingForController = true;
@@ -301,20 +303,33 @@ void Controller::setupBluetooth() {
             setMode(MODE_STANDBY);
         }
     });
-    clientController.registerSensorCallback(
-        [this](const float temp, const float pressure, const float puckFlow, const float pumpFlow, const float puckResistance) {
-            onTempRead(temp);
-            this->pressure = pressure;
-            this->currentPuckFlow = puckFlow;
-            this->currentPumpFlow = pumpFlow;
-            pluginManager->trigger(EventIds::BOILER_PRESSURE_CHANGE, "value", pressure);
-            pluginManager->trigger(EventIds::PUMP_PUCK_FLOW_CHANGE, "value", puckFlow);
-            pluginManager->trigger(EventIds::PUMP_FLOW_CHANGE, "value", pumpFlow);
-            pluginManager->trigger(EventIds::PUMP_PUCK_RESISTANCE_CHANGE, "value", puckResistance);
-        });
-    clientController.registerBrewBtnCallback([this](const int brewButtonStatus) { handleBrewButton(brewButtonStatus); });
-    clientController.registerSteamBtnCallback([this](const int steamButtonStatus) { handleSteamButton(steamButtonStatus); });
-    clientController.registerRemoteErrorCallback([this](const int error) {
+    comms.onSystemInfo([this](const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
+                              bool ledControl, bool tof, bool dualBoiler, std::vector<uint32_t> addons) {
+        onSystemInfo(hardware, version, protocolVersion, dimming, pressure, ledControl, tof, dualBoiler, addons);
+    });
+    // R3: controller without the framed TX/RX chars (legacy firmware). The link is kept
+    // for the controller-OTA service only; see onIncompatibleController().
+    comms.onIncompatibleController([this](const String &info) { onIncompatibleController(info); });
+    comms.onSensorData([this](float temp, float /*temp2*/, float pressure, float puckFlow, float pumpFlow, float puckResistance,
+                              float /*pumpPower*/, float /*heaterPower*/, float /*waterPumped*/) {
+        onTempRead(temp);
+        this->pressure = pressure;
+        this->currentPuckFlow = puckFlow;
+        this->currentPumpFlow = pumpFlow;
+        pluginManager->trigger(EventIds::BOILER_PRESSURE_CHANGE, "value", pressure);
+        pluginManager->trigger(EventIds::PUMP_PUCK_FLOW_CHANGE, "value", puckFlow);
+        pluginManager->trigger(EventIds::PUMP_FLOW_CHANGE, "value", pumpFlow);
+        pluginManager->trigger(EventIds::PUMP_PUCK_RESISTANCE_CHANGE, "value", puckResistance);
+    });
+    // ButtonState index 0 = brew, 1 = steam (was separate brew/steam characteristics).
+    comms.onButtonState([this](uint8_t index, bool pressed) {
+        if (index == 0) {
+            handleBrewButton(pressed ? 1 : 0);
+        } else if (index == 1) {
+            handleSteamButton(pressed ? 1 : 0);
+        }
+    });
+    comms.onError([this](int error) {
         if (error != ERROR_CODE_TIMEOUT && error != this->error) {
             this->error = error;
             deactivate();
@@ -323,7 +338,7 @@ void Controller::setupBluetooth() {
             ESP_LOGE(LOG_TAG, "Received error %d", error);
         }
     });
-    clientController.registerAutotuneResultCallback([this](const float Kp, const float Ki, const float Kd, const float Kf) {
+    comms.onAutotuneResult([this](float Kp, float Ki, float Kd, float Kf) {
         ESP_LOGI(LOG_TAG, "Received autotune values: Kp=%.3f, Ki=%.3f, Kd=%.3f, Kf=%.3f (combined)", Kp, Ki, Kd, Kf);
         char pid[64];
         // Store in simplified format with combined Kf
@@ -332,61 +347,93 @@ void Controller::setupBluetooth() {
         pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_RESULT);
         autotuning = false;
     });
-    clientController.registerVolumetricMeasurementCallback(
-        [this](const float value) { onVolumetricMeasurement(value, VolumetricMeasurementSource::FLOW_ESTIMATION); });
-    clientController.registerTofMeasurementCallback([this](const int value) {
-        tofDistance = value;
-        ESP_LOGV(LOG_TAG, "Received new TOF distance: %d", value);
-        pluginManager->trigger(EventIds::CONTROLLER_TOF_CHANGE, "value", value);
+    comms.onVolumetricMeasurement(
+        [this](float value) { onVolumetricMeasurement(value, VolumetricMeasurementSource::FLOW_ESTIMATION); });
+    comms.onTofMeasurement([this](uint32_t value) {
+        tofDistance = static_cast<int>(value);
+        ESP_LOGV(LOG_TAG, "Received new TOF distance: %d", tofDistance);
+        pluginManager->trigger(EventIds::CONTROLLER_TOF_CHANGE, "value", tofDistance);
     });
     pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_INIT);
 }
 
-void Controller::setupInfos() {
-    const std::string info = clientController.readInfo();
-#ifdef GAGGIMATE_SIM
-    // PRO-243: the simulator's NimBLEClientController (sim/comms, intentionally
-    // untouched) still serves the legacy JSON info string and the sim build does
-    // not link the nanopb codegen, so keep parsing JSON here for the sim only.
-    ESP_LOGI(LOG_TAG, "System info (sim/json): %s", info.c_str());
+// PRO-655: upstream v1.9 onSystemInfo (Controller.cpp :320-358) + v6 dualBoiler, with
+// Carlos's connect-time behaviour (pressure scale, PID, pump coeffs, startup standby,
+// CONTROLLER_READY once, CONTROLLER_BLUETOOTH_CONNECT every link) moved here from loop().
+void Controller::onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
+                              bool ledControl, bool tof, bool dualBoiler, const std::vector<uint32_t> &addons) {
+    const bool mismatch = controller_link::isProtocolMismatch(protocolVersion, gm_proto::PROTOCOL_VERSION);
+    systemInfo = SystemInfo{.hardware = String(hardware),
+                            .version = String(version),
+                            .capabilities =
+                                SystemCapabilities{
+                                    .dimming = dimming,
+                                    .pressure = pressure,
+                                    .ledControl = ledControl,
+                                    .tof = tof,
+                                    .dualBoiler = dualBoiler,
+                                    .addons = addons,
+                                },
+                            .protocolVersion = protocolVersion,
+                            .protocolMismatch = mismatch};
+    systemInfoReceived.store(true, std::memory_order_release);
+    waitingForController = false;
+    // Reset the grace clock so a subsequent disconnect measures from the
+    // moment of (re)connection, not from original boot (PRO-3).
+    connectStartTime = millis();
+    ESP_LOGI(LOG_TAG, "System info: %s %s (proto=%u local=%u dm=%d ps=%d led=%d tof=%d, db=%d)", hardware, version,
+             static_cast<unsigned>(protocolVersion), static_cast<unsigned>(gm_proto::PROTOCOL_VERSION), dimming, pressure,
+             ledControl, tof, dualBoiler);
+    if (mismatch) {
+        ESP_LOGW(LOG_TAG, "Protocol version mismatch: controller=%u display=%u -- control inhibited, OTA only",
+                 static_cast<unsigned>(protocolVersion), static_cast<unsigned>(gm_proto::PROTOCOL_VERSION));
+        deactivate();
+        pluginManager->trigger(EventIds::CONTROLLER_PROTOCOL_MISMATCH, "value", static_cast<int>(protocolVersion));
+    } else {
+        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f", settings.getPressureScaling());
+        setPressureScale();
+        setPidSettings();
+        setPumpModelCoeffs();
+        // A config burst right after a connect can be lost in the unstable BLE window;
+        // re-send it for a short while (upstream CONFIG_RESEND_WINDOW_MS).
+        configResendUntil = millis() + CONFIG_RESEND_WINDOW_MS;
+        lastConfigResend = millis();
+    }
+    if (!loaded) {
+        loaded = true;
+        if (controller_link::shouldActivateStandbyOnReady(mismatch, settings.getStartupMode() == MODE_STANDBY))
+            activateStandby();
+        // Fires for a mismatch too: WebUIPlugin binds controller OTA on READY (OTA-only recovery).
+        pluginManager->trigger(EventIds::CONTROLLER_READY);
+    }
+    pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_CONNECT);
+}
+
+// R3: missing TX/RX chars = legacy/incompatible controller firmware. Upstream parses
+// the legacy INFO char as JSON; Carlos's legacy controller encodes it as nanopb
+// (PRO-243), which lands in the "Legacy controller 0.0.0" branch (increment 4 skipped
+// by decision). Either way protocolVersion 0 => mismatch => control inhibited, OTA only.
+void Controller::onIncompatibleController(const String &info) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, info);
     if (err) {
-        ESP_LOGE(LOG_TAG, "Error deserializing JSON: %s", err.c_str());
-        systemInfo = SystemInfo{
-            .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
-    } else {
-        systemInfo = SystemInfo{.hardware = doc["hw"].as<String>(),
-                                .version = doc["v"].as<String>(),
-                                .capabilities = SystemCapabilities{
-                                    .dimming = doc["cp"]["dm"].as<bool>(),
-                                    .pressure = doc["cp"]["ps"].as<bool>(),
-                                    .ledControl = doc["cp"]["led"].as<bool>(),
-                                    .tof = doc["cp"]["tof"].as<bool>(),
-                                }};
+        ESP_LOGW(LOG_TAG, "Incompatible controller, no readable info (%s)", err.c_str());
+        onSystemInfo("Legacy controller", "0.0.0", 0, false, false, false, false, false, {});
+        return;
     }
-#else
-    // PRO-243: nanopb SystemInfo wire format (was an ArduinoJson string). The
-    // controller encodes gaggimate_SystemInfo in make_system_info(); decode it
-    // back into the firmware's SystemInfo struct here.
-    ESP_LOGI(LOG_TAG, "System info: %u bytes", static_cast<unsigned>(info.size()));
-    gaggimate_SystemInfo msg = gaggimate_SystemInfo_init_zero;
-    pb_istream_t is = pb_istream_from_buffer(reinterpret_cast<const uint8_t *>(info.data()), info.size());
-    if (!pb_decode(&is, gaggimate_SystemInfo_fields, &msg)) {
-        ESP_LOGE(LOG_TAG, "Error decoding SystemInfo: %s", PB_GET_ERROR(&is));
-        systemInfo = SystemInfo{
-            .hardware = "GaggiMate Standard 1.x", .version = "v1.0.0", .capabilities = {.dimming = false, .pressure = false}};
-    } else {
-        systemInfo = SystemInfo{.hardware = String(msg.hardware),
-                                .version = String(msg.version),
-                                .capabilities = SystemCapabilities{
-                                    .dimming = msg.capabilities.dimming,
-                                    .pressure = msg.capabilities.pressure,
-                                    .ledControl = msg.capabilities.led_control,
-                                    .tof = msg.capabilities.tof,
-                                }};
-    }
-#endif
+    String hardware = doc["hw"].as<String>();
+    String version = doc["v"].as<String>();
+    if (hardware.isEmpty())
+        hardware = "Legacy controller";
+    if (version.isEmpty())
+        version = "0.0.0";
+    onSystemInfo(hardware.c_str(), version.c_str(), 0, doc["cp"]["dm"].as<bool>(), doc["cp"]["ps"].as<bool>(),
+                 doc["cp"]["led"].as<bool>(), doc["cp"]["tof"].as<bool>(), false, {});
+}
+
+bool Controller::isControlAllowed() const {
+    return controller_link::controlAllowed(comms.isConnected(), systemInfoReceived.load(std::memory_order_acquire),
+                                           systemInfo.protocolMismatch);
 }
 
 void Controller::setupWifi() {
@@ -473,30 +520,32 @@ void Controller::loop() {
 
     // If BLE scanning has been running for a while without finding the controller,
     // notify the UI so it can update the startup label accordingly.
-    if (!waitingForController && initialized && !clientController.isConnected() &&
+    if (!waitingForController && initialized && !comms.isConnected() &&
         (long)(now - connectStartTime) > CONTROLLER_WAITING_TIMEOUT_MS) {
         waitingForController = true;
         pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_WAITING);
     }
 
-    if (clientController.isReadyForConnection() && clientController.connectToServer()) {
+    // PRO-655: drive the NanoPbComm link (scan-stall restart; send pump if no task).
+    comms.loop();
+    // Connect-time config/ready handling moved to onSystemInfo(): the framed link is
+    // only usable once the controller's SystemInfo (with protocol_version) arrives.
+    if (comms.isReadyForConnection() && comms.connectToServer()) {
         waitingForController = false;
-        // Reset the grace clock so a subsequent disconnect measures from the
-        // moment of (re)connection, not from original boot (PRO-3).
-        connectStartTime = millis();
-        setupInfos();
-        ESP_LOGI(LOG_TAG, "setting pressure scale to %.2f", settings.getPressureScaling());
+    }
+    const bool haveInfo = systemInfoReceived.load(std::memory_order_acquire);
+    // Keepalive ping: completes the server handshake and feeds the controller watchdog
+    // between control deltas; suppressed on mismatch so its failsafe keeps outputs off.
+    if (controller_link::shouldSendPing(comms.isConnected(), haveInfo, systemInfo.protocolMismatch) &&
+        now - lastPing >= PING_INTERVAL_MS) {
+        comms.sendPing();
+        lastPing = now;
+    }
+    if (isControlAllowed() && now < configResendUntil && (now - lastConfigResend) >= CONFIG_RESEND_INTERVAL_MS) {
         setPressureScale();
-        clientController.sendPidSettings(settings.getPid());
-        clientController.sendPumpModelCoeffs(settings.getPumpModelCoeffs());
-        if (!loaded) {
-            loaded = true;
-            if (settings.getStartupMode() == MODE_STANDBY)
-                activateStandby();
-
-            pluginManager->trigger(EventIds::CONTROLLER_READY);
-        }
-        pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_CONNECT);
+        setPidSettings();
+        setPumpModelCoeffs();
+        lastConfigResend = now;
     }
 
     if (isErrorState()) {
@@ -627,7 +676,11 @@ void Controller::autotune(int testTime, int samples) {
         activateStandby();
     }
     autotuning = true;
-    clientController.sendAutotune(testTime, samples);
+    if (!isControlAllowed()) {
+        return; // PRO-655 R3: never drive a mismatched / absent controller
+    }
+    // heaterWattage is unused by Carlos's controller Heater::autotune(goal, windowSize).
+    comms.sendAutotune(static_cast<uint32_t>(testTime), static_cast<uint32_t>(samples), 0);
     pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_START);
 }
 
@@ -928,16 +981,52 @@ bool Controller::setBrewTemperatureOverride(const float temperature) {
     return true;
 }
 
+// Parse "a,b,c,d" into `out`; missing/empty fields stay at `def` (upstream v1.9
+// parseFloatCsv). Pump coeffs default to NaN so a two-value "a,b" string keeps its
+// flow-measurement semantics on the controller; absent PID Kf defaults to 0.
+static void parseFloatCsv(const String &csv, float *out, size_t count, float def) {
+    for (size_t i = 0; i < count; i++)
+        out[i] = def;
+    unsigned int start = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (start > csv.length())
+            break;
+        const int comma = csv.indexOf(',', start);
+        String token = (comma < 0) ? csv.substring(start) : csv.substring(start, comma);
+        token.trim();
+        if (token.length() > 0)
+            out[i] = token.toFloat();
+        if (comma < 0)
+            break;
+        start = static_cast<unsigned int>(comma) + 1;
+    }
+}
+
 void Controller::setPressureScale(void) {
-    if (systemInfo.capabilities.pressure) {
-        clientController.setPressureScale(settings.getPressureScaling());
+    if (systemInfo.capabilities.pressure && isControlAllowed()) {
+        comms.sendPressureScale(settings.getPressureScaling());
     }
 }
 
 void Controller::setPumpModelCoeffs(void) {
-    if (systemInfo.capabilities.dimming) {
-        clientController.sendPumpModelCoeffs(settings.getPumpModelCoeffs());
+    if (systemInfo.capabilities.dimming && isControlAllowed()) {
+        float coeffs[4];
+        parseFloatCsv(settings.getPumpModelCoeffs(), coeffs, 4, NAN);
+        // Carlos's controller has no gear-pump addon: gains/max power/slip are unused
+        // by its PumpSettings handler, so send zeros.
+        comms.sendPumpSettings(coeffs[0], coeffs[1], coeffs[2], coeffs[3], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     }
+}
+
+void Controller::setPidSettings() {
+    if (!isControlAllowed())
+        return;
+    float pid[4];
+    parseFloatCsv(settings.getPid(), pid, 4, 0.0f);
+    // Old NimBLEComm client sent Kf only when > 0; keep that (negative/garbage -> 0).
+    if (!(pid[3] > 0.0f))
+        pid[3] = 0.0f;
+    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);
 }
 
 int Controller::getTargetGrindDuration() const { return settings.getTargetGrindDuration(); }
@@ -1084,6 +1173,11 @@ void Controller::lowerGrindTarget() {
 }
 
 void Controller::updateControl() {
+    // PRO-655 R3/R4b (upstream :897): never drive a controller whose protocol we
+    // don't match, or before its SystemInfo arrived; OTA recovery still works.
+    if (!isControlAllowed()) {
+        return;
+    }
     // Thread-safe access to currentProcess with mutex protection
     // Hold mutex for entire duration to prevent use-after-free
     if (xSemaphoreTake(processMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
@@ -1169,34 +1263,61 @@ void Controller::updateControl() {
         }
     }
 
-    clientController.sendAltControl(altRelayActive);
+    // PRO-655: boiler + pump + brew valve + alt relay go out as ONE batched frame
+    // (applied atomically by the controller). Unlike upstream's delta sends, the
+    // full state is sent every cycle, preserving Carlos's NimBLEComm semantics
+    // (every updateControl() wrote the whole output state); the endpoint's
+    // coalescing queue keeps only the newest value per component.
+    BoilerCommand boiler;
+    boiler.index = 0;
+    boiler.setpoint = targetTemp;
+    PumpCommand pump;
+    pump.index = 0;
+    RelayCommand relay; // index 0 = brew valve
+    relay.index = 0;
+
+    bool handled = false;
     if (active && systemInfo.capabilities.pressure) {
         if (procType == MODE_STEAM) {
             targetPressure = settings.getSteamPumpCutoff();
             targetFlow = pumpValue * 0.1f;
-            clientController.sendAdvancedOutputControl(false, targetTemp, false, targetPressure, targetFlow);
-            return;
-        }
-        if (procType == MODE_BREW) {
-            if (isAdvancedPump) {
-                clientController.sendAdvancedOutputControl(relayActive, targetTemp, brewPumpTargetIsPressure, brewPumpPressure,
-                                                           brewPumpFlow);
-                targetPressure = brewPumpPressure;
-                targetFlow = brewPumpFlow;
-                return;
-            }
-        }
-        if (procType == MODE_MANUAL) {
+            relay.open = false;
+            pump.mode = PumpControlMode::Flow; // flow target, pressure as the limit
+            pump.flow = targetFlow;
+            pump.pressure = targetPressure;
+            handled = true;
+        } else if (procType == MODE_BREW && isAdvancedPump) {
+            relay.open = relayActive;
+            pump.mode = brewPumpTargetIsPressure ? PumpControlMode::Pressure : PumpControlMode::Flow;
+            pump.pressure = brewPumpPressure;
+            pump.flow = brewPumpFlow;
+            targetPressure = brewPumpPressure;
+            targetFlow = brewPumpFlow;
+            handled = true;
+        } else if (procType == MODE_MANUAL) {
+            relay.open = relayActive;
+            pump.mode = manualTargetIsPressure ? PumpControlMode::Pressure : PumpControlMode::Flow;
+            pump.pressure = manualPumpPressure;
+            pump.flow = manualPumpFlow;
             targetPressure = manualPumpPressure;
             targetFlow = manualPumpFlow;
-            clientController.sendAdvancedOutputControl(relayActive, targetTemp, manualTargetIsPressure, manualPumpPressure,
-                                                       manualPumpFlow);
-            return;
+            handled = true;
         }
     }
-    targetPressure = 0.0f;
-    targetFlow = 0.0f;
-    clientController.sendOutputControl(active && relayActive, active ? pumpValue : 0, targetTemp);
+    if (!handled) {
+        targetPressure = 0.0f;
+        targetFlow = 0.0f;
+        relay.open = active && relayActive;
+        pump.mode = PumpControlMode::Power;
+        pump.power = active ? pumpValue : 0;
+    }
+
+    gm::Payload batch[4];
+    batch[0] = comms.buildBoilerControl(boiler.index, boiler.mode, boiler.setpoint);
+    batch[1] = comms.buildPumpControl(pump.index, pump.mode, pump.power, pump.pressure, pump.flow);
+    batch[2] = comms.buildRelayControl(relay.index, relay.open);
+    batch[3] = comms.buildRelayControl(1, altRelayActive); // index 1 = alt relay
+    comms.sendBatch(batch, 4);
 }
 
 void Controller::activate() {
@@ -1224,7 +1345,9 @@ void Controller::activate() {
     // LVGL on the shared core (see CAR-253).
     const bool needsTare = (mode == MODE_BREW || mode == MODE_MANUAL);
     if (needsTare) {
-        clientController.tare();
+        if (isControlAllowed()) {
+            comms.tare();
+        }
         if (isVolumetricAvailable()) {
 #ifdef NIGHTLY_BUILD
             currentVolumetricSource.store(isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH

@@ -4,6 +4,8 @@
 #include "../Protocol.h"
 #include "../Transport.h"
 #include <NimBLEDevice.h>
+#include <atomic>
+#include <freertos/FreeRTOS.h>
 
 // BLE central (client) transport for the display: scans, connects, subscribes TX / writes RX (one datagram per op).
 // Pairing: bonds to the first controller found, then connects only to it until clearBonds(); links encrypted before GATT use.
@@ -15,7 +17,7 @@ class BleClientTransport : public Transport, public NimBLEAdvertisedDeviceCallba
     void scan();
     void maintain();        // restart scan if it stalled; call from loop()
     bool connectToServer(); // returns true once connected + subscribed
-    bool isReadyForConnection() const { return _readyForConnection; }
+    bool isReadyForConnection() const { return _readyForConnection.load(std::memory_order_acquire); }
     void disconnect();
 
     // Forget the paired controller so the display can pair to a different one.
@@ -37,18 +39,27 @@ class BleClientTransport : public Transport, public NimBLEAdvertisedDeviceCallba
     NimBLEClient *_client = nullptr;
     NimBLEScan *_scanner = nullptr;
     // Value copy taken in onResult(); with setMaxResults(0) the advertised-device object is freed there (use-after-free trap).
+    // LOCAL PATCH (PRO-10, see lib/NanoPbComm/LOCAL_PATCHES.md): _serverAddress /
+    // _haveServerAddress / _readyForConnection are written by onResult() on the NimBLE
+    // host task and read by maintain()/connectToServer() on the display loop task.
+    // The multi-byte address + its flags are published and snapshotted together under
+    // _addrMux; the flags are atomics so lock-free reads (isReadyForConnection) are
+    // well-defined and ordered after the address write.
     NimBLEAddress _serverAddress{};
-    bool _haveServerAddress = false;
+    std::atomic<bool> _haveServerAddress{false};
+    portMUX_TYPE _addrMux = portMUX_INITIALIZER_UNLOCKED;
     // Paired controller identity from our own NVS; the scale-shared, evicting NimBLE bond store can't be the source of truth.
     NimBLEAddress _pairedPeer{};
     bool _havePairedPeer = false;
     NimBLERemoteCharacteristic *_writeChar = nullptr;  // to server (RX_CHAR_UUID)
     NimBLERemoteCharacteristic *_notifyChar = nullptr; // from server (TX_CHAR_UUID)
-    bool _readyForConnection = false;
+    std::atomic<bool> _readyForConnection{false};
     bool _lowLatency = false;
     bool _incompatible = false;
     std::function<void(const String &info)> _onIncompatible = nullptr;
 
+    // PRO-10: consistent copy of the scan result; false when none is published.
+    bool snapshotServerAddress(NimBLEAddress &out);
     void applyConnParams();
     int requestConnParams(uint16_t minInterval, uint16_t maxInterval);
     void logOtherLinks() const;

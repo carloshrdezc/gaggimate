@@ -24,7 +24,7 @@ void BleClientTransport::init(const String &deviceName) {
 }
 
 void BleClientTransport::scan() {
-    _readyForConnection = false;
+    _readyForConnection.store(false, std::memory_order_release);
     _scanner->clearDuplicateCache();
     _scanner->setAdvertisedDeviceCallbacks(this, true);
     _scanner->setInterval(1000);
@@ -38,14 +38,26 @@ void BleClientTransport::scan() {
 void BleClientTransport::maintain() {
     if (_client == nullptr || _scanner == nullptr)
         return; // init() failed to create the client/scanner
-    if (!_readyForConnection && !_client->isConnected() && !_scanner->isScanning()) {
+    if (!_readyForConnection.load(std::memory_order_acquire) && !_client->isConnected() && !_scanner->isScanning()) {
         ESP_LOGI(LOG_TAG, "Scan stalled, restarting");
         scan();
     }
 }
 
+bool BleClientTransport::snapshotServerAddress(NimBLEAddress &out) {
+    // LOCAL PATCH (PRO-10): read address + flag as one unit vs onResult().
+    taskENTER_CRITICAL(&_addrMux);
+    const bool have = _haveServerAddress.load(std::memory_order_relaxed);
+    if (have)
+        out = _serverAddress;
+    taskEXIT_CRITICAL(&_addrMux);
+    return have;
+}
+
 bool BleClientTransport::connectToServer() {
-    if (!_haveServerAddress)
+    // LOCAL PATCH (PRO-10): work on a local snapshot; the scan callback may republish meanwhile.
+    NimBLEAddress serverAddress;
+    if (!snapshotServerAddress(serverAddress))
         return false;
 
     ESP_LOGI(LOG_TAG, "Connecting to advertised device");
@@ -56,7 +68,7 @@ bool BleClientTransport::connectToServer() {
             scan();
             return false;
         }
-        if (!_client->connect(_serverAddress)) {
+        if (!_client->connect(serverAddress)) {
             ESP_LOGW(LOG_TAG, "Connect failed, retrying");
             delay(500);
         }
@@ -66,10 +78,10 @@ bool BleClientTransport::connectToServer() {
 
     // Secure before GATT use; trust the link state over the rc (losing the initiation race reports EALREADY as failure).
     if (!isEncrypted() && !_client->secureConnection() && !isEncrypted()) {
-        if (NimBLEDevice::isBonded(_serverAddress)) {
+        if (NimBLEDevice::isBonded(serverAddress)) {
             // Stale bond (controller re-flashed): drop our key and pair freshly.
             ESP_LOGW(LOG_TAG, "Encryption with stored key failed, re-pairing");
-            NimBLEDevice::deleteBond(_serverAddress);
+            NimBLEDevice::deleteBond(serverAddress);
             if (!_client->secureConnection() && !isEncrypted()) {
                 ESP_LOGE(LOG_TAG, "Pairing failed, rescanning");
                 _client->disconnect();
@@ -97,7 +109,7 @@ bool BleClientTransport::connectToServer() {
         ESP_LOGW(LOG_TAG, "Comms characteristics missing -- incompatible controller firmware (OTA only)");
         _writeChar = nullptr;
         _notifyChar = nullptr;
-        _readyForConnection = false;
+        _readyForConnection.store(false, std::memory_order_release);
         _incompatible = true;
         // Read the legacy INFO characteristic so the display can show the real hardware/version.
         String info;
@@ -119,11 +131,11 @@ bool BleClientTransport::connectToServer() {
         return false;
     }
 
-    _readyForConnection = false;
+    _readyForConnection.store(false, std::memory_order_release);
     _incompatible = false;
     // Persist the pairing only once a bond exists; until then the display keeps connecting openly.
-    if (NimBLEDevice::isBonded(_serverAddress))
-        savePairedPeer(_serverAddress);
+    if (NimBLEDevice::isBonded(serverAddress))
+        savePairedPeer(serverAddress);
     ESP_LOGI(LOG_TAG, "Connected, MTU: %d", _client->getMTU());
     emitConnection(true);
     return true;
@@ -178,8 +190,10 @@ void BleClientTransport::clearBonds() {
 }
 
 void BleClientTransport::disconnect() {
-    _readyForConnection = false;
-    _haveServerAddress = false;
+    taskENTER_CRITICAL(&_addrMux); // LOCAL PATCH (PRO-10)
+    _readyForConnection.store(false, std::memory_order_relaxed);
+    _haveServerAddress.store(false, std::memory_order_relaxed);
+    taskEXIT_CRITICAL(&_addrMux);
     if (_client && _client->isConnected())
         _client->disconnect();
 }
@@ -275,9 +289,13 @@ void BleClientTransport::onResult(NimBLEAdvertisedDevice *advertisedDevice) {
     ESP_LOGI(LOG_TAG, "Found controller, ready to connect");
     _scanner->stop();
     // Value-copy the address now -- the device object is freed when this callback returns (see header note).
-    _serverAddress = advertisedDevice->getAddress();
-    _haveServerAddress = true;
-    _readyForConnection = true;
+    // LOCAL PATCH (PRO-10): publish address + flags atomically w.r.t. the loop task.
+    const NimBLEAddress found = advertisedDevice->getAddress();
+    taskENTER_CRITICAL(&_addrMux);
+    _serverAddress = found;
+    _haveServerAddress.store(true, std::memory_order_relaxed);
+    _readyForConnection.store(true, std::memory_order_release);
+    taskEXIT_CRITICAL(&_addrMux);
 }
 
 bool BleClientTransport::isLockedToOther(NimBLEAdvertisedDevice *advertisedDevice) const {
