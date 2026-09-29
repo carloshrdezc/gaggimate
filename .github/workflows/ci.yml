@@ -1,6 +1,8 @@
-# CAR-341: Unified CI gate for pull requests targeting dev-master or master.
+# CAR-341: Unified CI gate for pull requests targeting dev-master or master
+# (and, since PRO-668, the feature/upstream-v1.9-integration branch).
 #
-# Runs the full local-equivalent check suite on every PR to dev-master:
+# Runs the full local-equivalent check suite on every PR to those branches.
+# No job is conditioned on the base/head ref, so every job runs for all three:
 #   1. web        — cd web && npm ci && npm run build, ESLint, vitest, plus the
 #      WebSocket API spec-drift gate (PRO-610)
 #   2. firmware   — pio run -e display (with the new -Wall -Wextra; warnings OK)
@@ -20,6 +22,9 @@ on:
     branches:
       - dev-master
       - master
+      # PRO-668: long-lived v1.9 upstream-port integration branch (epic
+      # PRO-651). Slice PRs target it, so they get the same gates.
+      - feature/upstream-v1.9-integration
 
 jobs:
   web:
