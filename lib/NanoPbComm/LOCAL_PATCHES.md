@@ -28,3 +28,17 @@ Fix (minimal):
   allocation, logging or NimBLE calls happen while it is held.
 
 Upstream candidate: yes, self-contained; propose it upstream later.
+
+## 2. PRO-655 A-P2-1: clear the OTA watchdog exemption on disconnect
+
+File: `src/ble/BleServerTransport.cpp` (`onDisconnect`, marked `PRO-655 A-P2-1`).
+
+Problem (also present upstream): `BLE_OTA_DFU::updating` was set when a DFU
+transfer started and never cleared, so after any aborted OTA the controller's
+ping watchdog never force-dropped a wedged link again until reboot.
+
+Fix: `onDisconnect()` calls `_otaDfu.onPeerDisconnect()`. The rest of the
+lifecycle (reject/size-mismatch/install fail/finish) lives in `lib/ble_ota_dfu`
+(`ota_updating_policy.hpp`, host-tested).
+
+Upstream candidate: yes, together with the `ble_ota_dfu` change.
