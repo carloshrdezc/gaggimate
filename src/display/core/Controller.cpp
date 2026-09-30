@@ -676,13 +676,16 @@ void Controller::autotune(int testTime, int samples) {
     if (isActiveSafe() || !isReady()) {
         return;
     }
+    // PRO-655 R3 / B-P2-1: gate FIRST so a refused request leaves no state behind
+    // (setting `autotuning` here would never clear: no result ever comes back).
+    if (!isControlAllowed()) {
+        ESP_LOGW(LOG_TAG, "Autotune refused: controller link not verified / protocol mismatch");
+        return;
+    }
     if (mode != MODE_STANDBY) {
         activateStandby();
     }
     autotuning = true;
-    if (!isControlAllowed()) {
-        return; // PRO-655 R3: never drive a mismatched / absent controller
-    }
     // heaterWattage is unused by Carlos's controller Heater::autotune(goal, windowSize).
     comms.sendAutotune(static_cast<uint32_t>(testTime), static_cast<uint32_t>(samples), 0);
     pluginManager->trigger(EventIds::CONTROLLER_AUTOTUNE_START);

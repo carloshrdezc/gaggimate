@@ -213,7 +213,17 @@ class Controller {
     GaggiMateClient *getClientController() { return &comms; }
     // PRO-655 R3/R4b: true while the connected controller speaks a different (or no)
     // framed protocol version: control inhibited, controller OTA only.
+    //
+    // B-P3-3: this flag is deliberately NOT cleared on disconnect (DefaultUI clears its
+    // own display copy on CONTROLLER_BLUETOOTH_DISCONNECT). That is fail-safe: control
+    // is gated by isControlAllowed(), which also requires connected + a SystemInfo
+    // from THIS link (systemInfoReceived is cleared on disconnect), so a stale `true`
+    // can only inhibit, never permit. The next SystemInfo overwrites it. Do not
+    // "fix" this by clearing it on disconnect and gating on the flag alone.
     bool isProtocolMismatch() const { return systemInfo.protocolMismatch; }
+    // PRO-655: connected && SystemInfo received on this link && protocol matches.
+    // The single gate for every display -> controller control/actuation frame.
+    bool isControlAllowed() const;
 
   private:
     // Initialization methods
@@ -225,7 +235,6 @@ class Controller {
                       bool ledControl, bool tof, bool dualBoiler, const std::vector<uint32_t> &addons);
     void onIncompatibleController(const String &info);
     void setPidSettings();
-    bool isControlAllowed() const;
     void setupWifi();
 
     // Functional methods
