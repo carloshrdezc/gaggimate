@@ -889,7 +889,7 @@ void WebUIPlugin::loop() {
         doc["mf"] = controller->getManualFlow();
         doc["mt"] = controller->getManualTemperature();
         doc["rssi"] = -127;
-        if (controller->getClientController()->getClient()->isConnected()) {
+        if (controller->getClientController()->isConnected()) { // PRO-669: false for a rejected link
             doc["rssi"] = controller->getClientController()->getClient()->getRssi();
         }
 

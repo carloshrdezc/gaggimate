@@ -38,6 +38,11 @@
 // src/display/core/process/
 #include <display/core/process/GlobalWeightCutoffPolicy.h>
 
+// lib/NimBLEComm/src/ (PRO-669: seam owned by the BLE lib; resolved via `-I src`
+// without putting lib/NimBLEComm/src on the path, which would let its real
+// NimBLEClientController.h shadow the sim/comms stand-in)
+#include <../lib/NimBLEComm/src/LegacyClientCharPolicy.h>
+
 // src/display/plugins/
 #include <display/plugins/ActiveShotFillPolicy.h>
 #include <display/plugins/BLEScaleConnectPolicy.h>
