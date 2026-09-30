@@ -52,6 +52,22 @@ void test_kicker_message_names_older_side(void) {
     TEST_ASSERT_NOT_NULL(std::strstr(mismatchKickerMessage(0, LOCAL), "VERSION MISMATCH"));
 }
 
+void test_waiting_when_link_up_but_no_systeminfo(void) {
+    const uint32_t T = 10000;
+    // B-P3-1: connected, SystemInfo never arrives -> waiting after the timeout.
+    TEST_ASSERT_FALSE(shouldEnterWaiting(false, true, true, false, T, T));
+    TEST_ASSERT_TRUE(shouldEnterWaiting(false, true, true, false, T + 1, T));
+    // No link at all (legacy behaviour kept).
+    TEST_ASSERT_TRUE(shouldEnterWaiting(false, true, false, false, T + 1, T));
+    // Healthy link never waits.
+    TEST_ASSERT_FALSE(shouldEnterWaiting(false, true, true, true, 60000, T));
+    // Edge-triggered and only after init.
+    TEST_ASSERT_FALSE(shouldEnterWaiting(true, true, true, false, T + 1, T));
+    TEST_ASSERT_FALSE(shouldEnterWaiting(false, false, true, false, T + 1, T));
+    // Wrap-safe elapsed from the caller: (uint32_t)(0x10 - 0xFFFFFF00) = 0x110.
+    TEST_ASSERT_FALSE(shouldEnterWaiting(false, true, true, false, static_cast<uint32_t>(0x10u - 0xFFFFFF00u), T));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_mismatch_detection);
@@ -60,5 +76,6 @@ int main(int, char **) {
     RUN_TEST(test_ping_policy);
     RUN_TEST(test_startup_standby_skipped_on_mismatch);
     RUN_TEST(test_kicker_message_names_older_side);
+    RUN_TEST(test_waiting_when_link_up_but_no_systeminfo);
     return UNITY_END();
 }

@@ -293,6 +293,8 @@ void Controller::setupBluetooth() {
     comms.onConnectionChanged([this](bool connected) {
         if (connected) {
             ESP_LOGI(LOG_TAG, "Controller link up, waiting for SystemInfo");
+            // B-P3-1: SystemInfo gets a full CONTROLLER_WAITING_TIMEOUT_MS from link-up.
+            connectStartTime = millis();
             return;
         }
         // Control stays inhibited until the next link delivers a matching SystemInfo.
@@ -532,8 +534,10 @@ void Controller::loop() {
 
     // If BLE scanning has been running for a while without finding the controller,
     // notify the UI so it can update the startup label accordingly.
-    if (!waitingForController && initialized && !comms.isConnected() &&
-        (long)(now - connectStartTime) > CONTROLLER_WAITING_TIMEOUT_MS) {
+    // B-P3-1: also fires when the link is up but SystemInfo never arrived.
+    if (controller_link::shouldEnterWaiting(waitingForController, initialized, comms.isConnected(),
+                                            systemInfoReceived.load(std::memory_order_acquire),
+                                            static_cast<uint32_t>(now - connectStartTime), CONTROLLER_WAITING_TIMEOUT_MS)) {
         waitingForController = true;
         pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_WAITING);
     }

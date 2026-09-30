@@ -27,6 +27,20 @@ inline bool shouldSendPing(bool connected, bool systemInfoReceived, bool mismatc
     return connected && !(systemInfoReceived && mismatch);
 }
 
+// B-P3-1: enter the "waiting for controller" state (CONTROLLER_BLUETOOTH_WAITING)
+// when no usable controller exists after the grace window: either no link, OR a
+// link that never delivered SystemInfo (a peer with the framed chars that never
+// sends info). Keyed on SystemInfo, not on the raw link state. `elapsedMs` is
+// measured from boot / last disconnect / last link-up (wrap-safe unsigned diff).
+inline bool shouldEnterWaiting(bool alreadyWaiting, bool initialized, bool connected, bool systemInfoReceived,
+                               uint32_t elapsedMs, uint32_t timeoutMs) {
+    if (alreadyWaiting || !initialized) {
+        return false;
+    }
+    const bool usable = connected && systemInfoReceived;
+    return !usable && elapsedMs > timeoutMs;
+}
+
 // Startup-standby activation is skipped on mismatch (upstream :352).
 inline bool shouldActivateStandbyOnReady(bool mismatch, bool startupModeIsStandby) { return !mismatch && startupModeIsStandby; }
 
