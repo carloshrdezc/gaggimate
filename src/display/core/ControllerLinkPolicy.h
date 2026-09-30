@@ -41,6 +41,16 @@ inline bool shouldEnterWaiting(bool alreadyWaiting, bool initialized, bool conne
     return !usable && elapsedMs > timeoutMs;
 }
 
+// B-P3-2: the control frame is ALWAYS the full four-part state (boiler + pump +
+// brew valve + alt relay, one atomic batch), but it is only sent when any part
+// changed, when a resend is forced (new link / SystemInfo), or when the keepalive
+// interval elapsed since the last send. That cuts steady-state BLE traffic from
+// 10 frames/s to 1 frame/s while keeping the controller refreshed with the whole
+// state well inside its 20 s link watchdog. `elapsedMs` is a wrap-safe diff.
+inline bool shouldSendControl(bool stateChanged, bool forceResend, uint32_t elapsedMs, uint32_t keepaliveMs) {
+    return forceResend || stateChanged || elapsedMs >= keepaliveMs;
+}
+
 // Startup-standby activation is skipped on mismatch (upstream :352).
 inline bool shouldActivateStandbyOnReady(bool mismatch, bool startupModeIsStandby) { return !mismatch && startupModeIsStandby; }
 

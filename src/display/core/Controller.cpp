@@ -299,6 +299,7 @@ void Controller::setupBluetooth() {
         }
         // Control stays inhibited until the next link delivers a matching SystemInfo.
         systemInfoReceived.store(false, std::memory_order_release);
+        controlResendRequested.store(true, std::memory_order_release); // B-P3-2
         configResendUntil = 0;
         if (initialized) {
             pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT);
@@ -382,6 +383,7 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
                                 },
                             .protocolVersion = protocolVersion,
                             .protocolMismatch = mismatch};
+    controlResendRequested.store(true, std::memory_order_release); // B-P3-2
     systemInfoReceived.store(true, std::memory_order_release);
     waitingForController = false;
     // Reset the grace clock so a subsequent disconnect measures from the
@@ -1295,10 +1297,11 @@ void Controller::updateControl() {
     }
 
     // PRO-655: boiler + pump + brew valve + alt relay go out as ONE batched frame
-    // (applied atomically by the controller). Unlike upstream's delta sends, the
-    // full state is sent every cycle, preserving Carlos's NimBLEComm semantics
-    // (every updateControl() wrote the whole output state); the endpoint's
-    // coalescing queue keeps only the newest value per component.
+    // (applied atomically by the controller). Unlike upstream's per-component
+    // deltas, every frame carries the FULL state (Carlos's NimBLEComm semantics:
+    // each write held the whole output state); the endpoint's coalescing queue
+    // keeps only the newest value per component. B-P3-2: frames go out only on
+    // change, on a new link/SystemInfo, or as a CONTROL_KEEPALIVE_MS keepalive.
     BoilerCommand boiler;
     boiler.index = 0;
     boiler.setpoint = targetTemp;
@@ -1342,6 +1345,20 @@ void Controller::updateControl() {
         pump.mode = PumpControlMode::Power;
         pump.power = active ? pumpValue : 0;
     }
+
+    // B-P3-2: full state on change / new link / keepalive only.
+    const uint32_t nowMs = static_cast<uint32_t>(millis());
+    const bool changed = boiler != lastSentBoiler || pump != lastSentPump || relay != lastSentRelay ||
+                         altRelayActive != lastSentAlt;
+    const bool force = controlResendRequested.exchange(false, std::memory_order_acq_rel);
+    if (!controller_link::shouldSendControl(changed, force, nowMs - lastControlSendMs, CONTROL_KEEPALIVE_MS)) {
+        return;
+    }
+    lastSentBoiler = boiler;
+    lastSentPump = pump;
+    lastSentRelay = relay;
+    lastSentAlt = altRelayActive;
+    lastControlSendMs = nowMs;
 
     gm::Payload batch[4];
     batch[0] = comms.buildBoilerControl(boiler.index, boiler.mode, boiler.setpoint);

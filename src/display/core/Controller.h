@@ -288,6 +288,14 @@ class Controller {
     SystemInfo systemInfo{};
     // PRO-655: set once a SystemInfo arrived on the current link (cleared on disconnect).
     std::atomic<bool> systemInfoReceived{false};
+    // B-P3-2: last full control frame sent (loopControl task only) + a resend
+    // request raised from the BLE/loop tasks on every new link / SystemInfo.
+    BoilerCommand lastSentBoiler;
+    PumpCommand lastSentPump;
+    RelayCommand lastSentRelay;
+    bool lastSentAlt = false;
+    uint32_t lastControlSendMs = 0;
+    std::atomic<bool> controlResendRequested{true};
 
     Process *currentProcess = nullptr;
     Process *lastProcess = nullptr;
@@ -333,6 +341,8 @@ class Controller {
     // PRO-655: keepalive ping cadence (upstream PING_INTERVAL); completes the
     // server handshake and feeds the controller watchdog between control frames.
     static const unsigned long PING_INTERVAL_MS = 2000;
+    // B-P3-2: full control-state keepalive when nothing changed.
+    static const uint32_t CONTROL_KEEPALIVE_MS = 1000;
     // PRO-655 (upstream v1.9): re-send the connect-time config burst for a short window.
     static const unsigned long CONFIG_RESEND_WINDOW_MS = 8000;
     static const unsigned long CONFIG_RESEND_INTERVAL_MS = 1000;

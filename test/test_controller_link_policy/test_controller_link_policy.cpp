@@ -68,6 +68,17 @@ void test_waiting_when_link_up_but_no_systeminfo(void) {
     TEST_ASSERT_FALSE(shouldEnterWaiting(false, true, true, false, static_cast<uint32_t>(0x10u - 0xFFFFFF00u), T));
 }
 
+void test_control_send_on_change_force_or_keepalive(void) {
+    const uint32_t K = 1000;
+    TEST_ASSERT_FALSE(shouldSendControl(false, false, 100, K)); // steady: suppressed
+    TEST_ASSERT_TRUE(shouldSendControl(true, false, 100, K));   // any part changed
+    TEST_ASSERT_TRUE(shouldSendControl(false, true, 0, K));     // new link / SystemInfo
+    TEST_ASSERT_TRUE(shouldSendControl(false, false, K, K));    // keepalive
+    // Wrap-safe elapsed from the caller.
+    TEST_ASSERT_FALSE(shouldSendControl(false, false, static_cast<uint32_t>(0x100u - 0xFFFFFE00u), K)); // 768 ms
+    TEST_ASSERT_TRUE(shouldSendControl(false, false, static_cast<uint32_t>(0x400u - 0xFFFFFC00u), K));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_mismatch_detection);
@@ -77,5 +88,6 @@ int main(int, char **) {
     RUN_TEST(test_startup_standby_skipped_on_mismatch);
     RUN_TEST(test_kicker_message_names_older_side);
     RUN_TEST(test_waiting_when_link_up_but_no_systeminfo);
+    RUN_TEST(test_control_send_on_change_force_or_keepalive);
     return UNITY_END();
 }
