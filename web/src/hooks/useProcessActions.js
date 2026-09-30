@@ -16,7 +16,7 @@ const alertNotify = msg => window.alert(msg);
 /** Subscribes to process-start refusals and shows them to the user. */
 export function useProcessRefusalNotice(api, notify = alertNotify) {
   useEffect(() => {
-    if (!api || typeof api.on !== 'function') return undefined;
+    if (!api || typeof api.on !== 'function' || typeof api.off !== 'function') return undefined;
     const ids = PROCESS_REFUSAL_TYPES.map(tp => [
       tp,
       api.on(tp, message => {
