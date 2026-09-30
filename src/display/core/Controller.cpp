@@ -435,6 +435,14 @@ void Controller::onIncompatibleController(const String &info) {
                  doc["cp"]["led"].as<bool>(), doc["cp"]["tof"].as<bool>(), false, {});
 }
 
+bool Controller::tareControllerScale() {
+    if (!isControlAllowed()) {
+        return false;
+    }
+    comms.tare();
+    return true;
+}
+
 bool Controller::isControlAllowed() const {
     return controller_link::controlAllowed(comms.isConnected(), systemInfoReceived.load(std::memory_order_acquire),
                                            systemInfo.protocolMismatch);
@@ -1368,9 +1376,7 @@ bool Controller::activate() {
     // LVGL on the shared core (see CAR-253).
     const bool needsTare = (mode == MODE_BREW || mode == MODE_MANUAL);
     if (needsTare) {
-        if (isControlAllowed()) {
-            comms.tare();
-        }
+        tareControllerScale();
         if (isVolumetricAvailable()) {
 #ifdef NIGHTLY_BUILD
             currentVolumetricSource.store(isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH

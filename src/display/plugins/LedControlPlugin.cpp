@@ -49,8 +49,11 @@ void LedControlPlugin::updateControl() {
 }
 
 void LedControlPlugin::sendControl(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint8_t ext) {
-    // PRO-655 R3: never drive a mismatched/legacy controller (OTA only).
-    if (this->controller->isProtocolMismatch()) {
+    // PRO-655 R3 / B-P2-3: full link policy (connected + SystemInfo from THIS link +
+    // no mismatch), not just the mismatch flag: after a reconnect the flag still
+    // holds the previous link's value until the new SystemInfo arrives. firstSend
+    // is left untouched, so the first allowed frame is still sent.
+    if (!this->controller->isControlAllowed()) {
         return;
     }
     if (!firstSend && r == last_r && g == last_g && b == last_b && w == last_w && ext == last_ext) {

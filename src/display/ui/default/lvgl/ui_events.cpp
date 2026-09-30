@@ -299,7 +299,9 @@ void onVolumetricHold(lv_event_t *e) {
     // Set flag to prevent click from firing when button is released
     volumetricHoldTriggered = true;
 
-    controller.getClientController()->tare();
+    // PRO-655 B-P2-4: controller tare goes through the gated path (no Tare frame
+    // to a mismatched / unverified controller). BLEScales is the phone-side scale.
+    controller.tareControllerScale();
     BLEScales.tare();
 }
 

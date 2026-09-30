@@ -226,6 +226,9 @@ class Controller {
     // PRO-655: connected && SystemInfo received on this link && protocol matches.
     // The single gate for every display -> controller control/actuation frame.
     bool isControlAllowed() const;
+    // B-P2-4: the only path to the controller's Tare frame; gated like all control.
+    // Returns false (and sends nothing) when control is inhibited.
+    bool tareControllerScale();
 
   private:
     // Initialization methods
