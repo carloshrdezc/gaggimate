@@ -8,6 +8,7 @@
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <display/core/Controller.h>
+#include <display/core/ControllerLinkPolicy.h>
 #include <display/core/EventIds.h>
 #include <display/core/GmHeapDiag.h> // PRO-566
 #include <display/core/GrinderManager.h>
@@ -482,7 +483,11 @@ void WebUIPlugin::loop() {
                 // PRO-421's reassert guard (which reads those two fields) therefore
                 // cannot be triggered via the deferred-apply path, and leaving it
                 // unarmed here is intentional and safe.
-                controller->setMode(target);
+                // PRO-670: the gate in setMode() only refuses LEAVING standby and this
+                // path starts from MODE_BREW, so a refusal is not expected; log it anyway.
+                if (!controller->setMode(target)) {
+                    ESP_LOGW("WebUIPlugin", "Deferred mode change to %u refused by controller gate", target);
+                }
             }
         }
     }
@@ -1716,6 +1721,17 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
             if (shouldSuppressStandbyReassert(newMode, msSinceStandby)) {
                 return;
             }
+            // PRO-670 (B-P3-4): leaving standby is refused while controller control is
+            // inhibited (mismatch / incompatible / unverified link). Checked BEFORE
+            // deactivate()/clear() so a refused request tears nothing down; the web UI
+            // shows the reply. Controller::setMode() enforces the same gate centrally.
+            if (!controller_link::modeChangeAllowed(controller->getMode() == MODE_STANDBY, newMode == MODE_STANDBY,
+                                                    controller->isControlAllowed())) {
+                JsonDocument response;
+                response["tp"] = "res:change-mode";
+                sendProcessRefused(clientId, doc, response);
+                return;
+            }
             // PRO-261: honor the post-shot extended-recording / scale-settle gate
             // that the display's auto-steam path already respects (DefaultUI::loop
             // / pendingAutoSteam, PRO-223 / PRO-248 / PRO-232). This handler runs
@@ -1757,7 +1773,13 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 // standby cancels the pending transition instead of being shadowed.
                 pendingModeChange = false;
                 controller->clear();
-                controller->setMode(newMode);
+                if (!controller->setMode(newMode)) {
+                    // PRO-670: central gate refused (link state changed since the check above).
+                    JsonDocument response;
+                    response["tp"] = "res:change-mode";
+                    sendProcessRefused(clientId, doc, response);
+                    return;
+                }
                 // PRO-421: record when an explicit STANDBY landed so an immediate
                 // stale non-STANDBY re-assert (see the guard above) is rejected. An
                 // AUTOMATIC standby-on-brew STANDBY never reaches this branch while a

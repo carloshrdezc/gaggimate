@@ -62,7 +62,12 @@ void AutoWakeupPlugin::checkAutoWakeup() {
             ESP_LOGI(LOG_TAG.c_str(), "Auto-wakeup schedule matched (time: %s, day: %d), switching to brew mode",
                      schedule.time.c_str(), currentDayOfWeek);
 
-            controller->setMode(MODE_BREW);
+            // PRO-670: refused (display stays in standby) while controller control is
+            // inhibited (protocol mismatch / incompatible controller); skip the event.
+            if (!controller->setMode(MODE_BREW)) {
+                ESP_LOGW(LOG_TAG.c_str(), "Auto-wakeup refused: controller not ready (mismatch or not connected)");
+                return;
+            }
 
             // Trigger plugin events
             pluginManager->trigger(EventIds::AUTOWAKEUP_ACTIVATED, "time", schedule.time);

@@ -51,6 +51,17 @@ inline bool shouldSendControl(bool stateChanged, bool forceResend, uint32_t elap
     return forceResend || stateChanged || elapsedMs >= keepaliveMs;
 }
 
+// PRO-670 (B-P3-4): a mode change that LEAVES standby (standby -> any non-standby
+// mode) is only allowed while control is allowed (verified, matching controller).
+// Entering / staying in standby is always allowed, as is any change that doesn't
+// start from standby (stop / OTA paths go through activateStandby()).
+inline bool modeChangeAllowed(bool currentIsStandby, bool targetIsStandby, bool controlIsAllowed) {
+    if (targetIsStandby || !currentIsStandby) {
+        return true;
+    }
+    return controlIsAllowed;
+}
+
 // Startup-standby activation is skipped on mismatch (upstream :352).
 inline bool shouldActivateStandbyOnReady(bool mismatch, bool startupModeIsStandby) { return !mismatch && startupModeIsStandby; }
 

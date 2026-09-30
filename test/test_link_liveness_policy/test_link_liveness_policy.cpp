@@ -61,6 +61,29 @@ void test_drop_just_before_wrap_trips_about_20s_later(void) {
     TEST_ASSERT_TRUE(link_liveness::pingTimedOut(last + 3600000u, last, TIMEOUT_S));
 }
 
+// PRO-670: only a stamp <= FUTURE_STAMP_TOLERANCE_MS in the future is tolerated.
+void test_future_stamp_tolerance_is_narrow(void) {
+    TEST_ASSERT_FALSE(link_liveness::pingTimedOut(1000, 1003, TIMEOUT_S));
+    TEST_ASSERT_FALSE(link_liveness::pingTimedOut(1000, 1999, TIMEOUT_S)); // 999 ms ahead
+    TEST_ASSERT_FALSE(link_liveness::pingTimedOut(1000, 2000, TIMEOUT_S)); // exactly 1 s ahead
+    TEST_ASSERT_FALSE(link_liveness::pingTimedOut(0x00000100u, 0x00000100u + 999u, TIMEOUT_S));
+    TEST_ASSERT_FALSE(link_liveness::pingTimedOut(0xFFFFFE00u, 0x00000100u, TIMEOUT_S)); // across wrap
+}
+
+void test_every_real_gap_trips_to_32bit_horizon(void) {
+    const uint32_t day = 24u * 60u * 60u * 1000u;
+    const uint32_t gaps[] = {21000u, 0x7FFFFFFFu, 0x80000000u, 0x80000001u, 30u * day, 49u * day,
+                             0xFFFFFFFFu - 1000u};
+    const uint32_t bases[] = {0u, 5000u, 0x7FFFFFFFu, 0xFFFFF000u};
+    for (uint32_t base : bases) {
+        for (uint32_t gap : gaps) {
+            TEST_ASSERT_TRUE(link_liveness::pingTimedOut(base + gap, base, TIMEOUT_S));
+        }
+    }
+    // ~24.8 d (2^31 ms) specifically: previously swallowed by the upper-half guard.
+    TEST_ASSERT_TRUE(link_liveness::pingTimedOut(0x80000000u + 10u, 10u, TIMEOUT_S));
+}
+
 void test_ms_after_is_wrap_safe(void) {
     TEST_ASSERT_TRUE(link_liveness::msAfter(0x00000010u, 0xFFFFFFF0u));
     TEST_ASSERT_FALSE(link_liveness::msAfter(0xFFFFFFF0u, 0x00000010u));
@@ -83,6 +106,8 @@ int main(int, char **) {
     RUN_TEST(test_exact_threshold_matches_legacy_integer_seconds);
     RUN_TEST(test_healthy_link_across_millis_wrap_does_not_trip);
     RUN_TEST(test_drop_just_before_wrap_trips_about_20s_later);
+    RUN_TEST(test_future_stamp_tolerance_is_narrow);
+    RUN_TEST(test_every_real_gap_trips_to_32bit_horizon);
     RUN_TEST(test_ms_after_is_wrap_safe);
     RUN_TEST(test_drop_link_only_on_transition_and_not_during_ota);
     return UNITY_END();

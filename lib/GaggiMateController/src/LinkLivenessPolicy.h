@@ -12,14 +12,20 @@
 
 namespace link_liveness {
 
+// PRO-670: how far in the future a ping stamp may be (NimBLE task stamping lastPing
+// just AFTER loop() sampled `now`) and still count as "fresh". Kept small (1 s) so
+// every genuine gap >= the timeout trips up to the 32-bit horizon (~49.7 d); the old
+// upper-half guard swallowed any real gap longer than ~24.8 days.
+constexpr uint32_t FUTURE_STAMP_TOLERANCE_MS = 1000u;
+
 // PRO-655 A-P1-1: wrap-safe. Unsigned subtraction survives the ~49.7-day millis()
-// wrap. An "elapsed" in the upper half of the uint32 range means lastPing was
-// stamped just AFTER loop() sampled `now` (NimBLE task race) -> not timed out.
+// wrap. An "elapsed" within FUTURE_STAMP_TOLERANCE_MS of 2^32 means lastPing was
+// stamped just AFTER `now` (race) -> not timed out.
 // Integer ms, strict >. Callers pass PING_TIMEOUT_MS (20999), which keeps the old
 // `(now - last) / 1000 > 20.0` trip point exactly (elapsed >= 21000 ms).
 inline bool pingTimedOut(uint32_t nowMs, uint32_t lastPingMs, uint32_t timeoutMs) {
     const uint32_t elapsed = nowMs - lastPingMs;
-    if (elapsed > 0x7FFFFFFFu) {
+    if (elapsed > 0xFFFFFFFFu - FUTURE_STAMP_TOLERANCE_MS) {
         return false;
     }
     return elapsed > timeoutMs;

@@ -151,7 +151,12 @@ void HomekitPlugin::loop() {
         return;
 
     if (stateActionRequired && accessory->getState() && controller->getMode() == MODE_STANDBY) {
-        controller->deactivateStandby();
+        if (!controller->deactivateStandby()) {
+            // PRO-670: refused while controller control is inhibited (mismatch /
+            // incompatible controller); stay in standby and report "off" to HomeKit.
+            ESP_LOGW("HomekitPlugin", "HomeKit wake refused: controller not ready (mismatch or not connected)");
+            accessory->setState(false);
+        }
     } else if (stateActionRequired && !accessory->getState() && controller->getMode() != MODE_STANDBY) {
         controller->activateStandby();
     }
