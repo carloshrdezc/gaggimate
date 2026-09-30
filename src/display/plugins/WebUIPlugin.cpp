@@ -1504,6 +1504,18 @@ void WebUIPlugin::broadcastRelayMsg(const String &msg) {
     }
 }
 
+// PRO-655 B-P2-2: reply sent only when Controller refuses to start a process
+// because control is inhibited (no verified controller link / protocol mismatch).
+// Success keeps the historical "no response" contract.
+void WebUIPlugin::sendProcessRefused(uint32_t clientId, JsonDocument &request, JsonDocument &response) {
+    if (!request["rid"].isNull()) {
+        response["rid"] = request["rid"];
+    }
+    response["success"] = false;
+    response["error"] = kProcessRefusedError;
+    sendResponse(clientId, response);
+}
+
 void WebUIPlugin::sendResponse(uint32_t clientId, JsonDocument &response) {
     String responseStr;
     serializeJson(response, responseStr);
@@ -1606,14 +1618,22 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
     } else if (msgType == "req:autotune-start") {
         handleAutotuneStart(clientId, doc);
     } else if (msgType == "req:process:activate") {
-        controller->activate();
+        if (!controller->activate()) {
+            JsonDocument response;
+            response["tp"] = "res:process:activate";
+            sendProcessRefused(clientId, doc, response);
+        }
     } else if (msgType == "req:process:deactivate") {
         controller->deactivate();
         controller->clear();
     } else if (msgType == "req:process:clear") {
         controller->clear();
     } else if (msgType == "req:grind:activate") {
-        controller->activateGrind();
+        if (!controller->activateGrind()) {
+            JsonDocument response;
+            response["tp"] = "res:grind:activate";
+            sendProcessRefused(clientId, doc, response);
+        }
     } else if (msgType == "req:grind:deactivate") {
         controller->deactivateGrind();
     } else if (msgType == "req:change-grind-target") {
@@ -2768,12 +2788,15 @@ void WebUIPlugin::sendAutotuneResult() {
 }
 
 void WebUIPlugin::handleFlushStart(uint32_t clientId, JsonDocument &request) {
-    controller->onFlush();
+    const bool started = controller->onFlush();
 
     JsonDocument response;
     response["tp"] = "res:flush:start";
     response["rid"] = request["rid"];
-    response["success"] = true;
+    response["success"] = started;
+    if (!started) {
+        response["error"] = kProcessRefusedError;
+    }
 
     sendResponse(clientId, response);
 }

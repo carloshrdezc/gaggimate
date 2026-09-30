@@ -29,6 +29,7 @@
 
 // src/display/core/
 #include <display/core/BrewTemperatureOverridePolicy.h>
+#include <display/core/ControllerLinkPolicy.h>
 #include <display/core/MbedtlsPsramAllocatorPolicy.h>
 #include <display/core/MdnsNamePolicy.h>
 #include <display/core/StandbyTransitionPolicy.h>

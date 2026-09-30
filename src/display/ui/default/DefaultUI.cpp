@@ -1,4 +1,5 @@
 #include "DefaultUI.h"
+#include <display/core/ControllerLinkPolicy.h>
 
 #include <WiFi.h>
 #include <display/core/Controller.h>
@@ -595,7 +596,8 @@ void DefaultUI::init() {
         waitingForController = false;
         rerender = true;
         initialized = true;
-        if (lv_scr_act() == ui_StandbyScreen) {
+        protocolMismatch = controller->isProtocolMismatch();
+        if (lv_scr_act() == ui_StandbyScreen && !protocolMismatch) {
             Settings &settings = controller->getSettings();
             if (settings.getStartupMode() == MODE_BREW) {
                 changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
@@ -607,7 +609,19 @@ void DefaultUI::init() {
     });
     pluginManager->on(EventIds::CONTROLLER_BLUETOOTH_DISCONNECT, [this](Event const &) {
         waitingForController = true;
+        protocolMismatch = false;
         rerender = true;
+    });
+    // PRO-655 R3/R4b: controller speaks another (or no) framed protocol version.
+    // Control is inhibited in Controller; show it on the standby kicker (upstream EEZ
+    // DefaultUI.cpp:174 switches to standby too). Controller OTA stays available.
+    pluginManager->on(EventIds::CONTROLLER_PROTOCOL_MISMATCH, [this](Event const &event) {
+        protocolMismatch = true;
+        mismatchControllerVersion = event.getInt("value");
+        waitingForController = false;
+        initialized = true;
+        rerender = true;
+        changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
     });
     pluginManager->on(EventIds::CONTROLLER_WIFI_CONNECT, [this](Event const &event) {
         rerender = true;
@@ -1041,6 +1055,9 @@ void DefaultUI::setupReactive() {
                               const char *msg = nullptr;
                               if (updateActive) {
                                   msg = "UPDATING";
+                              } else if (protocolMismatch) {
+                                  msg = controller_link::mismatchKickerMessage(
+                                      static_cast<uint32_t>(mismatchControllerVersion), gm_proto::PROTOCOL_VERSION);
                               } else if (error) {
                                   msg = controller->getError() == ERROR_CODE_RUNAWAY ? "TEMP ERROR \xC2\xB7 RESTART" : "ERROR \xC2\xB7 RESTART";
                               } else if (autotuning) {
@@ -1052,7 +1069,8 @@ void DefaultUI::setupReactive() {
                               }
                               lv_label_set_text(ui_StandbyScreen_mainLabel, msg ? msg : "STANDBY \xC2\xB7 READY");
                           },
-                          &updateActive, &updateAvailable, &error, &autotuning, &waitingForController, &initialized);
+                          &updateActive, &updateAvailable, &error, &autotuning, &waitingForController, &initialized,
+                          &protocolMismatch);
     effect_mgr.use_effect([=] { return currentScreen == ui_BrewScreen; },
                           [=]() {
                               if (brewVolumetric) {

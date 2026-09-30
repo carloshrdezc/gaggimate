@@ -1,4 +1,32 @@
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo } from 'preact/hooks';
+
+// PRO-655 B-P2-2: the display replies to req:process:activate / req:grind:activate
+// ONLY when it refuses the start (controller version mismatch / not connected).
+export const PROCESS_REFUSAL_TYPES = ['res:process:activate', 'res:grind:activate'];
+
+/** Returns the user-facing refusal text for a refusal reply, or null. */
+export function processRefusalMessage(message) {
+  if (!message || !PROCESS_REFUSAL_TYPES.includes(message.tp)) return null;
+  if (message.success !== false) return null;
+  return message.error || 'Controller not ready';
+}
+
+const alertNotify = msg => window.alert(msg);
+
+/** Subscribes to process-start refusals and shows them to the user. */
+export function useProcessRefusalNotice(api, notify = alertNotify) {
+  useEffect(() => {
+    if (!api || typeof api.on !== 'function' || typeof api.off !== 'function') return undefined;
+    const ids = PROCESS_REFUSAL_TYPES.map(tp => [
+      tp,
+      api.on(tp, message => {
+        const text = processRefusalMessage(message);
+        if (text) notify(`Cannot start: ${text}`);
+      }),
+    ]);
+    return () => ids.forEach(([tp, id]) => api.off(tp, id));
+  }, [api, notify]);
+}
 
 /**
  * Custom hook to create memoized action handlers for process control
@@ -17,6 +45,7 @@ export function useProcessActions(
   lastProcessTypeRef,
   processKind = grind ? 'grind' : 'brew',
 ) {
+  useProcessRefusalNotice(api);
   return useMemo(
     () => ({
       changeTarget: target => {
@@ -51,6 +80,9 @@ export function useProcessActions(
         api.request({ tp: 'req:flush:start' }).catch(error => {
           console.error('Flush request failed:', error);
           setIsFlushing(false);
+          if (error?.message && !/timed out/.test(error.message)) {
+            window.alert(`Cannot start: ${error.message}`);
+          }
         });
       },
     }),

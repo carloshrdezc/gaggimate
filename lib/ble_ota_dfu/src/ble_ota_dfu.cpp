@@ -28,6 +28,7 @@ void task_install_update(void *parameters) {
     // If the file cannot be loaded, return.
     if (!update_binary) {
         ESP_LOGE(TAG, "Could not load update.bin from spiffs root");
+        OTA_DFU_BLE->applyUpdating(ota_updating::Event::InstallFailed);
         vTaskDelete(NULL);
     }
 
@@ -35,6 +36,7 @@ void task_install_update(void *parameters) {
     if (update_binary.isDirectory()) {
         ESP_LOGE(TAG, "Error, update.bin is not a file");
         update_binary.close();
+        OTA_DFU_BLE->applyUpdating(ota_updating::Event::InstallFailed);
         vTaskDelete(NULL);
     }
 
@@ -45,6 +47,7 @@ void task_install_update(void *parameters) {
     if (update_size <= 0) {
         ESP_LOGE(TAG, "Error, update file is empty");
         update_binary.close();
+        OTA_DFU_BLE->applyUpdating(ota_updating::Event::InstallFailed);
         vTaskDelete(NULL);
     }
 
@@ -102,6 +105,8 @@ void task_install_update(void *parameters) {
     }
 
     ESP_LOGE(TAG, "Rebooting ESP32: complete OTA update");
+    // Completion: result already reported to the peer; clear before the reboot.
+    OTA_DFU_BLE->applyUpdating(ota_updating::Event::InstallFinished);
     delay(5000);
     ESP.restart();
 
@@ -247,8 +252,10 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
         case 0xFC: {
             if (len < 5) {
                 ESP_LOGW(TAG, "0xFC: short packet (len=%u)", len);
+                OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferRejected);
                 break;
             }
+            OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferCommand);
             selected_updater = !selected_updater;
             uint32_t requested_len = (static_cast<uint32_t>(pData[1]) * 256u) + pData[2];
             if (requested_len > UPDATER_SIZE) {
@@ -284,6 +291,7 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
                     if (received_file_size > expected_file_size) {
                         ESP_LOGW(TAG, "Unexpected size:\n Expected: %d\nReceived: %d", expected_file_size, received_file_size);
+                        OTA_DFU_BLE->applyUpdating(ota_updating::Event::SizeMismatch);
                     }
 
                 } else {
@@ -292,6 +300,7 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
                     // Start the installation
                     write_binary(&FLASH, "/update.bin", nullptr, 0, false);
                     bool start_update = true;
+                    OTA_DFU_BLE->applyUpdating(ota_updating::Event::InstallStarted);
                     xQueueOverwrite(start_update_queue, &start_update);
                 }
             }
@@ -299,6 +308,7 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
 
             // Remove previous file and send transfer mode
         case 0xFD: {
+            OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferCommand);
             // Remove previous (failed?) update
             if (FLASH.exists("/update.bin")) {
                 ESP_LOGI(TAG, "Removing previous update");
@@ -332,20 +342,24 @@ void BLEOverTheAirDeviceFirmwareUpdate::onWrite(BLECharacteristic *pCharacterist
             // sane upper bound to avoid pathological progress arithmetic.
             if (len < 5) {
                 ESP_LOGW(TAG, "0xFF: short packet (len=%u)", len);
+                OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferRejected);
                 break;
             }
             const uint16_t announced_parts = (pData[1] * 256) + pData[2];
             const uint16_t announced_mtu = (pData[3] * 256) + pData[4];
             if (announced_mtu == 0 || announced_mtu > UPDATER_SIZE) {
                 ESP_LOGW(TAG, "0xFF: invalid MTU %u (UPDATER_SIZE=%u); reject", announced_mtu, UPDATER_SIZE);
+                OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferRejected);
                 break;
             }
             if (announced_parts == 0) {
                 ESP_LOGW(TAG, "0xFF: parts=0 is invalid; reject");
+                OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferRejected);
                 break;
             }
             parts = announced_parts;
             MTU = announced_mtu;
+            OTA_DFU_BLE->applyUpdating(ota_updating::Event::TransferCommand);
         } break;
 
         default:
@@ -468,3 +482,18 @@ void BLE_OTA_DFU::send_OTA_DFU(String value) {
     this->pCharacteristic_BLE_OTA_DFU_TX->setValue(value.c_str());
     this->pCharacteristic_BLE_OTA_DFU_TX->notify();
 }
+
+bool BLE_OTA_DFU::isUpdating() const { return updating.load(std::memory_order_relaxed); }
+
+void BLE_OTA_DFU::setUpdating(bool updating) { this->updating.store(updating, std::memory_order_relaxed); }
+
+void BLE_OTA_DFU::applyUpdating(ota_updating::Event e) {
+    const bool was = isUpdating();
+    const bool now = ota_updating::next(was, e);
+    if (was && !now) {
+        ESP_LOGI(TAG, "OTA transfer ended (event %d); watchdog exemption cleared", static_cast<int>(e));
+    }
+    setUpdating(now);
+}
+
+void BLE_OTA_DFU::onPeerDisconnect() { applyUpdating(ota_updating::Event::Disconnect); }

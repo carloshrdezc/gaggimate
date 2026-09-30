@@ -72,6 +72,8 @@ class WebUIPlugin : public Plugin {
     void broadcastAll(const String &msg);
     void broadcastRelayMsg(const String &msg); // thread-safe relay-only send
     void sendResponse(uint32_t clientId, JsonDocument &response);
+    void sendProcessRefused(uint32_t clientId, JsonDocument &request, JsonDocument &response);
+    static constexpr const char *kProcessRefusedError = "Controller not ready: version mismatch or not connected";
     void processWebSocketMessage(uint32_t clientId, const String &msg);
 
     // Websocket handlers
