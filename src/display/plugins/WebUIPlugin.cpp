@@ -1732,6 +1732,16 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 sendProcessRefused(clientId, doc, response);
                 return;
             }
+            // The link can drop after the first check (the request runs on the
+            // relay task). Re-check immediately before teardown so a refusal
+            // never deactivates and clears the current process first.
+            if (!controller_link::modeChangeAllowed(controller->getMode() == MODE_STANDBY, newMode == MODE_STANDBY,
+                                                    controller->isControlAllowed())) {
+                JsonDocument response;
+                response["tp"] = "res:change-mode";
+                sendProcessRefused(clientId, doc, response);
+                return;
+            }
             // PRO-261: honor the post-shot extended-recording / scale-settle gate
             // that the display's auto-steam path already respects (DefaultUI::loop
             // / pendingAutoSteam, PRO-223 / PRO-248 / PRO-232). This handler runs

@@ -62,8 +62,9 @@ inline bool modeChangeAllowed(bool currentIsStandby, bool targetIsStandby, bool 
     return controlIsAllowed;
 }
 
-// Startup-standby activation is skipped on mismatch (upstream :352).
-inline bool shouldActivateStandbyOnReady(bool mismatch, bool startupModeIsStandby) { return !mismatch && startupModeIsStandby; }
+// A mismatch must force standby even when startup mode is BREW; a matching
+// controller follows the configured startup mode.
+inline bool shouldActivateStandbyOnReady(bool mismatch, bool startupModeIsStandby) { return mismatch || startupModeIsStandby; }
 
 // Standby kicker text (spacemono_14 is uppercase-only). The side with the lower
 // protocol version must be updated (upstream :677-678).

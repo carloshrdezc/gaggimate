@@ -369,6 +369,7 @@ void Controller::setupBluetooth() {
 // CONTROLLER_READY once, CONTROLLER_BLUETOOTH_CONNECT every link) moved here from loop().
 void Controller::onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
                               bool ledControl, bool tof, bool dualBoiler, const std::vector<uint32_t> &addons) {
+    const bool hadMismatch = systemInfo.protocolMismatch;
     const bool mismatch = controller_link::isProtocolMismatch(protocolVersion, gm_proto::PROTOCOL_VERSION);
     systemInfo = SystemInfo{.hardware = String(hardware),
                             .version = String(version),
@@ -413,6 +414,14 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
             activateStandby();
         // Fires for a mismatch too: WebUIPlugin binds controller OTA on READY (OTA-only recovery).
         pluginManager->trigger(EventIds::CONTROLLER_READY);
+    } else if (mismatch && mode != MODE_STANDBY) {
+        // A mismatch discovered after startup must still force the UI and mode
+        // to standby; control remains inhibited until a matching controller.
+        activateStandby();
+    } else if (hadMismatch && !mismatch && mode == MODE_STANDBY && settings.getStartupMode() != MODE_STANDBY) {
+        // A corrected controller restores the configured startup mode after a
+        // mismatch forced the display into standby.
+        setMode(settings.getStartupMode());
     }
     pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_CONNECT);
 }

@@ -432,6 +432,10 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
    "HomeKit wake refused" and flips back to off, and a web BREW/STEAM mode
    change shows "Cannot leave standby: ...". Entering standby, stop and
    controller OTA still work.
+4b. Start the display with startup mode **BREW** and a mismatched controller:
+   the display must force standby and show the mismatch kicker. After updating
+   the controller via OTA to the correct protocol, BREW resumes according to
+   the configured startup mode.
 5. 30-minute soak with no disconnect/panic (serial log).
 6. Rollback path: previous display+controller images kept for re-flash.
 

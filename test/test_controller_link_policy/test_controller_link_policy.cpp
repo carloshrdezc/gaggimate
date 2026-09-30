@@ -39,9 +39,10 @@ void test_ping_policy(void) {
     TEST_ASSERT_FALSE(shouldSendPing(false, false, false));
 }
 
-void test_startup_standby_skipped_on_mismatch(void) {
+void test_mismatch_forces_standby_even_when_startup_is_brew(void) {
     TEST_ASSERT_TRUE(shouldActivateStandbyOnReady(false, true));
-    TEST_ASSERT_FALSE(shouldActivateStandbyOnReady(true, true));
+    TEST_ASSERT_TRUE(shouldActivateStandbyOnReady(true, true));
+    TEST_ASSERT_TRUE(shouldActivateStandbyOnReady(true, false));
     TEST_ASSERT_FALSE(shouldActivateStandbyOnReady(false, false));
 }
 
@@ -110,7 +111,7 @@ int main(int, char **) {
     RUN_TEST(test_control_needs_connected_matching_systeminfo);
     RUN_TEST(test_legacy_controller_never_gets_control);
     RUN_TEST(test_ping_policy);
-    RUN_TEST(test_startup_standby_skipped_on_mismatch);
+    RUN_TEST(test_mismatch_forces_standby_even_when_startup_is_brew);
     RUN_TEST(test_kicker_message_names_older_side);
     RUN_TEST(test_waiting_when_link_up_but_no_systeminfo);
     RUN_TEST(test_control_send_on_change_force_or_keepalive);

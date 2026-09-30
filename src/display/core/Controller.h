@@ -85,8 +85,9 @@ class Controller {
     void loop();
     void loopControl();
 
-    // PRO-670: returns false when refused. Leaving standby is refused while control is
-    // inhibited (controller_link::modeChangeAllowed); entering standby never is.
+    // PRO-670: returns false when refused. The gate runs before side effects, so
+    // callers may safely ignore the result; leaving standby is refused while
+    // control is inhibited (controller_link::modeChangeAllowed), entering standby never is.
     bool setMode(int newMode);
     void setTargetTemp(float temperature);
     bool setBrewTemperatureOverride(float temperature);
