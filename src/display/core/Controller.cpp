@@ -1348,8 +1348,8 @@ void Controller::updateControl() {
 
     // B-P3-2: full state on change / new link / keepalive only.
     const uint32_t nowMs = static_cast<uint32_t>(millis());
-    const bool changed = boiler != lastSentBoiler || pump != lastSentPump || relay != lastSentRelay ||
-                         altRelayActive != lastSentAlt;
+    const bool changed =
+        boiler != lastSentBoiler || pump != lastSentPump || relay != lastSentRelay || altRelayActive != lastSentAlt;
     const bool force = controlResendRequested.exchange(false, std::memory_order_acq_rel);
     if (!controller_link::shouldSendControl(changed, force, nowMs - lastControlSendMs, CONTROL_KEEPALIVE_MS)) {
         return;

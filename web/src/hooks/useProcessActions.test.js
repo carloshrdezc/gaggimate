@@ -4,9 +4,15 @@ import { PROCESS_REFUSAL_TYPES, processRefusalMessage } from './useProcessAction
 describe('processRefusalMessage (PRO-655 B-P2-2)', () => {
   it('returns the firmware error for a refused activate', () => {
     expect(
-      processRefusalMessage({ tp: 'res:process:activate', success: false, error: 'Controller not ready: x' }),
+      processRefusalMessage({
+        tp: 'res:process:activate',
+        success: false,
+        error: 'Controller not ready: x',
+      }),
     ).toBe('Controller not ready: x');
-    expect(processRefusalMessage({ tp: 'res:grind:activate', success: false })).toBe('Controller not ready');
+    expect(processRefusalMessage({ tp: 'res:grind:activate', success: false })).toBe(
+      'Controller not ready',
+    );
   });
 
   it('ignores non-refusals and unrelated messages', () => {

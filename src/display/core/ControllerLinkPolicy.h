@@ -32,8 +32,8 @@ inline bool shouldSendPing(bool connected, bool systemInfoReceived, bool mismatc
 // link that never delivered SystemInfo (a peer with the framed chars that never
 // sends info). Keyed on SystemInfo, not on the raw link state. `elapsedMs` is
 // measured from boot / last disconnect / last link-up (wrap-safe unsigned diff).
-inline bool shouldEnterWaiting(bool alreadyWaiting, bool initialized, bool connected, bool systemInfoReceived,
-                               uint32_t elapsedMs, uint32_t timeoutMs) {
+inline bool shouldEnterWaiting(bool alreadyWaiting, bool initialized, bool connected, bool systemInfoReceived, uint32_t elapsedMs,
+                               uint32_t timeoutMs) {
     if (alreadyWaiting || !initialized) {
         return false;
     }
