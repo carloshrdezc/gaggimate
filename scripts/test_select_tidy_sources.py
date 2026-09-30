@@ -27,6 +27,7 @@ Run with no dependencies (there is no pytest in this repo):
 """
 import json
 import os
+import posixpath
 import re
 import sys
 import tempfile
@@ -73,6 +74,10 @@ SEAM_TU = "test/tidy/tidy_seam_headers.cpp"
 # only; a controller-side header has no TU here to belong to.
 SEAM_HEADER_ROOT = "src/display"
 SEAM_INCLUDE_ROOT = "src"
+# PRO-669: extra seam roots outside src/display — policy headers owned by a lib
+# (so the lib need not reach into src/). Included from SEAM_TU as
+# `<../lib/...>` so they still resolve against `-I src`.
+SEAM_EXTRA_HEADER_ROOTS = ("lib/NimBLEComm/src",)
 
 # Angle-bracket form only: that is the convention throughout SEAM_TU, and the
 # form [env:native-tidy]'s `-I src` resolves. A quoted include would show up as
@@ -220,12 +225,13 @@ class SeamHeaderCoverage(unittest.TestCase):
             source = fh.read()
         # Include paths as written in the TU, resolved back to project-relative
         # paths so they compare against the on-disk inventory.
-        self.included = {f"{SEAM_INCLUDE_ROOT}/{inc}" for inc in _INCLUDE_RE.findall(source) if inc.endswith("Policy.h")}
+        self.included = {posixpath.normpath(f"{SEAM_INCLUDE_ROOT}/{inc}") for inc in _INCLUDE_RE.findall(source) if inc.endswith("Policy.h")}
 
         root = os.path.join(PROJECT_ROOT, *SEAM_HEADER_ROOT.split("/"))
         self.assertTrue(os.path.isdir(root), f"{SEAM_HEADER_ROOT} is missing")
         self.on_disk = set()
-        for dirpath, _dirnames, filenames in os.walk(root):
+        roots = [root] + [os.path.join(PROJECT_ROOT, *r.split("/")) for r in SEAM_EXTRA_HEADER_ROOTS]
+        for dirpath, _dirnames, filenames in (w for r in roots for w in os.walk(r)):
             for name in filenames:
                 if not name.endswith("Policy.h"):
                     continue
