@@ -10,9 +10,14 @@
 #include <peripherals/PressureSensor.h>
 #include <peripherals/Pump.h>
 #include <peripherals/SimpleRelay.h>
+#include <atomic>
+#include <cstdint>
 #include <vector>
 
 constexpr double PING_TIMEOUT_SECONDS = 20.0;
+// Integer-ms form used by link_liveness::pingTimedOut (strict >). 20999 keeps the
+// legacy integer-seconds trip point: (elapsed / 1000) > 20 <=> elapsed >= 21000.
+constexpr uint32_t PING_TIMEOUT_MS = 20999;
 
 constexpr int DETECT_EN_PIN = 40;
 constexpr int DETECT_VALUE_PIN = 11;
@@ -53,7 +58,8 @@ class GaggiMateController {
     std::vector<ControllerConfig> configs;
 
     String _version;
-    unsigned long lastPingTime = 0;
+    // A-P3-1: written by the NimBLE host task (handlePing), read by loop().
+    std::atomic<uint32_t> lastPingTime{0};
     int errorState = ERROR_CODE_NONE;
 
     const char *LOG_TAG = "GaggiMateController";

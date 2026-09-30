@@ -108,7 +108,7 @@ void GaggiMateController::setup() {
         heater->setFeedforwardScale(0.0f);
     }
     // Initialize last ping time
-    lastPingTime = millis();
+    lastPingTime.store(static_cast<uint32_t>(millis()), std::memory_order_relaxed);
 
     // PRO-655: output control arrives as per-component, device-numbered messages
     // (Boiler/Pump/Relay), usually batched in one frame by the display. They map
@@ -155,7 +155,10 @@ void GaggiMateController::setup() {
     // Binary outputs: index 0 = brew valve, index 1 = alt relay.
     _comms.onRelayControl([this](uint8_t index, bool open) {
         if (index == 1) {
-            // Alt relay: no watchdog/error gating (same as the old AltControl path).
+            // Alt relay (A-P3-2): deliberately does NOT call handlePing() (does not feed
+            // the link watchdog) and is NOT errorState-gated. That is unchanged legacy
+            // behaviour from the old AltControl path; it stays safe because
+            // handlePingTimeout() forces alt off on every loop() while timed out.
             this->alt->set(open);
             return;
         }
@@ -214,8 +217,8 @@ void GaggiMateController::setup() {
 }
 
 void GaggiMateController::loop() {
-    unsigned long now = millis();
-    if (link_liveness::pingTimedOut(now, lastPingTime, PING_TIMEOUT_SECONDS)) {
+    const uint32_t now = static_cast<uint32_t>(millis());
+    if (link_liveness::pingTimedOut(now, lastPingTime.load(std::memory_order_relaxed), PING_TIMEOUT_MS)) {
         handlePingTimeout();
     }
     sendSensorData();
@@ -259,7 +262,7 @@ void GaggiMateController::handlePing() {
     if (errorState == ERROR_CODE_TIMEOUT) {
         errorState = ERROR_CODE_NONE;
     }
-    lastPingTime = millis();
+    lastPingTime.store(static_cast<uint32_t>(millis()), std::memory_order_relaxed);
     ESP_LOGV(LOG_TAG, "Ping received, system is alive");
 }
 

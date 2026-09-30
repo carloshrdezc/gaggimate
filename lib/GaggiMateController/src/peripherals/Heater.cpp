@@ -173,13 +173,13 @@ float Heater::softPwm(uint32_t windowSize) {
 
     // PWM relay output
     if (!relayStatus && static_cast<unsigned long>(optimumOutput) > (msNow - windowStartTime)) {
-        if (msNow > nextSwitchTime) {
+        if (static_cast<int32_t>(static_cast<uint32_t>(msNow - nextSwitchTime)) > 0) { // wrap-safe (PRO-655 A-P1-1)
             nextSwitchTime = msNow;
             relayStatus = true;
             digitalWrite(heaterPin, HIGH);
         }
     } else if (relayStatus && static_cast<unsigned long>(optimumOutput) < (msNow - windowStartTime)) {
-        if (msNow > nextSwitchTime) {
+        if (static_cast<int32_t>(static_cast<uint32_t>(msNow - nextSwitchTime)) > 0) { // wrap-safe (PRO-655 A-P1-1)
             nextSwitchTime = msNow;
             relayStatus = false;
             digitalWrite(heaterPin, LOW);
