@@ -1,8 +1,10 @@
 #ifndef NIMBLECLIENTCONTROLLER_H
 #define NIMBLECLIENTCONTROLLER_H
 
+#include "LegacyClientCharPolicy.h"
 #include "NimBLEComm.h"
 #include "cstring"
+#include <atomic>
 
 class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLEClientCallbacks {
   public:
@@ -23,6 +25,10 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void sendLedControl(uint8_t channel, uint8_t brightness);
     bool isReadyForConnection() const;
     bool isConnected();
+    // PRO-669: diagnostics only — a controller missing required characteristics
+    // was rejected and its backoff window is open. Cleared on the next successful
+    // connect or when the window expires. Safe from any task (locked snapshot).
+    bool isIncompatible() const;
     void scan();
     void tare();
     void registerRemoteErrorCallback(const remote_err_callback_t &callback);
@@ -40,6 +46,24 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     NimBLEClient *client;
     NimBLEScan *scanner;
 
+    // PRO-669: per-address rejection backoff. Written by the display task
+    // (connectToServer) and read by the NimBLE host task (onResult/onDisconnect),
+    // so every access copies/stores the WHOLE struct inside backoffMux — address
+    // and timestamp are published as one unit and can never be seen torn.
+    LegacyClientBackoff backoff{};
+    mutable portMUX_TYPE backoffMux = portMUX_INITIALIZER_UNLOCKED;
+    LegacyClientBackoff loadBackoff() const;
+    void storeBackoff(const LegacyClientBackoff &b);
+    // PRO-669 round 2: set on reject, cleared by onDisconnect()/a compatible
+    // connect. Keeps the link reported not-connected (and the disconnect being
+    // retried) even after the 30 s backoff window expires.
+    std::atomic<bool> rejectedLink{false};
+    // Touched by the display task (reject), loop task (retry), host task (onDisconnect).
+    std::atomic<bool> hasRejectDisconnectAttempt{false};
+    std::atomic<uint32_t> lastRejectDisconnectMs{0};
+    void requestRejectDisconnect(uint32_t nowMs);
+    void clearCharacteristics();
+    bool linkUsable(const NimBLERemoteCharacteristic *chr) const;
     NimBLERemoteCharacteristic *tempControlChar = nullptr;
     NimBLERemoteCharacteristic *pumpControlChar = nullptr;
     NimBLERemoteCharacteristic *valveControlChar = nullptr;
