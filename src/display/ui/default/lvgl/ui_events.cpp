@@ -22,6 +22,8 @@ void onBrewStart(lv_event_t *e) {
     // swap lives in DefaultUI.cpp), so a shot can't be triggered before
     // at-target — and rectangular layouts (which never hide the button on
     // heating) are unaffected by a gate that used to fire for all displays.
+    // PRO-655 B-P2-2: Controller::activate() refuses (and logs) when control is
+    // inhibited, so no gate is needed here either.
     controller.activate();
 }
 
@@ -148,7 +150,9 @@ void onSteamScreen(lv_event_t *e) {
 
 void onWakeup(lv_event_t *e) {
     if (controller.isUpdating() || controller.isErrorState() || controller.isAutotuning() ||
-        !controller.getClientController()->isConnected()) {
+        !controller.isControlAllowed()) {
+        // PRO-655 B-P2-2: isControlAllowed() also covers protocol mismatch and "no
+        // SystemInfo yet" (upstream eez/actions.cpp:9 checks the mismatch flag).
         return;
     }
     // CAR-300: land on the mode hub (Nothing-theme ModeScreen) on wake, not the
@@ -165,7 +169,11 @@ void onStandby(lv_event_t *e) { controller.activateStandby(); }
 void onGrindToggle(lv_event_t *e) {
     if (!controller.isGrindAvailable())
         return;
-    controller.isGrindActive() ? controller.deactivateGrind() : controller.activateGrind();
+    if (controller.isGrindActive()) {
+        controller.deactivateGrind();
+    } else {
+        controller.activateGrind(); // refusal logged by Controller (B-P2-2)
+    }
 }
 
 void onGrindTimeLower(lv_event_t *e) { controller.lowerGrindTarget(); }
@@ -218,7 +226,11 @@ void onFlush(lv_event_t *e) { controller.onFlush(); }
 // its own start affordance on ui_BrewScreen).
 void onStatusScreenTap(lv_event_t *e) {
     if (controller.getMode() == MODE_WATER) {
-        controller.isActiveSafe() ? controller.deactivate() : controller.activate();
+        if (controller.isActiveSafe()) {
+            controller.deactivate();
+        } else {
+            controller.activate(); // refusal logged by Controller (B-P2-2)
+        }
     }
 }
 
@@ -295,7 +307,9 @@ void onVolumetricHold(lv_event_t *e) {
     // Set flag to prevent click from firing when button is released
     volumetricHoldTriggered = true;
 
-    controller.getClientController()->tare();
+    // PRO-655 B-P2-4: controller tare goes through the gated path (no Tare frame
+    // to a mismatched / unverified controller). BLEScales is the phone-side scale.
+    controller.tareControllerScale();
     BLEScales.tare();
 }
 

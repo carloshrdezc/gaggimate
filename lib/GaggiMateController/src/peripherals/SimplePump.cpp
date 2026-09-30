@@ -32,13 +32,13 @@ void SimplePump::loop() {
 
     // PWM relay output
     if (!relayStatus && static_cast<unsigned long>(output) > (msNow - windowStartTime)) {
-        if (msNow > nextSwitchTime) {
+        if (static_cast<int32_t>(static_cast<uint32_t>(msNow - nextSwitchTime)) > 0) { // wrap-safe (PRO-655 A-P1-1)
             nextSwitchTime = msNow;
             relayStatus = true;
             digitalWrite(_pin, _pumpOn);
         }
     } else if (relayStatus && static_cast<unsigned long>(output) < (msNow - windowStartTime)) {
-        if (msNow > nextSwitchTime) {
+        if (static_cast<int32_t>(static_cast<uint32_t>(msNow - nextSwitchTime)) > 0) { // wrap-safe (PRO-655 A-P1-1)
             nextSwitchTime = msNow;
             relayStatus = false;
             digitalWrite(_pin, !_pumpOn);

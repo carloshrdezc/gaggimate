@@ -108,6 +108,9 @@ class DefaultUI {
     int error = false;
     int autotuning = false;
     int waitingForController = false;
+    // PRO-655: controller protocol mismatch (control inhibited, OTA only).
+    int protocolMismatch = false;
+    int mismatchControllerVersion = 0;
     int volumetricAvailable = false;
     int bluetoothScales = false;
     int volumetricMode = false;

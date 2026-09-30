@@ -420,7 +420,12 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
 3. Brew, steam and hot water. Power-cycle the controller mid-idle and confirm
    it reconnects.
 4. With the BLE scale connected, run a shot. Weight should stream, and the scale
-   should survive a controller reconnect.
+   should survive a controller reconnect. BLE scale weight keeps streaming
+   smoothly during a shot (no gaps/stutter in the weight trace vs. idle; the
+   display now sends the full control frame only on change + 1 s keepalive,
+   PRO-655 B-P3-2).
+   Also: with a mismatched controller, Start/wake/web `req:process:activate` are
+   refused (web shows "Cannot start: ..."), and autotune does not latch AUTOTUNING.
 5. 30-minute soak with no disconnect/panic (serial log).
 6. Rollback path: previous display+controller images kept for re-flash.
 

@@ -139,6 +139,7 @@ void test_system_info_and_protocol_version(void) {
     p.content.system_info.has_capabilities = true;
     p.content.system_info.capabilities.pressure = true;
     p.content.system_info.capabilities.tof = true;
+    p.content.system_info.capabilities.dual_boiler = true;
     p.content.system_info.capabilities.addons_count = 1;
     p.content.system_info.capabilities.addons[0].type = 3;
     p.content.system_info.protocol_version = gm_proto::PROTOCOL_VERSION;
@@ -147,13 +148,24 @@ void test_system_info_and_protocol_version(void) {
     TEST_ASSERT_EQUAL_STRING("v1.9.0-carlos", o.content.system_info.version);
     TEST_ASSERT_TRUE(o.content.system_info.capabilities.pressure);
     TEST_ASSERT_FALSE(o.content.system_info.capabilities.dimming);
+    TEST_ASSERT_TRUE(o.content.system_info.capabilities.dual_boiler);
     TEST_ASSERT_EQUAL_UINT32(3, o.content.system_info.capabilities.addons[0].type);
     TEST_ASSERT_EQUAL_UINT32(gm_proto::PROTOCOL_VERSION, o.content.system_info.protocol_version);
 }
 
-// Pins the vendored revision: the v1.9.0 final tree has PROTOCOL_VERSION = 5
-// (upstream/master is 6). Changing this is a deliberate wire break.
-void test_protocol_version_pinned(void) { TEST_ASSERT_EQUAL_UINT32(5, gm_proto::PROTOCOL_VERSION); }
+// Pins the vendored revision: upstream/master final shape (Capabilities.dual_boiler = 6)
+// has PROTOCOL_VERSION = 6 (v1.9.0 was 5). Changing this is a deliberate wire break.
+void test_protocol_version_pinned(void) { TEST_ASSERT_EQUAL_UINT32(6, gm_proto::PROTOCOL_VERSION); }
+
+// dual_boiler is field 6 and defaults to false when omitted (v5 peers / single boiler).
+void test_dual_boiler_defaults_false(void) {
+    gm::Payload p = make(gaggimate_Payload_system_info_tag);
+    p.content.system_info.has_capabilities = true;
+    p.content.system_info.capabilities.pressure = true;
+    gm::Payload o = roundTrip(p);
+    TEST_ASSERT_TRUE(o.content.system_info.capabilities.pressure);
+    TEST_ASSERT_FALSE(o.content.system_info.capabilities.dual_boiler);
+}
 
 // Codec default only: an omitted SystemInfo.protocol_version (field 4) decodes
 // as the proto3 default 0, which can never equal a real PROTOCOL_VERSION. This
@@ -341,6 +353,7 @@ int main(int, char **) {
     RUN_TEST(test_autotune_pressure_scale_led);
     RUN_TEST(test_system_info_and_protocol_version);
     RUN_TEST(test_protocol_version_pinned);
+    RUN_TEST(test_dual_boiler_defaults_false);
     RUN_TEST(test_codec_missing_protocol_version_defaults_to_zero);
     RUN_TEST(test_sensor_data);
     RUN_TEST(test_button_autotune_volumetric_tof_error);

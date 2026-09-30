@@ -98,6 +98,8 @@ channels:
           - $ref: '#/components/messages/FlushStartResponse'
           - $ref: '#/components/messages/AuthResponse'
           - $ref: '#/components/messages/BrewTemperatureSetResponse'
+          - $ref: '#/components/messages/ProcessActivateResponse'
+          - $ref: '#/components/messages/GrindActivateResponse'
     publish:
       description: Messages sent from the client to the server.
       message:
@@ -883,6 +885,10 @@ components:
             type: string
           success:
             type: boolean
+            description: false when refused because controller control is inhibited (PRO-655).
+          error:
+            type: string
+            description: Present only when success is false.
         required: [tp]
     # ---- OTA / autotune requests ---------------------------------------
     OtaSettingsRequest:
@@ -939,12 +945,37 @@ components:
       x-since-version: 'unknown'
       payload:
         type: object
-        description: Activate (start) the current process. No response is sent.
+        description: |
+          Activate (start) the current process. No response is sent on success.
+          If the display refuses because controller control is inhibited
+          (protocol mismatch / no verified controller link, PRO-655), it replies
+          with `res:process:activate` carrying `success: false` and `error`.
         properties:
           tp:
             type: string
             enum: ['req:process:activate']
         required: [tp]
+    ProcessActivateResponse:
+      x-since-version: 'PRO-655'
+      payload:
+        type: object
+        description: |
+          Sent ONLY when the start request is refused because controller control
+          is inhibited (protocol mismatch or no verified controller link).
+        properties:
+          tp:
+            type: string
+            enum: ['res:process:activate']
+          rid:
+            type: string
+            description: Echoed when the request carried one.
+          success:
+            type: boolean
+            enum: [false]
+          error:
+            type: string
+            description: Human-readable refusal reason for the web UI.
+        required: [tp, success, error]
     ProcessDeactivateRequest:
       x-since-version: 'unknown'
       payload:
@@ -969,12 +1000,36 @@ components:
       x-since-version: 'unknown'
       payload:
         type: object
-        description: Activate grinding. No response is sent.
+        description: |
+          Activate grinding. No response is sent on success. If refused because
+          controller control is inhibited (PRO-655), the display replies with
+          `res:grind:activate` carrying `success: false` and `error`.
         properties:
           tp:
             type: string
             enum: ['req:grind:activate']
         required: [tp]
+    GrindActivateResponse:
+      x-since-version: 'PRO-655'
+      payload:
+        type: object
+        description: |
+          Sent ONLY when the start request is refused because controller control
+          is inhibited (protocol mismatch or no verified controller link).
+        properties:
+          tp:
+            type: string
+            enum: ['res:grind:activate']
+          rid:
+            type: string
+            description: Echoed when the request carried one.
+          success:
+            type: boolean
+            enum: [false]
+          error:
+            type: string
+            description: Human-readable refusal reason for the web UI.
+        required: [tp, success, error]
     GrindDeactivateRequest:
       x-since-version: 'unknown'
       payload:

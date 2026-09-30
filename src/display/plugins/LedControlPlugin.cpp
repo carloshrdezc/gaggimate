@@ -49,20 +49,23 @@ void LedControlPlugin::updateControl() {
 }
 
 void LedControlPlugin::sendControl(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint8_t ext) {
-    if (firstSend || r != last_r)
-        this->controller->getClientController()->sendLedControl(0, r);
-    if (firstSend || g != last_g)
-        this->controller->getClientController()->sendLedControl(1, g);
-    if (firstSend || b != last_b)
-        this->controller->getClientController()->sendLedControl(2, b);
-    if (firstSend || w != last_w)
-        this->controller->getClientController()->sendLedControl(3, w);
-    if (firstSend || ext != last_ext) {
-        this->controller->getClientController()->sendLedControl(4, 255 - ext);
-        this->controller->getClientController()->sendLedControl(5, 255 - ext);
-        this->controller->getClientController()->sendLedControl(6, 255 - ext);
-        this->controller->getClientController()->sendLedControl(7, 255 - ext);
+    // PRO-655 R3 / B-P2-3: full link policy (connected + SystemInfo from THIS link +
+    // no mismatch), not just the mismatch flag: after a reconnect the flag still
+    // holds the previous link's value until the new SystemInfo arrives. firstSend
+    // is left untouched, so the first allowed frame is still sent.
+    if (!this->controller->isControlAllowed()) {
+        return;
     }
+    if (!firstSend && r == last_r && g == last_g && b == last_b && w == last_w && ext == last_ext) {
+        return;
+    }
+    // PRO-655: one LedControl snapshot (NanoPbComm coalesces per payload type, so
+    // per-channel sends would collapse to the last channel). Same channel map as before.
+    const uint8_t extInv = 255 - ext;
+    const LedChannelCommand channels[] = {
+        {0, r}, {1, g}, {2, b}, {3, w}, {4, extInv}, {5, extInv}, {6, extInv}, {7, extInv},
+    };
+    this->controller->getClientController()->sendLedControl(channels, sizeof(channels) / sizeof(channels[0]));
     last_r = r;
     last_g = g;
     last_b = b;

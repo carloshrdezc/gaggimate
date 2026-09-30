@@ -5,10 +5,12 @@
 #define SRC_BLE_OTA_DFU_HPP_
 
 #include "./freertos_utils.hpp"
+#include "./ota_updating_policy.hpp"
 #include <Arduino.h>
 #include <FS.h>
 #include <NimBLEDevice.h>
 #include <Update.h>
+#include <atomic>
 #include <string>
 
 // comment to use FFat
@@ -66,6 +68,12 @@ private:
   BLEService *pServiceOTA = nullptr;
   BLECharacteristic *pCharacteristic_BLE_OTA_DFU_TX = nullptr;
   friend class BLEOverTheAirDeviceFirmwareUpdate;
+  // PRO-655 (from upstream v1.9): set once a DFU transfer starts so NanoPbComm's
+  // ping watchdog does not drop the BLE link mid-OTA.
+  // Written by the NimBLE host task and the install task, read by loop().
+  // Transitions go through ota_updating::next() (A-P2-1: never latches).
+  std::atomic<bool> updating{false};
+  void applyUpdating(ota_updating::Event e);
 
 public:
   BLE_OTA_DFU() = default;
@@ -77,6 +85,10 @@ public:
   bool begin(String local_name);
 
   bool connected();
+  bool isUpdating() const;
+  void setUpdating(bool updating);
+  // Called by the owning BLE server on peer disconnect: aborts the transfer state.
+  void onPeerDisconnect();
 
   void send_OTA_DFU(uint8_t value);
   void send_OTA_DFU(uint8_t *value, size_t size);

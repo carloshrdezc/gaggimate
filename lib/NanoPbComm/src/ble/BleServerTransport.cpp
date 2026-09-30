@@ -255,6 +255,8 @@ void BleServerTransport::onAuthenticationComplete(ble_gap_conn_desc *desc) {
 void BleServerTransport::onDisconnect(NimBLEServer *server) {
     _connected = false;
     _connHandle = BLE_HS_CONN_HANDLE_NONE;
+    // PRO-655 A-P2-1: a disconnect aborts any DFU transfer; clear the watchdog exemption.
+    _otaDfu.onPeerDisconnect();
     ESP_LOGI(LOG_TAG, "Client disconnected");
     emitConnection(false);
     startAdv();

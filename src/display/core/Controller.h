@@ -1,10 +1,11 @@
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
-#include "NimBLEClientController.h"
-#include "NimBLEComm.h"
+#include "ControllerLinkPolicy.h"
+#include "GaggiMateClient.h"
 #include "PluginManager.h"
 #include "Settings.h"
+#include "SystemInfo.h"
 #include "VolumetricCoalescer.h"
 #include "VolumetricMeasurementSource.h"
 #include <WiFi.h>
@@ -179,13 +180,15 @@ class Controller {
     void setBrewTarget(float value);
     void raiseGrindTarget();
     void lowerGrindTarget();
-    void activate();
+    // PRO-655 B-P2-2: return false when refused (control inhibited: no verified
+    // controller link / protocol mismatch, see isControlAllowed()).
+    bool activate();
     void deactivate();
     void clear();
-    void activateGrind();
+    bool activateGrind();
     void deactivateGrind();
     void activateStandby();
-    void deactivateStandby();
+    bool deactivateStandby();
     void onOTAUpdate();
     void onScreenReady();
     void onTargetToggle();
@@ -195,7 +198,7 @@ class Controller {
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
     void setVolumetricOverride(bool override) { volumetricOverride.store(override, std::memory_order_release); }
     bool isBluetoothScaleHealthy() const;
-    void onFlush();
+    bool onFlush(); // false = refused (B-P2-2)
     int getWaterLevel() const {
         float reversedLevel = static_cast<float>(settings.getEmptyTankDistance()) -
                               static_cast<float>(std::min(settings.getEmptyTankDistance(), tofDistance));
@@ -208,7 +211,24 @@ class Controller {
 
     SystemInfo getSystemInfo() const { return systemInfo; }
 
-    NimBLEClientController *getClientController() { return &clientController; }
+    // PRO-655: the display-side NanoPbComm facade (was NimBLEClientController).
+    GaggiMateClient *getClientController() { return &comms; }
+    // PRO-655 R3/R4b: true while the connected controller speaks a different (or no)
+    // framed protocol version: control inhibited, controller OTA only.
+    //
+    // B-P3-3: this flag is deliberately NOT cleared on disconnect (DefaultUI clears its
+    // own display copy on CONTROLLER_BLUETOOTH_DISCONNECT). That is fail-safe: control
+    // is gated by isControlAllowed(), which also requires connected + a SystemInfo
+    // from THIS link (systemInfoReceived is cleared on disconnect), so a stale `true`
+    // can only inhibit, never permit. The next SystemInfo overwrites it. Do not
+    // "fix" this by clearing it on disconnect and gating on the flag alone.
+    bool isProtocolMismatch() const { return systemInfo.protocolMismatch; }
+    // PRO-655: connected && SystemInfo received on this link && protocol matches.
+    // The single gate for every display -> controller control/actuation frame.
+    bool isControlAllowed() const;
+    // B-P2-4: the only path to the controller's Tare frame; gated like all control.
+    // Returns false (and sends nothing) when control is inhibited.
+    bool tareControllerScale();
 
   private:
     // Initialization methods
@@ -216,7 +236,10 @@ class Controller {
     void setupPanel();
 #endif
     void setupBluetooth();
-    void setupInfos();
+    void onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
+                      bool ledControl, bool tof, bool dualBoiler, const std::vector<uint32_t> &addons);
+    void onIncompatibleController(const String &info);
+    void setPidSettings();
     void setupWifi();
 
     // Functional methods
@@ -246,7 +269,7 @@ class Controller {
     DefaultUI *ui = nullptr;
     Driver *driver = nullptr;
 #endif
-    NimBLEClientController clientController;
+    GaggiMateClient comms;
     Settings settings;
     PluginManager *pluginManager{};
     BeanManager *beanManager{};
@@ -263,6 +286,16 @@ class Controller {
     int tofDistance = 0;
 
     SystemInfo systemInfo{};
+    // PRO-655: set once a SystemInfo arrived on the current link (cleared on disconnect).
+    std::atomic<bool> systemInfoReceived{false};
+    // B-P3-2: last full control frame sent (loopControl task only) + a resend
+    // request raised from the BLE/loop tasks on every new link / SystemInfo.
+    BoilerCommand lastSentBoiler;
+    PumpCommand lastSentPump;
+    RelayCommand lastSentRelay;
+    bool lastSentAlt = false;
+    uint32_t lastControlSendMs = 0;
+    std::atomic<bool> controlResendRequested{true};
 
     Process *currentProcess = nullptr;
     Process *lastProcess = nullptr;
@@ -305,6 +338,16 @@ class Controller {
     volumetric::Coalescer volumetricCoalescer{};
     static const unsigned long BLUETOOTH_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
     static const unsigned long CONTROLLER_WAITING_TIMEOUT_MS = 10000;
+    // PRO-655: keepalive ping cadence (upstream PING_INTERVAL); completes the
+    // server handshake and feeds the controller watchdog between control frames.
+    static const unsigned long PING_INTERVAL_MS = 2000;
+    // B-P3-2: full control-state keepalive when nothing changed.
+    static const uint32_t CONTROL_KEEPALIVE_MS = 1000;
+    // PRO-655 (upstream v1.9): re-send the connect-time config burst for a short window.
+    static const unsigned long CONFIG_RESEND_WINDOW_MS = 8000;
+    static const unsigned long CONFIG_RESEND_INTERVAL_MS = 1000;
+    unsigned long configResendUntil = 0;
+    unsigned long lastConfigResend = 0;
 
     xTaskHandle taskHandle = nullptr;
 
