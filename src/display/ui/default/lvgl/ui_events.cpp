@@ -169,7 +169,11 @@ void onStandby(lv_event_t *e) { controller.activateStandby(); }
 void onGrindToggle(lv_event_t *e) {
     if (!controller.isGrindAvailable())
         return;
-    controller.isGrindActive() ? controller.deactivateGrind() : controller.activateGrind();
+    if (controller.isGrindActive()) {
+        controller.deactivateGrind();
+    } else {
+        controller.activateGrind(); // refusal logged by Controller (B-P2-2)
+    }
 }
 
 void onGrindTimeLower(lv_event_t *e) { controller.lowerGrindTarget(); }
@@ -222,7 +226,11 @@ void onFlush(lv_event_t *e) { controller.onFlush(); }
 // its own start affordance on ui_BrewScreen).
 void onStatusScreenTap(lv_event_t *e) {
     if (controller.getMode() == MODE_WATER) {
-        controller.isActiveSafe() ? controller.deactivate() : controller.activate();
+        if (controller.isActiveSafe()) {
+            controller.deactivate();
+        } else {
+            controller.activate(); // refusal logged by Controller (B-P2-2)
+        }
     }
 }
 
