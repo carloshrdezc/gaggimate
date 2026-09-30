@@ -2,7 +2,17 @@ import { useEffect, useMemo } from 'preact/hooks';
 
 // PRO-655 B-P2-2: the display replies to req:process:activate / req:grind:activate
 // ONLY when it refuses the start (controller version mismatch / not connected).
-export const PROCESS_REFUSAL_TYPES = ['res:process:activate', 'res:grind:activate'];
+// PRO-670: req:change-mode likewise replies ONLY when leaving standby is refused.
+export const PROCESS_REFUSAL_TYPES = [
+  'res:process:activate',
+  'res:grind:activate',
+  'res:change-mode',
+];
+
+/** User-facing prefix for a refusal of the given reply type. */
+export function refusalPrefix(tp) {
+  return tp === 'res:change-mode' ? 'Cannot leave standby' : 'Cannot start';
+}
 
 /** Returns the user-facing refusal text for a refusal reply, or null. */
 export function processRefusalMessage(message) {
@@ -21,7 +31,7 @@ export function useProcessRefusalNotice(api, notify = alertNotify) {
       tp,
       api.on(tp, message => {
         const text = processRefusalMessage(message);
-        if (text) notify(`Cannot start: ${text}`);
+        if (text) notify(`${refusalPrefix(tp)}: ${text}`);
       }),
     ]);
     return () => ids.forEach(([tp, id]) => api.off(tp, id));

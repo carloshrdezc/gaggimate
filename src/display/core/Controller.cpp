@@ -1760,11 +1760,17 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
 
 int Controller::getMode() const { return mode; }
 
-void Controller::setMode(int newMode) {
+bool Controller::setMode(int newMode) {
+    // PRO-670 (B-P3-4): central gate. Leaving standby is refused while control is
+    // inhibited (mismatch / incompatible / unverified link); entering standby never is.
+    if (!controller_link::modeChangeAllowed(mode == MODE_STANDBY, newMode == MODE_STANDBY, isControlAllowed())) {
+        ESP_LOGW(LOG_TAG, "Mode change %d -> %d refused: controller link not verified / protocol mismatch", mode, newMode);
+        return false;
+    }
     if (newMode == MODE_GRIND && !isGrindAvailable())
-        return;
+        return false;
     if (newMode == MODE_MANUAL && !isManualAvailable())
-        return;
+        return false;
     Event modeEvent = pluginManager->trigger(EventIds::CONTROLLER_MODE_CHANGE, "value", newMode);
     mode = modeEvent.getInt("value");
     steamReady = false;
@@ -1774,6 +1780,7 @@ void Controller::setMode(int newMode) {
     if (mode == MODE_MANUAL) {
         updateControl();
     }
+    return true;
 }
 
 void Controller::onTempRead(float temperature) {

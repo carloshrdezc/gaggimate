@@ -85,7 +85,9 @@ class Controller {
     void loop();
     void loopControl();
 
-    void setMode(int newMode);
+    // PRO-670: returns false when refused. Leaving standby is refused while control is
+    // inhibited (controller_link::modeChangeAllowed); entering standby never is.
+    bool setMode(int newMode);
     void setTargetTemp(float temperature);
     bool setBrewTemperatureOverride(float temperature);
     void setPressureScale();

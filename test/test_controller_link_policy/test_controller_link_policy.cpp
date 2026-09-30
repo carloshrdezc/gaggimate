@@ -79,8 +79,33 @@ void test_control_send_on_change_force_or_keepalive(void) {
     TEST_ASSERT_TRUE(shouldSendControl(false, false, static_cast<uint32_t>(0x400u - 0xFFFFFC00u), K));
 }
 
+// PRO-670: leaving standby is gated on controlAllowed; entering standby never is.
+void test_leave_standby_gated_on_control_allowed(void) {
+    // standby -> BREW/STEAM/... refused under mismatch / incompatible / no link
+    TEST_ASSERT_FALSE(modeChangeAllowed(true, false, false));
+    TEST_ASSERT_TRUE(modeChangeAllowed(true, false, true));
+    // entering / staying in standby always allowed (stop, OTA, disconnect, error)
+    TEST_ASSERT_TRUE(modeChangeAllowed(false, true, false));
+    TEST_ASSERT_TRUE(modeChangeAllowed(true, true, false));
+    TEST_ASSERT_TRUE(modeChangeAllowed(false, true, true));
+    // not starting from standby: unaffected by this gate
+    TEST_ASSERT_TRUE(modeChangeAllowed(false, false, false));
+    TEST_ASSERT_TRUE(modeChangeAllowed(false, false, true));
+}
+
+void test_leave_standby_composed_with_link_state(void) {
+    // Mismatched SystemInfo, incompatible (legacy, never SystemInfo), no link.
+    TEST_ASSERT_FALSE(modeChangeAllowed(true, false, controlAllowed(true, true, isProtocolMismatch(5, LOCAL))));
+    TEST_ASSERT_FALSE(modeChangeAllowed(true, false, controlAllowed(true, false, false)));
+    TEST_ASSERT_FALSE(modeChangeAllowed(true, false, controlAllowed(false, false, false)));
+    TEST_ASSERT_TRUE(modeChangeAllowed(true, false, controlAllowed(true, true, isProtocolMismatch(6, LOCAL))));
+    TEST_ASSERT_TRUE(modeChangeAllowed(false, true, controlAllowed(true, true, true)));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_leave_standby_gated_on_control_allowed);
+    RUN_TEST(test_leave_standby_composed_with_link_state);
     RUN_TEST(test_mismatch_detection);
     RUN_TEST(test_control_needs_connected_matching_systeminfo);
     RUN_TEST(test_legacy_controller_never_gets_control);

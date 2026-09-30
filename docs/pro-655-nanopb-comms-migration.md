@@ -426,6 +426,12 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
    PRO-655 B-P3-2).
    Also: with a mismatched controller, Start/wake/web `req:process:activate` are
    refused (web shows "Cannot start: ..."), and autotune does not latch AUTOTUNING.
+4a. Under mismatch (and with an incompatible/legacy controller), AutoWakeup /
+   HomeKit / web mode change keep the display in standby (PRO-670): an
+   AutoWakeup schedule hit logs "Auto-wakeup refused", HomeKit "on" logs
+   "HomeKit wake refused" and flips back to off, and a web BREW/STEAM mode
+   change shows "Cannot leave standby: ...". Entering standby, stop and
+   controller OTA still work.
 5. 30-minute soak with no disconnect/panic (serial log).
 6. Rollback path: previous display+controller images kept for re-flash.
 
