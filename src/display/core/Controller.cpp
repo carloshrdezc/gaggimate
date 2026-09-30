@@ -696,6 +696,18 @@ void Controller::startProcess(Process *process) {
         delete process;
         return;
     }
+    // PRO-655 B-P2-2: central process-start inhibit. Every entry point (LVGL, web,
+    // HomeKit, buttons, flush, BoilerFill, grind) ends here, so a mismatched or not
+    // yet verified controller can never show a "running" process that nothing
+    // actuates. Upstream blocks only the LVGL wake action (eez/actions.cpp:9).
+    // Exception: a grind driven by the SmartGrind Wi-Fi plug does not need the
+    // controller (its alt-relay frame is still dropped by updateControl's gate).
+    const bool needsController = !(process->getType() == MODE_GRIND && settings.isSmartGrindActive());
+    if (needsController && !isControlAllowed()) {
+        ESP_LOGW(LOG_TAG, "Process start refused: controller link not verified / protocol mismatch");
+        delete process;
+        return;
+    }
 
     // Acquire mutex first to prevent TOCTOU race condition
     // Use portMAX_DELAY (blocking) with ESP_LOGE: failure here is critical and should never happen
@@ -1327,9 +1339,14 @@ void Controller::updateControl() {
     comms.sendBatch(batch, 4);
 }
 
-void Controller::activate() {
+bool Controller::activate() {
     if (isActiveSafe())
-        return;
+        return true; // already running: not a refusal
+    if (!isControlAllowed()) {
+        // B-P2-2: covers the standby-wake branch below too (no false "ready" BREW).
+        ESP_LOGW(LOG_TAG, "activate() refused: controller link not verified / protocol mismatch");
+        return false;
+    }
     // Any activate() call while in standby (web/remote req:process:activate,
     // or the LVGL onBrewStart path) mirrors the physical brew button's first
     // press: wake into BREW (boiler starts heating). A second activate() then
@@ -1341,8 +1358,7 @@ void Controller::activate() {
     // does not shim. This guard is exercised by the firmware compile in CI and
     // is symmetric with the handleBrewButton() standby case above.
     if (mode == MODE_STANDBY) {
-        deactivateStandby();
-        return;
+        return deactivateStandby();
     }
     clear();
     // Tare + settle is only meaningful for modes that consume scale/volumetric
@@ -1389,7 +1405,7 @@ void Controller::activate() {
         break;
     case MODE_MANUAL:
         if (!isManualAvailable())
-            return;
+            return false;
         startProcess(new ManualProcess(settings.getManualTargetType(), settings.getManualPressure(), settings.getManualFlow(),
                                        settings.getManualTemperature()));
         break;
@@ -1406,6 +1422,7 @@ void Controller::activate() {
     if (isBrewProcess) {
         pluginManager->trigger(EventIds::CONTROLLER_BREW_START);
     }
+    return true;
 }
 
 void Controller::deactivate() {
@@ -1461,12 +1478,18 @@ void Controller::clear() {
     currentVolumetricSource.store(VolumetricMeasurementSource::INACTIVE, std::memory_order_release);
 }
 
-void Controller::activateGrind() {
+bool Controller::activateGrind() {
     if (!isGrindAvailable())
-        return;
+        return false;
+    if (!settings.isSmartGrindActive() && !isControlAllowed()) {
+        // B-P2-2: the grind relay (alt, index 1) is driven by the controller
+        // (SmartGrind drives a Wi-Fi plug instead and stays available).
+        ESP_LOGW(LOG_TAG, "activateGrind() refused: controller link not verified / protocol mismatch");
+        return false;
+    }
     pluginManager->trigger(EventIds::CONTROLLER_GRIND_START);
     if (isGrindActive())
-        return;
+        return true;
     clear();
     if (settings.isVolumetricTarget() && isVolumetricAvailable()) {
         currentVolumetricSource.store(VolumetricMeasurementSource::BLUETOOTH, std::memory_order_release);
@@ -1475,6 +1498,7 @@ void Controller::activateGrind() {
         startProcess(
             new GrindProcess(ProcessTarget::TIME, settings.getTargetGrindDuration(), settings.getTargetGrindVolume(), 0.0));
     }
+    return true;
 }
 
 void Controller::deactivateGrind() {
@@ -1500,9 +1524,16 @@ void Controller::activateStandby() {
     setMode(MODE_STANDBY);
 }
 
-void Controller::deactivateStandby() {
+bool Controller::deactivateStandby() {
+    // B-P2-2: waking into BREW would start heating / show a ready UI; refuse while
+    // control is inhibited (matches upstream's wake gate, eez/actions.cpp:9).
+    if (!isControlAllowed()) {
+        ESP_LOGW(LOG_TAG, "Leave-standby refused: controller link not verified / protocol mismatch");
+        return false;
+    }
     deactivate();
     setMode(MODE_BREW);
+    return true;
 }
 
 bool Controller::isActive() const {
@@ -1814,15 +1845,20 @@ bool Controller::isBluetoothScaleHealthy() const {
     return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride.load(std::memory_order_acquire);
 }
 
-void Controller::onFlush() {
+bool Controller::onFlush() {
     if (isActiveSafe()) {
-        return;
+        return true;
+    }
+    if (!isControlAllowed()) {
+        ESP_LOGW(LOG_TAG, "Flush refused: controller link not verified / protocol mismatch");
+        return false;
     }
     clear();
     Profile flushProfile = FLUSH_PROFILE;
     flushProfile.phases[0].duration = settings.getFlushDuration() / 1000.0f;
     startProcess(new BrewProcess(flushProfile, ProcessTarget::TIME, settings.getBrewDelay()));
     pluginManager->trigger(EventIds::CONTROLLER_BREW_START);
+    return true;
 }
 
 void Controller::onVolumetricDelete() {

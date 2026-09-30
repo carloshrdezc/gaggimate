@@ -180,13 +180,15 @@ class Controller {
     void setBrewTarget(float value);
     void raiseGrindTarget();
     void lowerGrindTarget();
-    void activate();
+    // PRO-655 B-P2-2: return false when refused (control inhibited: no verified
+    // controller link / protocol mismatch, see isControlAllowed()).
+    bool activate();
     void deactivate();
     void clear();
-    void activateGrind();
+    bool activateGrind();
     void deactivateGrind();
     void activateStandby();
-    void deactivateStandby();
+    bool deactivateStandby();
     void onOTAUpdate();
     void onScreenReady();
     void onTargetToggle();
@@ -196,7 +198,7 @@ class Controller {
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
     void setVolumetricOverride(bool override) { volumetricOverride.store(override, std::memory_order_release); }
     bool isBluetoothScaleHealthy() const;
-    void onFlush();
+    bool onFlush(); // false = refused (B-P2-2)
     int getWaterLevel() const {
         float reversedLevel = static_cast<float>(settings.getEmptyTankDistance()) -
                               static_cast<float>(std::min(settings.getEmptyTankDistance(), tofDistance));

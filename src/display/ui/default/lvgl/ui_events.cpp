@@ -22,6 +22,8 @@ void onBrewStart(lv_event_t *e) {
     // swap lives in DefaultUI.cpp), so a shot can't be triggered before
     // at-target — and rectangular layouts (which never hide the button on
     // heating) are unaffected by a gate that used to fire for all displays.
+    // PRO-655 B-P2-2: Controller::activate() refuses (and logs) when control is
+    // inhibited, so no gate is needed here either.
     controller.activate();
 }
 
@@ -148,7 +150,9 @@ void onSteamScreen(lv_event_t *e) {
 
 void onWakeup(lv_event_t *e) {
     if (controller.isUpdating() || controller.isErrorState() || controller.isAutotuning() ||
-        !controller.getClientController()->isConnected()) {
+        !controller.isControlAllowed()) {
+        // PRO-655 B-P2-2: isControlAllowed() also covers protocol mismatch and "no
+        // SystemInfo yet" (upstream eez/actions.cpp:9 checks the mismatch flag).
         return;
     }
     // CAR-300: land on the mode hub (Nothing-theme ModeScreen) on wake, not the
