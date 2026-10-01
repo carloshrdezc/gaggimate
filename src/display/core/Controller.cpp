@@ -307,7 +307,12 @@ void Controller::setupBluetooth() {
             // Restart the grace clock so the next scan/reconnect attempt gets a
             // full CONTROLLER_WAITING_TIMEOUT_MS window (PRO-3).
             connectStartTime = millis();
+            // PRO-671/673: setMode() clears mismatchForcedStandby; a link drop is not
+            // a new standby cause, so keep a mismatch-forced standby marked as such
+            // (read by the next onSystemInfo to decide RestoreStartup).
+            const bool keepMismatchForced = mismatchForcedStandby.load(std::memory_order_acquire);
             setMode(MODE_STANDBY);
+            mismatchForcedStandby.store(keepMismatchForced, std::memory_order_release);
         }
     });
     comms.onSystemInfo([this](const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
@@ -407,10 +412,30 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
         configResendUntil = millis() + CONFIG_RESEND_WINDOW_MS;
         lastConfigResend = millis();
     }
-    if (!loaded) {
-        loaded = true;
-        if (controller_link::shouldActivateStandbyOnReady(mismatch, settings.getStartupMode() == MODE_STANDBY))
-            activateStandby();
+    const bool wasLoaded = loaded;
+    loaded = true;
+    // PRO-671/673: mismatchForcedStandby (not systemInfo.protocolMismatch) is the
+    // "had mismatch" input, so only a standby a mismatch actually forced can be
+    // auto-restored. See ControllerLinkPolicy.h::systemInfoModeAction.
+    switch (controller_link::systemInfoModeAction(wasLoaded, mismatchForcedStandby.load(std::memory_order_acquire), mismatch,
+                                                  mode == MODE_STANDBY, settings.getStartupMode() == MODE_STANDBY)) {
+    case controller_link::SystemInfoModeAction::StartupStandby:
+    case controller_link::SystemInfoModeAction::ForceStandby:
+        // Startup standby, or a mismatch (at boot or discovered later) forcing the
+        // UI and mode to standby; control stays inhibited until a matching controller.
+        activateStandby();
+        // Written AFTER activateStandby(): its setMode() clears the flag.
+        mismatchForcedStandby.store(mismatch, std::memory_order_release);
+        break;
+    case controller_link::SystemInfoModeAction::RestoreStartup:
+        // A corrected controller restores the configured startup mode after a
+        // mismatch forced the display into standby (setMode() clears the flag).
+        setMode(settings.getStartupMode());
+        break;
+    case controller_link::SystemInfoModeAction::None:
+        break;
+    }
+    if (!wasLoaded) {
         // Fires for a mismatch too: WebUIPlugin binds controller OTA on READY (OTA-only recovery).
         pluginManager->trigger(EventIds::CONTROLLER_READY);
     }
@@ -1774,6 +1799,10 @@ bool Controller::setMode(int newMode) {
     Event modeEvent = pluginManager->trigger(EventIds::CONTROLLER_MODE_CHANGE, "value", newMode);
     mode = modeEvent.getInt("value");
     steamReady = false;
+    // PRO-671/673: any accepted mode change (restore, user stop/wake, error,
+    // timeout) ends a mismatch-forced standby. Callers that must keep it marked
+    // (onSystemInfo ForceStandby, onConnectionChanged(false)) re-store it after.
+    mismatchForcedStandby.store(false, std::memory_order_release);
 
     updateLastAction();
     setTargetTemp(getTargetTemp());

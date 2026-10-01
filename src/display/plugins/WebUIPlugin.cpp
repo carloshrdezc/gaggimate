@@ -1732,6 +1732,12 @@ void WebUIPlugin::processWebSocketMessage(uint32_t clientId, const String &msg) 
                 sendProcessRefused(clientId, doc, response);
                 return;
             }
+            // PRO-671 (accepted race): this runs on the relay task, so the link can
+            // still drop after the gate above and deactivate()/clear() below run
+            // before setMode() refuses. Accepted: the refusal only applies to
+            // STANDBY -> non-standby, where nothing is normally running, and the
+            // drop itself already forces STANDBY via onConnectionChanged(false).
+            // The post-setMode() refusal reply below still informs the client.
             // PRO-261: honor the post-shot extended-recording / scale-settle gate
             // that the display's auto-steam path already respects (DefaultUI::loop
             // / pendingAutoSteam, PRO-223 / PRO-248 / PRO-232). This handler runs
