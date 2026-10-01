@@ -103,8 +103,44 @@ void test_leave_standby_composed_with_link_state(void) {
     TEST_ASSERT_TRUE(modeChangeAllowed(false, true, controlAllowed(true, true, true)));
 }
 
+// PRO-671/673: Controller::onSystemInfo mode decision, full table.
+void test_system_info_mode_action_table(void) {
+    using A = SystemInfoModeAction;
+    struct Row {
+        bool loaded, forced, mismatch, standby, startupStandby;
+        A expect;
+        const char *why;
+    };
+    static const Row rows[] = {
+        // First SystemInfo since boot (`forced` is never set yet).
+        {false, false, false, false, false, A::None, "boot: match, startup=BREW"},
+        {false, false, false, false, true, A::StartupStandby, "boot: match, startup=STANDBY"},
+        {false, false, false, true, true, A::StartupStandby, "boot: match, startup=STANDBY (already standby)"},
+        {false, false, true, false, false, A::StartupStandby, "boot: mismatch forces standby despite startup=BREW"},
+        {false, false, true, true, true, A::StartupStandby, "boot: mismatch, startup=STANDBY"},
+        // Late mismatch.
+        {true, false, true, false, false, A::ForceStandby, "late mismatch while BREW"},
+        {true, false, true, false, true, A::ForceStandby, "late mismatch while BREW, startup=STANDBY"},
+        {true, false, true, true, false, A::None, "late mismatch already in (non-mismatch) standby"},
+        {true, true, true, true, false, A::None, "still mismatched after reconnect"},
+        // Matching reconnects.
+        {true, true, false, true, false, A::RestoreStartup, "corrected controller restores startup=BREW"},
+        {true, true, false, true, true, A::None, "corrected controller, startup=STANDBY: stay"},
+        {true, false, false, true, false, A::None, "REGRESSION: ordinary reconnect in STANDBY, startup=BREW"},
+        {true, false, false, true, true, A::None, "ordinary reconnect in STANDBY, startup=STANDBY"},
+        {true, false, false, false, false, A::None, "ordinary SystemInfo while BREW"},
+        {true, true, false, false, false, A::None, "forced flag stale while not standby: no-op"},
+    };
+    for (const Row &r : rows) {
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(r.expect),
+                                  static_cast<int>(systemInfoModeAction(r.loaded, r.forced, r.mismatch, r.standby, r.startupStandby)),
+                                  r.why);
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_system_info_mode_action_table);
     RUN_TEST(test_leave_standby_gated_on_control_allowed);
     RUN_TEST(test_leave_standby_composed_with_link_state);
     RUN_TEST(test_mismatch_detection);

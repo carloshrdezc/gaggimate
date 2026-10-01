@@ -66,6 +66,33 @@ inline bool modeChangeAllowed(bool currentIsStandby, bool targetIsStandby, bool 
 // controller follows the configured startup mode.
 inline bool shouldActivateStandbyOnReady(bool mismatch, bool startupModeIsStandby) { return mismatch || startupModeIsStandby; }
 
+// PRO-671/673: what Controller::onSystemInfo does to the mode for one SystemInfo.
+enum class SystemInfoModeAction {
+    None,           // leave the mode alone
+    StartupStandby, // first SystemInfo since boot: apply startup standby (or mismatch-forced standby)
+    ForceStandby,   // later SystemInfo is mismatched while not in standby: force standby
+    RestoreStartup, // matching SystemInfo after a mismatch-forced standby: restore the startup mode
+};
+
+// `loaded`                 - a SystemInfo was already handled since boot.
+// `mismatchForcedStandby`  - the current standby was forced by a mismatch (Controller flag; NOT
+//                            set by an ordinary disconnect / user / timeout standby).
+// An ordinary reconnect while in STANDBY must never auto-restore the startup mode.
+inline SystemInfoModeAction systemInfoModeAction(bool loaded, bool mismatchForcedStandby, bool mismatch, bool modeIsStandby,
+                                                 bool startupModeIsStandby) {
+    if (!loaded) {
+        return shouldActivateStandbyOnReady(mismatch, startupModeIsStandby) ? SystemInfoModeAction::StartupStandby
+                                                                            : SystemInfoModeAction::None;
+    }
+    if (mismatch) {
+        return modeIsStandby ? SystemInfoModeAction::None : SystemInfoModeAction::ForceStandby;
+    }
+    if (mismatchForcedStandby && modeIsStandby && !startupModeIsStandby) {
+        return SystemInfoModeAction::RestoreStartup;
+    }
+    return SystemInfoModeAction::None;
+}
+
 // Standby kicker text (spacemono_14 is uppercase-only). The side with the lower
 // protocol version must be updated (upstream :677-678).
 inline const char *mismatchKickerMessage(uint32_t controllerVersion, uint32_t localVersion) {

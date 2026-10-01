@@ -291,6 +291,12 @@ class Controller {
     SystemInfo systemInfo{};
     // PRO-655: set once a SystemInfo arrived on the current link (cleared on disconnect).
     std::atomic<bool> systemInfoReceived{false};
+    // PRO-671/673: the current STANDBY was forced by a protocol mismatch (set in
+    // onSystemInfo). Every setMode() clears it (restore, user stop/wake, error,
+    // timeout); only the disconnect standby in onConnectionChanged(false) preserves
+    // it, so mismatch -> link drop -> matching reconnect can still restore the
+    // startup mode while an ordinary reconnect in STANDBY never does.
+    std::atomic<bool> mismatchForcedStandby{false};
     // B-P3-2: last full control frame sent (loopControl task only) + a resend
     // request raised from the BLE/loop tasks on every new link / SystemInfo.
     BoilerCommand lastSentBoiler;
