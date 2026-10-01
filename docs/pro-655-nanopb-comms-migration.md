@@ -432,10 +432,25 @@ same lib fits there, so that is not expected to be a blocker. Re-measure then.
    "HomeKit wake refused" and flips back to off, and a web BREW/STEAM mode
    change shows "Cannot leave standby: ...". Entering standby, stop and
    controller OTA still work.
-4b. Start the display with startup mode **BREW** and a mismatched controller:
-   the display must force standby and show the mismatch kicker. After updating
-   the controller via OTA to the correct protocol, BREW resumes according to
-   the configured startup mode.
+4b. Mismatch -> corrected controller restore (PRO-671/673). Note: the in-tree
+   web controller OTA (`GitHubOTA::update()`) calls `ESP.restart()` on the
+   **display** after a successful controller flash
+   (`lib/OTA/src/GitHubOTA.cpp`), so it re-enters the fresh-boot path and does
+   NOT exercise the restore branch. Use USB for the controller swaps below and
+   keep the display powered throughout (no display reboot).
+   (a) Boot the display with startup mode **BREW** and a mismatched controller:
+       the display forces standby and shows the mismatch kicker.
+   (b) Without rebooting the display, re-flash the controller over USB to the
+       matching image. On reconnect the display restores the configured startup
+       mode (BREW) by itself (`RestoreStartup`).
+   (c) Negative: with a matching controller, startup mode BREW, put the display
+       in STANDBY (button or web), then power-cycle / re-flash the controller
+       so the link drops and reconnects. The display must STAY in STANDBY (no
+       mismatch forced it, so `mismatchForcedStandby` is clear).
+   (d) Late mismatch: boot with a matching controller in BREW, then (display
+       still powered) re-flash the controller over USB to a mismatched image.
+       On reconnect the display forces standby and shows the kicker
+       (`ForceStandby`); continuing with (b) then restores BREW.
 5. 30-minute soak with no disconnect/panic (serial log).
 6. Rollback path: previous display+controller images kept for re-flash.
 
