@@ -354,7 +354,9 @@ task (`onSystemInfo`, link drop, controller errors), the Arduino loop task
 Decision: a lock, not a single-owner task. `mode` is `std::atomic<int>` (lock-free
 reads everywhere) and every write goes through `setMode()` under a recursive
 `modeMutex`, which `onSystemInfo` also holds across its `systemInfo` write and
-mode decision, and `getSystemInfo()` holds for its copy. Recursive because
+mode decision. `systemInfo` itself is copied under a separate leaf
+`systemInfoMutex`, so `getSystemInfo()` never waits on mode-change side
+effects. Recursive because
 `CONTROLLER_MODE_CHANGE` handlers may re-enter `setMode()`. A queue to one owner
 task would turn `setMode()`'s synchronous bool result (used by the WebUI refusal
 reply, PRO-670) into an async one and touch every caller. The link-drop standby
