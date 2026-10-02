@@ -93,6 +93,17 @@ inline SystemInfoModeAction systemInfoModeAction(bool loaded, bool mismatchForce
     return SystemInfoModeAction::None;
 }
 
+// PRO-674 (review finding 2): the inactivity standby timeout fires only while NOT
+// already in STANDBY. Controller::loop() evaluates this twice: once lock-free as a
+// cheap pre-check, then again under modeMutex right before activateStandby(). The
+// locked re-check closes the TOCTOU where a mismatch-forced standby (flag Set) lands
+// between the pre-check and the timeout's setMode(STANDBY), whose Clear would
+// otherwise wipe mismatchForcedStandby and block the next RestoreStartup.
+// `elapsedMs` = now - lastAction (wrap-safe signed diff); timeoutMs <= 0 = disabled.
+inline bool standbyTimeoutExpired(bool modeIsStandby, long timeoutMs, long elapsedMs) {
+    return !modeIsStandby && timeoutMs > 0 && elapsedMs > timeoutMs;
+}
+
 // PRO-674: how one accepted Controller::setMode() updates mismatchForcedStandby.
 //   Clear    - any ordinary mode change (restore, user stop/wake, error, timeout)
 //              ends a mismatch-forced standby. The default.

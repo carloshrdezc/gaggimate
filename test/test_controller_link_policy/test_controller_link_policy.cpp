@@ -206,6 +206,38 @@ void test_old_save_clear_restore_was_racy(void) {
     TEST_ASSERT_TRUE(m.forced); // the user's STANDBY was undone -> would restore BREW
 }
 
+// PRO-674 review finding 2: standby-timeout vs mismatch link-drop TOCTOU.
+// Controller::loop() pre-checks standbyTimeoutExpired() lock-free; a mismatch
+// ForceStandby (Set) then lands before the timeout acts. Acting on the stale
+// pre-check would run setMode(STANDBY, Clear) and wipe the flag; the locked
+// re-check sees STANDBY and does nothing, so the matching reconnect restores BREW.
+void test_standby_timeout_does_not_clear_mismatch_forced_flag(void) {
+    TEST_ASSERT_FALSE(standbyTimeoutExpired(false, 0, 1000000)); // disabled
+    TEST_ASSERT_FALSE(standbyTimeoutExpired(false, 600, 600));   // not yet (strict >)
+    TEST_ASSERT_TRUE(standbyTimeoutExpired(false, 600, 601));
+    TEST_ASSERT_FALSE(standbyTimeoutExpired(true, 600, 601)); // already STANDBY: no-op
+
+    for (int recheck = 0; recheck < 2; ++recheck) {
+        ModeModel m;
+        m.standby = false;                                                // brewing, idle
+        const bool preCheck = standbyTimeoutExpired(m.standby, 600, 601); // loop(), lock-free
+        TEST_ASSERT_TRUE(preCheck);
+        m.setMode(true, MismatchFlagUpdate::Set, /*mismatch=*/true); // racing ForceStandby
+        const bool act = recheck ? standbyTimeoutExpired(m.standby, 600, 601) : preCheck;
+        if (act) {
+            m.setMode(true, MismatchFlagUpdate::Clear); // activateStandby() -> setMode()
+        }
+        const auto action = systemInfoModeAction(true, m.forced, false, m.standby, false);
+        if (recheck) {
+            TEST_ASSERT_TRUE_MESSAGE(m.forced, "locked re-check keeps the mismatch flag");
+            TEST_ASSERT_EQUAL(static_cast<int>(SystemInfoModeAction::RestoreStartup), static_cast<int>(action));
+        } else {
+            TEST_ASSERT_FALSE_MESSAGE(m.forced, "stale pre-check (old code) wiped the flag");
+            TEST_ASSERT_EQUAL(static_cast<int>(SystemInfoModeAction::None), static_cast<int>(action));
+        }
+    }
+}
+
 // PRO-674 item 3: the screen on reconnect follows the Controller's actual mode.
 void test_reconnect_screen_follows_controller_mode(void) {
     using R = ReconnectScreenAction;
@@ -225,6 +257,7 @@ int main(int, char **) {
     RUN_TEST(test_link_drop_keeps_mismatch_forced_standby);
     RUN_TEST(test_explicit_standby_around_link_drop_is_never_undone);
     RUN_TEST(test_old_save_clear_restore_was_racy);
+    RUN_TEST(test_standby_timeout_does_not_clear_mismatch_forced_flag);
     RUN_TEST(test_reconnect_screen_follows_controller_mode);
     RUN_TEST(test_leave_standby_gated_on_control_allowed);
     RUN_TEST(test_leave_standby_composed_with_link_state);

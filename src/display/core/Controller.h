@@ -215,7 +215,9 @@ class Controller {
     void onVolumetricDelete();
     bool isLowWaterLevel() const { return getWaterLevel() < 20; };
 
-    // PRO-674: copied under modeMutex; the Strings are rewritten on the BLE dispatch task.
+    // PRO-674: copied under systemInfoMutex (a leaf lock, NOT modeMutex, so WebUI/MQTT
+    // status reads never wait behind mode-change side effects); the Strings are
+    // rewritten on the BLE dispatch task.
     SystemInfo getSystemInfo() const;
 
     // PRO-655: the display-side NanoPbComm facade (was NimBLEClientController).
@@ -288,12 +290,17 @@ class Controller {
     // modeMutex (onSystemInfo, link drop) cannot interleave with another task's
     // setMode() (WebUI/relay on AsyncTCP, buttons, standby timeout).
     std::atomic<int> mode{MODE_BREW};
-    // PRO-674: serializes mode transitions + mismatchForcedStandby + systemInfo.
+    // PRO-674: serializes mode transitions + mismatchForcedStandby + the onSystemInfo
+    // decision (the systemInfo copy itself is guarded by systemInfoMutex).
     // RECURSIVE: setMode() fires CONTROLLER_MODE_CHANGE, whose handlers (and
     // activateStandby() inside an onSystemInfo decision) may re-enter setMode().
     // Lock order: modeMutex may be held while processMutex is taken, never the
-    // reverse (no processMutex holder calls setMode()/getSystemInfo()).
+    // reverse (no processMutex holder calls setMode()).
     SemaphoreHandle_t modeMutex = nullptr;
+    // PRO-674 (review finding 1): LEAF lock for the systemInfo copy/move only. May be
+    // taken while modeMutex/processMutex are held; nothing is ever taken, triggered
+    // or awaited while it is held.
+    SemaphoreHandle_t systemInfoMutex = nullptr;
     // setMode() body; caller holds modeMutex.
     bool setModeLocked(int newMode, controller_link::MismatchFlagUpdate flagUpdate, bool mismatch);
     float currentTemp = 0;

@@ -16,6 +16,7 @@
 #include <display/core/BrewTemperatureOverridePolicy.h>
 #include <display/core/EventIds.h>
 #include <display/core/GmHeapDiag.h> // PRO-566: gated internal-DRAM checkpoints (no-op unless -DGM_HEAP_DIAG_ENABLED)
+#include <utility>
 #ifndef GAGGIMATE_SIM
 #include <display/core/MbedtlsPsramAllocator.h> // PRO-569: route mbedTLS allocs to PSRAM (device-only)
 #endif
@@ -78,7 +79,7 @@ static_assert(!shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate:
 
 namespace {
 // PRO-674: RAII lock for Controller::modeMutex. Tolerates a null handle (calls that
-// race setup(), e.g. a getSystemInfo() before the mutex exists, run unlocked as before).
+// race setup(), i.e. before the mutex exists, run unlocked as before).
 class ModeLock {
   public:
     explicit ModeLock(SemaphoreHandle_t m) : m_(m) {
@@ -95,6 +96,29 @@ class ModeLock {
     ModeLock &operator=(const ModeLock &) = delete;
     ModeLock(ModeLock &&) = delete;
     ModeLock &operator=(ModeLock &&) = delete;
+
+  private:
+    SemaphoreHandle_t m_;
+};
+
+// PRO-674 (review finding 1): RAII lock for Controller::systemInfoMutex, a LEAF
+// lock held only for a SystemInfo copy/move (never across a trigger, setMode() or
+// any other lock), so portMAX_DELAY is bounded by one struct copy. Null handle
+// (before setup() / allocation failure) runs unlocked, like ModeLock.
+class SystemInfoLock {
+  public:
+    explicit SystemInfoLock(SemaphoreHandle_t m) : m_(m) {
+        if (m_ != nullptr)
+            xSemaphoreTake(m_, portMAX_DELAY);
+    }
+    ~SystemInfoLock() {
+        if (m_ != nullptr)
+            xSemaphoreGive(m_);
+    }
+    SystemInfoLock(const SystemInfoLock &) = delete;
+    SystemInfoLock &operator=(const SystemInfoLock &) = delete;
+    SystemInfoLock(SystemInfoLock &&) = delete;
+    SystemInfoLock &operator=(SystemInfoLock &&) = delete;
 
   private:
     SemaphoreHandle_t m_;
@@ -120,6 +144,11 @@ void Controller::setup() {
     modeMutex = xSemaphoreCreateRecursiveMutex();
     if (modeMutex == nullptr) {
         ESP_LOGE(LOG_TAG, "Failed to create mode mutex");
+    }
+    // PRO-674 (review finding 1): leaf lock for the systemInfo copy only.
+    systemInfoMutex = xSemaphoreCreateMutex();
+    if (systemInfoMutex == nullptr) {
+        ESP_LOGE(LOG_TAG, "Failed to create system info mutex");
     }
 
     // Initialize process mutex for thread-safe access
@@ -412,19 +441,25 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
     // mode/mismatchForcedStandby and acting on them. Released before the
     // READY/CONNECT triggers (their handlers may block, e.g. OTA init).
     ModeLock modeLock(modeMutex);
-    systemInfo = SystemInfo{.hardware = String(hardware),
-                            .version = String(version),
-                            .capabilities =
-                                SystemCapabilities{
-                                    .dimming = dimming,
-                                    .pressure = pressure,
-                                    .ledControl = ledControl,
-                                    .tof = tof,
-                                    .dualBoiler = dualBoiler,
-                                    .addons = addons,
-                                },
-                            .protocolVersion = protocolVersion,
-                            .protocolMismatch = mismatch};
+    SystemInfo info{.hardware = String(hardware),
+                    .version = String(version),
+                    .capabilities =
+                        SystemCapabilities{
+                            .dimming = dimming,
+                            .pressure = pressure,
+                            .ledControl = ledControl,
+                            .tof = tof,
+                            .dualBoiler = dualBoiler,
+                            .addons = addons,
+                        },
+                    .protocolVersion = protocolVersion,
+                    .protocolMismatch = mismatch};
+    {
+        // Built above without the leaf lock; only the move is under it, so a
+        // getSystemInfo() reader never waits on String allocation either.
+        SystemInfoLock infoLock(systemInfoMutex);
+        systemInfo = std::move(info);
+    }
     controlResendRequested.store(true, std::memory_order_release); // B-P3-2
     systemInfoReceived.store(true, std::memory_order_release);
     waitingForController = false;
@@ -715,8 +750,20 @@ void Controller::loop() {
 
     if (grindActiveUntil != 0 && (long)(now - grindActiveUntil) > 0)
         deactivateGrind();
-    if (mode != MODE_STANDBY && settings.getStandbyTimeout() > 0 && (long)(now - lastAction) > settings.getStandbyTimeout())
-        activateStandby();
+    // PRO-674 (review finding 2): lock-free pre-check, then re-check under
+    // modeMutex so a mismatch-forced standby (or any other setMode()) that lands
+    // in between is seen: the timeout must not issue its own setMode(STANDBY,
+    // Clear) over it and wipe mismatchForcedStandby. A racing setMode() also
+    // refreshes lastAction, so the re-check re-reads it too. Recursive mutex:
+    // activateStandby() -> setMode() re-takes it; deactivate() takes
+    // processMutex under modeMutex (allowed order, see Controller.h).
+    if (controller_link::standbyTimeoutExpired(mode == MODE_STANDBY, settings.getStandbyTimeout(), (long)(now - lastAction))) {
+        ModeLock modeLock(modeMutex);
+        if (controller_link::standbyTimeoutExpired(mode == MODE_STANDBY, settings.getStandbyTimeout(),
+                                                   (long)(millis() - lastAction))) {
+            activateStandby();
+        }
+    }
 }
 
 void Controller::loopControl() {
@@ -1839,7 +1886,15 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
 int Controller::getMode() const { return mode.load(); }
 
 SystemInfo Controller::getSystemInfo() const {
-    ModeLock lock(modeMutex);
+    // PRO-674 (review finding 1): NOT modeMutex. modeMutex is held across
+    // CONTROLLER_MODE_CHANGE handlers (BLE scale teardown, MQTT, Homekit) and
+    // deactivate()'s BREW_END/PROCESS_END (ShotHistory file IO), and this is
+    // called on AsyncTCP for every WebUI status frame and by MQTT. The leaf
+    // systemInfoMutex is only ever held for one SystemInfo copy/move, so a status
+    // read never waits behind mode-change side effects. Chosen over a bounded
+    // modeMutex take + unlocked fallback: an unlocked copy of the Strings while
+    // onSystemInfo rewrites them is exactly the torn read this lock exists for.
+    SystemInfoLock lock(systemInfoMutex);
     return systemInfo;
 }
 
