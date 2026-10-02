@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <functional>
 
-class NimBLEClient;
+class SimLinkHandle; // sim/comms/SimLinkHandle.h — what GaggiMateClient::getClient() returns in the sim
 
 using phase_callback_t = std::function<void(uint8_t phase)>;
 using progress_callback_t = std::function<void(uint8_t phase, int progress)>;
@@ -17,7 +17,7 @@ class GitHubOTA {
               const String & = "filesystem.bin", const String & = "controller.bin")
         : _version(display_version) {}
 
-    void init(NimBLEClient *) {}
+    void init(SimLinkHandle *) {}
     void checkForUpdates() {}
     bool isUpdateAvailable(bool = false) const { return false; }
     String getCurrentVersion() const { return _version; }

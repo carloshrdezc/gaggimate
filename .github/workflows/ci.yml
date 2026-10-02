@@ -484,3 +484,11 @@ jobs:
       # serveWebAsset/blob path also fails the build, not just a link gap.
       - name: Build display-sim simulator
         run: pio run -e display-sim
+      # PRO-656: the per-slice migration gate. Boots the built sim headless
+      # (SDL offscreen), checks the embedded WebUI is served, drives a brew over
+      # the WebSocket against MockController (evt:status pressure/flow), runs the
+      # --link-check scenarios, and asserts no NimBLE symbol/source is in the sim.
+      - name: Simulator smoke (scripts/sim_smoke.py)
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: python3 scripts/sim_smoke.py
