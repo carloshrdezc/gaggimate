@@ -551,29 +551,7 @@ void DefaultUI::init() {
     pluginManager->on(EventIds::CONTROLLER_PROCESS_START, triggerRender);
     pluginManager->on(EventIds::CONTROLLER_MODE_CHANGE, [this](Event const &event) {
         mode = event.getInt("value");
-        switch (mode) {
-        case MODE_STANDBY:
-            changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
-            break;
-        case MODE_BREW:
-            changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
-            break;
-        case MODE_GRIND:
-            changeScreen(&ui_GrindScreen, &ui_GrindScreen_screen_init);
-            break;
-        // CAR-292: STEAM and WATER share ui_StatusScreen with the brew path.
-        // gm_status_apply_mode() retints + relayouts per mode; updateStatusScreen()
-        // drives hero/kicker/metrics directly from class state, so idle entry
-        // (no live shot) renders the per-mode static layout cleanly.
-        case MODE_STEAM:
-            changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
-            break;
-        case MODE_WATER:
-            changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
-            break;
-        default:
-            break;
-        };
+        showScreenForMode(mode);
     });
     pluginManager->on(EventIds::CONTROLLER_BREW_START,
                       [this](Event const &event) { changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init); });
@@ -597,13 +575,21 @@ void DefaultUI::init() {
         rerender = true;
         initialized = true;
         protocolMismatch = controller->isProtocolMismatch();
-        if (lv_scr_act() == ui_StandbyScreen && !protocolMismatch) {
-            Settings &settings = controller->getSettings();
-            if (settings.getStartupMode() == MODE_BREW) {
-                changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
-            } else {
-                standbyEnterTime = millis();
-            }
+        // PRO-674: the screen follows the Controller's ACTUAL mode on every reconnect
+        // (not the startup-mode setting / mismatch flag). onSystemInfo already applied
+        // any RestoreStartup / forced standby before firing CONNECT, so getMode() is
+        // the post-decision mode. `targetScreen` is the pending screen (a MODE_CHANGE
+        // earlier in this same SystemInfo may not have rendered yet).
+        const int controllerMode = controller->getMode();
+        switch (controller_link::reconnectScreenAction(*targetScreen == ui_StandbyScreen, controllerMode == MODE_STANDBY)) {
+        case controller_link::ReconnectScreenAction::StayStandby:
+            standbyEnterTime = millis();
+            break;
+        case controller_link::ReconnectScreenAction::ShowModeScreen:
+            showScreenForMode(controllerMode);
+            break;
+        case controller_link::ReconnectScreenAction::None:
+            break;
         }
         pressureAvailable = controller->getSystemInfo().capabilities.pressure;
     });
@@ -817,6 +803,30 @@ void DefaultUI::loopProfiles() {
             favoritedProfiles.emplace_back(profile);
         }
         profileLoaded = 1;
+    }
+}
+
+void DefaultUI::showScreenForMode(int newMode) {
+    switch (newMode) {
+    case MODE_STANDBY:
+        changeScreen(&ui_StandbyScreen, &ui_StandbyScreen_screen_init);
+        break;
+    case MODE_BREW:
+        changeScreen(&ui_BrewScreen, &ui_BrewScreen_screen_init);
+        break;
+    case MODE_GRIND:
+        changeScreen(&ui_GrindScreen, &ui_GrindScreen_screen_init);
+        break;
+    // CAR-292: STEAM and WATER share ui_StatusScreen with the brew path.
+    // gm_status_apply_mode() retints + relayouts per mode; updateStatusScreen()
+    // drives hero/kicker/metrics directly from class state, so idle entry
+    // (no live shot) renders the per-mode static layout cleanly.
+    case MODE_STEAM:
+    case MODE_WATER:
+        changeScreen(&ui_StatusScreen, &ui_StatusScreen_screen_init);
+        break;
+    default:
+        break;
     }
 }
 

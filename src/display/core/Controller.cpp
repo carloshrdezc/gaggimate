@@ -16,6 +16,7 @@
 #include <display/core/BrewTemperatureOverridePolicy.h>
 #include <display/core/EventIds.h>
 #include <display/core/GmHeapDiag.h> // PRO-566: gated internal-DRAM checkpoints (no-op unless -DGM_HEAP_DIAG_ENABLED)
+#include <utility>
 #ifndef GAGGIMATE_SIM
 #include <display/core/MbedtlsPsramAllocator.h> // PRO-569: route mbedTLS allocs to PSRAM (device-only)
 #endif
@@ -76,6 +77,54 @@ const String LOG_TAG = F("Controller");
 static_assert(!shouldPersistBrewTemperatureOverride(BrewTemperatureTargetUpdate::PASSIVE_REASSERT),
               "setMode target reassertions must not persist brew overrides");
 
+namespace {
+// PRO-674: RAII lock for Controller::modeMutex. Tolerates a null handle (calls that
+// race setup(), i.e. before the mutex exists, run unlocked as before).
+class ModeLock {
+  public:
+    explicit ModeLock(SemaphoreHandle_t m) : m_(m) {
+        if (m_ != nullptr)
+            xSemaphoreTakeRecursive(m_, portMAX_DELAY);
+    }
+    ~ModeLock() { release(); }
+    void release() {
+        if (m_ != nullptr)
+            xSemaphoreGiveRecursive(m_);
+        m_ = nullptr;
+    }
+    ModeLock(const ModeLock &) = delete;
+    ModeLock &operator=(const ModeLock &) = delete;
+    ModeLock(ModeLock &&) = delete;
+    ModeLock &operator=(ModeLock &&) = delete;
+
+  private:
+    SemaphoreHandle_t m_;
+};
+
+// PRO-674 (review finding 1): RAII lock for Controller::systemInfoMutex, a LEAF
+// lock held only for a SystemInfo copy/move (never across a trigger, setMode() or
+// any other lock), so portMAX_DELAY is bounded by one struct copy. Null handle
+// (before setup() / allocation failure) runs unlocked, like ModeLock.
+class SystemInfoLock {
+  public:
+    explicit SystemInfoLock(SemaphoreHandle_t m) : m_(m) {
+        if (m_ != nullptr)
+            xSemaphoreTake(m_, portMAX_DELAY);
+    }
+    ~SystemInfoLock() {
+        if (m_ != nullptr)
+            xSemaphoreGive(m_);
+    }
+    SystemInfoLock(const SystemInfoLock &) = delete;
+    SystemInfoLock &operator=(const SystemInfoLock &) = delete;
+    SystemInfoLock(SystemInfoLock &&) = delete;
+    SystemInfoLock &operator=(SystemInfoLock &&) = delete;
+
+  private:
+    SemaphoreHandle_t m_;
+};
+} // namespace
+
 void Controller::setup() {
     GM_HEAP_DIAG("setup() begin"); // PRO-566
     // PRO-331: load persisted settings from NVS now, NOT in the Settings
@@ -90,6 +139,17 @@ void Controller::setup() {
     // to tear down the existing loop task and vectorMutex first.
 
     mode = settings.getStartupMode();
+
+    // PRO-674: serializes mode transitions (see Controller.h modeMutex).
+    modeMutex = xSemaphoreCreateRecursiveMutex();
+    if (modeMutex == nullptr) {
+        ESP_LOGE(LOG_TAG, "Failed to create mode mutex");
+    }
+    // PRO-674 (review finding 1): leaf lock for the systemInfo copy only.
+    systemInfoMutex = xSemaphoreCreateMutex();
+    if (systemInfoMutex == nullptr) {
+        ESP_LOGE(LOG_TAG, "Failed to create system info mutex");
+    }
 
     // Initialize process mutex for thread-safe access
     processMutex = xSemaphoreCreateMutex();
@@ -307,12 +367,13 @@ void Controller::setupBluetooth() {
             // Restart the grace clock so the next scan/reconnect attempt gets a
             // full CONTROLLER_WAITING_TIMEOUT_MS window (PRO-3).
             connectStartTime = millis();
-            // PRO-671/673: setMode() clears mismatchForcedStandby; a link drop is not
-            // a new standby cause, so keep a mismatch-forced standby marked as such
-            // (read by the next onSystemInfo to decide RestoreStartup).
-            const bool keepMismatchForced = mismatchForcedStandby.load(std::memory_order_acquire);
-            setMode(MODE_STANDBY);
-            mismatchForcedStandby.store(keepMismatchForced, std::memory_order_release);
+            // PRO-671/673/674: a link drop is not a new standby cause, so a
+            // mismatch-forced standby stays marked as such (read by the next
+            // onSystemInfo to decide RestoreStartup). Preserve leaves the flag
+            // untouched (no save/clear/restore), and the whole transition runs
+            // under modeMutex, so a concurrent explicit STANDBY from the WebUI/relay
+            // task that clears the flag can no longer be undone by this path.
+            setMode(MODE_STANDBY, controller_link::MismatchFlagUpdate::Preserve);
         }
     });
     comms.onSystemInfo([this](const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
@@ -375,19 +436,30 @@ void Controller::setupBluetooth() {
 void Controller::onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
                               bool ledControl, bool tof, bool dualBoiler, const std::vector<uint32_t> &addons) {
     const bool mismatch = controller_link::isProtocolMismatch(protocolVersion, gm_proto::PROTOCOL_VERSION);
-    systemInfo = SystemInfo{.hardware = String(hardware),
-                            .version = String(version),
-                            .capabilities =
-                                SystemCapabilities{
-                                    .dimming = dimming,
-                                    .pressure = pressure,
-                                    .ledControl = ledControl,
-                                    .tof = tof,
-                                    .dualBoiler = dualBoiler,
-                                    .addons = addons,
-                                },
-                            .protocolVersion = protocolVersion,
-                            .protocolMismatch = mismatch};
+    // PRO-674: hold modeMutex across the systemInfo write AND the mode decision
+    // below, so another task's setMode() cannot interleave between reading
+    // mode/mismatchForcedStandby and acting on them. Released before the
+    // READY/CONNECT triggers (their handlers may block, e.g. OTA init).
+    ModeLock modeLock(modeMutex);
+    SystemInfo info{.hardware = String(hardware),
+                    .version = String(version),
+                    .capabilities =
+                        SystemCapabilities{
+                            .dimming = dimming,
+                            .pressure = pressure,
+                            .ledControl = ledControl,
+                            .tof = tof,
+                            .dualBoiler = dualBoiler,
+                            .addons = addons,
+                        },
+                    .protocolVersion = protocolVersion,
+                    .protocolMismatch = mismatch};
+    {
+        // Built above without the leaf lock; only the move is under it, so a
+        // getSystemInfo() reader never waits on String allocation either.
+        SystemInfoLock infoLock(systemInfoMutex);
+        systemInfo = std::move(info);
+    }
     controlResendRequested.store(true, std::memory_order_release); // B-P3-2
     systemInfoReceived.store(true, std::memory_order_release);
     waitingForController = false;
@@ -423,9 +495,10 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
     case controller_link::SystemInfoModeAction::ForceStandby:
         // Startup standby, or a mismatch (at boot or discovered later) forcing the
         // UI and mode to standby; control stays inhibited until a matching controller.
-        activateStandby();
-        // Written AFTER activateStandby(): its setMode() clears the flag.
-        mismatchForcedStandby.store(mismatch, std::memory_order_release);
+        // Same order as activateStandby() (PRO-278: deactivate first); the flag is
+        // written inside setMode() (MismatchFlagUpdate::Set), not after it.
+        deactivate();
+        setMode(MODE_STANDBY, controller_link::MismatchFlagUpdate::Set, mismatch);
         break;
     case controller_link::SystemInfoModeAction::RestoreStartup:
         // A corrected controller restores the configured startup mode after a
@@ -435,8 +508,23 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
     case controller_link::SystemInfoModeAction::None:
         break;
     }
+    modeLock.release();
     if (!wasLoaded) {
         // Fires for a mismatch too: WebUIPlugin binds controller OTA on READY (OTA-only recovery).
+        //
+        // PRO-674: ONCE PER BOOT, ON PURPOSE. The two READY consumers are boot-time
+        // actions, not per-link state: BoilerFillPlugin runs the startup boiler fill
+        // (re-running it on every BLE reconnect would pump water mid-session), and
+        // WebUIPlugin calls ota->setControllerVersion()/init(client). init() binds
+        // the OTA characteristics on the single NimBLEClient that BleClientTransport
+        // creates once and reuses for every reconnect; ControllerOTA::runUpdate()
+        // re-checks client->isConnected() before flashing. The controller version
+        // only changes across a controller OTA, and GitHubOTA::update() reboots the
+        // display after any successful flash, so READY fires again then. A display
+        // left on an old version (e.g. a controller USB-flashed without a display
+        // reboot) only shows a stale update-available hint until the next boot; it
+        // never permits control (that is gated per link on SystemInfo above).
+        // See docs/pro-655-nanopb-comms-migration.md §4 "CONTROLLER_READY is once per boot".
         pluginManager->trigger(EventIds::CONTROLLER_READY);
     }
     pluginManager->trigger(EventIds::CONTROLLER_BLUETOOTH_CONNECT);
@@ -662,8 +750,20 @@ void Controller::loop() {
 
     if (grindActiveUntil != 0 && (long)(now - grindActiveUntil) > 0)
         deactivateGrind();
-    if (mode != MODE_STANDBY && settings.getStandbyTimeout() > 0 && (long)(now - lastAction) > settings.getStandbyTimeout())
-        activateStandby();
+    // PRO-674 (review finding 2): lock-free pre-check, then re-check under
+    // modeMutex so a mismatch-forced standby (or any other setMode()) that lands
+    // in between is seen: the timeout must not issue its own setMode(STANDBY,
+    // Clear) over it and wipe mismatchForcedStandby. A racing setMode() also
+    // refreshes lastAction, so the re-check re-reads it too. Recursive mutex:
+    // activateStandby() -> setMode() re-takes it; deactivate() takes
+    // processMutex under modeMutex (allowed order, see Controller.h).
+    if (controller_link::standbyTimeoutExpired(mode == MODE_STANDBY, settings.getStandbyTimeout(), (long)(now - lastAction))) {
+        ModeLock modeLock(modeMutex);
+        if (controller_link::standbyTimeoutExpired(mode == MODE_STANDBY, settings.getStandbyTimeout(),
+                                                   (long)(millis() - lastAction))) {
+            activateStandby();
+        }
+    }
 }
 
 void Controller::loopControl() {
@@ -1783,13 +1883,36 @@ ProcessSnapshot Controller::getProcessSnapshot() const {
     return snapshot;
 }
 
-int Controller::getMode() const { return mode; }
+int Controller::getMode() const { return mode.load(); }
 
-bool Controller::setMode(int newMode) {
+SystemInfo Controller::getSystemInfo() const {
+    // PRO-674 (review finding 1): NOT modeMutex. modeMutex is held across
+    // CONTROLLER_MODE_CHANGE handlers (BLE scale teardown, MQTT, Homekit) and
+    // deactivate()'s BREW_END/PROCESS_END (ShotHistory file IO), and this is
+    // called on AsyncTCP for every WebUI status frame and by MQTT. The leaf
+    // systemInfoMutex is only ever held for one SystemInfo copy/move, so a status
+    // read never waits behind mode-change side effects. Chosen over a bounded
+    // modeMutex take + unlocked fallback: an unlocked copy of the Strings while
+    // onSystemInfo rewrites them is exactly the torn read this lock exists for.
+    SystemInfoLock lock(systemInfoMutex);
+    return systemInfo;
+}
+
+bool Controller::setMode(int newMode) { return setMode(newMode, controller_link::MismatchFlagUpdate::Clear); }
+
+bool Controller::setMode(int newMode, controller_link::MismatchFlagUpdate flagUpdate, bool mismatch) {
+    // PRO-674: one mode transition at a time across tasks (BLE dispatch, loop,
+    // AsyncTCP/relay). Recursive: CONTROLLER_MODE_CHANGE handlers may re-enter.
+    ModeLock lock(modeMutex);
+    return setModeLocked(newMode, flagUpdate, mismatch);
+}
+
+bool Controller::setModeLocked(int newMode, controller_link::MismatchFlagUpdate flagUpdate, bool mismatch) {
     // PRO-670 (B-P3-4): central gate. Leaving standby is refused while control is
     // inhibited (mismatch / incompatible / unverified link); entering standby never is.
-    if (!controller_link::modeChangeAllowed(mode == MODE_STANDBY, newMode == MODE_STANDBY, isControlAllowed())) {
-        ESP_LOGW(LOG_TAG, "Mode change %d -> %d refused: controller link not verified / protocol mismatch", mode, newMode);
+    const int currentMode = mode.load();
+    if (!controller_link::modeChangeAllowed(currentMode == MODE_STANDBY, newMode == MODE_STANDBY, isControlAllowed())) {
+        ESP_LOGW(LOG_TAG, "Mode change %d -> %d refused: controller link not verified / protocol mismatch", currentMode, newMode);
         return false;
     }
     if (newMode == MODE_GRIND && !isGrindAvailable())
@@ -1799,10 +1922,15 @@ bool Controller::setMode(int newMode) {
     Event modeEvent = pluginManager->trigger(EventIds::CONTROLLER_MODE_CHANGE, "value", newMode);
     mode = modeEvent.getInt("value");
     steamReady = false;
-    // PRO-671/673: any accepted mode change (restore, user stop/wake, error,
-    // timeout) ends a mismatch-forced standby. Callers that must keep it marked
-    // (onSystemInfo ForceStandby, onConnectionChanged(false)) re-store it after.
-    mismatchForcedStandby.store(false, std::memory_order_release);
+    // PRO-671/673/674: any ordinary accepted mode change (restore, user stop/wake,
+    // error, timeout) ends a mismatch-forced standby (Clear). The link-drop standby
+    // leaves it untouched (Preserve: no write at all); onSystemInfo's forced standby
+    // sets it to the SystemInfo's mismatch (Set). All under modeMutex.
+    if (flagUpdate != controller_link::MismatchFlagUpdate::Preserve) {
+        mismatchForcedStandby.store(controller_link::mismatchForcedAfterModeChange(
+                                        flagUpdate, mismatchForcedStandby.load(std::memory_order_acquire), mismatch),
+                                    std::memory_order_release);
+    }
 
     updateLastAction();
     setTargetTemp(getTargetTemp());

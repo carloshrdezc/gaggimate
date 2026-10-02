@@ -89,6 +89,9 @@ class Controller {
     // callers may safely ignore the result; leaving standby is refused while
     // control is inhibited (controller_link::modeChangeAllowed), entering standby never is.
     bool setMode(int newMode);
+    // PRO-674: setMode() with an explicit mismatchForcedStandby update (see
+    // controller_link::MismatchFlagUpdate). Internal link-state callers only.
+    bool setMode(int newMode, controller_link::MismatchFlagUpdate flagUpdate, bool mismatch = false);
     void setTargetTemp(float temperature);
     bool setBrewTemperatureOverride(float temperature);
     void setPressureScale();
@@ -212,7 +215,10 @@ class Controller {
     void onVolumetricDelete();
     bool isLowWaterLevel() const { return getWaterLevel() < 20; };
 
-    SystemInfo getSystemInfo() const { return systemInfo; }
+    // PRO-674: copied under systemInfoMutex (a leaf lock, NOT modeMutex, so WebUI/MQTT
+    // status reads never wait behind mode-change side effects); the Strings are
+    // rewritten on the BLE dispatch task.
+    SystemInfo getSystemInfo() const;
 
     // PRO-655: the display-side NanoPbComm facade (was NimBLEClientController).
     GaggiMateClient *getClientController() { return &comms; }
@@ -279,7 +285,24 @@ class Controller {
     GrinderManager *grinderManager{};
     ProfileManager *profileManager{};
 
-    int mode = MODE_BREW;
+    // PRO-674: read lock-free from every task (atomic, never torn); every WRITE goes
+    // through setMode() under modeMutex, so a read-decide-write sequence that holds
+    // modeMutex (onSystemInfo, link drop) cannot interleave with another task's
+    // setMode() (WebUI/relay on AsyncTCP, buttons, standby timeout).
+    std::atomic<int> mode{MODE_BREW};
+    // PRO-674: serializes mode transitions + mismatchForcedStandby + the onSystemInfo
+    // decision (the systemInfo copy itself is guarded by systemInfoMutex).
+    // RECURSIVE: setMode() fires CONTROLLER_MODE_CHANGE, whose handlers (and
+    // activateStandby() inside an onSystemInfo decision) may re-enter setMode().
+    // Lock order: modeMutex may be held while processMutex is taken, never the
+    // reverse (no processMutex holder calls setMode()).
+    SemaphoreHandle_t modeMutex = nullptr;
+    // PRO-674 (review finding 1): LEAF lock for the systemInfo copy/move only. May be
+    // taken while modeMutex/processMutex are held; nothing is ever taken, triggered
+    // or awaited while it is held.
+    SemaphoreHandle_t systemInfoMutex = nullptr;
+    // setMode() body; caller holds modeMutex.
+    bool setModeLocked(int newMode, controller_link::MismatchFlagUpdate flagUpdate, bool mismatch);
     float currentTemp = 0;
     float pressure = 0.0f;
     float targetPressure = 0.0f;
@@ -294,7 +317,8 @@ class Controller {
     // PRO-671/673: the current STANDBY was forced by a protocol mismatch (set in
     // onSystemInfo). Every setMode() clears it (restore, user stop/wake, error,
     // timeout); only the disconnect standby in onConnectionChanged(false) preserves
-    // it, so mismatch -> link drop -> matching reconnect can still restore the
+    // it (PRO-674: MismatchFlagUpdate::Preserve under modeMutex, no write), so
+    // mismatch -> link drop -> matching reconnect can still restore the
     // startup mode while an ordinary reconnect in STANDBY never does.
     std::atomic<bool> mismatchForcedStandby{false};
     // B-P3-2: last full control frame sent (loopControl task only) + a resend

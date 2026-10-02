@@ -33,6 +33,8 @@ class DefaultUI {
 
     // Interface methods
     void changeScreen(lv_obj_t **screen, void (*target_init)(void));
+    // PRO-674: the screen that represents a Controller mode (MODE_CHANGE + reconnect).
+    void showScreenForMode(int newMode);
 
     void changeBrewScreenMode(BrewScreenState state);
     void onProfileSwitch();

@@ -32,7 +32,7 @@ void GaggiMateClient::loop() {
         if (_connCb)
             _connCb(true);
         if (_systemInfoCb)
-            _systemInfoCb("GaggiMate Sim", "sim-3.0", gm_proto::PROTOCOL_VERSION, true, true, true, true, false, {});
+            _systemInfoCb("GaggiMate Sim", "sim-3.0", _simProtocolVersion, true, true, true, true, false, {});
         _mock.begin();
     }
     if (_autotunePending && (int32_t)(millis() - _autotuneDueMs) >= 0) {

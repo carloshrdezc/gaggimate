@@ -55,10 +55,22 @@ class GaggiMateClient {
     void init(const String &deviceName);
     void loop();
 
-    bool isReadyForConnection() const { return _initialized; }
+    bool isReadyForConnection() const { return _initialized && !_simHoldDown; }
     bool connectToServer();
     bool isConnected() const { return _connected; }
     void disconnect() { _connected = false; }
+    // PRO-674 sim hooks (scripted link scenarios, see sim/main.cpp --link-script):
+    // drop the link (fires the connection callback like a real BLE drop), and set
+    // the protocol version the NEXT connect reports in its SystemInfo.
+    void simDropLink() {
+        _connected = false;
+        _pendingConnect = false;
+        if (_connCb)
+            _connCb(false);
+    }
+    void simSetProtocolVersion(uint32_t version) { _simProtocolVersion = version; }
+    // Hold the link down (Controller::loop() reconnects as soon as this is false).
+    void simHoldDown(bool hold) { _simHoldDown = hold; }
 
     uint32_t getLatencyMs() const { return 18; }
     uint32_t getLastLatencyMs() const { return 18; }
@@ -119,6 +131,8 @@ class GaggiMateClient {
     bool _initialized = false;
     bool _connected = false;
     bool _pendingConnect = false;
+    uint32_t _simProtocolVersion = gm_proto::PROTOCOL_VERSION;
+    bool _simHoldDown = false;
     bool _autotunePending = false;
     uint32_t _autotuneDueMs = 0;
 

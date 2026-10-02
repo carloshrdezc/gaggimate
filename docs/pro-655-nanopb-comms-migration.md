@@ -331,6 +331,39 @@ DISPLAY/CONTROLLER") in Carlos's `DefaultUI`. That is an LVGL-side change unless
 PRO-658 (EEZ UI port) lands first, and it needs a host test for the
 state-to-message mapping.
 
+**CONTROLLER_READY is once per boot (PRO-674, intentional).** `Controller::onSystemInfo`
+fires `CONTROLLER_READY` only for the first SystemInfo since boot (`!wasLoaded`);
+`CONTROLLER_BLUETOOTH_CONNECT` fires on every link. The READY consumers are
+boot-time actions, not per-link state: `BoilerFillPlugin` runs the startup boiler
+fill (re-running it on every BLE reconnect would pump water mid-session), and
+`WebUIPlugin` calls `ota->setControllerVersion()` + `ota->init(client)`. `init()`
+binds the controller-OTA characteristics on the one `NimBLEClient` that
+`BleClientTransport` creates at boot and reuses for every reconnect, and
+`ControllerOTA::runUpdate()` re-checks `client->isConnected()` before it flashes.
+The controller version only changes across a controller OTA, and
+`GitHubOTA::update()` reboots the display after any successful flash, so READY
+fires again then. The only stale case is a controller re-flashed out of band
+(USB) without a display reboot: the update-available hint is stale until the next
+boot. It never permits control, which is gated per link on SystemInfo
+(`isControlAllowed()`). Per-link state (screen, mismatch kicker, LED first-send,
+BLE scale) hangs off `CONTROLLER_BLUETOOTH_CONNECT` instead.
+
+**Mode ownership (PRO-674).** `Controller::mode` is mutated from the BLE dispatch
+task (`onSystemInfo`, link drop, controller errors), the Arduino loop task
+(buttons, standby timeout, LVGL), and the AsyncTCP/relay task (`req:change-mode`).
+Decision: a lock, not a single-owner task. `mode` is `std::atomic<int>` (lock-free
+reads everywhere) and every write goes through `setMode()` under a recursive
+`modeMutex`, which `onSystemInfo` also holds across its `systemInfo` write and
+mode decision. `systemInfo` itself is copied under a separate leaf
+`systemInfoMutex`, so `getSystemInfo()` never waits on mode-change side
+effects. Recursive because
+`CONTROLLER_MODE_CHANGE` handlers may re-enter `setMode()`. A queue to one owner
+task would turn `setMode()`'s synchronous bool result (used by the WebUI refusal
+reply, PRO-670) into an async one and touch every caller. The link-drop standby
+uses `MismatchFlagUpdate::Preserve` (no write to `mismatchForcedStandby`), which
+replaces the old save/clear/restore and closes the race where an interleaved
+explicit STANDBY could be undone and a later matching reconnect restored BREW.
+
 ## 5. BLE scale coexistence, PSRAM, NimBLE pin
 
 - Both the old and the new client call `NimBLEDevice::init` and share the single

@@ -138,9 +138,127 @@ void test_system_info_mode_action_table(void) {
     }
 }
 
+// PRO-674 item 1: models Controller's mismatchForcedStandby + mode under modeMutex.
+// Each call below is one setMode() critical section; a "concurrent" task can only
+// run between two of them, never inside one, so interleaving the explicit STANDBY
+// at every point of the link-drop sequence covers the old race window.
+namespace {
+struct ModeModel {
+    bool standby = true;
+    bool forced = false;
+    void setMode(bool toStandby, MismatchFlagUpdate u, bool mismatch = false) {
+        standby = toStandby;
+        if (u != MismatchFlagUpdate::Preserve) {
+            forced = mismatchForcedAfterModeChange(u, forced, mismatch);
+        }
+    }
+};
+} // namespace
+
+void test_mismatch_flag_update(void) {
+    TEST_ASSERT_FALSE(mismatchForcedAfterModeChange(MismatchFlagUpdate::Clear, true, true));
+    TEST_ASSERT_FALSE(mismatchForcedAfterModeChange(MismatchFlagUpdate::Clear, false, false));
+    TEST_ASSERT_TRUE(mismatchForcedAfterModeChange(MismatchFlagUpdate::Preserve, true, false));
+    TEST_ASSERT_FALSE(mismatchForcedAfterModeChange(MismatchFlagUpdate::Preserve, false, true));
+    TEST_ASSERT_TRUE(mismatchForcedAfterModeChange(MismatchFlagUpdate::Set, false, true));
+    TEST_ASSERT_FALSE(mismatchForcedAfterModeChange(MismatchFlagUpdate::Set, true, false));
+}
+
+void test_link_drop_keeps_mismatch_forced_standby(void) {
+    ModeModel m;
+    m.setMode(true, MismatchFlagUpdate::Set, /*mismatch=*/true); // onSystemInfo ForceStandby
+    m.setMode(true, MismatchFlagUpdate::Preserve);               // link drop
+    TEST_ASSERT_TRUE(m.forced);
+    TEST_ASSERT_EQUAL(static_cast<int>(SystemInfoModeAction::RestoreStartup),
+                      static_cast<int>(systemInfoModeAction(true, m.forced, false, m.standby, false)));
+}
+
+void test_explicit_standby_around_link_drop_is_never_undone(void) {
+    // The user's explicit STANDBY (WebUI/relay task, Clear) lands BEFORE or AFTER the
+    // link-drop setMode (Preserve). Either order must leave forced == false, so the
+    // matching reconnect does NOT restore BREW. (The pre-PRO-674 save/clear/restore
+    // re-stored the saved `true` after an interleaved explicit STANDBY.)
+    for (int explicitFirst = 0; explicitFirst < 2; ++explicitFirst) {
+        ModeModel m;
+        m.setMode(true, MismatchFlagUpdate::Set, true);
+        if (explicitFirst) {
+            m.setMode(true, MismatchFlagUpdate::Clear);
+            m.setMode(true, MismatchFlagUpdate::Preserve);
+        } else {
+            m.setMode(true, MismatchFlagUpdate::Preserve);
+            m.setMode(true, MismatchFlagUpdate::Clear);
+        }
+        TEST_ASSERT_FALSE_MESSAGE(m.forced, explicitFirst ? "explicit STANDBY before drop" : "explicit STANDBY after drop");
+        TEST_ASSERT_EQUAL(static_cast<int>(SystemInfoModeAction::None),
+                          static_cast<int>(systemInfoModeAction(true, m.forced, false, m.standby, false)));
+    }
+}
+
+void test_old_save_clear_restore_was_racy(void) {
+    // Documents the bug closed by PRO-674: save -> setMode(Clear) -> [explicit
+    // STANDBY clears] -> restore(saved) resurrects the flag.
+    ModeModel m;
+    m.setMode(true, MismatchFlagUpdate::Set, true);
+    const bool saved = m.forced;
+    m.setMode(true, MismatchFlagUpdate::Clear); // old link-drop setMode
+    m.setMode(true, MismatchFlagUpdate::Clear); // concurrent explicit STANDBY
+    m.forced = saved;                           // old restore
+    TEST_ASSERT_TRUE(m.forced); // the user's STANDBY was undone -> would restore BREW
+}
+
+// PRO-674 review finding 2: standby-timeout vs mismatch link-drop TOCTOU.
+// Controller::loop() pre-checks standbyTimeoutExpired() lock-free; a mismatch
+// ForceStandby (Set) then lands before the timeout acts. Acting on the stale
+// pre-check would run setMode(STANDBY, Clear) and wipe the flag; the locked
+// re-check sees STANDBY and does nothing, so the matching reconnect restores BREW.
+void test_standby_timeout_does_not_clear_mismatch_forced_flag(void) {
+    TEST_ASSERT_FALSE(standbyTimeoutExpired(false, 0, 1000000)); // disabled
+    TEST_ASSERT_FALSE(standbyTimeoutExpired(false, 600, 600));   // not yet (strict >)
+    TEST_ASSERT_TRUE(standbyTimeoutExpired(false, 600, 601));
+    TEST_ASSERT_FALSE(standbyTimeoutExpired(true, 600, 601)); // already STANDBY: no-op
+
+    for (int recheck = 0; recheck < 2; ++recheck) {
+        ModeModel m;
+        m.standby = false;                                                // brewing, idle
+        const bool preCheck = standbyTimeoutExpired(m.standby, 600, 601); // loop(), lock-free
+        TEST_ASSERT_TRUE(preCheck);
+        m.setMode(true, MismatchFlagUpdate::Set, /*mismatch=*/true); // racing ForceStandby
+        const bool act = recheck ? standbyTimeoutExpired(m.standby, 600, 601) : preCheck;
+        if (act) {
+            m.setMode(true, MismatchFlagUpdate::Clear); // activateStandby() -> setMode()
+        }
+        const auto action = systemInfoModeAction(true, m.forced, false, m.standby, false);
+        if (recheck) {
+            TEST_ASSERT_TRUE_MESSAGE(m.forced, "locked re-check keeps the mismatch flag");
+            TEST_ASSERT_EQUAL(static_cast<int>(SystemInfoModeAction::RestoreStartup), static_cast<int>(action));
+        } else {
+            TEST_ASSERT_FALSE_MESSAGE(m.forced, "stale pre-check (old code) wiped the flag");
+            TEST_ASSERT_EQUAL(static_cast<int>(SystemInfoModeAction::None), static_cast<int>(action));
+        }
+    }
+}
+
+// PRO-674 item 3: the screen on reconnect follows the Controller's actual mode.
+void test_reconnect_screen_follows_controller_mode(void) {
+    using R = ReconnectScreenAction;
+    // Mismatch-standby -> matching reconnect: RestoreStartup already set BREW.
+    TEST_ASSERT_EQUAL(static_cast<int>(R::ShowModeScreen), static_cast<int>(reconnectScreenAction(true, false)));
+    // Ordinary reconnect while STANDBY (startup=BREW or not): stay on standby.
+    TEST_ASSERT_EQUAL(static_cast<int>(R::StayStandby), static_cast<int>(reconnectScreenAction(true, true)));
+    // Non-standby screen: leave it (brew screen while brewing, or a menu the user opened).
+    TEST_ASSERT_EQUAL(static_cast<int>(R::None), static_cast<int>(reconnectScreenAction(false, false)));
+    TEST_ASSERT_EQUAL(static_cast<int>(R::None), static_cast<int>(reconnectScreenAction(false, true)));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_system_info_mode_action_table);
+    RUN_TEST(test_mismatch_flag_update);
+    RUN_TEST(test_link_drop_keeps_mismatch_forced_standby);
+    RUN_TEST(test_explicit_standby_around_link_drop_is_never_undone);
+    RUN_TEST(test_old_save_clear_restore_was_racy);
+    RUN_TEST(test_standby_timeout_does_not_clear_mismatch_forced_flag);
+    RUN_TEST(test_reconnect_screen_follows_controller_mode);
     RUN_TEST(test_leave_standby_gated_on_control_allowed);
     RUN_TEST(test_leave_standby_composed_with_link_state);
     RUN_TEST(test_mismatch_detection);

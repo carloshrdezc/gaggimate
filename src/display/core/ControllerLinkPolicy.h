@@ -93,6 +93,63 @@ inline SystemInfoModeAction systemInfoModeAction(bool loaded, bool mismatchForce
     return SystemInfoModeAction::None;
 }
 
+// PRO-674 (review finding 2): the inactivity standby timeout fires only while NOT
+// already in STANDBY. Controller::loop() evaluates this twice: once lock-free as a
+// cheap pre-check, then again under modeMutex right before activateStandby(). The
+// locked re-check closes the TOCTOU where a mismatch-forced standby (flag Set) lands
+// between the pre-check and the timeout's setMode(STANDBY), whose Clear would
+// otherwise wipe mismatchForcedStandby and block the next RestoreStartup.
+// `elapsedMs` = now - lastAction (wrap-safe signed diff); timeoutMs <= 0 = disabled.
+inline bool standbyTimeoutExpired(bool modeIsStandby, long timeoutMs, long elapsedMs) {
+    return !modeIsStandby && timeoutMs > 0 && elapsedMs > timeoutMs;
+}
+
+// PRO-674: how one accepted Controller::setMode() updates mismatchForcedStandby.
+//   Clear    - any ordinary mode change (restore, user stop/wake, error, timeout)
+//              ends a mismatch-forced standby. The default.
+//   Preserve - the link-drop standby in onConnectionChanged(false): a drop is not a
+//              new standby cause, so the flag is left exactly as it is. NOT a
+//              save/clear/restore: nothing is written, so a concurrent explicit
+//              STANDBY (WebUI/relay task) that clears the flag is never undone.
+//   Set      - onSystemInfo ForceStandby/StartupStandby: written inside setMode()
+//              right after the mode, to the SystemInfo's mismatch value.
+enum class MismatchFlagUpdate { Clear, Preserve, Set };
+
+// New flag value after an accepted setMode(); `current` is the flag's value at the
+// time of the write and is returned unchanged for Preserve (=> no store needed).
+inline bool mismatchForcedAfterModeChange(MismatchFlagUpdate update, bool current, bool mismatch) {
+    switch (update) {
+    case MismatchFlagUpdate::Preserve:
+        return current;
+    case MismatchFlagUpdate::Set:
+        return mismatch;
+    case MismatchFlagUpdate::Clear:
+    default:
+        return false;
+    }
+}
+
+// PRO-674 (item 3): what DefaultUI does with the screen on CONTROLLER_BLUETOOTH_CONNECT.
+// The decision follows the Controller's ACTUAL mode, never the configured startup
+// mode or the mismatch flag: the standby screen is only left when the Controller has
+// really left STANDBY (RestoreStartup already ran setMode() before CONNECT fired), and
+// a Controller still in STANDBY keeps the standby screen. Any non-standby screen is
+// left alone: every entry INTO standby already switches the screen via
+// CONTROLLER_MODE_CHANGE, so a non-standby screen while the Controller is STANDBY is
+// a screen the user navigated to (menu/settings) and must not be yanked away.
+enum class ReconnectScreenAction {
+    None,           // leave the screen alone
+    StayStandby,    // controller is STANDBY and the standby screen is up: (re)arm the dim timer
+    ShowModeScreen, // controller left STANDBY but the standby screen is still up
+};
+
+inline ReconnectScreenAction reconnectScreenAction(bool screenIsStandby, bool controllerModeIsStandby) {
+    if (!screenIsStandby) {
+        return ReconnectScreenAction::None;
+    }
+    return controllerModeIsStandby ? ReconnectScreenAction::StayStandby : ReconnectScreenAction::ShowModeScreen;
+}
+
 // Standby kicker text (spacemono_14 is uppercase-only). The side with the lower
 // protocol version must be updated (upstream :677-678).
 inline const char *mismatchKickerMessage(uint32_t controllerVersion, uint32_t localVersion) {
