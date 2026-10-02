@@ -7,7 +7,7 @@
 
 #include "GaggiMateComm.h"
 #include "MockController.h"
-#include "NimBLEClient.h"
+#include "SimLinkHandle.h"
 #include <Arduino.h>
 #include <cstdint>
 #include <functional>
@@ -78,7 +78,7 @@ class GaggiMateClient {
     uint32_t getRetransmits() const { return 0; }
     bool isIdle() const { return true; }
     void setLowLatency(bool) {}
-    NimBLEClient *getClient() const { return const_cast<NimBLEClient *>(&_nativeClient); }
+    SimLinkHandle *getClient() const { return const_cast<SimLinkHandle *>(&_nativeClient); }
 
     // build*: compose a command without sending.
     gm::Payload buildPing();
@@ -126,7 +126,7 @@ class GaggiMateClient {
 
   private:
     MockController _mock;
-    NimBLEClient _nativeClient;
+    SimLinkHandle _nativeClient;
 
     bool _initialized = false;
     bool _connected = false;

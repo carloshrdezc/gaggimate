@@ -101,6 +101,25 @@ IDE (CLion/VSCode) it shows up under the `display-sim` environment as the
 - **State** (settings, profiles, shot history) persists under `sim_data/`
   (git-ignored). Delete it to start fresh.
 
+### Scripted smoke: the per-slice gate
+
+```sh
+./scripts/build_webui.sh               # the smoke checks the REAL embedded bundle
+pio run -e display-sim -t smoke        # build + run scripts/sim_smoke.py
+# or, against an existing build:  python3 scripts/sim_smoke.py [--binary PATH]
+```
+
+`scripts/sim_smoke.py` boots the sim headless (`SDL_VIDEODRIVER=offscreen`, in a
+throwaway working dir so your `sim_data/` is untouched), checks `GET /` serves the
+embedded WebUI, opens `/ws`, authenticates, waits for `evt:status` with the
+MockController link up, switches to BREW, starts and stops a brew and checks
+MockController pressure/flow show up in `evt:status`. It then runs the
+`--link-check` scenarios and checks that no `NimBLE` file, reference or linked
+symbol is in the sim. It prints PASS/FAIL per check and exits non-zero on any
+failure. CI runs it in the `Simulator build (display-sim)` job. **Every v1.9
+integration slice must keep it green** (PRO-656). CI runs it on Linux only;
+Windows/MinGW re-verification after the NanoPbComm port is tracked in PRO-677.
+
 ## 4. How it works
 
 Everything simulator-only lives here in `sim/`; the firmware in `src/` is built
@@ -109,7 +128,7 @@ unchanged except for a few small `#ifndef GAGGIMATE_SIM` guards.
 | Folder | Role |
 |---|---|
 | `sim/platform/` | Host shims for the Arduino/ESP32 APIs the firmware uses — Arduino core (vendored `String`/`Print`/`Stream`), FreeRTOS, `FS`/`LittleFS`/`SPIFFS`/`SD_MMC`, `Preferences` (NVS), `WiFi`, and the `esp_*` headers. `xTaskCreate*` is a no-op so the sim drives the firmware's loop methods cooperatively on the main thread. |
-| `sim/comms/` | A mock `GaggiMateClient` (NanoPbComm display facade, PRO-655) matching this fork's client API, plus a `MockController` thermal/hydraulic model that reacts to the boiler/pump/relay commands the display sends and emits sensor telemetry (temperature, pressure, flow, scale weight). `GaggiMateComm.h` carries the plain protocol vocabulary so the sim has no NimBLE dependency. |
+| `sim/comms/` | A mock `GaggiMateClient` (NanoPbComm display facade, PRO-655) matching this fork's client API, plus a `MockController` thermal/hydraulic model that reacts to the boiler/pump/relay commands the display sends and emits sensor telemetry (temperature, pressure, flow, scale weight). `GaggiMateComm.h` carries the plain protocol vocabulary and `SimLinkHandle.h` stands in for the native link handle `getClient()` returns, so the sim has no NimBLE dependency. |
 | `sim/driver/` | `SdlDriver` — an SDL2 window wired into LVGL as the display + mouse-as-touch input, plus a screenshot helper. |
 | `sim/web/` | Host shim of `ESPAsyncWebServer`/`AsyncWebSocket`/`DNSServer` over a tiny non-blocking HTTP/1.1 + WebSocket server (pumped from the main loop, so handlers never race the firmware). Sockets use BSD sockets on macOS/Linux and Winsock2 on Windows. A no-op `WebSocketsClient` stands in for the cloud-relay client; OTA / BLE-scale endpoints are stubbed. |
 | `sim/main.cpp` | Entry point: builds the `Controller`, then runs one cooperative loop (controller + UI + web server + SDL) on the main thread. |
