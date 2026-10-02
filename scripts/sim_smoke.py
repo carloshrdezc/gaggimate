@@ -73,7 +73,13 @@ def check_no_nimble_symbols(binary):
     if not nm:
         print("[sim-smoke] SKIP NimBLE symbol check: `nm` not on PATH", flush=True)
         return
-    out = subprocess.run([nm, "-C", binary], capture_output=True, text=True).stdout
+    r = subprocess.run([nm, "-C", binary], capture_output=True, text=True)
+    out = r.stdout
+    if r.returncode != 0 or not out.strip():
+        # Stripped/unreadable binary: nothing was checked, so don't claim PASS.
+        why = r.stderr.strip() or f"rc={r.returncode}, no output"
+        print(f"[sim-smoke] SKIP NimBLE symbol check: no symbols readable (nm: {why})", flush=True)
+        return
     hits = sorted({line.split(None, 2)[-1] for line in out.splitlines() if "nimble" in line.lower()})
     check(not hits, "no NimBLE symbols linked into the sim binary", ", ".join(hits[:5]))
 
@@ -267,6 +273,7 @@ def main():
     ap.add_argument("--allow-empty-webui", action="store_true", help="tolerate the empty-bundle stub (no web build)")
     ap.add_argument("--skip-link-check", action="store_true")
     a = ap.parse_args()
+    a.binary = os.path.abspath(a.binary)  # the sim is launched with cwd=<temp dir>; a relative path would break
 
     if not os.path.isfile(a.binary):
         sys.exit(f"[sim-smoke] no simulator binary at {a.binary} — run `pio run -e display-sim` first")
