@@ -30,7 +30,7 @@
     "preact": "^10.29.8",
     "preact-fetching": "^1.0.0",
     "preact-iso": "^2.12.2",
-    "preact-render-to-string": "^6.8.0"
+    "preact-render-to-string": "^6.8.1"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
