@@ -26,11 +26,11 @@
     "chartjs-plugin-annotation": "^3.1.0",
     "daisyui": "^5.7.46",
     "dayjs": "^1.11.23",
-    "idb": "^8.0.3",
+    "idb": "^8.0.4",
     "preact": "^10.29.8",
     "preact-fetching": "^1.0.0",
     "preact-iso": "^2.12.2",
-    "preact-render-to-string": "^6.8.0"
+    "preact-render-to-string": "^6.8.1"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
